@@ -234,9 +234,7 @@ class DatabaseImportService:
         if len(keep_total) > 3:
             stale_data_versions = keep_total[3:]
             stale_pks = [v.pk for v in stale_data_versions]
-            
-            from apps.database_manager.models import RateMaster, LabourMaster, TORMain, TORLabour, TORAccessories
-            
+
             RateMaster.objects.filter(database_version_id__in=stale_pks).delete()
             LabourMaster.objects.filter(database_version_id__in=stale_pks).delete()
             TORMain.objects.filter(database_version_id__in=stale_pks).delete()

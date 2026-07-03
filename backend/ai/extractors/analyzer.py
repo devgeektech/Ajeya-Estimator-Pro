@@ -14,6 +14,7 @@ from common.exceptions import AIServiceError
 from ai.service import AIService
 from ai.extractors.activity_extractor import extract_activities
 from ai.extractors.product_extractor import extract_product
+from apps.matching.models import ActivityMatch
 
 logger = logging.getLogger("boq_ai")
 
@@ -23,8 +24,6 @@ def analyze_run(run) -> int:
 
     Returns the number of items successfully analyzed.
     """
-    from apps.matching.models import ActivityMatch
-
     service = AIService()
     analyzed = 0
 

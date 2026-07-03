@@ -721,7 +721,7 @@ Production Ready:
 Current Runtime Direction:
 
 * PostgreSQL only.
-* Single production settings module: `config.settings.production`.
+* Single settings module: `config.settings`.
 * Local development and EC2 both use PostgreSQL on `localhost`.
 * No demo seeding or dummy runtime data.
 * No active public REST API in V1.

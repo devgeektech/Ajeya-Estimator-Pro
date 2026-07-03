@@ -56,6 +56,33 @@ class UserManagementAccessTests(TestCase):
         user = User.objects.get(email="new@example.com")
         self.assertEqual(user.role, UserRole.EXPERT)
 
+    def test_admin_role_always_has_db_access(self):
+        admin = User.objects.create_user(
+            "locked-admin@example.com",
+            "pass12345",
+            role=UserRole.ADMIN,
+            allow_db_access=False,
+        )
+        self.assertTrue(admin.allow_db_access)
+
+        admin.allow_db_access = False
+        admin.save(update_fields=["allow_db_access"])
+        admin.refresh_from_db()
+        self.assertTrue(admin.allow_db_access)
+
+    def test_admin_db_access_cannot_be_toggled_off(self):
+        target = User.objects.create_user(
+            "target-admin@example.com",
+            "pass12345",
+            role=UserRole.ADMIN,
+            allow_db_access=False,
+        )
+        self.client.force_login(self.admin)
+        response = self.client.post(reverse("users:toggle_db_access", args=[target.pk]))
+        self.assertRedirects(response, reverse("users:list"))
+        target.refresh_from_db()
+        self.assertTrue(target.allow_db_access)
+
     def test_admin_cannot_deactivate_self_from_user_management(self):
         self.client.force_login(self.admin)
         response = self.client.post(reverse("users:toggle_active", args=[self.admin.pk]))

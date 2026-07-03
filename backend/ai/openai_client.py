@@ -12,6 +12,7 @@ import logging
 from pathlib import Path
 
 from django.conf import settings
+from openai import OpenAI
 
 from common.exceptions import AIServiceError
 
@@ -21,7 +22,7 @@ PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 
 # A key matching any of these (case-insensitive) is treated as a placeholder
 # and AI features stay disabled (graceful degradation).
-_PLACEHOLDER_MARKERS = ("replace", "your-", "your_", "changeme", "xxxx")
+_PLACEHOLDER_MARKERS = ("replace", "your-", "your_", "changeme", "xxxx", "placeholder")
 
 
 def is_configured() -> bool:
@@ -42,17 +43,9 @@ def load_prompt(name: str) -> str:
 
 
 def get_client():
-    """Return a configured OpenAI client.
-
-    Imported lazily so the project runs without the openai package installed
-    for non-AI workflows.
-    """
+    """Return a configured OpenAI client."""
     if not is_configured():
         raise AIServiceError("OPENAI_API_KEY is not configured (placeholder in use).")
-    try:
-        from openai import OpenAI
-    except ImportError as exc:  # pragma: no cover
-        raise AIServiceError("openai package is not installed.") from exc
     return OpenAI(
         api_key=str(settings.OPENAI_API_KEY),
         timeout=float(settings.OPENAI_TIMEOUT_SECONDS) if getattr(settings, "OPENAI_TIMEOUT_SECONDS", None) else None,

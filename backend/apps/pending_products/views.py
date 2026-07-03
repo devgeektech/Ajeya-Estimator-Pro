@@ -5,6 +5,7 @@ from django.contrib import messages
 from django.shortcuts import get_object_or_404, redirect
 from django.views.generic import ListView, View
 
+from apps.audit.services import record
 from common.choices import PendingProductStatus
 from common.exceptions import BOQAIError
 from common.mixins import SuperAdminRequiredMixin
@@ -38,8 +39,6 @@ class _PendingActionView(SuperAdminRequiredMixin, View):
         raise NotImplementedError
 
     def post(self, request, pk):
-        from apps.audit.services import record
-
         pending = self.get_pending(pk)
         try:
             self.handle(request, pending)

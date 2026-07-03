@@ -14,6 +14,7 @@ from apps.boq.models import BOQ, BOQItem, BOQRun
 from apps.make_list.models import MakeListEntry
 from apps.processing.models import ProcessingJob
 from common.choices import BOQStatus, RunStatus
+from tasks.process_boq import process_boq_task
 
 logger = logging.getLogger("boq_ai")
 
@@ -88,6 +89,4 @@ class ProcessingJobService:
 
     @staticmethod
     def _dispatch(run_id: int) -> None:
-        from tasks.process_boq import process_boq_task
-
         process_boq_task.delay(run_id)

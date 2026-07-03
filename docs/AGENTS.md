@@ -582,7 +582,7 @@ All foundation documents are complete:
 
 BOQ_AI currently uses a single EC2 runtime:
 
-* Active settings module: `config.settings.production`.
+* Active settings module: `config.settings`.
 * Environment file: `.env` locally and `/srv/boq_ai/.env` on EC2.
 * Database: PostgreSQL database `boq_db` with application role `boq_user`.
 * Database host: `localhost` in both local development and EC2 deployment.

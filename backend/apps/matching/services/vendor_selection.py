@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import logging
 
+from apps.database_manager.models import DatabaseVersion, RateMaster
+from apps.make_list.models import MakeListEntry
 from common.choices import VendorSelectionMode
 from utils.text import normalize
 
@@ -29,15 +31,11 @@ class VendorSelectionService:
     """Select the vendor row for matched items in a run."""
 
     def __init__(self, mode: str = VendorSelectionMode.LOWEST_COST):
-        from apps.database_manager.models import DatabaseVersion
-
         self.mode = mode
         self._version = DatabaseVersion.objects.filter(is_active=True).first()
 
     @staticmethod
     def _approved_makes(run) -> list[str]:
-        from apps.make_list.models import MakeListEntry
-
         makes = MakeListEntry.objects.filter(boq_run=run).values_list("make", flat=True)
         # Preserve make-list order; PREFERRED mode treats it as preference order.
         ordered: list[str] = []
@@ -48,8 +46,6 @@ class VendorSelectionService:
         return ordered
 
     def _candidates(self, product_code: str) -> list:
-        from apps.database_manager.models import RateMaster
-
         if self._version is None:
             return []
         return list(

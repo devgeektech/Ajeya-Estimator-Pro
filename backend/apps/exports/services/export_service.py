@@ -11,7 +11,11 @@ import io
 import logging
 
 from django.core.files.base import ContentFile
+from openpyxl import Workbook
 
+from apps.audit.services import record
+from apps.exports.models import ExportFile
+from apps.notifications.services import notify
 from common.choices import BOQStatus
 from common.exceptions import ValidationError
 
@@ -31,10 +35,6 @@ class ExportService:
     """Build and persist export workbooks for an approved BOQ run."""
 
     def export_run(self, run, user=None):
-        from openpyxl import Workbook
-
-        from apps.exports.models import ExportFile
-
         boq = run.boq
         if boq.status != BOQStatus.APPROVED:
             raise ValidationError(
@@ -65,9 +65,6 @@ class ExportService:
         boq.status = BOQStatus.EXPORTED
         boq.save(update_fields=["status"])
         logger.info("BOQ %s exported (run %s)", boq.pk, run.run_number)
-
-        from apps.audit.services import record
-        from apps.notifications.services import notify
 
         record(user, "export", "BOQ", boq.pk)
         notify(boq.user, "Export ready", f"'{boq.boq_name}' has been exported.")

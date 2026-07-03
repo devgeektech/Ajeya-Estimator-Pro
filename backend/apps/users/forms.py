@@ -33,6 +33,7 @@ class UserCreateForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields["first_name"].required = True
         self.fields["role"].choices = [
             (UserRole.ADMIN, "App Admin"),
             (UserRole.EXPERT, "BOQ Expert"),
@@ -43,6 +44,8 @@ class UserCreateForm(forms.ModelForm):
         p1, p2 = cleaned.get("password1"), cleaned.get("password2")
         if p1 and p2 and p1 != p2:
             self.add_error("password2", "Passwords do not match.")
+        if cleaned.get("role") == UserRole.ADMIN:
+            cleaned["allow_db_access"] = True
         return cleaned
 
     def save(self, commit=True):
@@ -69,6 +72,7 @@ class UserEditForm(forms.ModelForm):
     def __init__(self, *args, request_user=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.request_user = request_user
+        self.fields["first_name"].required = True
         self.fields["role"].choices = [
             (UserRole.ADMIN, "App Admin"),
             (UserRole.EXPERT, "BOQ Expert"),
@@ -85,5 +89,8 @@ class UserEditForm(forms.ModelForm):
         if self.request_user and self.request_user.role == UserRole.ADMIN:
             if cleaned.get("role") == UserRole.ADMIN:
                 cleaned["role"] = self.instance.role if self.instance else UserRole.EXPERT
-                
+
+        if cleaned.get("role") == UserRole.ADMIN:
+            cleaned["allow_db_access"] = True
+
         return cleaned

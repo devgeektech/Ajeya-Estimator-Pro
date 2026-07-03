@@ -17,7 +17,7 @@ Browser
 The same app settings are used locally and on EC2:
 
 ```ini
-DJANGO_SETTINGS_MODULE=config.settings.production
+DJANGO_SETTINGS_MODULE=config.settings
 DATABASE_URL=postgres://boq_user:<password>@localhost:5432/boq_db
 ```
 
@@ -105,7 +105,7 @@ Minimum production values:
 ```ini
 SECRET_KEY=<generated-secret-key>
 DEBUG=False
-DJANGO_SETTINGS_MODULE=config.settings.production
+DJANGO_SETTINGS_MODULE=config.settings
 ALLOWED_HOSTS=13.205.90.58
 DATABASE_URL=postgres://boq_user:<password>@localhost:5432/boq_db
 REDIS_URL=redis://localhost:6379/0

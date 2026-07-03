@@ -6,9 +6,11 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.generic import View
 
-from apps.boq.models import BOQ
+from apps.boq.models import BOQ, BOQItem
+from apps.database_manager.models import RateMaster
 from apps.matching.services.confidence import band_for
 from apps.review.services.review_service import ReviewService
+from common.exceptions import ValidationError
 
 logger = logging.getLogger("boq_ai")
 
@@ -54,9 +56,6 @@ class ApplyReviewView(LoginRequiredMixin, View):
     """Apply a product/vendor change to one item (HTMX row swap)."""
 
     def post(self, request, item_id):
-        from apps.boq.models import BOQItem
-        from apps.database_manager.models import RateMaster
-
         item = get_object_or_404(
             BOQItem.objects.select_related("boq_run__boq"), pk=item_id
         )
@@ -87,8 +86,6 @@ class StartReviewView(LoginRequiredMixin, View):
 
 class ApproveView(LoginRequiredMixin, View):
     def post(self, request, pk):
-        from common.exceptions import ValidationError
-
         boq = get_object_or_404(_owned_boq_qs(request.user), pk=pk)
         try:
             ReviewService().approve(boq, request.user)
@@ -100,8 +97,6 @@ class ApproveView(LoginRequiredMixin, View):
 
 class ReviseView(LoginRequiredMixin, View):
     def post(self, request, pk):
-        from common.exceptions import ValidationError
-
         boq = get_object_or_404(_owned_boq_qs(request.user), pk=pk)
         try:
             ReviewService().revise(boq, request.user)

@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import logging
 
+from apps.audit.models import AuditLog
+
 logger = logging.getLogger("boq_ai")
 
 
 def record(user, action: str, entity: str = "", entity_id="") -> None:
     """Write an audit log entry. Never raises."""
-    from apps.audit.models import AuditLog
-
     try:
         AuditLog.objects.create(
             user=user if getattr(user, "is_authenticated", False) else None,

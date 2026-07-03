@@ -25,6 +25,15 @@ import logging
 
 from django.utils import timezone
 
+from ai.extractors.analyzer import analyze_run
+from ai.service import AIService
+from apps.boq.models import BOQRun
+from apps.costing.services.cost_service import CostCalculationService
+from apps.matching.services.confidence import ConfidenceService
+from apps.matching.services.matching_service import ProductMatchingService
+from apps.matching.services.vendor_selection import VendorSelectionService
+from apps.notifications.services import notify
+from apps.processing.models import ProcessingJob
 from common.choices import BOQStatus, RunStatus
 from common.exceptions import ProcessingError
 
@@ -67,33 +76,22 @@ def _run_stage(run, stage_key: str) -> None:
     - confidence:  Factor-weighted scoring, colour bands, match explanations (Sprint 11).
     """
     if stage_key == "ai_analysis":
-        from ai.service import AIService
-
         if AIService.is_enabled():
-            from ai.extractors.analyzer import analyze_run
-
             analyze_run(run)
         else:
             logger.info("Run %s: AI disabled (placeholder key) - skipping AI analysis", run.pk)
         return
 
     if stage_key == "matching":
-        from apps.matching.services.matching_service import ProductMatchingService
-        from apps.matching.services.vendor_selection import VendorSelectionService
-
         ProductMatchingService().match_run(run, created_by=run.boq.user)
         VendorSelectionService().select_run(run)
         return
 
     if stage_key == "costing":
-        from apps.costing.services.cost_service import CostCalculationService
-
         CostCalculationService().calculate_run(run)
         return
 
     if stage_key == "confidence":
-        from apps.matching.services.confidence import ConfidenceService
-
         ConfidenceService().score_run(run)
         return
 
@@ -102,9 +100,6 @@ def _run_stage(run, stage_key: str) -> None:
 
 def process_boq_run(boq_run_id: int) -> int:
     """Process a BOQ run end-to-end. Returns the run id."""
-    from apps.boq.models import BOQRun
-    from apps.processing.models import ProcessingJob
-
     run = BOQRun.objects.select_related("boq").get(pk=boq_run_id)
     job, _ = ProcessingJob.objects.get_or_create(boq_run=run)
     boq = run.boq
@@ -129,8 +124,6 @@ def process_boq_run(boq_run_id: int) -> int:
         _update_job(job, progress=100, status=RunStatus.COMPLETED, message="Completed")
         logger.info("Run %s completed", run.pk)
 
-        from apps.notifications.services import notify
-
         notify(
             boq.user,
             "Processing complete",
@@ -143,8 +136,6 @@ def process_boq_run(boq_run_id: int) -> int:
         run.status = RunStatus.FAILED
         run.save(update_fields=["status"])
         _update_job(job, status=RunStatus.FAILED, message=f"Failed: {exc}")
-
-        from apps.notifications.services import notify
 
         notify(boq.user, "Processing failed", f"'{boq.boq_name}' failed: {exc}")
         raise ProcessingError(str(exc)) from exc

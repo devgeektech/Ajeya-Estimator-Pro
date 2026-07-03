@@ -6,11 +6,12 @@ from django.test import TestCase
 
 from apps.boq.models import BOQ, BOQItem, BOQRun
 from apps.costing.models import CostBreakdown
-from apps.costing.services.cost_service import CostCalculationService
+from apps.costing.services.cost_service import CostCalculationService, recompute_final_rate
 from apps.database_manager.models import (
     DatabaseVersion,
     LabourMaster,
     RateMaster,
+    StateControl,
     TORAccessories,
     TORLabour,
 )
@@ -70,8 +71,6 @@ class MaterialCostTests(TestCase):
         self.assertEqual(CostBreakdown.objects.count(), 1)
 
     def test_recompute_sums_all_components(self):
-        from apps.costing.services.cost_service import recompute_final_rate
-
         match = self._match(self.rate)
         breakdown = CostCalculationService().calculate_item(match)
         breakdown.material_cost = Decimal("500.00")
@@ -151,8 +150,6 @@ class LabourCostTests(TestCase):
 
 class CommercialCostingTests(TestCase):
     def setUp(self):
-        from apps.database_manager.models import StateControl
-
         self.user = get_user_model().objects.create_user(email="com@x.com", password="x")
         self.version = DatabaseVersion.objects.create(
             version_number=1, is_active=True, source_filename="db.xlsx"

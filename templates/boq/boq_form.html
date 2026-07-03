@@ -13,7 +13,7 @@
         {% csrf_token %}
         {% for field in form %}
         <label class="field">
-            <span class="field__label">{{ field.label }}</span>
+            <span class="field__label">{{ field.label }}{% if field.field.required %}<span class="field__required" aria-hidden="true">*</span>{% endif %}</span>
             {{ field }}
             {% for error in field.errors %}<span class="field__error">{{ error }}</span>{% endfor %}
         </label>

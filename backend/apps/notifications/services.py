@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import logging
 
+from apps.notifications.models import Notification
+
 logger = logging.getLogger("boq_ai")
 
 
@@ -15,7 +17,6 @@ def notify(user, title: str, message: str = ""):
     """Create a notification for a user. Returns it (or None on failure)."""
     if user is None:
         return None
-    from apps.notifications.models import Notification
 
     try:
         return Notification.objects.create(user=user, title=title, message=message)
@@ -27,12 +28,9 @@ def notify(user, title: str, message: str = ""):
 def unread_count(user) -> int:
     if not getattr(user, "is_authenticated", False):
         return 0
-    from apps.notifications.models import Notification
 
     return Notification.objects.filter(user=user, is_read=False).count()
 
 
 def mark_all_read(user) -> int:
-    from apps.notifications.models import Notification
-
     return Notification.objects.filter(user=user, is_read=False).update(is_read=True)

@@ -73,6 +73,11 @@ class User(AbstractBaseUser, PermissionsMixin):
     def save(self, *args, **kwargs):
         if self.email:
             self.email = self.__class__.objects.normalize_email(self.email).lower()
+        if self.role == UserRole.ADMIN:
+            self.allow_db_access = True
+            update_fields = kwargs.get("update_fields")
+            if update_fields is not None and "allow_db_access" not in update_fields:
+                kwargs["update_fields"] = {*update_fields, "allow_db_access"}
         super().save(*args, **kwargs)
 
     def __str__(self) -> str:

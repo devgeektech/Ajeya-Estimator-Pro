@@ -6,6 +6,7 @@ resolves it within the active database version. No AI involved.
 """
 from __future__ import annotations
 
+from apps.database_manager.models import ProductAlias
 from utils.text import normalize
 
 
@@ -15,8 +16,6 @@ def find_alias(query: str, rates_by_code: dict) -> object | None:
     ``rates_by_code`` maps normalized product_code -> RateMaster for the active
     version. The longest matching alias wins to prefer the most specific entry.
     """
-    from apps.database_manager.models import ProductAlias
-
     target = normalize(query)
     if not target:
         return None

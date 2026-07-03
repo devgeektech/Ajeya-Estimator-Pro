@@ -17,6 +17,8 @@ from __future__ import annotations
 import logging
 import math
 
+from apps.database_manager.models import ProductEmbedding, RateMaster
+
 logger = logging.getLogger("boq_ai")
 
 
@@ -52,8 +54,6 @@ def search(
         A list of ``(RateMaster, float)`` tuples ordered by similarity desc.
         Returns an empty list when no ``ProductEmbedding`` rows exist.
     """
-    from apps.database_manager.models import ProductEmbedding, RateMaster
-
     # Score every stored embedding.
     scored: list[tuple[str, float]] = []  # (product_code, similarity)
     for emb in ProductEmbedding.objects.only("product_code", "embedding_vector"):

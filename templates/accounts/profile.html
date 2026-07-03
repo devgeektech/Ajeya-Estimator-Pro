@@ -11,7 +11,7 @@
             {% csrf_token %}
             {% for field in profile_form %}
             <label class="field">
-                <span class="field__label">{{ field.label }}</span>
+                <span class="field__label">{{ field.label }}{% if field.field.required %}<span class="field__required" aria-hidden="true">*</span>{% endif %}</span>
                 {{ field }}
                 {% for error in field.errors %}<span class="field__error">{{ error }}</span>{% endfor %}
             </label>
@@ -33,7 +33,7 @@
             {% endif %}
             {% for field in password_form %}
             <label class="field">
-                <span class="field__label">{{ field.label }}</span>
+                <span class="field__label">{{ field.label }}{% if field.field.required %}<span class="field__required" aria-hidden="true">*</span>{% endif %}</span>
                 <div class="password-wrap">
                     {{ field }}
                     <button type="button" class="pwd-eye" onclick="togglePwd(this)" tabindex="-1" aria-label="Toggle password visibility">

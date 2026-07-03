@@ -12,7 +12,14 @@ from __future__ import annotations
 
 import logging
 
+from apps.audit.services import record
+from apps.costing.services.cost_service import CostCalculationService
+from apps.database_manager.models import DatabaseVersion, RateMaster
+from apps.matching.models import ProductMatch
+from apps.notifications.services import notify
+from apps.review.models import ReviewItem
 from common.choices import BOQStatus
+from common.choices import VendorSelectionMode
 from common.exceptions import ValidationError
 
 logger = logging.getLogger("boq_ai")
@@ -44,9 +51,6 @@ class ReviewService:
         boq.save(update_fields=["status"])
         logger.info("BOQ %s approved by %s", boq.pk, getattr(user, "pk", None))
 
-        from apps.audit.services import record
-        from apps.notifications.services import notify
-
         record(user, "approve", "BOQ", boq.pk)
         notify(boq.user, "BOQ approved", f"'{boq.boq_name}' has been approved.")
         return boq
@@ -64,8 +68,6 @@ class ReviewService:
 
     def candidate_rates(self, item):
         """Master rows the item can be re-pointed to (same product_code first)."""
-        from apps.database_manager.models import DatabaseVersion, RateMaster
-
         version = DatabaseVersion.objects.filter(is_active=True).first()
         if version is None:
             return RateMaster.objects.none()
@@ -83,11 +85,6 @@ class ReviewService:
         has typed a maker name manually — stored on ProductMatch and recorded
         in the ReviewItem notes for full audit trail.
         """
-        from apps.costing.services.cost_service import CostCalculationService
-        from apps.matching.models import ProductMatch
-        from apps.review.models import ReviewItem
-        from common.choices import VendorSelectionMode
-
         if rate is None:
             raise ValidationError("A target product/vendor row is required.")
 

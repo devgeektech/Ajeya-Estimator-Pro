@@ -18,7 +18,10 @@ from apps.database_manager.models import (
 from apps.matching.models import ProductMatch
 from apps.matching.services.confidence import ConfidenceService, band_for
 from apps.matching.services.matching_service import ProductMatchingService
+from apps.matching.services.vendor_selection import VendorSelectionService
+from apps.make_list.models import MakeListEntry
 from apps.pending_products.models import PendingProduct
+from common.choices import VendorSelectionMode
 
 
 class MatchingEngineTests(TestCase):
@@ -183,8 +186,6 @@ class ConfidenceServiceTests(TestCase):
 
 class VendorSelectionTests(TestCase):
     def setUp(self):
-        from common.choices import VendorSelectionMode
-
         self.modes = VendorSelectionMode
         self.user = get_user_model().objects.create_user(email="v@x.com", password="x")
         self.version = DatabaseVersion.objects.create(
@@ -214,14 +215,10 @@ class VendorSelectionTests(TestCase):
         )
 
     def _approve(self, *makes):
-        from apps.make_list.models import MakeListEntry
-
         for make in makes:
             MakeListEntry.objects.create(boq_run=self.run, make=make)
 
     def test_lowest_cost_picks_cheapest(self):
-        from apps.matching.services.vendor_selection import VendorSelectionService
-
         chosen = VendorSelectionService(self.modes.LOWEST_COST).select_for_item(self.item)
         self.assertEqual(chosen, self.apl)
         self.match.refresh_from_db()
@@ -229,30 +226,22 @@ class VendorSelectionTests(TestCase):
         self.assertEqual(self.match.make, "APL")
 
     def test_make_list_restricts_candidates(self):
-        from apps.matching.services.vendor_selection import VendorSelectionService
-
         self._approve("Jindal", "Tata")  # APL (cheapest) excluded
         chosen = VendorSelectionService(self.modes.LOWEST_COST).select_for_item(self.item)
         self.assertEqual(chosen, self.tata)  # cheapest among approved
 
     def test_preferred_follows_make_list_order(self):
-        from apps.matching.services.vendor_selection import VendorSelectionService
-
         self._approve("Tata", "APL")  # Tata preferred even though APL cheaper
         chosen = VendorSelectionService(self.modes.PREFERRED).select_for_item(self.item)
         self.assertEqual(chosen, self.tata)
 
     def test_custom_selection_uses_given_row(self):
-        from apps.matching.services.vendor_selection import VendorSelectionService
-
         chosen = VendorSelectionService(self.modes.CUSTOM).select_for_item(
             self.item, custom_rate=self.jindal
         )
         self.assertEqual(chosen, self.jindal)
 
     def test_no_approved_vendor_returns_none(self):
-        from apps.matching.services.vendor_selection import VendorSelectionService
-
         self._approve("Unknown Make")
         chosen = VendorSelectionService().select_for_item(self.item)
         self.assertIsNone(chosen)
@@ -260,7 +249,5 @@ class VendorSelectionTests(TestCase):
         self.assertEqual(self.match.product, self.jindal)  # unchanged
 
     def test_select_run_counts_selected(self):
-        from apps.matching.services.vendor_selection import VendorSelectionService
-
         selected = VendorSelectionService().select_run(self.run)
         self.assertEqual(selected, 1)

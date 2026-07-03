@@ -7,22 +7,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pandas as pd
+from openpyxl import load_workbook
+
 
 def read_sheets(file_path: str | Path) -> dict[str, "object"]:
     """Read all sheets of a workbook into a mapping of {sheet_name: DataFrame}.
 
-    Imported lazily so the project does not require pandas to be installed
-    for parts of the app that don't touch Excel.
+    Returns all sheets using pandas.
     """
-    import pandas as pd
-
     return pd.read_excel(file_path, sheet_name=None)
 
 
 def list_sheet_names(file_path: str | Path) -> list[str]:
     """Return the sheet names present in a workbook."""
-    from openpyxl import load_workbook
-
     workbook = load_workbook(filename=file_path, read_only=True)
     try:
         return list(workbook.sheetnames)
@@ -44,8 +42,6 @@ def read_rows(file_path: str | Path, sheet_name: str | None = None) -> list[dict
     skipped. When ``sheet_name`` is None the active (first) worksheet is used.
     Uses openpyxl only (no pandas) so it installs cleanly everywhere.
     """
-    from openpyxl import load_workbook
-
     workbook = load_workbook(filename=file_path, read_only=True, data_only=True)
     try:
         worksheet = workbook[sheet_name] if sheet_name else workbook.active

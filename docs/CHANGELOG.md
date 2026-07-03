@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-07-03 — Settings Consolidation and Import Cleanup
+
+- Consolidated Django configuration into the single active settings module
+  `config.settings` (`backend/config/settings.py`); removed the old
+  `base.py` / `production.py` split.
+- Updated Django, ASGI, WSGI, Celery, `.env.example`, README, runbook, deploy
+  guide, project structure, and agent docs to reference `config.settings`.
+- Moved application and test imports to module scope and added rotating file
+  logging for application and error logs.
+
 ## 2026-07-03 — Git Initialization & Production Readiness Audit
 
 - Initialized Git repository for the first-time push milestone.
@@ -26,7 +36,7 @@
 ## 2026-07-01 — EC2 Runtime Simplification
 
 - Simplified runtime guidance around a single EC2 settings path
-  (`config.settings.production`) and `/srv/boq_ai/.env`.
+  (`config.settings`) and `/srv/boq_ai/.env`.
 - Updated EC2/PostgreSQL documentation to use `boq_db` and `boq_user`.
 - Made SMTP optional in production settings so the app can run before a domain
   or mail provider is configured.

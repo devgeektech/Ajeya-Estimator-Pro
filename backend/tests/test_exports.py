@@ -6,6 +6,7 @@ from decimal import Decimal
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from openpyxl import load_workbook
 
 from apps.boq.models import BOQ, BOQItem, BOQRun
 from apps.costing.services.cost_service import CostCalculationService
@@ -52,8 +53,6 @@ class ExportServiceTests(TestCase):
         self.assertEqual(self.boq.status, BOQStatus.EXPORTED)
 
     def test_internal_workbook_has_both_sheets(self):
-        from openpyxl import load_workbook
-
         export = ExportService().export_run(self.run, self.user)
         wb = load_workbook(io.BytesIO(export.internal_sheet.read()))
         self.assertEqual(wb.sheetnames, ["Internal Review", "Client BOQ"])
@@ -62,8 +61,6 @@ class ExportServiceTests(TestCase):
         self.assertEqual(ws["C2"].value, "PIPE150")  # product code row 1
 
     def test_client_standalone_has_computed_amount(self):
-        from openpyxl import load_workbook
-
         export = ExportService().export_run(self.run, self.user)
         wb = load_workbook(io.BytesIO(export.client_sheet.read()))
         ws = wb["Client BOQ"]

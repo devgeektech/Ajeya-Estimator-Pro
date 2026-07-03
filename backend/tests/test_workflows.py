@@ -21,7 +21,7 @@ from apps.notifications.models import Notification
 from apps.processing.models import ProcessingJob
 from apps.review.services.review_service import ReviewService
 from common.choices import BOQStatus, RunStatus
-from common.exceptions import ProcessingError
+from common.exceptions import ProcessingError, ValidationError
 from workflows.boq_processing import process_boq_run
 
 
@@ -126,7 +126,6 @@ class ReviewApproveExportTests(_PipelineFixture):
     @override_settings(OPENAI_API_KEY="placeholder-key")
     def test_cannot_export_before_approval(self):
         process_boq_run(self.run.pk)
-        from common.exceptions import ValidationError
 
         with self.assertRaises(ValidationError):
             ExportService().export_run(self.run, self.user)

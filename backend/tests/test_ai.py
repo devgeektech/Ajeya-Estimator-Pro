@@ -10,6 +10,8 @@ from ai.extractors.analyzer import analyze_run
 from ai.extractors.product_extractor import extract_product
 from ai.openai_client import is_configured
 from ai.service import AIService
+from apps.boq.models import BOQ, BOQItem, BOQRun
+from apps.matching.models import ActivityMatch
 from common.exceptions import AIServiceError
 
 
@@ -118,8 +120,6 @@ class ActivityExtractorTests(SimpleTestCase):
 @override_settings(OPENAI_API_KEY="sk-realLookingKey123", OPENAI_MODEL="gpt-4o-mini")
 class AnalyzeRunTests(TestCase):
     def setUp(self):
-        from apps.boq.models import BOQ, BOQItem, BOQRun
-
         user = get_user_model().objects.create_user(  # type: ignore[attr-defined]
             email="exp@example.com", password="x"
         )
@@ -131,8 +131,6 @@ class AnalyzeRunTests(TestCase):
     @mock.patch("ai.extractors.analyzer.extract_activities")
     @mock.patch("ai.extractors.analyzer.extract_product")
     def test_analyze_run_persists_results(self, extract_product_mock, extract_activities_mock):
-        from apps.matching.models import ActivityMatch
-
         extract_product_mock.return_value = {
             "product": "Pipe", "size": "150 NB", "material": "MS", "make": None,
         }
@@ -154,8 +152,6 @@ class AnalyzeRunTests(TestCase):
     @mock.patch("ai.extractors.analyzer.extract_activities")
     @mock.patch("ai.extractors.analyzer.extract_product")
     def test_analyze_run_is_idempotent(self, extract_product_mock, extract_activities_mock):
-        from apps.matching.models import ActivityMatch
-
         extract_product_mock.return_value = {"product": "Pipe", "size": None, "material": None, "make": None}
         extract_activities_mock.return_value = ["excavation", "installation"]
 

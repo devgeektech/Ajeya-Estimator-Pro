@@ -56,22 +56,29 @@ Create a `.env` file in the root of the project with the following local configu
 
 ```ini
 DEBUG=True
-DJANGO_SETTINGS_MODULE=config.settings.base
+DJANGO_SETTINGS_MODULE=config.settings
 ALLOWED_HOSTS=localhost,127.0.0.1
 DATABASE_URL=postgres://boq_user:localpass@localhost:5432/boq_db
 REDIS_URL=redis://localhost:6379/0
 CELERY_BROKER_URL=redis://localhost:6379/0
 CELERY_RESULT_BACKEND=redis://localhost:6379/1
-SECRET_KEY=local-dev-secret-key-123
+SECRET_KEY=paste-your-generated-key-here
 ```
 
-### 4. Database Migration & Run
+To generate a completely random, secure `SECRET_KEY`, run this command in your terminal and paste the output into your `.env` file:
 
-Run the migrations to build the tables, create an admin account, and start the server:
+```bash
+python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
+```
+
+### 4. Database Migration, Static Files, & Run
+
+Run the migrations to build the tables, collect the CSS/JS files, create an admin account, and start the server:
 
 ```bash
 cd backend
 python manage.py migrate
+python manage.py collectstatic --noinput
 python manage.py createsuperuser
 python manage.py runserver
 ```
@@ -132,7 +139,7 @@ Minimum values:
 ```ini
 SECRET_KEY=generate-a-real-secret-key
 DEBUG=False
-DJANGO_SETTINGS_MODULE=config.settings.production
+DJANGO_SETTINGS_MODULE=config.settings
 ALLOWED_HOSTS=13.205.90.58
 DATABASE_URL=postgres://boq_user:replace-with-password@localhost:5432/boq_db
 REDIS_URL=redis://localhost:6379/0

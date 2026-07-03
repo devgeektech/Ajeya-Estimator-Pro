@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 from decimal import Decimal
 
+from apps.database_manager.models import DatabaseVersion, ProductAlias, RateMaster
 from common.choices import PendingProductStatus
 from common.exceptions import ValidationError
 
@@ -28,8 +29,6 @@ class PendingProductService:
 
     @staticmethod
     def _active_version():
-        from apps.database_manager.models import DatabaseVersion
-
         version = DatabaseVersion.objects.filter(is_active=True).first()
         if version is None:
             raise ValidationError("No active database version.")
@@ -44,8 +43,6 @@ class PendingProductService:
 
     def merge(self, pending, product_code: str, user=None):
         """Map the pending description to an existing master product."""
-        from apps.database_manager.models import ProductAlias, RateMaster
-
         version = self._active_version()
         code = (product_code or "").strip()
         if not code:
@@ -74,8 +71,6 @@ class PendingProductService:
         user=None,
     ):
         """Create a new master product (active version) and alias to it."""
-        from apps.database_manager.models import ProductAlias, RateMaster
-
         version = self._active_version()
         code = (product_code or "").strip()
         if not code:

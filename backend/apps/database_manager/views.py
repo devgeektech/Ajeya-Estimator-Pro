@@ -2,18 +2,21 @@
 import logging
 
 from django.contrib import messages
+from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.files.storage import FileSystemStorage
-from django.shortcuts import get_object_or_404, redirect
+from django.http import FileResponse
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy
 from django.views.generic import FormView, ListView, View
 
+from apps.audit.services import record
 from common.exceptions import BOQAIError
-from django.contrib.auth.mixins import LoginRequiredMixin
 from common.mixins import DatabaseAccessRequiredMixin
+from tasks.import_database import import_database_task
 from utils.files import unique_filename
 
 from .forms import DatabaseUploadForm
-from .models import DatabaseVersion
+from .models import DatabaseVersion, StateControl
 from .services.rollback import DatabaseRollbackService
 
 logger = logging.getLogger("boq_ai")
@@ -58,8 +61,6 @@ class DatabaseUploadView(DatabaseAccessRequiredMixin, FormView):
         )
         file_path = storage.path(stored_name)
 
-        from tasks.import_database import import_database_task
-
         try:
             result = import_database_task.delay(
                 file_path, self.request.user.pk, upload.name, name, stored_name
@@ -67,8 +68,6 @@ class DatabaseUploadView(DatabaseAccessRequiredMixin, FormView):
             # In local/eager mode the result is available immediately and
             # exceptions propagate; in production this returns at once.
             if getattr(result, "successful", None) and result.successful():
-                from apps.audit.services import record
-
                 record(self.request.user, "database_import", "Workbook", upload.name)
                 messages.success(self.request, "Database imported and activated.")
             else:
@@ -91,8 +90,6 @@ class DatabaseRollbackView(DatabaseAccessRequiredMixin, View):
         version = get_object_or_404(DatabaseVersion, pk=pk)
         try:
             DatabaseRollbackService(version).run()
-            from apps.audit.services import record
-
             record(request.user, "database_rollback", "DatabaseVersion", version.pk)
             messages.success(
                 request, f"Rolled back to database v{version.version_number}."
@@ -104,8 +101,6 @@ class DatabaseRollbackView(DatabaseAccessRequiredMixin, View):
 
 class DatabaseDownloadView(LoginRequiredMixin, View):
     def get(self, request, pk):
-        from django.http import FileResponse, Http404
-
         version = get_object_or_404(DatabaseVersion, pk=pk)
         if not version.file or not version.file.storage.exists(version.file.name):
             messages.error(request, "File not found for this version.")
@@ -117,9 +112,7 @@ class DatabaseDownloadView(LoginRequiredMixin, View):
 
 class DatabaseVersionDetailView(LoginRequiredMixin, View):
     def get(self, request, pk):
-        from django.shortcuts import render
         version = get_object_or_404(DatabaseVersion, pk=pk)
-        from .models import StateControl
         context = {
             "version": version,
             "rates_count": version.rates.count(),

@@ -9,7 +9,7 @@ internal/client Excel outputs.
 
 ## Runtime
 
-- Settings: `config.settings.production`
+- Settings: `config.settings`
 - Database: PostgreSQL database `boq_db`, user `boq_user`
 - Server: Ubuntu EC2, `13.205.90.58`, Mumbai `ap-south-1`
 - Web stack: Nginx, Gunicorn, Django
@@ -80,7 +80,7 @@ cp .env.example .env
 #   DATABASE_URL=postgres://boq_user:replace-with-your-local-password@localhost:5432/boq_db
 #   SECRET_KEY=<any-local-value>
 #   DEBUG=False
-#   DJANGO_SETTINGS_MODULE=config.settings.production
+#   DJANGO_SETTINGS_MODULE=config.settings
 ```
 
 **4. Run migrations and create a superuser**
@@ -133,4 +133,3 @@ ALLOWED_HOSTS=13.205.90.58
 `SECRET_KEY` cannot be removed. Django uses it to sign sessions, CSRF tokens,
 password reset links, and other trusted data. If it is missing or leaked, the
 app is not production safe.
-

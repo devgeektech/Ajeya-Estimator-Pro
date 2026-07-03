@@ -7,9 +7,14 @@ Long-running — must not block views (docs/AGENTS.md - Background Jobs).
 The task is idempotent: items whose embedding already exists are skipped, so
 re-queuing after a partial failure is safe.
 """
+import logging
+
 from celery import shared_task
 
-import logging
+from ai.embeddings.generator import generate_embedding
+from ai.openai_client import is_configured
+from apps.database_manager.models import DatabaseVersion, ProductEmbedding, RateMaster
+from common.exceptions import AIServiceError
 
 logger = logging.getLogger("boq_ai")
 
@@ -22,11 +27,6 @@ def generate_embeddings_task(database_version_id: int) -> dict:
     When AI is disabled (placeholder key) the task logs and exits gracefully
     without raising so the import pipeline still completes.
     """
-    from ai.openai_client import is_configured
-    from ai.embeddings.generator import generate_embedding
-    from apps.database_manager.models import DatabaseVersion, RateMaster, ProductEmbedding
-    from common.exceptions import AIServiceError
-
     if not is_configured():
         logger.info(
             "generate_embeddings_task: AI disabled (placeholder key) — "

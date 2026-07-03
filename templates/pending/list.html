@@ -36,14 +36,14 @@
                         <form method="post" action="{% url 'pending_products:merge' p.pk %}"
                               class="stack" x-show="open === 'merge'" style="display:none; width:100%; margin-top:8px;">
                             {% csrf_token %}
-                            <input type="text" name="product_code" class="select" placeholder="Existing product code" required>
+                            <input type="text" name="product_code" class="select" placeholder="Existing product code *" required>
                             <button type="submit" class="btn btn--primary btn--small">Confirm merge</button>
                         </form>
 
                         <form method="post" action="{% url 'pending_products:add' p.pk %}"
                               class="stack" x-show="open === 'add'" style="display:none; width:100%; margin-top:8px; gap:6px;">
                             {% csrf_token %}
-                            <input type="text" name="product_code" class="select" placeholder="New product code" required>
+                            <input type="text" name="product_code" class="select" placeholder="New product code *" required>
                             <input type="text" name="description" class="select" placeholder="Description (optional)">
                             <input type="number" step="0.01" name="purchase_rate" class="select" placeholder="Purchase rate">
                             <input type="text" name="make" class="select" placeholder="Make">

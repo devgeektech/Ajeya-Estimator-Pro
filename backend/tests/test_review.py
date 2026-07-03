@@ -11,6 +11,7 @@ from apps.matching.models import ProductMatch
 from apps.review.models import ReviewItem
 from apps.review.services.review_service import ReviewService
 from common.choices import BOQStatus, RunStatus
+from common.exceptions import ValidationError
 
 
 class ReviewServiceTests(TestCase):
@@ -88,8 +89,6 @@ class ReviewServiceTests(TestCase):
         self.assertEqual(self.boq.status, BOQStatus.APPROVED)
 
     def test_approve_invalid_state_raises(self):
-        from common.exceptions import ValidationError
-
         self.boq.status = BOQStatus.UPLOADED
         self.boq.save(update_fields=["status"])
         with self.assertRaises(ValidationError):
@@ -103,8 +102,6 @@ class ReviewServiceTests(TestCase):
         self.assertEqual(self.boq.status, BOQStatus.UNDER_REVIEW)
 
     def test_revise_requires_approved(self):
-        from common.exceptions import ValidationError
-
         with self.assertRaises(ValidationError):
             ReviewService().revise(self.boq, self.user)  # still COMPLETED
 

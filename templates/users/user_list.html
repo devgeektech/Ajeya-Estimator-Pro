@@ -56,6 +56,7 @@
 
     .users-page .status-toggle--inactive .status-toggle__track { background: var(--red); }
     .users-page .status-toggle--disabled { cursor: default; opacity: .78; }
+    .users-page .status-toggle--locked { cursor: not-allowed; opacity: 1; }
 
     .users-page .icon-button {
         width: 32px;
@@ -141,7 +142,12 @@
                         {% endif %}
                     </td>
                     <td style="text-align:center">
-                        {% if u != request.user %}
+                        {% if u.is_admin %}
+                        <span class="status-toggle status-toggle--active status-toggle--locked" aria-label="Admin users always have DB access" title="Admin users always have DB access">
+                            <span class="status-toggle__track"><span class="status-toggle__knob"></span></span>
+                            <span class="status-toggle__label">Granted</span>
+                        </span>
+                        {% elif u != request.user %}
                         <form method="post" action="{% url 'users:toggle_db_access' u.pk %}" class="inline-form" data-confirm-bound="inline" data-confirm="{% if u.allow_db_access %}Revoke DB Access for{% else %}Grant DB Access to{% endif %} {{ u.email }}?" onsubmit="return window.BOQConfirm ? window.BOQConfirm.submit(event, this) : true;">
                             {% csrf_token %}
                             <button type="submit" class="status-toggle {% if u.allow_db_access %}status-toggle--active{% else %}status-toggle--inactive{% endif %}" aria-label="{% if u.allow_db_access %}Revoke DB Access{% else %}Grant DB Access{% endif %} {{ u.email }}">

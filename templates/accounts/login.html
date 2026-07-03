@@ -5,10 +5,12 @@
 <div class="auth">
     <div class="auth__card">
         <div class="auth__brand">
-            <span class="brand-mark">Ajeya</span> <span class="brand-ai">Estimator Pro</span>
+            <div class="auth__brand-name">
+                <span class="brand-mark">Ajeya</span> <span class="brand-ai">Estimator Pro</span>
+            </div>
+            <p class="auth__brand-tagline">AI-Powered BOQ Estimation Platform</p>
         </div>
         <h1 class="auth__title">Sign in</h1>
-        <p class="auth__subtitle">AI-Powered BOQ Estimation Platform</p>
 
         {% if form.non_field_errors %}
         <div class="alert alert--error">
@@ -19,12 +21,12 @@
         <form method="post" novalidate>
             {% csrf_token %}
             <label class="field">
-                <span class="field__label">Email</span>
+                <span class="field__label">Email{% if form.email.field.required %}<span class="field__required" aria-hidden="true">*</span>{% endif %}</span>
                 {{ form.email }}
                 {% for error in form.email.errors %}<span class="field__error">{{ error }}</span>{% endfor %}
             </label>
             <label class="field">
-                <span class="field__label">Password</span>
+                <span class="field__label">Password{% if form.password.field.required %}<span class="field__required" aria-hidden="true">*</span>{% endif %}</span>
                 <div class="password-wrap">
                     {{ form.password }}
                     <button type="button" class="pwd-eye" onclick="togglePwd(this)" tabindex="-1" aria-label="Toggle password visibility">
@@ -42,6 +44,21 @@
 </div>
 
 <style>
+.auth__brand {
+    align-items: center !important;
+    margin-bottom: 10px !important;
+    text-align: center !important;
+}
+.auth__brand-name,
+.auth__brand-tagline {
+    width: 100%;
+    text-align: center !important;
+}
+.auth__brand-tagline {
+    margin: 2px 0 0 !important;
+    font-size: .84rem;
+    line-height: 1.25;
+}
 .password-wrap { position: relative; }
 .password-wrap .form-control { padding-right: 42px; }
 .pwd-eye {

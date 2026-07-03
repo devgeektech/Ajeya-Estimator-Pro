@@ -1,38 +1,41 @@
-"""
-Base settings for BOQ_AI.
 
-Shared Django configuration. The active EC2 runtime imports this through
-production.py.
+"""Single settings module for BOQ_AI.
 
-Derived from docs/TRD.md, docs/ARCHITECTURE.md and docs/PROJECT_STRUCTURE.md.
+All runtimes use this module. Environment values are read from ``.env`` in the
+project root when present, and production safety checks are enabled whenever
+``DEBUG=False``.
 """
 from pathlib import Path
+import sys
 
 import environ
+from django.core.exceptions import ImproperlyConfigured
 
 # backend/ directory (contains manage.py, config/, apps/, ...)
-BASE_DIR = Path(__file__).resolve().parents[2]
+BASE_DIR = Path(__file__).resolve().parents[1]
 # Project root (contains backend/, docs/, templates/, static/, media/, ...)
 ROOT_DIR = BASE_DIR.parent
+
+if str(BASE_DIR) not in sys.path:
+    sys.path.append(str(BASE_DIR))
 
 env = environ.Env(
     DEBUG=(bool, False),
     ALLOWED_HOSTS=(list, ["localhost", "127.0.0.1"]),
 )
 
-# Load .env from the project root if present.
 env_file = ROOT_DIR / ".env"
 if env_file.exists():
     env.read_env(str(env_file))
 
 SECRET_KEY = env("SECRET_KEY", default="insecure-dev-key-change-me")
-DEBUG = env("DEBUG")
-ALLOWED_HOSTS = env("ALLOWED_HOSTS")
+DEBUG = env.bool("DEBUG", default=False)
+ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["localhost", "127.0.0.1"])
 
-# Make the apps/ package importable as `apps.<name>`.
-import sys  # noqa: E402
-
-sys.path.append(str(BASE_DIR / "apps"))
+if not DEBUG and SECRET_KEY == "insecure-dev-key-change-me":
+    raise ImproperlyConfigured(
+        "SECRET_KEY must be set in the environment before starting BOQ_AI."
+    )
 
 # --- Applications -----------------------------------------------------------
 
@@ -105,13 +108,21 @@ WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
 # --- Database ---------------------------------------------------------------
-# PostgreSQL is required for the single EC2 production runtime.
 
 DATABASE_URL = env("DATABASE_URL", default="")
 if DATABASE_URL:
     DATABASES = {"default": env.db_url_config(DATABASE_URL)}
+elif DEBUG:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": ROOT_DIR / "db.sqlite3",
+        }
+    }
 else:
-    DATABASES = {}
+    raise ImproperlyConfigured(
+        "DATABASE_URL must be set. BOQ_AI uses PostgreSQL in production."
+    )
 
 # --- Authentication ---------------------------------------------------------
 
@@ -147,10 +158,12 @@ MEDIA_ROOT = ROOT_DIR / "media"
 
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
-    # Plain storage by default so {% static %} works without collectstatic.
-    # Production swaps in WhiteNoise's compressed manifest storage.
     "staticfiles": {
-        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
+        "BACKEND": (
+            "django.contrib.staticfiles.storage.StaticFilesStorage"
+            if DEBUG
+            else "whitenoise.storage.CompressedManifestStaticFilesStorage"
+        )
     },
 }
 
@@ -163,6 +176,7 @@ CELERY_BROKER_URL = env("CELERY_BROKER_URL", default=REDIS_URL)
 CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default=REDIS_URL)
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 60 * 30
+CELERY_TASK_ALWAYS_EAGER = env.bool("CELERY_TASK_ALWAYS_EAGER", default=False)
 
 # --- OpenAI -----------------------------------------------------------------
 
@@ -172,10 +186,35 @@ OPENAI_EMBEDDING_MODEL = env("OPENAI_EMBEDDING_MODEL", default="text-embedding-3
 OPENAI_TIMEOUT_SECONDS = env.int("OPENAI_TIMEOUT_SECONDS", default=30)
 
 # --- Email ------------------------------------------------------------------
-# Console backend by default; production overrides with SMTP.
 
-EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+if env("EMAIL_HOST", default=""):
+    EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+    EMAIL_HOST = env("EMAIL_HOST")
+    EMAIL_PORT = env.int("EMAIL_PORT", default=587)
+    EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
+    EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
+    EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=True)
+else:
+    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="no-reply@boq-ai.local")
+
+# --- Security ---------------------------------------------------------------
+
+SECURE_SSL_REDIRECT = env.bool("SECURE_SSL_REDIRECT", default=False)
+SESSION_COOKIE_SECURE = env.bool("SESSION_COOKIE_SECURE", default=SECURE_SSL_REDIRECT)
+CSRF_COOKIE_SECURE = env.bool("CSRF_COOKIE_SECURE", default=SECURE_SSL_REDIRECT)
+SECURE_HSTS_SECONDS = env.int(
+    "SECURE_HSTS_SECONDS",
+    default=(60 * 60 * 24 * 365 if SECURE_SSL_REDIRECT else 0),
+)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = env.bool(
+    "SECURE_HSTS_INCLUDE_SUBDOMAINS",
+    default=SECURE_SSL_REDIRECT,
+)
+SECURE_HSTS_PRELOAD = env.bool("SECURE_HSTS_PRELOAD", default=SECURE_SSL_REDIRECT)
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+X_FRAME_OPTIONS = "DENY"
 
 # --- Logging ----------------------------------------------------------------
 
@@ -197,13 +236,17 @@ LOGGING = {
             "formatter": "verbose",
         },
         "app_file": {
-            "class": "logging.FileHandler",
+            "class": "logging.handlers.RotatingFileHandler",
             "filename": str(LOGS_DIR / "application.log"),
+            "maxBytes": 5 * 1024 * 1024,
+            "backupCount": 5,
             "formatter": "verbose",
         },
         "error_file": {
-            "class": "logging.FileHandler",
+            "class": "logging.handlers.RotatingFileHandler",
             "filename": str(LOGS_DIR / "errors.log"),
+            "maxBytes": 5 * 1024 * 1024,
+            "backupCount": 5,
             "level": "ERROR",
             "formatter": "verbose",
         },
@@ -216,6 +259,16 @@ LOGGING = {
         "boq_ai": {
             "handlers": ["console", "app_file", "error_file"],
             "level": "INFO",
+            "propagate": False,
+        },
+        "django": {
+            "handlers": ["console", "app_file", "error_file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "django.request": {
+            "handlers": ["console", "error_file"],
+            "level": "ERROR",
             "propagate": False,
         },
     },

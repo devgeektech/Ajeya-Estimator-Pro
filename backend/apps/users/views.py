@@ -5,6 +5,7 @@ from django.urls import reverse_lazy
 from django.views.generic import CreateView, ListView, UpdateView, View
 from django.shortcuts import get_object_or_404, redirect
 
+from common.choices import UserRole
 from common.mixins import SuperAdminRequiredMixin
 
 from .forms import UserCreateForm, UserEditForm
@@ -87,6 +88,12 @@ class UserToggleDbAccessView(SuperAdminRequiredMixin, View):
 
     def post(self, request, pk):
         user = get_object_or_404(platform_users().exclude(pk=request.user.pk), pk=pk)
+        if user.role == UserRole.ADMIN:
+            if not user.allow_db_access:
+                user.allow_db_access = True
+                user.save(update_fields=["allow_db_access"])
+            messages.info(request, "Admin users always have DB access.")
+            return redirect("users:list")
         user.allow_db_access = not getattr(user, 'allow_db_access', False)
         user.save(update_fields=["allow_db_access"])
         state = "granted DB access" if user.allow_db_access else "revoked DB access"

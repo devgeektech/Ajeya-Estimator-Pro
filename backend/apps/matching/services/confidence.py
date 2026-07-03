@@ -19,6 +19,7 @@ from common.exceptions import AIServiceError
 from utils.text import normalize
 
 from ai.service import AIService
+from apps.matching.models import ProductMatch
 
 logger = logging.getLogger("boq_ai")
 
@@ -130,8 +131,6 @@ class ConfidenceService:
 
     def score_run(self, run) -> int:
         """Score every match in a run. Returns the number of matches scored."""
-        from apps.matching.models import ProductMatch
-
         matches = ProductMatch.objects.filter(
             boq_item__boq_run=run
         ).select_related("boq_item", "product")

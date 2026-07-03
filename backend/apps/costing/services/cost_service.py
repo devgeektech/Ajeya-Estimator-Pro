@@ -26,6 +26,16 @@ from apps.costing.services import labour as labour_service
 from apps.costing.services import material as material_service
 from apps.costing.services import profit as profit_service
 from apps.costing.services import transport as transport_service
+from apps.costing.models import CostBreakdown
+from apps.database_manager.models import (
+    DatabaseVersion,
+    LabourMaster,
+    RateMaster,
+    StateControl,
+    TORAccessories,
+    TORLabour,
+)
+from apps.matching.models import ProductMatch
 
 logger = logging.getLogger("boq_ai")
 
@@ -59,14 +69,6 @@ class CostCalculationService:
     @staticmethod
     def _load_context() -> dict:
         """Preload active-version cost lookups (labour rates, TOR rows)."""
-        from apps.database_manager.models import (
-            DatabaseVersion,
-            LabourMaster,
-            RateMaster,
-            TORAccessories,
-            TORLabour,
-        )
-
         version = DatabaseVersion.objects.filter(is_active=True).first()
         if version is None:
             logger.warning("No active database version; labour/accessories are zero")
@@ -99,7 +101,6 @@ class CostCalculationService:
         """Return (labour_multiplier, transportation_multiplier) for a state."""
         if not state_name:
             return Decimal("1"), Decimal("1")
-        from apps.database_manager.models import StateControl
 
         state = StateControl.objects.filter(state_name__iexact=state_name).first()
         if state is None:
@@ -111,8 +112,6 @@ class CostCalculationService:
 
         Returns the breakdown, or None when the item has no selected product.
         """
-        from apps.costing.models import CostBreakdown
-
         if match.product is None:
             CostBreakdown.objects.filter(product_match=match).delete()
             return None
@@ -147,8 +146,6 @@ class CostCalculationService:
 
     def calculate_run(self, run, state_name: str | None = None) -> int:
         """Calculate breakdowns for all matched items. Returns the count."""
-        from apps.matching.models import ProductMatch
-
         context = self._load_context()
         multipliers = self._state_multipliers(state_name)
         matches = ProductMatch.objects.filter(

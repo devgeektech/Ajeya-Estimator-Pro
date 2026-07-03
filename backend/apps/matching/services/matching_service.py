@@ -25,7 +25,11 @@ from common.exceptions import AIServiceError
 from utils.text import normalize
 
 from ai.service import AIService
+from apps.database_manager.models import DatabaseVersion, RateMaster
+from apps.matching.models import ProductMatch
 from apps.matching.services import alias_match, embedding_match, exact_match
+from apps.pending_products.models import PendingProduct
+from common.choices import PendingProductStatus
 
 logger = logging.getLogger("boq_ai")
 
@@ -70,10 +74,6 @@ class ProductMatchingService:
 
     def match_item(self, item, rates=None, rates_by_code=None, created_by=None):
         """Match a single item and persist a ProductMatch (+ pending if low)."""
-        from apps.matching.models import ProductMatch
-        from apps.pending_products.models import PendingProduct
-        from common.choices import PendingProductStatus
-
         if rates is None or rates_by_code is None:
             rates, rates_by_code = self._load_rates()
 
@@ -122,8 +122,6 @@ class ProductMatchingService:
     @staticmethod
     def _load_rates():
         """Load active-version rates as a list + normalized-code index."""
-        from apps.database_manager.models import DatabaseVersion, RateMaster
-
         version = DatabaseVersion.objects.filter(is_active=True).first()
         if version is None:
             logger.warning("No active database version; matching has no candidates")

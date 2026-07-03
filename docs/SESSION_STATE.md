@@ -496,7 +496,7 @@ All 24 Sprints — Complete.
 
 Delivered (Sprints 1 & 2):
 
-* Django project scaffolding, split settings, Celery/Redis, logging.
+* Django project scaffolding, single settings module, Celery/Redis, logging.
 * All 13 app data models + migrations.
 * Email-based custom User, roles, auth (login/logout/password reset).
 * Super-Admin user management. Responsive dashboard + layout.
@@ -686,6 +686,37 @@ Every development session must update:
 ---
 
 # Session Log
+
+## 2026-07-03 — Settings Consolidation and Import Cleanup
+
+Completed:
+
+* Consolidated runtime configuration into conventional Django
+  `backend/config/settings.py` (`config.settings`).
+* Removed the old `config.settings.base` and `config.settings.production` files.
+* Updated Django, Celery, ASGI, WSGI, `.env.example`, README, runbook, deploy
+  guide, project structure, agent instructions, roadmap, changelog, and session
+  state references.
+* Moved application and test imports to module scope; Ruff import checks pass.
+* Added rotating application/error file handlers and kept existing service
+  logging intact.
+* Tightened placeholder OpenAI key detection to include `placeholder`.
+* Verified Django system checks, Ruff, Pyright, and all tests.
+
+Pending:
+
+* None.
+
+Issues:
+
+* Sandboxed Python launch failed on Windows; verification was run through the
+  project virtualenv outside the sandbox.
+
+Next:
+
+* Continue production hardening and EC2 validation with real client data.
+
+---
 
 ## 2026-07-03 — Git Initialization & Production Readiness Audit
 
@@ -1119,7 +1150,7 @@ Next:
 Completed:
 
 * Full project scaffolding per PROJECT_STRUCTURE.md.
-* Split settings (base/local/development/production), Celery, logging.
+* Single settings module (`config.settings`), Celery, logging.
 * All 13 app models + initial migrations applied.
 * Custom email-based User, roles, login/logout/password reset.
 * Super-Admin user management (list/create/edit/activate).
@@ -1178,7 +1209,7 @@ generated when AI key is present. pgvector upgrade is post-UAT.
 
 Test Coverage:
 
-134 passing tests across all 13 apps + workflows.
+149 passing tests across all 13 apps + workflows.
 
 Risk Level:
 
@@ -1243,7 +1274,7 @@ Next:
 
 Completed:
 
-* Standardized the active runtime on `config.settings.production`.
+* Standardized the active runtime on `config.settings`.
 * Updated `manage.py`, Celery, WSGI/ASGI expectations, systemd, `.env` examples,
   `README.md`, and `RUN.md` for the single EC2 flow.
 * Updated PostgreSQL docs to use database `boq_db` and user `boq_user`.

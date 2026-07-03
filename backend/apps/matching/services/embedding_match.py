@@ -12,6 +12,10 @@ from __future__ import annotations
 
 import math
 
+from ai.embeddings import generator
+from apps.database_manager.models import ProductEmbedding
+from utils.text import normalize
+
 
 def _cosine(a: list[float], b: list[float]) -> float:
     if not a or not b or len(a) != len(b):
@@ -30,11 +34,6 @@ def find_embedding(query: str, rates_by_code: dict) -> tuple[object | None, floa
     similarity_percent is 0-100. Returns (None, 0.0) when there are no stored
     embeddings for the active version or AI is disabled.
     """
-    from apps.database_manager.models import ProductEmbedding
-
-    from ai.embeddings.generator import generate_embedding
-    from utils.text import normalize
-
     codes = list(rates_by_code.keys())
     embeddings = [
         emb
@@ -45,7 +44,7 @@ def find_embedding(query: str, rates_by_code: dict) -> tuple[object | None, floa
         return None, 0.0
 
     # Raises AIServiceError when disabled; the caller decides whether to skip.
-    query_vector = generate_embedding(query)
+    query_vector = generator.generate_embedding(query)
 
     best_code: str | None = None
     best_sim = 0.0

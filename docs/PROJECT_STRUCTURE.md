@@ -73,10 +73,7 @@ backend/
 ```text
 config/
 
-├── settings/
-│   ├── base.py
-│   └── production.py
-│
+├── settings.py
 ├── urls.py
 ├── celery.py
 ├── asgi.py
@@ -87,9 +84,9 @@ config/
 
 Runtime note:
 
-* `config.settings.production` is the single active settings module.
-* `base.py` contains shared Django configuration used by production settings.
-* Environment values are read from `/srv/boq_ai/.env` on the EC2 server.
+* `config.settings` is the single active settings module (`config/settings.py`).
+* Environment values are read from `.env` in the project root when present.
+* Production safety checks are enabled when `DEBUG=False`.
 
 # Django Applications
 

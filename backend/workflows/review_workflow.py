@@ -13,15 +13,15 @@ helpers exist for workflow-level orchestration consistency.
 """
 from __future__ import annotations
 
+from apps.boq.models import BOQ
+from apps.review.services.review_service import ReviewService
+
 
 def submit_for_review(boq_id: int) -> None:
     """Transition a Completed BOQ to Under Review.
 
     Delegates to ``ReviewService.start_review(boq)``.
     """
-    from apps.review.services.review_service import ReviewService
-    from apps.boq.models import BOQ
-
     boq = BOQ.objects.get(pk=boq_id)
     ReviewService().start_review(boq)
 
@@ -31,9 +31,6 @@ def approve_boq(boq_id: int, approved_by) -> None:
 
     Delegates to ``ReviewService.approve(boq, user=approved_by)``.
     """
-    from apps.review.services.review_service import ReviewService
-    from apps.boq.models import BOQ
-
     boq = BOQ.objects.get(pk=boq_id)
     ReviewService().approve(boq, user=approved_by)
 
@@ -43,8 +40,5 @@ def reopen_for_review(boq_id: int, reopened_by) -> None:
 
     Delegates to ``ReviewService.revise(boq, user=reopened_by)``.
     """
-    from apps.review.services.review_service import ReviewService
-    from apps.boq.models import BOQ
-
     boq = BOQ.objects.get(pk=boq_id)
     ReviewService().revise(boq, user=reopened_by)
