@@ -1,0 +1,426 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" x-data="appState()" :class="{ 'dark-mode': darkMode }">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Ajeya Estimator Pro{% endblock %}</title>
+    <meta name="csrf-token" content="{{ csrf_token }}">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=3">
+    <style>
+        .confirm-modal {
+            position: fixed;
+            inset: 0;
+            z-index: 200;
+            display: grid;
+            place-items: center;
+            padding: 24px;
+        }
+
+        .confirm-modal[hidden] { display: none; }
+
+        .confirm-modal__backdrop {
+            position: absolute;
+            inset: 0;
+            background: rgba(15, 23, 42, .58);
+        }
+
+        .confirm-modal__dialog {
+            position: relative;
+            width: min(420px, 100%);
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            box-shadow: 0 24px 64px rgba(15, 23, 42, .28);
+            padding: 22px;
+        }
+
+        .confirm-modal__title {
+            margin: 0 0 8px;
+            color: #1e293b;
+            font-size: 1.1rem;
+        }
+
+        .confirm-modal__message {
+            margin: 0;
+            color: #64748b;
+        }
+
+        .confirm-modal__actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 22px;
+        }
+
+        /* Enforce bold table headings everywhere */
+        .table th { 
+            color: var(--text) !important; 
+            font-weight: 700 !important; 
+            text-transform: uppercase; 
+            font-size: .72rem !important; 
+            letter-spacing: .04em; 
+        }
+
+        /* Fix column alignment across all pages */
+        .table th, .table td {
+            text-align: left;
+        }
+        .table th.table__actions, .table td.table__actions, .table__empty {
+            text-align: center;
+        }
+    </style>
+    <style>
+        /* ---- Dark mode overrides ---- */
+        .dark-mode { color-scheme: dark; }
+        .dark-mode body {
+            --bg: #0a0f1e;
+            --surface: #111827;
+            --surface-alt: #1a2236;
+            --border: #2d3748;
+            --text: #e2e8f0;
+            --text-muted: #94a3b8;
+            --shadow: 0 1px 3px rgba(0,0,0,.4), 0 1px 2px rgba(0,0,0,.3);
+        }
+        .dark-mode .topbar {
+            background: #111827;
+            border-color: #2d3748;
+        }
+        .dark-mode .form-control,
+        .dark-mode .form-select {
+            background: #1a2236;
+            color: var(--text);
+            border-color: var(--border);
+        }
+        .dark-mode .btn--ghost { border-color: #2d3748; color: var(--text); }
+        .dark-mode .btn--ghost:hover { background: #2d3748; }
+        .dark-mode .confirm-modal__dialog { background: #111827; }
+        .dark-mode .auth__card { background: #111827; }
+        .dark-mode .select { background: #1a2236; color: var(--text); border-color: #2d3748; }
+
+        /* ---- Theme toggle button ---- */
+        .theme-toggle {
+            margin-left: auto;
+            width: 36px; height: 36px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            background: var(--surface-alt);
+            color: var(--text-muted);
+            display: inline-flex; align-items: center; justify-content: center;
+            cursor: pointer;
+            transition: background .2s, border-color .2s, color .2s, transform .15s;
+            flex-shrink: 0;
+        }
+        .theme-toggle:hover {
+            background: var(--surface);
+            border-color: var(--primary);
+            color: var(--primary);
+            transform: rotate(15deg);
+        }
+        .theme-toggle svg { width: 18px; height: 18px; }
+
+        /* ---- Sidebar close button ---- */
+        .sidebar__close {
+            position: absolute;
+            top: 16px; right: 14px;
+            width: 28px; height: 28px;
+            border-radius: 8px;
+            border: 1px solid rgba(255,255,255,.12);
+            background: rgba(255,255,255,.06);
+            color: #94a3b8;
+            display: none;
+            align-items: center; justify-content: center;
+            cursor: pointer; font-size: 1.1rem; line-height: 1;
+            transition: background .15s, color .15s;
+        }
+        .sidebar__close:hover { background: rgba(255,255,255,.14); color: #fff; }
+        @media (max-width: 860px) {
+            .sidebar__close { display: inline-flex; }
+        }
+
+        /* ---- Profile slide-out panel ---- */
+        .profile-panel-overlay {
+            position: fixed; inset: 0; z-index: 99;
+            background: rgba(15,23,42,.4);
+            backdrop-filter: blur(2px);
+        }
+        .profile-panel {
+            position: fixed; inset: 0 0 0 auto;
+            width: min(340px, 100vw);
+            background: var(--surface);
+            border-left: 1px solid var(--border);
+            box-shadow: -8px 0 40px rgba(15,23,42,.18);
+            z-index: 100;
+            display: flex; flex-direction: column;
+            padding: 0;
+            overflow-y: auto;
+            transition: transform .25s cubic-bezier(.4,0,.2,1);
+        }
+        .profile-panel__header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 20px 20px 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .profile-panel__title { margin: 0; font-size: 1rem; font-weight: 700; }
+        .profile-panel__close {
+            width: 30px; height: 30px; border-radius: 8px;
+            border: 1px solid var(--border); background: var(--surface-alt);
+            color: var(--text-muted); display: inline-flex; align-items: center;
+            justify-content: center; cursor: pointer; font-size: 1.1rem;
+            transition: background .15s, color .15s;
+        }
+        .profile-panel__close:hover { background: var(--red-bg); color: var(--red); border-color: #fecaca; }
+        .profile-panel__body { padding: 24px 20px; display: flex; flex-direction: column; gap: 20px; }
+        .profile-avatar-lg {
+            width: 64px; height: 64px; border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary), #7c3aed);
+            color: #fff; display: grid; place-items: center;
+            font-size: 1.6rem; font-weight: 800;
+            margin: 0 auto 4px;
+            box-shadow: 0 4px 16px rgba(37,99,235,.35);
+        }
+        .profile-name {
+            text-align: center; font-size: 1.1rem; font-weight: 700;
+            margin: 0; color: var(--text);
+        }
+        .profile-role {
+            text-align: center; font-size: .82rem;
+            color: var(--text-muted); margin: 2px 0 0;
+        }
+        .profile-divider { border: none; border-top: 1px solid var(--border); margin: 4px 0; }
+        .profile-info-row {
+            display: flex; align-items: center; gap: 10px;
+            padding: 8px 0; font-size: .9rem;
+        }
+        .profile-info-row__icon {
+            width: 30px; height: 30px; border-radius: 8px;
+            background: var(--surface-alt); border: 1px solid var(--border);
+            display: grid; place-items: center; flex-shrink: 0; font-size: .9rem;
+        }
+        .profile-info-row__label { font-size: .75rem; color: var(--text-muted); margin-bottom: 1px; }
+        .profile-info-row__value { font-weight: 600; color: var(--text); }
+        .profile-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+
+        /* ---- User chip clickable ---- */
+        .user-chip { cursor: pointer; border-radius: 10px; padding: 6px 8px; margin: -6px -8px 12px; transition: background .15s; overflow: hidden; }
+        .user-chip:hover { background: rgba(255,255,255,.08); }
+
+        /* ---- Sidebar logout always white ---- */
+        .sidebar__footer .btn--ghost { color: #fff; border-color: rgba(255,255,255,.2); }
+        .sidebar__footer .btn--ghost:hover { background: rgba(255,255,255,.1); color: #fff; }
+    </style>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://unpkg.com/htmx.org@2.0.2"></script>
+</head>
+<body>
+{% if user.is_authenticated %}
+<div class="layout">
+    <aside class="sidebar" :class="{ 'is-open': sidebarOpen }">
+        <button class="sidebar__close" @click="sidebarOpen = false" aria-label="Close sidebar">&times;</button>
+        <div class="sidebar__brand">
+            <span class="brand-mark">Ajeya</span> <span class="brand-ai">Estimator Pro</span>
+        </div>
+        <nav class="sidebar__nav">
+            <a href="{% url 'dashboard:home' %}" class="nav-link">Dashboard</a>
+            <a href="{% url 'boq:list' %}" class="nav-link">BOQs</a>
+            <a href="{% url 'processing:list' %}" class="nav-link">Processing</a>
+            <a href="{% url 'database:list' %}" class="nav-link">Database</a>
+            <a href="{% url 'notifications:list' %}" class="nav-link">
+                Notifications{% if notifications_unread %} <span class="nav-badge">{{ notifications_unread }}</span>{% endif %}
+            </a>
+
+            {% if user.is_super_admin %}
+            <!-- <a href="{% url 'pending_products:list' %}" class="nav-link">Pending Products</a> -->
+            <a href="{% url 'audit:list' %}" class="nav-link">Audit Log</a>
+            <a href="{% url 'users:list' %}" class="nav-link">User Management</a>
+            {% if user.is_superadmin %}<a href="{% url 'admin:index' %}" class="nav-link">Admin</a>{% endif %}
+            {% endif %}
+        </nav>
+        <div class="sidebar__footer">
+            <div class="user-chip" @click="profileOpen = true" title="View profile" role="button" tabindex="0" @keydown.enter="profileOpen = true">
+                <span class="user-chip__avatar">{{ user.full_name|slice:":1"|upper }}</span>
+                <div class="user-chip__meta">
+                    <span class="user-chip__name">{{ user.full_name }}</span>
+                    <span class="user-chip__role">{{ user.get_role_display }}</span>
+                </div>
+            </div>
+            <form method="post" action="{% url 'accounts:logout' %}" data-confirm="Are you sure you want to log out?" onsubmit="return window.BOQConfirm ? window.BOQConfirm.submit(event, this) : true;">
+                {% csrf_token %}
+                <button type="submit" class="btn btn--ghost btn--block">Log out</button>
+            </form>
+        </div>
+    </aside>
+
+    <div class="main">
+        <header class="topbar">
+            <button class="topbar__menu" @click="sidebarOpen = !sidebarOpen" aria-label="Toggle menu">&#9776;</button>
+            <h1 class="topbar__title">{% block heading %}{% endblock %}</h1>
+            <button class="theme-toggle" @click="toggleTheme" :title="darkMode ? 'Switch to light mode' : 'Switch to dark mode'" aria-label="Toggle theme">
+                <svg x-show="!darkMode" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                </svg>
+                <svg x-show="darkMode" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="5"/>
+                    <line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
+                    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+                    <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
+                    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+                </svg>
+            </button>
+        </header>
+
+        {% if messages %}
+        <div class="messages">
+            {% for message in messages %}
+            <div class="alert alert--{{ message.tags }}" x-data="{ show: true }" x-show="show">
+                <span>{{ message }}</span>
+                <button class="alert__close" @click="show = false" aria-label="Dismiss">&times;</button>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <main class="content">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+    <!-- Profile slide-out panel -->
+    <template x-if="profileOpen">
+        <div>
+            <div class="profile-panel-overlay" @click="profileOpen = false"></div>
+            <div class="profile-panel">
+                <div class="profile-panel__header">
+                    <h2 class="profile-panel__title">My Profile</h2>
+                    <button class="profile-panel__close" @click="profileOpen = false" aria-label="Close profile">&times;</button>
+                </div>
+                <div class="profile-panel__body">
+                    <div style="text-align:center">
+                        <div class="profile-avatar-lg">{{ user.full_name|slice:":1"|upper }}</div>
+                        <p class="profile-name">{{ user.full_name }}</p>
+                        <p class="profile-role">{{ user.get_role_display }}</p>
+                    </div>
+                    <hr class="profile-divider">
+                    <div>
+                        <div class="profile-info-row">
+                            <span class="profile-info-row__icon">&#9993;</span>
+                            <div>
+                                <div class="profile-info-row__label">Email</div>
+                                <div class="profile-info-row__value">{{ user.email }}</div>
+                            </div>
+                        </div>
+
+                        <div class="profile-info-row">
+                            <span class="profile-info-row__icon">&#128274;</span>
+                            <div>
+                                <div class="profile-info-row__label">Role</div>
+                                <div class="profile-info-row__value">{{ user.get_role_display }}</div>
+                            </div>
+                        </div>
+                    </div>
+                    <hr class="profile-divider">
+                    <div class="profile-actions">
+                        <a href="{% url 'accounts:profile' %}" class="btn btn--primary btn--block">Edit Profile</a>
+                        {% if user.is_super_admin %}
+                        <a href="{% url 'users:list' %}" class="btn btn--ghost btn--block">Manage Users</a>
+                        {% endif %}
+                        <form method="post" action="{% url 'accounts:logout' %}" data-confirm="Are you sure you want to log out?" onsubmit="return window.BOQConfirm ? window.BOQConfirm.submit(event, this) : true;">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn--danger btn--block">Log out</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </template>
+</div>
+{% else %}
+    {% if messages %}
+    <div class="messages messages--floating">
+        {% for message in messages %}
+        <div class="alert alert--{{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% block auth_content %}{% endblock %}
+{% endif %}
+<div class="confirm-modal" id="confirm-modal" hidden>
+    <div class="confirm-modal__backdrop" data-confirm-cancel></div>
+    <div class="confirm-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title">
+        <h2 class="confirm-modal__title" id="confirm-modal-title">Confirm action</h2>
+        <p class="confirm-modal__message" id="confirm-modal-message"></p>
+        <div class="confirm-modal__actions">
+            <button type="button" class="btn btn--ghost" data-confirm-cancel>Cancel</button>
+            <button type="button" class="btn btn--primary" data-confirm-submit>Confirm</button>
+        </div>
+    </div>
+</div>
+<script>
+    (() => {
+        const modal = document.getElementById("confirm-modal");
+        const message = document.getElementById("confirm-modal-message");
+        const confirmButton = modal.querySelector("[data-confirm-submit]");
+        const cancelButtons = modal.querySelectorAll("[data-confirm-cancel]");
+        let pendingForm = null;
+
+        const closeModal = () => {
+            pendingForm = null;
+            modal.hidden = true;
+        };
+
+        window.BOQConfirm = {
+            submit(event, form) {
+                if (!form || form.dataset.confirmed === "true") return true;
+                event.preventDefault();
+                pendingForm = form;
+                message.textContent = form.dataset.confirm || "Are you sure?";
+                modal.hidden = false;
+                confirmButton.focus();
+                return false;
+            },
+        };
+
+        document.addEventListener("submit", (event) => {
+            const form = event.target.closest("form[data-confirm]");
+            if (!form || form.dataset.confirmed === "true" || form.dataset.confirmBound === "inline") return;
+            event.preventDefault();
+            pendingForm = form;
+            message.textContent = form.dataset.confirm;
+            modal.hidden = false;
+            confirmButton.focus();
+        });
+
+        confirmButton.addEventListener("click", () => {
+            if (!pendingForm) return;
+            pendingForm.dataset.confirmed = "true";
+            pendingForm.submit();
+        });
+
+        cancelButtons.forEach((button) => button.addEventListener("click", closeModal));
+        document.addEventListener("keydown", (event) => {
+            if (event.key === "Escape" && !modal.hidden) closeModal();
+        });
+    })();
+</script>
+<script>
+    function appState() {
+        return {
+            sidebarOpen: false,
+            profileOpen: false,
+            darkMode: localStorage.getItem('boq-theme') === 'dark',
+            toggleTheme() {
+                this.darkMode = !this.darkMode;
+                localStorage.setItem('boq-theme', this.darkMode ? 'dark' : 'light');
+            },
+            init() {
+                const saved = localStorage.getItem('boq-theme');
+                if (saved) this.darkMode = saved === 'dark';
+                document.addEventListener('keydown', (e) => {
+                    if (e.key === 'Escape') { this.profileOpen = false; this.sidebarOpen = false; }
+                });
+            }
+        };
+    }
+</script>
+</body>
+</html>

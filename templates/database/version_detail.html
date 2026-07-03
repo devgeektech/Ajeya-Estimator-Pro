@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Version {{ version.version_number }} Details &middot; BOQ_AI{% endblock %}
+{% block heading %}Version {{ version.name|default:version.source_filename }} Details{% endblock %}
+
+{% block content %}
+<div class="toolbar">
+    <a href="{% url 'database:list' %}" class="btn btn--ghost">&larr; Back to Versions</a>
+    {% if version.file %}
+    <a href="{% url 'database:download' version.pk %}" class="btn btn--primary">Download File</a>
+    {% endif %}
+</div>
+
+<div class="panel panel--narrow">
+    <h2 class="panel__title">Version Summary</h2>
+    <table class="table">
+        <tbody>
+            <tr>
+                <th style="text-align: left;">Name</th>
+                <td style="text-align: right; font-weight: 500;">{{ version.name|default:"-" }}</td>
+            </tr>
+            <tr>
+                <th style="text-align: left;">Version Number</th>
+                <td style="text-align: right;">v{{ version.version_number }}</td>
+            </tr>
+            <tr>
+                <th style="text-align: left;">Source File</th>
+                <td style="text-align: right;">{{ version.source_filename }}</td>
+            </tr>
+            <tr>
+                <th style="text-align: left;">Status</th>
+                <td style="text-align: right;">
+                    {% if version.is_active %}
+                    <span class="badge badge--green">Active</span>
+                    {% else %}
+                    <span class="badge">Archived</span>
+                    {% endif %}
+                </td>
+            </tr>
+            <tr>
+                <th style="text-align: left;">Uploaded By</th>
+                <td style="text-align: right;">{{ version.uploaded_by.full_name|default:"-" }}</td>
+            </tr>
+            <tr>
+                <th style="text-align: left;">Uploaded At</th>
+                <td style="text-align: right;">{{ version.uploaded_at|date:"Y-m-d H:i" }}</td>
+            </tr>
+        </tbody>
+    </table>
+    
+    <h3 style="margin-top: 24px;" class="panel__title">Data Statistics</h3>
+    <table class="table">
+        <tbody>
+            <tr>
+                <th style="text-align: left;">Rate Master Items</th>
+                <td style="text-align: right;">{{ rates_count }}</td>
+            </tr>
+            <tr>
+                <th style="text-align: left;">Labour Master Items</th>
+                <td style="text-align: right;">{{ labour_count }}</td>
+            </tr>
+            <tr>
+                <th style="text-align: left;">TOR Main Items</th>
+                <td style="text-align: right;">{{ tor_main_count }}</td>
+            </tr>
+            <tr>
+                <th style="text-align: left;">TOR Labour Items</th>
+                <td style="text-align: right;">{{ tor_labour_count }}</td>
+            </tr>
+            <tr>
+                <th style="text-align: left;">TOR Accessories Items</th>
+                <td style="text-align: right;">{{ tor_accessories_count }}</td>
+            </tr>
+            <tr>
+                <th style="text-align: left;">State Control List Items</th>
+                <td style="text-align: right;">{{ state_control_count }}</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+{% endblock %}

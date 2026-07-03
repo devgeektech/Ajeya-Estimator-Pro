@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}{{ boq.boq_name }} &middot; BOQ_AI{% endblock %}
+{% block heading %}{{ boq.boq_name }}{% endblock %}
+
+{% block content %}
+<div class="toolbar">
+    <a href="{% url 'boq:list' %}" class="btn btn--ghost btn--small">&larr; Back to BOQs</a>
+    <div style="display:flex; align-items:center; gap:12px;">
+        <span class="badge">{{ boq.get_status_display }}</span>
+        {% if latest_run and latest_run.status == 'COMPLETED' %}
+        <a href="{% url 'review:detail' boq.pk %}" class="btn btn--small">Review results</a>
+        {% endif %}
+        {% if latest_run.status == 'PROCESSING' or latest_run.status == 'QUEUED' %}
+        <button class="btn btn--small" disabled>Processing&hellip;</button>
+        {% else %}
+        <form method="post" action="{% url 'processing:start' boq.pk %}" class="inline-form">
+            {% csrf_token %}
+            <button type="submit" class="btn btn--primary btn--small">
+                {% if latest_run and latest_run.status == 'COMPLETED' %}Reprocess{% else %}Process BOQ{% endif %}
+            </button>
+        </form>
+        {% endif %}
+    </div>
+</div>
+
+{% if latest_run %}
+<div class="panel" style="margin-bottom:24px;">
+    <h3 class="panel__title">Processing status</h3>
+    {% include "processing/_status.html" with run=latest_run job=latest_run.processing_job %}
+</div>
+{% endif %}
+
+<section class="metrics" style="margin-bottom:24px;">
+    <div class="metric-card">
+        <span class="metric-card__value">{{ items|length }}</span>
+        <span class="metric-card__label">BOQ items</span>
+    </div>
+    <div class="metric-card">
+        <span class="metric-card__value">{{ make_entries|length }}</span>
+        <span class="metric-card__label">Approved makes</span>
+    </div>
+    <div class="metric-card">
+        <span class="metric-card__value">{% if latest_run %}{{ latest_run.run_number }}{% else %}&mdash;{% endif %}</span>
+        <span class="metric-card__label">Latest run</span>
+    </div>
+    <div class="metric-card">
+        <span class="metric-card__value" style="font-size:1rem;">{% if latest_run %}{{ latest_run.get_status_display }}{% else %}&mdash;{% endif %}</span>
+        <span class="metric-card__label">Run status</span>
+    </div>
+</section>
+
+{% if make_entries %}
+<div class="panel" style="margin-bottom:24px;">
+    <h3 class="panel__title">Approved makes</h3>
+    <p class="panel__text">
+        {% for m in make_entries %}<span class="badge" style="margin:2px;">{{ m.make }}</span>{% endfor %}
+    </p>
+</div>
+{% endif %}
+
+<div class="panel">
+    <h3 class="panel__title">BOQ items</h3>
+    <table class="table">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Description</th>
+                <th>Quantity</th>
+                <th>Unit</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in items %}
+            <tr>
+                <td>{{ item.row_number }}</td>
+                <td>{{ item.description }}</td>
+                <td>{{ item.quantity|floatformat:"-2" }}</td>
+                <td>{{ item.unit }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="4" class="table__empty">
+                No rows were captured from the workbook. Ensure it has a
+                "Description" column.
+            </td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

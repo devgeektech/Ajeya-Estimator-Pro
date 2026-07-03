@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Notifications &middot; BOQ_AI{% endblock %}
+{% block heading %}Notifications{% endblock %}
+
+{% block content %}
+<div class="toolbar">
+    <span class="badge">{{ notifications_unread }} unread</span>
+    {% if notifications_unread %}
+    <form method="post" action="{% url 'notifications:read' %}" class="inline-form">
+        {% csrf_token %}
+        <button type="submit" class="btn btn--small btn--primary">Mark all read</button>
+    </form>
+    {% endif %}
+</div>
+
+<div class="panel">
+    <table class="table">
+        <thead>
+            <tr><th>Title</th><th>Message</th><th>When</th></tr>
+        </thead>
+        <tbody>
+            {% for n in notifications %}
+            <tr>
+                <td>
+                    {{ n.title }}
+                    {% if not n.is_read %}<span class="badge badge--green" style="margin-left: 8px;">New</span>{% endif %}
+                </td>
+                <td>{{ n.message }}</td>
+                <td>{{ n.created_at|date:"M d, H:i" }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="4" class="table__empty">No notifications yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

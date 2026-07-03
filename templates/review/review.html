@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Review &middot; {{ boq.boq_name }}{% endblock %}
+{% block heading %}Review: {{ boq.boq_name }}{% endblock %}
+
+{% block content %}
+<div class="toolbar">
+    <a href="{% url 'boq:detail' boq.pk %}" class="btn btn--ghost btn--small">&larr; Back to BOQ</a>
+    <div style="display:flex; align-items:center; gap:12px;">
+        <span class="badge">{{ boq.get_status_display }}</span>
+        {% if boq.status == 'COMPLETED' %}
+        <form method="post" action="{% url 'review:start' boq.pk %}" class="inline-form">
+            {% csrf_token %}
+            <button type="submit" class="btn btn--small">Start review</button>
+        </form>
+        {% endif %}
+        {% if boq.status == 'COMPLETED' or boq.status == 'UNDER_REVIEW' %}
+        <form method="post" action="{% url 'review:approve' boq.pk %}" class="inline-form">
+            {% csrf_token %}
+            <button type="submit" class="btn btn--primary btn--small">Approve</button>
+        </form>
+        {% endif %}
+        {% if boq.status == 'APPROVED' %}
+        <form method="post" action="{% url 'review:revise' boq.pk %}" class="inline-form">
+            {% csrf_token %}
+            <button type="submit" class="btn btn--ghost btn--small">Reopen for review</button>
+        </form>
+        <form method="post" action="{% url 'exports:generate' boq.pk %}" class="inline-form">
+            {% csrf_token %}
+            <button type="submit" class="btn btn--primary btn--small">Export</button>
+        </form>
+        {% endif %}
+        {% if latest_export %}
+        <a href="{{ latest_export.internal_sheet.url }}" class="btn btn--ghost btn--small">Internal sheet</a>
+        <a href="{{ latest_export.client_sheet.url }}" class="btn btn--ghost btn--small">Client sheet</a>
+        {% endif %}
+    </div>
+</div>
+
+<div class="panel">
+    <h3 class="panel__title">Results &mdash; run {% if run %}{{ run.run_number }}{% else %}&mdash;{% endif %}</h3>
+    <table class="table">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Description</th>
+                <th>Qty</th>
+                <th>Product</th>
+                <th>Vendor selection</th>
+                <th>Final rate</th>
+                <th>Confidence</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+                {% include "review/_row.html" with row=row %}
+            {% empty %}
+            <tr><td colspan="7" class="table__empty">
+                No results yet. Process the BOQ first.
+            </td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Upload BOQ &middot; BOQ_AI{% endblock %}
+{% block heading %}Upload BOQ{% endblock %}
+
+{% block content %}
+<div class="panel panel--narrow">
+    <p class="panel__text" style="margin-bottom:20px;">
+        Upload a BOQ workbook and, optionally, its make list. The original rows
+        are captured and a processing run is created. Your BOQ is private to
+        your account.
+    </p>
+    <form method="post" enctype="multipart/form-data" novalidate>
+        {% csrf_token %}
+        {% for field in form %}
+        <label class="field">
+            <span class="field__label">{{ field.label }}</span>
+            {{ field }}
+            {% for error in field.errors %}<span class="field__error">{{ error }}</span>{% endfor %}
+        </label>
+        {% endfor %}
+        <div class="form-actions">
+            <a href="{% url 'boq:list' %}" class="btn btn--ghost">Cancel</a>
+            <button type="submit" class="btn btn--primary">Upload BOQ</button>
+        </div>
+    </form>
+</div>
+{% endblock %}

@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Processing &middot; BOQ_AI{% endblock %}
+{% block heading %}Processing{% endblock %}
+
+{% block content %}
+<div class="panel">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>BOQ</th>
+                {% if user.is_super_admin %}<th>Owner</th>{% endif %}
+                <th>Run</th>
+                <th>Status</th>
+                <th>Progress</th>
+                <th>Updated</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for job in jobs %}
+            <tr>
+                <td><a href="{% url 'boq:detail' job.boq_run.boq.pk %}">{{ job.boq_run.boq.boq_name }}</a></td>
+                {% if user.is_super_admin %}<td>{{ job.boq_run.boq.user.full_name }}</td>{% endif %}
+                <td>{{ job.boq_run.run_number }}</td>
+                <td>
+                    <span class="badge {% if job.status == 'COMPLETED' %}badge--green{% elif job.status == 'FAILED' %}badge--red{% elif job.status == 'PROCESSING' %}badge--orange{% elif job.status == 'QUEUED' %}badge--warn{% endif %}">
+                        {{ job.get_status_display }}
+                    </span>
+                </td>
+                <td style="min-width:160px;">
+                    <div class="progress">
+                        <div class="progress__bar {% if job.status == 'FAILED' %}progress__bar--error{% endif %}"
+                             style="width: {{ job.progress }}%;"></div>
+                    </div>
+                </td>
+                <td>{{ job.updated_at|date:"Y-m-d H:i" }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="6" class="table__empty">No processing jobs yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% if is_paginated %}
+<div class="pagination">
+    {% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}" class="btn btn--small">Previous</a>{% endif %}
+    <span class="pagination__info">Page {{ page_obj.number }} of {{ paginator.num_pages }}</span>
+    {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}" class="btn btn--small">Next</a>{% endif %}
+</div>
+{% endif %}
+{% endblock %}

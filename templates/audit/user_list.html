@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Audit Log for {{ audit_user.full_name }} &middot; BOQ_AI{% endblock %}
+{% block heading %}Audit Log: {{ audit_user.full_name }}{% if audit_user == request.user %} <span style="color: var(--text-muted); font-size: 0.65em; font-weight: normal; margin-left: 8px;">(You)</span>{% endif %}{% endblock %}
+
+{% block content %}
+<div class="toolbar">
+    <a href="{% url 'audit:list' %}" class="btn btn--ghost">&larr; Back to users</a>
+</div>
+
+<div class="panel">
+    <table class="table">
+        <thead>
+            <tr><th>When</th><th>Action</th><th>Entity</th><th>ID/Name</th></tr>
+        </thead>
+        <tbody>
+            {% for log in logs %}
+            <tr>
+                <td>{{ log.timestamp|date:"M d, H:i:s" }}</td>
+                <td>{{ log.action }}</td>
+                <td>{{ log.entity|default:"&mdash;" }}</td>
+                <td>{{ log.entity_id|default:"&mdash;" }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="4" class="table__empty">No audit entries yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    
+    {% if is_paginated %}
+    <div class="pagination">
+        <span class="pagination__info">
+            Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
+        </span>
+        <div style="display: flex; gap: 8px;">
+            {% if page_obj.has_previous %}
+            <a href="?page=1" class="btn btn--small btn--ghost">&laquo; First</a>
+            <a href="?page={{ page_obj.previous_page_number }}" class="btn btn--small btn--ghost">Previous</a>
+            {% endif %}
+            
+            {% if page_obj.has_next %}
+            <a href="?page={{ page_obj.next_page_number }}" class="btn btn--small btn--ghost">Next</a>
+            <a href="?page={{ page_obj.paginator.num_pages }}" class="btn btn--small btn--ghost">Last &raquo;</a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

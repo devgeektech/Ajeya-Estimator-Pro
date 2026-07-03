@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+{% block title %}User Management &middot; BOQ_AI{% endblock %}
+{% block heading %}User Management{% endblock %}
+
+{% block content %}
+<style>
+    .users-page .status-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 102px;
+        padding: 4px 8px 4px 5px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: var(--surface);
+        color: var(--text-muted);
+        font: inherit;
+        font-size: .8rem;
+        font-weight: 700;
+        cursor: pointer;
+    }
+
+    .users-page .status-toggle__track {
+        width: 32px;
+        height: 18px;
+        display: inline-flex;
+        align-items: center;
+        padding: 2px;
+        border-radius: 999px;
+        background: #cbd5e1;
+    }
+
+    .users-page .status-toggle__knob {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: #fff;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, .24);
+        transition: transform .15s;
+    }
+
+    .users-page .status-toggle--active {
+        color: var(--green);
+        border-color: #bbf7d0;
+        background: var(--green-bg);
+    }
+
+    .users-page .status-toggle--active .status-toggle__track { background: var(--green); }
+    .users-page .status-toggle--active .status-toggle__knob { transform: translateX(14px); }
+
+    .users-page .status-toggle--inactive {
+        color: var(--red);
+        border-color: #fecaca;
+        background: var(--red-bg);
+    }
+
+    .users-page .status-toggle--inactive .status-toggle__track { background: var(--red); }
+    .users-page .status-toggle--disabled { cursor: default; opacity: .78; }
+
+    .users-page .icon-button {
+        width: 32px;
+        height: 32px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        background: transparent;
+        color: #1e3a5f;
+        text-decoration: none;
+        vertical-align: middle;
+        cursor: pointer;
+    }
+
+    .users-page .icon-button:hover {
+        background: var(--surface-alt);
+        border-color: var(--border);
+    }
+
+    .users-page .icon-button--edit:hover {
+        color: var(--primary);
+        border-color: #bfdbfe;
+    }
+
+    .users-page .icon-button--danger {
+        color: var(--red);
+    }
+
+    .users-page .icon-button--danger:hover {
+        color: var(--red);
+        background: var(--red-bg);
+        border-color: #fecaca;
+    }
+
+    .users-page .icon {
+        width: 16px;
+        height: 16px;
+        display: block;
+        fill: currentColor;
+    }
+</style>
+
+<div class="users-page">
+    <div class="toolbar" style="justify-content: flex-end;">
+        <a href="{% url 'users:create' %}" class="btn btn--primary">+ Create user</a>
+    </div>
+
+    <div class="panel">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Email</th>
+                    <th>Name</th>
+                    <th style="text-align:center">Role</th>
+                    <th style="text-align:center">Status</th>
+                    <th style="text-align:center">DB Access</th>
+                    <th class="table__actions" style="text-align:center">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for u in users %}
+                <tr>
+                    <td style="max-width: 250px; word-break: break-word;">{{ u.email }}</td>
+                    <td style="max-width: 250px; word-break: break-word;">{{ u.full_name }}</td>
+                    <td style="text-align:center"><span class="badge">{{ u.get_role_display }}</span></td>
+                    <td style="text-align:center">
+                        {% if u != request.user %}
+                        <form method="post" action="{% url 'users:toggle_active' u.pk %}" class="inline-form" data-confirm-bound="inline" data-confirm="{% if u.is_active %}Deactivate{% else %}Activate{% endif %} {{ u.email }}?" onsubmit="return window.BOQConfirm ? window.BOQConfirm.submit(event, this) : true;">
+                            {% csrf_token %}
+                            <button type="submit" class="status-toggle {% if u.is_active %}status-toggle--active{% else %}status-toggle--inactive{% endif %}" aria-label="{% if u.is_active %}Deactivate{% else %}Activate{% endif %} {{ u.email }}">
+                                <span class="status-toggle__track"><span class="status-toggle__knob"></span></span>
+                                <span class="status-toggle__label">{% if u.is_active %}Active{% else %}Inactive{% endif %}</span>
+                            </button>
+                        </form>
+                        {% else %}
+                        <span class="status-toggle status-toggle--active status-toggle--disabled" aria-label="Your account is active">
+                            <span class="status-toggle__track"><span class="status-toggle__knob"></span></span>
+                            <span class="status-toggle__label">Active</span>
+                        </span>
+                        {% endif %}
+                    </td>
+                    <td style="text-align:center">
+                        {% if u != request.user %}
+                        <form method="post" action="{% url 'users:toggle_db_access' u.pk %}" class="inline-form" data-confirm-bound="inline" data-confirm="{% if u.allow_db_access %}Revoke DB Access for{% else %}Grant DB Access to{% endif %} {{ u.email }}?" onsubmit="return window.BOQConfirm ? window.BOQConfirm.submit(event, this) : true;">
+                            {% csrf_token %}
+                            <button type="submit" class="status-toggle {% if u.allow_db_access %}status-toggle--active{% else %}status-toggle--inactive{% endif %}" aria-label="{% if u.allow_db_access %}Revoke DB Access{% else %}Grant DB Access{% endif %} {{ u.email }}">
+                                <span class="status-toggle__track"><span class="status-toggle__knob"></span></span>
+                                <span class="status-toggle__label">{% if u.allow_db_access %}Granted{% else %}Denied{% endif %}</span>
+                            </button>
+                        </form>
+                        {% else %}
+                        <span class="status-toggle {% if u.allow_db_access %}status-toggle--active{% else %}status-toggle--inactive{% endif %} status-toggle--disabled" aria-label="Your DB access status">
+                            <span class="status-toggle__track"><span class="status-toggle__knob"></span></span>
+                            <span class="status-toggle__label">{% if u.allow_db_access %}Granted{% else %}Denied{% endif %}</span>
+                        </span>
+                        {% endif %}
+                    </td>
+                    <td class="table__actions" style="text-align:center">
+                        <a href="{% url 'users:edit' u.pk %}" class="icon-button icon-button--edit" aria-label="Edit {{ u.email }}" title="Edit">
+                            <svg class="icon" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                                <path d="M14.44 1.56a1.91 1.91 0 0 0-2.7 0l-.95.95 2.7 2.7.95-.95a1.91 1.91 0 0 0 0-2.7zM9.84 3.46 2.2 11.1a1.35 1.35 0 0 0-.34.58L1.03 14.7a.55.55 0 0 0 .67.67l3.02-.83c.22-.06.42-.18.58-.34l7.64-7.64z" />
+                            </svg>
+                        </a>
+                        {% if u != request.user %}
+                        <form method="post" action="{% url 'users:delete' u.pk %}" class="inline-form" data-confirm-bound="inline" data-confirm="Delete {{ u.email }}? This cannot be undone." onsubmit="return window.BOQConfirm ? window.BOQConfirm.submit(event, this) : true;">
+                            {% csrf_token %}
+                            <button type="submit" class="icon-button icon-button--danger" aria-label="Delete {{ u.email }}" title="Delete">
+                                <svg class="icon" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                                    <path d="M5.5.75A1.75 1.75 0 0 0 3.75 2.5V3H1.5a.75.75 0 0 0 0 1.5h13a.75.75 0 0 0 0-1.5h-2.25v-.5A1.75 1.75 0 0 0 10.5.75zM5.25 3v-.5a.25.25 0 0 1 .25-.25h5a.25.25 0 0 1 .25.25V3zm-1.8 2.25.68 8.87A1.75 1.75 0 0 0 5.88 15.75h4.24a1.75 1.75 0 0 0 1.75-1.63l.68-8.87z" />
+                                </svg>
+                            </button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="6" class="table__empty">No users yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% if is_paginated %}
+    <div class="pagination">
+        {% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}" class="btn btn--small">Previous</a>{% endif %}
+        <span class="pagination__info">Page {{ page_obj.number }} of {{ paginator.num_pages }}</span>
+        {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}" class="btn btn--small">Next</a>{% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

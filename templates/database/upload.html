@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Upload Database &middot; BOQ_AI{% endblock %}
+{% block heading %}Upload Database{% endblock %}
+
+{% block content %}
+<div class="panel panel--narrow">
+    <p class="panel__text" style="margin-bottom:20px;">
+        Upload the master database workbook. Required sheets:
+        <strong>Rate_Master, Labour_Master, TOR_Main, TOR_Labour,
+        TOR_Accessories, State_Control_List</strong>. The workbook is validated,
+        the existing database is backed up, the new data is imported and the
+        new version is activated.
+    </p>
+    <form method="post" enctype="multipart/form-data" novalidate x-data="{ isUploading: false }" @submit="if(isUploading) { $event.preventDefault(); return false; } isUploading = true">
+        {% csrf_token %}
+        {% for field in form %}
+        <label class="field">
+            <span class="field__label">{{ field.label }}</span>
+            {{ field }}
+            {% for error in field.errors %}<span class="field__error">{{ error }}</span>{% endfor %}
+        </label>
+        {% endfor %}
+        <div class="form-actions">
+            <a href="{% url 'database:list' %}" class="btn btn--ghost" :class="{ 'btn--disabled': isUploading }">Cancel</a>
+            <button type="submit" class="btn btn--primary" :disabled="isUploading">
+                <span x-show="!isUploading">Upload &amp; import</span>
+                <span x-show="isUploading" style="display: none; align-items: center; justify-content: center; gap: 8px;">
+                    <svg class="spinner" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="animation: spin 1s linear infinite;"><line x1="12" y1="2" x2="12" y2="6"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="18" y1="12" x2="22" y2="12"></line><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line></svg>
+                    Processing...
+                </span>
+            </button>
+        </div>
+    </form>
+</div>
+<style>
+@keyframes spin { 100% { transform: rotate(360deg); } }
+.btn--disabled { pointer-events: none; opacity: 0.6; }
+</style>
+{% endblock %}

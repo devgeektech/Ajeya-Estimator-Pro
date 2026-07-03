@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Database Versions &middot; BOQ_AI{% endblock %}
+{% block heading %}Database Management{% endblock %}
+
+{% block content %}
+{% if user.is_super_admin or user.allow_db_access %}
+<div class="toolbar" style="justify-content: flex-end;">
+    <a href="{% url 'database:upload' %}" class="btn btn--primary">+ Upload database</a>
+</div>
+{% endif %}
+
+<div class="panel">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Uploaded by</th>
+                <th>Uploaded at</th>
+                <th class="table__actions" style="text-align: left;">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for v in versions %}
+            <tr>
+                <td>
+                    <div style="font-weight: 500;">{{ v.name|default:v.source_filename }}</div>
+                    <div style="font-size: 0.8em; color: var(--text-muted);">v{{ v.version_number }}</div>
+                </td>
+                <td>
+                    {% if v.is_active %}
+                    <span class="badge badge--green">Active</span>
+                    {% else %}
+                    <span class="badge">Archived</span>
+                    {% endif %}
+                </td>
+                <td>{{ v.uploaded_by.full_name|default:"&mdash;" }}</td>
+                <td>{{ v.uploaded_at|date:"Y-m-d H:i" }}</td>
+                <td class="table__actions" style="text-align: left;">
+                    <div style="display: flex; gap: 8px; align-items: center; justify-content: flex-start;">
+                        <a href="{% url 'database:version_detail' v.pk %}" class="btn btn--small btn--ghost" aria-label="View" title="View">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                        </a>
+                        <a href="{% url 'database:download' v.pk %}" class="btn btn--small btn--ghost" aria-label="Download" title="Download">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        </a>
+                        
+                        {% if v.can_rollback and user.is_super_admin or v.can_rollback and user.allow_db_access %}
+                        <form method="post" action="{% url 'database:rollback' v.pk %}" class="inline-form" style="margin: 0;" data-confirm="Are you sure you want to rollback to this version?" onsubmit="return window.BOQConfirm ? window.BOQConfirm.submit(event, this) : true;">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn--small btn--classy-red" title="Roll back to this version" style="background-color: #d9534f; color: white; border-color: #d43f3a;">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
+                            </button>
+                        </form>
+                        {% endif %}
+                    </div>
+                </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="6" class="table__empty">No database uploaded yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
