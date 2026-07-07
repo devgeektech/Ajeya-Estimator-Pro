@@ -35,8 +35,8 @@ class _PendingActionView(SuperAdminRequiredMixin, View):
     def get_pending(self, pk):
         return get_object_or_404(PendingProduct, pk=pk)
 
-    def handle(self, request, pending):  # pragma: no cover - overridden
-        raise NotImplementedError
+    def handle(self, request, pending):  # pragma: no cover - defensive base guard
+        raise BOQAIError("Pending product action is not configured.")
 
     def post(self, request, pk):
         pending = self.get_pending(pk)

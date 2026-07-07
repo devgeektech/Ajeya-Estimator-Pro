@@ -214,6 +214,9 @@ embedding_match.py
 confidence.py
 ```
 
+Matching also performs lowest `Final_Amount_(Excl GST)` rate-row selection
+inside the matching services. A separate vendor-selection service is not active.
+
 ---
 
 # costing
@@ -330,6 +333,7 @@ workflows/
 ai/
 
 openai_client.py
+context.py
 prompts/
 extractors/
 validators/
@@ -362,6 +366,10 @@ product_extractor.py
 activity_extractor.py
 ```
 
+`ai/context.py` builds compact active database vocabulary for extraction
+prompts so AI product and activity JSON stays close to Rate_Master,
+Labour_Master, and TOR_Labour terminology.
+
 ---
 
 # Validators
@@ -382,6 +390,8 @@ confidence_validator.py
 embeddings/
 
 generator.py
+
+generate_database_embeddings.py
 
 search.py
 ```
@@ -421,6 +431,10 @@ Matching
 
 ↓
 
+Lowest Final Amount Rate Selection
+
+↓
+
 Costing
 
 ↓
@@ -454,8 +468,6 @@ formatter.py
 tasks/
 
 process_boq.py
-
-generate_embeddings.py
 
 export_files.py
 
@@ -561,6 +573,10 @@ logs/
 application.log    # All INFO+ events (app + root logger)
 
 errors.log         # ERROR+ events only
+
+ai_extractions.log # One structured JSON log line per BOQ row AI extraction
+
+ai_instructions.log # One structured JSON log line per rendered AI instruction
 ```
 
 Note: log files are runtime-generated and are excluded from git via `.gitignore`.
@@ -720,12 +736,15 @@ Import
 
 ↓
 
-Embeddings
+Activate
 
 ↓
 
-Activate
+Embeddings
 ```
+
+Database imports run synchronously in the upload request through
+`workflows/database_import.py` and `DatabaseImportService`.
 
 ---
 
@@ -739,18 +758,6 @@ BOQ processing:
 
 ---
 
-# Future Expansion
-
-The structure supports:
-
-* Additional AI providers.
-* APIs.
-* Mobile apps.
-* Multiple companies.
-* ERP integrations.
-
----
-
 # Architecture Dependencies
 
 This document depends upon:
@@ -760,4 +767,4 @@ This document depends upon:
 * ARCHITECTURE.md
 * DATABASE_ARCHITECTURE.md
 
-All future code generation shall follow this structure.
+All code generation shall follow this structure.

@@ -4,10 +4,8 @@ Schema sourced from docs/DATABASE_ARCHITECTURE.md (System, Master and
 Product tables). The master workbook is imported per database version so
 historical BOQs remain reproducible.
 
-Note: ProductEmbedding.embedding_vector is stored as JSON for V1 to remain
-database-agnostic during scaffolding. It will migrate to a pgvector
-VectorField in the AI/matching sprints (docs/DATABASE_ARCHITECTURE.md -
-Database Technologies: pgvector).
+Note: ProductEmbedding.embedding_vector is stored as JSON for V1 so vectors can
+be stored without extra database extensions.
 """
 from django.conf import settings
 from django.db import models
@@ -48,6 +46,7 @@ class RateMaster(models.Model):
     make = models.CharField(max_length=150, blank=True)
     vendor = models.CharField(max_length=150, blank=True)
     purchase_rate = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    final_amount_excl_gst = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     unit = models.CharField(max_length=50, blank=True)
     category = models.CharField(max_length=150, blank=True)
     subcategory = models.CharField(max_length=150, blank=True)

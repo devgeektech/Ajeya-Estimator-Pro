@@ -14,7 +14,7 @@ BOQ_AI
 
 This document defines the database architecture, table relationships, import strategy, versioning strategy, and data ownership model for BOQ_AI.
 
-The schema is based on the current client database workbook and may evolve in future versions.
+The schema is based on the current client database workbook.
 
 ---
 
@@ -126,15 +126,32 @@ Fields:
 
 * id
 * database_version
-* product_code
-* description
+* product_code (from workbook key fields when present; synthesized from
+  category/subcategory/class/size when the client workbook leaves the key blank)
+* description (from workbook description/match key, or synthesized from product
+  attributes)
 * make
 * vendor
 * purchase_rate
+* final_amount_excl_gst (from `Final_Amount_(Excl GST)`)
 * unit
 * category
 * subcategory
 * remarks
+* spec_json (all normalized raw workbook columns for evolving client fields such
+  as discount, handling, accessories, profit, state, and source fields)
+
+Import:
+
+* `Tech_Key`, `product_code`, `Match_Key`, and `Source_Key` are accepted as
+  explicit product identifiers.
+* If no identifier is supplied, the importer creates a stable product key from
+  available attributes such as category, subcategory, class, and size.
+* Net/material rates populate `purchase_rate`. `Final_Amount_(Excl GST)` is
+  stored separately as `final_amount_excl_gst` and is used to choose the lowest
+  final-amount Rate_Master row during product matching.
+* Blank or structurally incomplete master rows are skipped instead of creating
+  empty product records.
 
 ---
 
@@ -165,8 +182,9 @@ Fields:
 
 * id
 * database_version
-* tor_code
+* tor_code (from tor_code or category)
 * description
+* spec_json
 
 ---
 
@@ -214,6 +232,11 @@ Fields:
 * state_name
 * labour_multiplier
 * transportation_multiplier
+
+Import:
+
+* `State` and `state_name` headers are both accepted.
+* Missing transportation multipliers default to 1.0.
 
 ---
 
@@ -321,6 +344,7 @@ Fields:
 * status
 * started_at
 * completed_at
+* original_headers (JSON, canonical BOQ display headers)
 
 ---
 
@@ -328,7 +352,7 @@ Fields:
 
 Purpose:
 
-Original BOQ rows.
+Original BOQ rows after serial-number grouping.
 
 Fields:
 
@@ -338,6 +362,48 @@ Fields:
 * description
 * quantity
 * unit
+* original_data (JSON canonical source values: s_no, description, unit, quantity)
+* row_json (JSON grouped source row payload)
+* ai_extraction (JSON)
+
+Row grouping:
+
+* If the workbook has no serial numbers, each captured row becomes one BOQItem.
+* If serial numbers are present, a serial-numbered row starts a BOQItem and
+  following blank-serial child/detail rows are stored inside that item's
+  `row_json`.
+* `row_json.schema` is `boq_row_group_v1`.
+* `row_json.rows` preserves the Excel row number, serial number, description,
+  unit, quantity, and canonical source values for each parent/child row.
+
+AI extraction:
+
+* `ai_extraction` stores top-level product fields and a `products` candidate
+  list extracted from `row_json`.
+* Product candidates may include category, subcategory, make, and
+  database_hint values shaped toward active Rate_Master terminology.
+* Activity extraction is shaped toward Labour_Master and TOR_Labour terminology.
+
+---
+
+## MakeListEntry
+
+Purpose:
+
+Approved makes scoped to one BOQ processing run.
+
+Fields:
+
+* id
+* boq_run
+* make
+* category
+
+Ownership:
+
+* Each make-list row belongs to exactly one BOQRun.
+* Through BOQRun.boq, each make-list row belongs to exactly one BOQ.
+* Make-list rows are never global and are never shared across BOQs.
 
 ---
 
@@ -481,16 +547,19 @@ Import Data
 
 ↓
 
-Generate Embeddings
+Activate
 
 ↓
 
-Activate
+Generate Embeddings
 
 ↓
 
 Archive Previous
 ```
+
+Database imports run synchronously; no Celery task is queued for database import
+or database embedding generation.
 
 ---
 
@@ -510,6 +579,10 @@ BOQ Items
 ↓
 
 Matching
+
+↓
+
+Lowest Final Amount Rate Selection
 
 ↓
 
@@ -603,23 +676,11 @@ Keep:
 
 ---
 
-# FUTURE DATABASE CHANGES
-
-Future versions may include:
-
-* Vendor master.
-* Product master.
-* Activity master.
-* Rule engine.
-* Multi-company support.
-
----
-
 # FINAL NOTES
 
 This schema represents Version 1 and is derived from the March client workbook.
 
-Future database updates shall preserve:
+Database updates shall preserve:
 
 * BOQ history.
 * Processing history.

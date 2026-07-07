@@ -4,8 +4,10 @@ import tempfile
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from openpyxl import Workbook
 from openpyxl import load_workbook
 
 from apps.boq.models import BOQ, BOQItem, BOQRun
@@ -18,6 +20,24 @@ from common.choices import BOQStatus, RunStatus
 from common.exceptions import ValidationError
 
 _MEDIA = tempfile.mkdtemp()
+
+
+def _workbook_upload(name="source_boq.xlsx", rows=None):
+    wb = Workbook()
+    ws = wb.active
+    rows = rows or [
+        ["Particulars", "UOM", "Qty", "Remarks"],
+        ["150 NB MS Pipe", "m", 3, "Existing"],
+    ]
+    for row in rows:
+        ws.append(row)
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return SimpleUploadedFile(
+        name,
+        buffer.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 @override_settings(MEDIA_ROOT=_MEDIA)
@@ -55,10 +75,11 @@ class ExportServiceTests(TestCase):
     def test_internal_workbook_has_both_sheets(self):
         export = ExportService().export_run(self.run, self.user)
         wb = load_workbook(io.BytesIO(export.internal_sheet.read()))
-        self.assertEqual(wb.sheetnames, ["Internal Review", "Client BOQ"])
-        ws = wb["Internal Review"]
-        self.assertEqual(ws["A1"].value, "#")
-        self.assertEqual(ws["C2"].value, "PIPE150")  # product code row 1
+        self.assertEqual(wb.sheetnames, ["Breakdown List", "Client BOQ"])
+        ws = wb["Breakdown List"]
+        self.assertEqual(ws["A1"].value, "BOQ Ser No")
+        self.assertEqual(ws["D2"].value, "PIPE150")  # product code row 1
+        self.assertEqual(ws["Q1"].value, "Final_Amount_(Excl GST)")
 
     def test_client_standalone_has_computed_amount(self):
         export = ExportService().export_run(self.run, self.user)
@@ -67,6 +88,107 @@ class ExportServiceTests(TestCase):
         # Amount = final_rate * qty (computed, not a formula).
         final_rate = float(self.match.cost_breakdown.final_rate)
         self.assertAlmostEqual(ws["F2"].value, round(final_rate * 3, 2), places=2)
+
+    def test_client_standalone_uses_static_boq_columns(self):
+        self.run.original_headers = [
+            {"key": "ignored", "label": "Ignored", "index": 0},
+            {"key": "description", "label": "Description", "index": 1},
+            {"key": "quantity", "label": "Quantity", "index": 2},
+            {"key": "unit", "label": "Unit", "index": 3},
+        ]
+        self.run.save(update_fields=["original_headers"])
+        self.item.original_data = {
+            "s_no": None,
+            "description": "150 NB MS Pipe",
+            "quantity": 3,
+            "unit": "m",
+        }
+        self.item.save(update_fields=["original_data"])
+
+        export = ExportService().export_run(self.run, self.user)
+        wb = load_workbook(io.BytesIO(export.client_sheet.read()))
+        ws = wb["Client BOQ"]
+
+        self.assertEqual(ws["A1"].value, "S No")
+        self.assertIsNone(ws["A2"].value)
+        self.assertEqual(ws["B2"].value, "150 NB MS Pipe")
+        self.assertEqual(ws["C1"].value, "Unit")
+        self.assertEqual(ws["D1"].value, "Quantity")
+        self.assertEqual(ws["E1"].value, "Final Rate")
+        self.assertEqual(ws["F1"].value, "Amount")
+
+    def test_client_export_preserves_uploaded_boq_and_fills_only_rate_amount_when_unit_qty_exist(self):
+        self.boq.uploaded_file = _workbook_upload()
+        self.boq.save(update_fields=["uploaded_file"])
+        self.item.row_number = 2
+        self.item.unit = "m"
+        self.item.quantity = Decimal("3")
+        self.item.row_json = {
+            "rows": [
+                {
+                    "excel_row_number": 2,
+                    "description": "150 NB MS Pipe",
+                    "unit": "m",
+                    "quantity": 3,
+                }
+            ]
+        }
+        self.item.save(update_fields=["row_number", "unit", "quantity", "row_json"])
+
+        export = ExportService().export_run(self.run, self.user)
+        wb = load_workbook(io.BytesIO(export.client_sheet.read()))
+        ws = wb["Client BOQ"]
+
+        self.assertEqual(ws["A1"].value, "Particulars")
+        self.assertEqual(ws["B1"].value, "UOM")
+        self.assertEqual(ws["C1"].value, "Qty")
+        self.assertEqual(ws["D1"].value, "Remarks")
+        self.assertEqual(ws["B2"].value, "m")
+        self.assertEqual(ws["C2"].value, 3)
+        self.assertEqual(ws["E1"].value, "Rate")
+        self.assertEqual(ws["F1"].value, "Amount")
+        self.assertEqual(ws["E2"].value, float(self.match.cost_breakdown.final_rate))
+        self.assertEqual(ws["F2"].value, round(float(self.match.cost_breakdown.final_rate) * 3, 2))
+
+    def test_client_export_fills_child_row_when_child_has_unit_quantity(self):
+        self.boq.uploaded_file = _workbook_upload(
+            rows=[
+                ["Particulars", "UOM", "Qty"],
+                ["Fire fighting pipe scope", None, None],
+                ["150 NB MS Pipe", "m", 3],
+            ]
+        )
+        self.boq.save(update_fields=["uploaded_file"])
+        self.item.row_number = 2
+        self.item.row_json = {
+            "rows": [
+                {"excel_row_number": 2, "description": "Fire fighting pipe scope"},
+                {
+                    "excel_row_number": 3,
+                    "description": "150 NB MS Pipe",
+                    "unit": "m",
+                    "quantity": 3,
+                },
+            ]
+        }
+        self.item.save(update_fields=["row_number", "row_json"])
+
+        export = ExportService().export_run(self.run, self.user)
+        wb = load_workbook(io.BytesIO(export.client_sheet.read()))
+        ws = wb["Client BOQ"]
+
+        self.assertIsNone(ws["D2"].value)
+        self.assertIsNone(ws["E2"].value)
+        self.assertEqual(ws["D3"].value, float(self.match.cost_breakdown.final_rate))
+        self.assertEqual(ws["E3"].value, round(float(self.match.cost_breakdown.final_rate) * 3, 2))
+
+    def test_linked_client_sheet_references_internal_rate_and_client_quantity(self):
+        export = ExportService().export_run(self.run, self.user)
+        wb = load_workbook(io.BytesIO(export.internal_sheet.read()), data_only=False)
+        ws = wb["Client BOQ"]
+
+        self.assertEqual(ws["E2"].value, "='Breakdown List'!Q2")
+        self.assertEqual(ws["F2"].value, "='Breakdown List'!Q2*D2")
 
     def test_export_requires_approved(self):
         self.boq.status = BOQStatus.COMPLETED
@@ -106,6 +228,20 @@ class ExportViewTests(TestCase):
         self.boq.refresh_from_db()
         self.assertEqual(self.boq.status, BOQStatus.EXPORTED)
         self.assertTrue(ExportFile.objects.filter(boq_run=self.run).exists())
+
+    def test_owner_can_download_exported_files(self):
+        ExportService().export_run(self.run, self.owner)
+        self.client.force_login(self.owner)
+
+        client_resp = self.client.get(reverse("exports:download", args=[self.boq.pk, "client"]))
+        breakdown_resp = self.client.get(
+            reverse("exports:download", args=[self.boq.pk, "breakdown"])
+        )
+
+        self.assertEqual(client_resp.status_code, 200)
+        self.assertEqual(breakdown_resp.status_code, 200)
+        self.assertIn("attachment", client_resp["Content-Disposition"])
+        self.assertIn("attachment", breakdown_resp["Content-Disposition"])
 
     def test_non_owner_cannot_export(self):
         self.client.force_login(self.other)

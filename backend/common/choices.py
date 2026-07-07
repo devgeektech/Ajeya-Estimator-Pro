@@ -31,9 +31,3 @@ class PendingProductStatus(models.TextChoices):
     PENDING = "PENDING", "Pending"
     APPROVED = "APPROVED", "Approved"
     REJECTED = "REJECTED", "Rejected"
-
-
-class VendorSelectionMode(models.TextChoices):
-    LOWEST_COST = "LOWEST_COST", "Lowest Cost"
-    PREFERRED = "PREFERRED", "Preferred Vendor"
-    CUSTOM = "CUSTOM", "Custom Selection"

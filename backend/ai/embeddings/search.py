@@ -1,8 +1,6 @@
-"""Embedding / vector search over stored ProductEmbedding rows.
+"""Embedding search over stored ProductEmbedding rows.
 
-In V1 embeddings are stored as JSON arrays keyed by ``product_code``. A
-pgvector migration is the first post-UAT backlog item
-(docs/SESSION_STATE.md - Future Sprints).
+In V1 embeddings are stored as JSON arrays keyed by ``product_code``.
 
 ProductEmbedding schema (V1):
     product_code      CharField   — links back to RateMaster.product_code
@@ -18,6 +16,7 @@ import logging
 import math
 
 from apps.database_manager.models import ProductEmbedding, RateMaster
+from apps.matching.services.exact_match import selection_amount
 
 logger = logging.getLogger("boq_ai")
 
@@ -26,7 +25,7 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     """Return cosine similarity in [0, 1] between two equal-length vectors."""
     dot = sum(x * y for x, y in zip(a, b))
     norm_a = math.sqrt(sum(x * x for x in a))
-    norm_b = math.sqrt(sum(x * x for x in b))
+    norm_b = math.sqrt(sum(y * y for y in b))
     if norm_a == 0 or norm_b == 0:
         return 0.0
     return dot / (norm_a * norm_b)
@@ -41,8 +40,8 @@ def search(
     """Return the top-k most similar RateMaster rows for ``query_vector``.
 
     Scores every ``ProductEmbedding`` row using cosine similarity, then resolves
-    the winning ``product_code`` values back to ``RateMaster`` rows scoped to
-    ``database_version`` (cheapest per product_code within the version).
+    the winning ``product_code`` values back to the lowest-final-amount
+    ``RateMaster`` row scoped to ``database_version``.
 
     Args:
         query_vector:      The embedding to compare against (list[float]).
@@ -81,13 +80,14 @@ def search(
             break
 
     # Resolve product_codes back to RateMaster rows within the given version.
-    rate_masters = {
-        rm.product_code: rm
-        for rm in RateMaster.objects.filter(
-            database_version=database_version,
-            product_code__in=top_codes_with_sim.keys(),
-        )
-    }
+    rate_masters: dict[str, RateMaster] = {}
+    for rate in RateMaster.objects.filter(
+        database_version=database_version,
+        product_code__in=top_codes_with_sim.keys(),
+    ):
+        existing = rate_masters.get(rate.product_code)
+        if existing is None or selection_amount(rate) < selection_amount(existing):
+            rate_masters[rate.product_code] = rate
 
     results = [
         (rate_masters[code], sim)

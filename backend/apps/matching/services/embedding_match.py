@@ -14,6 +14,7 @@ import math
 
 from ai.embeddings import generator
 from apps.database_manager.models import ProductEmbedding
+from apps.matching.services.exact_match import selection_amount
 from utils.text import normalize
 
 
@@ -34,13 +35,12 @@ def find_embedding(query: str, rates_by_code: dict) -> tuple[object | None, floa
     similarity_percent is 0-100. Returns (None, 0.0) when there are no stored
     embeddings for the active version or AI is disabled.
     """
-    codes = list(rates_by_code.keys())
     embeddings = [
         emb
         for emb in ProductEmbedding.objects.all()
         if normalize(emb.product_code) in rates_by_code
     ]
-    if not embeddings or not codes:
+    if not embeddings or not rates_by_code:
         return None, 0.0
 
     # Raises AIServiceError when disabled; the caller decides whether to skip.
@@ -56,4 +56,5 @@ def find_embedding(query: str, rates_by_code: dict) -> tuple[object | None, floa
 
     if best_code is None:
         return None, 0.0
-    return rates_by_code.get(best_code), round(best_sim * 100, 2)
+    candidates = rates_by_code.get(best_code, [])
+    return min(candidates, key=selection_amount, default=None), round(best_sim * 100, 2)

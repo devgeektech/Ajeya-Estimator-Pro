@@ -20,7 +20,7 @@ from common.choices import BOQStatus
 from common.exceptions import ValidationError
 
 from exports.client_sheet import write_client_sheet
-from exports.internal_sheet import write_internal_sheet
+from exports.internal_sheet import BREAKDOWN_SHEET_TITLE, write_internal_sheet
 
 logger = logging.getLogger("boq_ai")
 
@@ -41,11 +41,11 @@ class ExportService:
                 f"Only approved BOQs can be exported (current: '{boq.get_status_display()}')."
             )
 
-        # Internal workbook: Internal Review + linked Client BOQ.
+        # Internal workbook: Breakdown List + linked Client BOQ.
         internal_wb = Workbook()
         write_internal_sheet(internal_wb.active, run)
         write_client_sheet(
-            internal_wb.create_sheet("Client BOQ"), run, link_sheet="Internal Review"
+            internal_wb.create_sheet("Client BOQ"), run, link_sheet=BREAKDOWN_SHEET_TITLE
         )
 
         # Standalone client workbook (computed values, safe to share).

@@ -1,4 +1,4 @@
-"""Celery task: send user notifications (scaffold)."""
+"""Celery task: send user notifications."""
 from celery import shared_task
 
 from apps.notifications.models import Notification

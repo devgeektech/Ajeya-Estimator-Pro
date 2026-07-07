@@ -28,7 +28,7 @@ def make_boq(user, name="BOQ", with_item=True) -> BOQ:
     return boq
 
 
-@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp(), OPENAI_API_KEY="placeholder-key")
 class WorkflowTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user("e@example.com", "pass12345")
@@ -41,14 +41,18 @@ class WorkflowTests(TestCase):
         boq.refresh_from_db()
         job = ProcessingJob.objects.get(boq_run=run)
         self.assertEqual(run.status, RunStatus.COMPLETED)
-        self.assertEqual(boq.status, BOQStatus.COMPLETED)
+        self.assertEqual(boq.status, BOQStatus.UNDER_REVIEW)
         self.assertEqual(job.status, RunStatus.COMPLETED)
         self.assertEqual(job.progress, 100)
         self.assertIsNotNone(run.started_at)
         self.assertIsNotNone(run.completed_at)
 
 
-@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+@override_settings(
+    MEDIA_ROOT=tempfile.mkdtemp(),
+    OPENAI_API_KEY="placeholder-key",
+    CELERY_TASK_ALWAYS_EAGER=True,
+)
 class JobServiceTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user("e@example.com", "pass12345")
@@ -61,7 +65,7 @@ class JobServiceTests(TestCase):
         job = ProcessingJob.objects.get(boq_run__boq=boq)
         self.assertEqual(job.status, RunStatus.COMPLETED)
         self.assertEqual(job.progress, 100)
-        self.assertEqual(boq.status, BOQStatus.COMPLETED)
+        self.assertEqual(boq.status, BOQStatus.UNDER_REVIEW)
 
     def test_reprocess_creates_new_run_and_clones_items(self):
         boq = make_boq(self.user)
@@ -75,7 +79,11 @@ class JobServiceTests(TestCase):
         self.assertEqual(new_run.items.count(), 1)
 
 
-@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+@override_settings(
+    MEDIA_ROOT=tempfile.mkdtemp(),
+    OPENAI_API_KEY="placeholder-key",
+    CELERY_TASK_ALWAYS_EAGER=True,
+)
 class ProcessingViewTests(TestCase):
     def setUp(self):
         self.admin = User.objects.create_superuser("admin@example.com", "pass12345")
@@ -87,9 +95,9 @@ class ProcessingViewTests(TestCase):
         self.client.force_login(self.alice)
         with self.captureOnCommitCallbacks(execute=True):
             response = self.client.post(reverse("processing:start", args=[self.boq.pk]))
-        self.assertRedirects(response, reverse("boq:detail", args=[self.boq.pk]))
+        self.assertRedirects(response, reverse("processing:list"))
         self.boq.refresh_from_db()
-        self.assertEqual(self.boq.status, BOQStatus.COMPLETED)
+        self.assertEqual(self.boq.status, BOQStatus.UNDER_REVIEW)
 
     def test_other_user_cannot_start_processing(self):
         self.client.force_login(self.bob)

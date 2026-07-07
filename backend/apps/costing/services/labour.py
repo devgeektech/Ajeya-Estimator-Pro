@@ -64,7 +64,7 @@ def accessories_cost(product, tor_accessories_by_code: dict, accessory_rates: di
     # 2. Fallback: Check if spec_json contains accessories percentage
     if hasattr(product, "spec_json") and product.spec_json:
         # Check various common keys
-        keys = ["accessories_%", "accessories_percent", "accessories_value", "accessories"]
+        keys = ["accessories", "accessories_percent", "accessories_value"]
         for key in keys:
             val = product.spec_json.get(key)
             if val is not None and val != "":

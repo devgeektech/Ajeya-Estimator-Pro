@@ -18,10 +18,7 @@ from apps.database_manager.models import (
 from apps.matching.models import ProductMatch
 from apps.matching.services.confidence import ConfidenceService, band_for
 from apps.matching.services.matching_service import ProductMatchingService
-from apps.matching.services.vendor_selection import VendorSelectionService
-from apps.make_list.models import MakeListEntry
 from apps.pending_products.models import PendingProduct
-from common.choices import VendorSelectionMode
 
 
 class MatchingEngineTests(TestCase):
@@ -55,6 +52,26 @@ class MatchingEngineTests(TestCase):
         self.assertEqual(float(match.confidence_score), 100.0)
         self.assertEqual(match.vendor, "ACME")
 
+    def test_exact_match_selects_lowest_final_amount(self):
+        cheaper = RateMaster.objects.create(
+            database_version=self.version,
+            product_code="PIPE150",
+            description="150 NB MS Pipe",
+            make="APL",
+            vendor="BestValue",
+            purchase_rate=900,
+            final_amount_excl_gst=750,
+        )
+        self.pipe.final_amount_excl_gst = 1000
+        self.pipe.save(update_fields=["final_amount_excl_gst"])
+
+        item = self._item("150 NB MS Pipe")
+        ProductMatchingService().match_item(item)
+
+        match = ProductMatch.objects.get(boq_item=item)
+        self.assertEqual(match.product, cheaper)
+        self.assertEqual(match.vendor, "BestValue")
+
     def test_exact_match_by_product_code(self):
         item = self._item("pipe150")
         ProductMatchingService().match_item(item)
@@ -80,6 +97,59 @@ class MatchingEngineTests(TestCase):
         self.assertEqual(float(match.confidence_score), 0.0)
         pending = PendingProduct.objects.get(boq_item=item)
         self.assertEqual(pending.created_by, self.user)
+
+    def test_source_description_match_wins_over_bad_ai_extraction(self):
+        item = self._item(
+            "150 NB MS Pipe",
+            {"product": "unknown imagined product", "size": None, "material": None, "make": None},
+        )
+
+        ProductMatchingService().match_item(item, created_by=self.user)
+
+        match = ProductMatch.objects.get(boq_item=item)
+        self.assertEqual(match.product, self.pipe)
+        self.assertEqual(match.match_reason, "exact")
+        self.assertEqual(match.make, "Jindal")
+        self.assertFalse(PendingProduct.objects.filter(boq_item=item).exists())
+
+    def test_unmatched_ai_extraction_does_not_create_database_product_suggestion(self):
+        item = self._item(
+            "Unknown exotic widget",
+            {"product": "AI invented product", "size": None, "material": None, "make": "Imagined"},
+        )
+
+        ProductMatchingService().match_item(item, created_by=self.user)
+
+        match = ProductMatch.objects.get(boq_item=item)
+        self.assertIsNone(match.product)
+        self.assertEqual(match.make, "")
+        pending = PendingProduct.objects.get(boq_item=item)
+        self.assertEqual(pending.suggested_product, "")
+
+    def test_product_candidate_database_hint_is_searched(self):
+        item = self._item(
+            "Supply and fixing as per specification",
+            {
+                "products": [
+                    {
+                        "product": "MS Pipe",
+                        "size": "150 NB",
+                        "material": "MS",
+                        "make": None,
+                        "category": "Pipe",
+                        "subcategory": "MS Pipe",
+                        "database_hint": "PIPE150",
+                    }
+                ]
+            },
+        )
+
+        ProductMatchingService().match_item(item, created_by=self.user)
+
+        match = ProductMatch.objects.get(boq_item=item)
+        self.assertEqual(match.product, self.pipe)
+        self.assertEqual(match.match_reason, "exact")
+        self.assertFalse(PendingProduct.objects.filter(boq_item=item).exists())
 
     @override_settings(OPENAI_API_KEY="sk-realLookingKey123")
     @mock.patch("ai.embeddings.generator.generate_embedding")
@@ -110,6 +180,7 @@ class MatchingEngineTests(TestCase):
         self.assertIsNone(ProductMatch.objects.get(boq_item=item).product)
 
 
+@override_settings(OPENAI_API_KEY="placeholder-key")
 class ConfidenceServiceTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user(email="c@x.com", password="x")
@@ -182,72 +253,3 @@ class ConfidenceServiceTests(TestCase):
         self._match(reason="exact", product=self.pipe)
         scored = ConfidenceService().score_run(self.run)
         self.assertEqual(scored, 1)
-
-
-class VendorSelectionTests(TestCase):
-    def setUp(self):
-        self.modes = VendorSelectionMode
-        self.user = get_user_model().objects.create_user(email="v@x.com", password="x")
-        self.version = DatabaseVersion.objects.create(
-            version_number=1, is_active=True, source_filename="db.xlsx"
-        )
-        # Three vendor rows for the same product_code at different prices/makes.
-        self.jindal = RateMaster.objects.create(
-            database_version=self.version, product_code="PIPE150",
-            description="150 NB MS Pipe", make="Jindal", vendor="V1", purchase_rate=1200,
-        )
-        self.tata = RateMaster.objects.create(
-            database_version=self.version, product_code="PIPE150",
-            description="150 NB MS Pipe", make="Tata", vendor="V2", purchase_rate=1000,
-        )
-        self.apl = RateMaster.objects.create(
-            database_version=self.version, product_code="PIPE150",
-            description="150 NB MS Pipe", make="APL", vendor="V3", purchase_rate=800,
-        )
-        boq = BOQ.objects.create(user=self.user, boq_name="B", uploaded_file="boq/x.xlsx")
-        self.run = BOQRun.objects.create(boq=boq, run_number=1)
-        self.item = BOQItem.objects.create(
-            boq_run=self.run, row_number=1, description="150 NB MS Pipe"
-        )
-        # Initial match points at the most expensive row.
-        self.match = ProductMatch.objects.create(
-            boq_item=self.item, product=self.jindal, confidence_score=100, match_reason="exact"
-        )
-
-    def _approve(self, *makes):
-        for make in makes:
-            MakeListEntry.objects.create(boq_run=self.run, make=make)
-
-    def test_lowest_cost_picks_cheapest(self):
-        chosen = VendorSelectionService(self.modes.LOWEST_COST).select_for_item(self.item)
-        self.assertEqual(chosen, self.apl)
-        self.match.refresh_from_db()
-        self.assertEqual(self.match.vendor, "V3")
-        self.assertEqual(self.match.make, "APL")
-
-    def test_make_list_restricts_candidates(self):
-        self._approve("Jindal", "Tata")  # APL (cheapest) excluded
-        chosen = VendorSelectionService(self.modes.LOWEST_COST).select_for_item(self.item)
-        self.assertEqual(chosen, self.tata)  # cheapest among approved
-
-    def test_preferred_follows_make_list_order(self):
-        self._approve("Tata", "APL")  # Tata preferred even though APL cheaper
-        chosen = VendorSelectionService(self.modes.PREFERRED).select_for_item(self.item)
-        self.assertEqual(chosen, self.tata)
-
-    def test_custom_selection_uses_given_row(self):
-        chosen = VendorSelectionService(self.modes.CUSTOM).select_for_item(
-            self.item, custom_rate=self.jindal
-        )
-        self.assertEqual(chosen, self.jindal)
-
-    def test_no_approved_vendor_returns_none(self):
-        self._approve("Unknown Make")
-        chosen = VendorSelectionService().select_for_item(self.item)
-        self.assertIsNone(chosen)
-        self.match.refresh_from_db()
-        self.assertEqual(self.match.product, self.jindal)  # unchanged
-
-    def test_select_run_counts_selected(self):
-        selected = VendorSelectionService().select_run(self.run)
-        self.assertEqual(selected, 1)

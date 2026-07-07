@@ -49,6 +49,7 @@ class BOQRun(models.Model):
     )
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
+    original_headers = models.JSONField(null=True, blank=True)
 
     class Meta:
         ordering = ["boq", "-run_number"]
@@ -66,6 +67,10 @@ class BOQItem(models.Model):
     description = models.TextField()
     quantity = models.DecimalField(max_digits=14, decimal_places=4, default=0)
     unit = models.CharField(max_length=50, blank=True)
+    # The complete parsed row (for skipping empty but retaining all headers)
+    original_data = models.JSONField(null=True, blank=True)
+    # Structured parent/child BOQ row payload sent to AI for extraction.
+    row_json = models.JSONField(null=True, blank=True)
     # AI-extracted structured attributes (product/size/material/make).
     # Populated by the AI analysis stage; null until processed.
     ai_extraction = models.JSONField(null=True, blank=True)

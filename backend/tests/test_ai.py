@@ -57,18 +57,59 @@ class AIServiceTests(SimpleTestCase):
         self.assertEqual(AIService().complete("hi"), "hello world")
 
     @mock.patch("ai.service.get_client")
+    def test_complete_logs_runtime_instruction(self, get_client):
+        get_client.return_value = _fake_client("hello world")
+
+        with self.assertLogs("boq_ai.ai_instructions", level="INFO") as captured:
+            AIService().complete("visible instruction")
+
+        payload = json.loads(captured.output[0].split("INFO:boq_ai.ai_instructions:", 1)[1])
+        self.assertEqual(payload["event"], "ai_runtime_instruction")
+        self.assertEqual(payload["model"], "gpt-4o-mini")
+        self.assertEqual(payload["template_name"], "")
+        self.assertFalse(payload["json_mode"])
+        self.assertEqual(payload["instruction_text"], "visible instruction")
+
+    @mock.patch("ai.service.get_client")
     def test_run_json_prompt_parses(self, get_client):
         get_client.return_value = _fake_client('{"product": "Pipe", "size": "150 NB"}')
         result = AIService().run_json_prompt(
-            "product_extraction.txt", description="150 NB MS Pipe"
+            "product_extraction.txt",
+            description="150 NB MS Pipe",
+            row_json='{"description":"150 NB MS Pipe"}',
+            database_context="{}",
         )
         self.assertEqual(result["product"], "Pipe")
+
+    @mock.patch("ai.service.get_client")
+    def test_run_json_prompt_logs_rendered_template_instruction(self, get_client):
+        get_client.return_value = _fake_client('{"product": "Pipe"}')
+
+        with self.assertLogs("boq_ai.ai_instructions", level="INFO") as captured:
+            AIService().run_json_prompt(
+                "product_extraction.txt",
+                description="150 NB MS Pipe",
+                row_json='{"description":"150 NB MS Pipe"}',
+                database_context='{"products":[]}',
+            )
+
+        payload = json.loads(captured.output[0].split("INFO:boq_ai.ai_instructions:", 1)[1])
+        self.assertEqual(payload["event"], "ai_runtime_instruction")
+        self.assertEqual(payload["template_name"], "product_extraction.txt")
+        self.assertTrue(payload["json_mode"])
+        self.assertIn("150 NB MS Pipe", payload["instruction_text"])
+        self.assertIn('{"products":[]}', payload["instruction_text"])
 
     @mock.patch("ai.service.get_client")
     def test_invalid_json_raises(self, get_client):
         get_client.return_value = _fake_client("not json")
         with self.assertRaises(AIServiceError):
-            AIService().run_json_prompt("product_extraction.txt", description="x")
+            AIService().run_json_prompt(
+                "product_extraction.txt",
+                description="x",
+                row_json='{"description":"x"}',
+                database_context="{}",
+            )
 
     @mock.patch("ai.service.get_client")
     def test_provider_error_is_wrapped(self, get_client):
@@ -90,7 +131,7 @@ class ProductExtractorTests(SimpleTestCase):
         payload = {"product": "Pipe", "size": "150 NB", "material": "MS", "make": "Jindal"}
         get_client.return_value = _fake_client(json.dumps(payload))
         result = extract_product("150 NB MS Pipe Jindal")
-        self.assertEqual(result, payload)
+        self.assertEqual(result, payload | {"products": []})
 
     @mock.patch("ai.service.get_client")
     def test_extract_product_fills_missing_fields(self, get_client):
@@ -99,6 +140,27 @@ class ProductExtractorTests(SimpleTestCase):
         self.assertEqual(result["product"], "Valve")
         self.assertIsNone(result["size"])
         self.assertIsNone(result["make"])
+        self.assertEqual(result["products"], [])
+
+    @mock.patch("ai.service.get_client")
+    def test_extract_product_preserves_product_candidates(self, get_client):
+        payload = {
+            "products": [
+                {
+                    "product": "MS Pipe",
+                    "size": "150 NB",
+                    "material": "MS",
+                    "make": None,
+                    "category": "Pipe",
+                    "subcategory": "MS Pipe",
+                    "database_hint": "PIPE150",
+                }
+            ]
+        }
+        get_client.return_value = _fake_client(json.dumps(payload))
+        result = extract_product("Supply and install 150 NB MS Pipe")
+        self.assertEqual(result["product"], "MS Pipe")
+        self.assertEqual(result["products"][0]["database_hint"], "PIPE150")
 
 
 @override_settings(OPENAI_API_KEY="sk-realLookingKey123", OPENAI_MODEL="gpt-4o-mini")
@@ -143,11 +205,53 @@ class AnalyzeRunTests(TestCase):
         self.assertEqual(items[0].ai_extraction["product"], "Pipe")
         self.assertEqual(ActivityMatch.objects.filter(boq_item=items[0]).count(), 1)  # type: ignore[attr-defined]
 
+    @mock.patch("ai.extractors.analyzer.extract_activities")
+    @mock.patch("ai.extractors.analyzer.extract_product")
+    def test_analyze_run_logs_each_row_extraction(self, extract_product_mock, extract_activities_mock):
+        extract_product_mock.return_value = {
+            "product": "Pipe", "size": "150 NB", "material": "MS", "make": None,
+        }
+        extract_activities_mock.return_value = ["installation"]
+
+        with self.assertLogs("boq_ai.ai_rows", level="INFO") as captured:
+            analyze_run(self.run)
+
+        extraction_lines = [
+            line for line in captured.output if '"event": "ai_row_extraction"' in line
+        ]
+        self.assertEqual(len(extraction_lines), 2)
+        payload = json.loads(extraction_lines[0].split("INFO:boq_ai.ai_rows:", 1)[1])
+        self.assertEqual(payload["excel_row_number"], 1)
+        self.assertEqual(payload["description"], "150 NB MS pipe")
+        self.assertEqual(payload["product_extraction"]["product"], "Pipe")
+        self.assertEqual(payload["activities"], ["installation"])
+        self.assertIn("row_json", payload)
+        self.assertIn("fetched_row_json", payload)
+        self.assertEqual(payload["ai_output_json"]["product_extraction"]["product"], "Pipe")
+        self.assertEqual(payload["ai_output_json"]["activities"], ["installation"])
+
     @mock.patch("ai.extractors.analyzer.extract_product")
     def test_analyze_run_skips_failing_item(self, extract_product_mock):
         extract_product_mock.side_effect = AIServiceError("boom")
         analyzed = analyze_run(self.run)
         self.assertEqual(analyzed, 0)
+
+    @mock.patch("ai.extractors.analyzer.extract_product")
+    def test_analyze_run_logs_row_failures(self, extract_product_mock):
+        extract_product_mock.side_effect = AIServiceError("boom")
+
+        with self.assertLogs("boq_ai.ai_rows", level="ERROR") as captured:
+            analyze_run(self.run)
+
+        failure_lines = [
+            line for line in captured.output if '"event": "ai_row_extraction_failed"' in line
+        ]
+        self.assertEqual(len(failure_lines), 2)
+        payload = json.loads(failure_lines[0].split("ERROR:boq_ai.ai_rows:", 1)[1])
+        self.assertEqual(payload["excel_row_number"], 1)
+        self.assertEqual(payload["error"], "boom")
+        self.assertIn("row_json", payload)
+        self.assertIn("fetched_row_json", payload)
 
     @mock.patch("ai.extractors.analyzer.extract_activities")
     @mock.patch("ai.extractors.analyzer.extract_product")

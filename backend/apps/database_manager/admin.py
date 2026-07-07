@@ -21,7 +21,15 @@ class DatabaseVersionAdmin(admin.ModelAdmin):
 
 @admin.register(RateMaster)
 class RateMasterAdmin(admin.ModelAdmin):
-    list_display = ("product_code", "make", "vendor", "purchase_rate", "unit", "database_version")
+    list_display = (
+        "product_code",
+        "make",
+        "vendor",
+        "purchase_rate",
+        "final_amount_excl_gst",
+        "unit",
+        "database_version",
+    )
     search_fields = ("product_code", "description", "make", "vendor")
     list_filter = ("database_version", "category")
 

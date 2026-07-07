@@ -63,6 +63,7 @@ This document serves as the primary technical reference for developers, AI codin
 
 * Pandas
 * OpenPyXL
+* PyPDF (for Make List PDF extraction)
 
 ---
 
@@ -162,14 +163,14 @@ Responsible for:
 
 ---
 
-## Vendor Service
+## Rate Selection Service
 
 Responsible for:
 
-* Vendor selection
-* Lowest-cost selection
-* Preferred vendor selection
-* Manual overrides
+* Selecting the lowest `Final_Amount_(Excl GST)` Rate_Master row among matched
+  product candidates.
+* Preserving make/vendor data from the selected Rate_Master row for review and
+  audit.
 
 ---
 
@@ -246,10 +247,13 @@ Backup Existing Database
     ↓
 Import New Data
     ↓
-Generate Embeddings
-    ↓
 Activate Version
+    ↓
+Generate Embeddings
 ```
+
+Database upload/import runs synchronously through the database import service.
+No Celery task is queued for database import or database embedding generation.
 
 ---
 
@@ -283,12 +287,19 @@ AI Processing
     ↓
 Product Matching
     ↓
+Lowest Final Amount Rate Selection
+    ↓
 Cost Calculation
     ↓
 Confidence Scoring
     ↓
 Generate Results
 ```
+
+BOQ Excel parsing keeps original worksheet row numbers and groups structural
+parent/specification rows into the JSON context of measured child rows. Rows
+with the actual unit or quantity are the rows processed for costing and the
+rows targeted by client-sheet rate/amount fills.
 
 ---
 
@@ -311,7 +322,11 @@ BOQ Row
 
 ↓
 
-OpenAI Analysis
+Build grouped BOQ row JSON
+
+↓
+
+OpenAI Analysis with active database context
 
 ↓
 
@@ -320,6 +335,7 @@ Extract:
 * Product
 * Size
 * Material
+* Product candidates
 * Activities
 
 ↓
@@ -337,6 +353,15 @@ Priority:
 3. Embedding Match
 4. OpenAI Validation
 
+Search queries are built in this order:
+
+1. Original grouped BOQ description.
+2. Top-level AI extraction fields.
+3. Extracted product candidate fields.
+4. AI-provided database hints that point toward active Rate_Master terminology.
+
+The original BOQ text remains authoritative and is searched first.
+
 ---
 
 # Confidence Calculation
@@ -347,7 +372,6 @@ Factors:
 * Size match.
 * Make match.
 * Activity match.
-* Vendor match.
 
 ---
 
@@ -385,25 +409,25 @@ Only approved makes are eligible for selection.
 
 Products outside the make list are excluded.
 
----
+Each parsed make-list row is scoped through the target BOQRun, not by visible
+BOQ name or uploaded filename. Duplicate BOQ names and duplicate make-list
+filenames therefore remain isolated.
 
-# Vendor Selection Modes
-
-## Lowest Cost
-
-Select minimum price.
-
----
-
-## Preferred Vendor
-
-Select configured vendor.
+Excel make-list parsing detects the real header row when title rows appear
+before the table and maps common aliases such as make, approved make, brand,
+manufacturer, and OEM into make-list entries.
+Parsed make-list entries are deduplicated by make plus category, so repeated
+approved makes remain available for every material category where they appear.
 
 ---
 
-## Custom Selection
+# Rate Selection
 
-User selects vendor during review.
+When exact, alias, or embedding search returns multiple Rate_Master rows for
+the same product, the active workflow selects the row with the lowest
+`Final_Amount_(Excl GST)`.
+
+Vendor selection modes are not part of the active workflow.
 
 ---
 
@@ -430,16 +454,13 @@ All calculations are rule based.
 
 Contains:
 
-* BOQ description.
-* Product.
-* Make.
-* Vendor.
-* Purchase rate.
-* Labour.
-* Transportation.
-* Accessories.
-* Profit.
-* Confidence.
+* Breakdown List workbook sheet.
+* Original BOQ description.
+* AI interpretation.
+* Matched database product code.
+* Approved make and supplier.
+* Purchase/material/commercial breakdown values.
+* Profit, final amount excluding GST, margin, labour, and confidence.
 
 ---
 
@@ -447,11 +468,19 @@ Contains:
 
 Contains:
 
-* Original BOQ format.
-* Final approved rate.
+* Uploaded BOQ sheet layout preserved where available.
+* Unit.
+* Quantity.
+* Rate.
 * Amount.
 
 Linked to internal sheet.
+
+Uploaded BOQ files are preserved for auditability. Client export starts from the
+uploaded workbook sheet when available and fills only Unit, Quantity, Rate, and
+Amount. Existing Unit and Quantity cells are not overwritten. If the product
+details live in a child/inherited row, Rate and Amount are filled on that child
+row.
 
 ---
 
@@ -506,7 +535,7 @@ System shall detect:
 * Empty rows.
 * Failed AI calls.
 * Invalid products.
-* Missing vendors.
+* Missing rates.
 
 ---
 
@@ -516,6 +545,8 @@ System logs:
 
 * User actions.
 * Processing jobs.
+* Runtime AI instructions rendered from prompt templates before provider calls.
+* Row-level AI extraction payloads for BOQ processing review.
 * Errors.
 * Approvals.
 * Database uploads.
@@ -571,24 +602,13 @@ Additional services:
 # Technical Constraints
 
 * OpenAI only.
-* Excel-based inputs.
+* Excel-based inputs for primary DB/BOQ.
+* PDF or Excel based inputs for Make Lists.
 * Single company deployment.
 * No public registration.
-* No PDF support in V1.
 * PostgreSQL is required in every runtime.
 * No public REST API is active in V1; the product surface is Django Templates
   with HTMX interactions.
-
----
-
-# Future Technical Scope
-
-* Multi-company support.
-* Multiple AI providers.
-* Advanced analytics.
-* Dashboard reporting.
-* API integrations.
-* ERP integration.
 
 ---
 
@@ -613,11 +633,5 @@ This document depends on:
 
 * PRD.md
 
-Future documents:
-
-* ARCHITECTURE.md
-* DATABASE_ARCHITECTURE.md
-* PROJECT_STRUCTURE.md
-* AGENTS.md
-
+ARCHITECTURE.md, DATABASE_ARCHITECTURE.md, PROJECT_STRUCTURE.md, and AGENTS.md
 shall derive technical decisions from this document.

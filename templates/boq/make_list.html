@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Make List &middot; {{ boq.boq_name }}{% endblock %}
+{% block heading %}Make List &middot; {{ boq.boq_name }}{% endblock %}
+
+{% block content %}
+<div class="toolbar">
+    <a href="{% url 'boq:detail' boq.pk %}" class="btn btn--ghost btn--small">&larr; Back to BOQ</a>
+</div>
+
+<div class="panel" style="margin-bottom:24px;">
+    <h3 class="panel__title">Linked Make List</h3>
+    <p class="panel__text" style="margin-bottom:16px;">
+        Current file:
+        {% if make_list_filename %}
+        <strong>{{ make_list_filename }}</strong>
+        {% else %}
+        <span class="muted">No make list file is currently linked.</span>
+        {% endif %}
+    </p>
+    <form method="post" action="{% url 'boq:make_list_upload' boq.pk %}" enctype="multipart/form-data">
+        {% csrf_token %}
+        <label class="field">
+            <span class="field__label">Replacement make list (.xlsx, .xlsm, or .pdf)</span>
+            {{ make_list_form.make_list_file }}
+        </label>
+        <div class="form-actions">
+            <button type="submit" class="btn btn--primary btn--small">Replace make list</button>
+        </div>
+    </form>
+</div>
+
+<div class="panel">
+    <h3 class="panel__title">Make List Entries</h3>
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Category</th>
+                <th>Make</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for m in make_entries %}
+            <tr>
+                <td>{{ m.category|default:"-" }}</td>
+                <td>{{ m.make }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="2" class="table__empty">
+                No makes have been assigned yet.
+            </td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

@@ -15,7 +15,12 @@ def overhead_cost(base: Decimal, product=None) -> Decimal:
     """Overhead as a percentage of the cost base. Fallback to product handling_% / overhead_% from spec_json."""
     pct = OVERHEAD_PERCENT
     if product and hasattr(product, "spec_json") and product.spec_json:
-        val = product.spec_json.get("handling_%") or product.spec_json.get("handling_percent") or product.spec_json.get("overhead_%") or product.spec_json.get("overhead_percent")
+        val = (
+            product.spec_json.get("handling")
+            or product.spec_json.get("handling_percent")
+            or product.spec_json.get("overhead")
+            or product.spec_json.get("overhead_percent")
+        )
         if val is not None and val != "":
             try:
                 ov_pct = Decimal(str(val))
@@ -32,7 +37,7 @@ def profit(base_with_overhead: Decimal, product=None) -> Decimal:
     """Profit as a percentage of the base including overhead. Fallback to product profit_% from spec_json."""
     pct = PROFIT_PERCENT
     if product and hasattr(product, "spec_json") and product.spec_json:
-        val = product.spec_json.get("profit_%") or product.spec_json.get("profit_percent")
+        val = product.spec_json.get("profit") or product.spec_json.get("profit_percent")
         if val is not None and val != "":
             try:
                 pr_pct = Decimal(str(val))

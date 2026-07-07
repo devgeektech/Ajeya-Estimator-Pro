@@ -7,14 +7,16 @@ resolves it within the active database version. No AI involved.
 from __future__ import annotations
 
 from apps.database_manager.models import ProductAlias
+from apps.matching.services.exact_match import selection_amount
 from utils.text import normalize
 
 
 def find_alias(query: str, rates_by_code: dict) -> object | None:
     """Return a RateMaster matched via ProductAlias, else None.
 
-    ``rates_by_code`` maps normalized product_code -> RateMaster for the active
-    version. The longest matching alias wins to prefer the most specific entry.
+    ``rates_by_code`` maps normalized product_code -> list[RateMaster] for the
+    active version. The longest matching alias wins to prefer the most specific
+    entry, then the lowest final amount row is selected for that product.
     """
     target = normalize(query)
     if not target:
@@ -32,4 +34,6 @@ def find_alias(query: str, rates_by_code: dict) -> object | None:
                 best_code = code
                 best_len = len(alias_norm)
 
-    return rates_by_code.get(best_code) if best_code else None
+    if not best_code:
+        return None
+    return min(rates_by_code.get(best_code, []), key=selection_amount, default=None)

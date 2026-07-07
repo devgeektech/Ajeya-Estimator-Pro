@@ -26,7 +26,8 @@
                 {% if user.is_super_admin %}<td>{{ boq.user.full_name }}</td>{% endif %}
                 <td>
                     <span class="badge
-                        {% if boq.status == 'APPROVED' or boq.status == 'EXPORTED' %}badge--green
+                        {% if boq.status == 'APPROVED' %}badge--green
+                        {% elif boq.status == 'EXPORTED' %}badge--purple
                         {% elif boq.status == 'UNDER_REVIEW' %}badge--yellow
                         {% elif boq.status == 'PROCESSING' %}badge--orange
                         {% elif boq.status == 'COMPLETED' %}badge--warn

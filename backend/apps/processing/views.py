@@ -21,7 +21,7 @@ class StartProcessingView(LoginRequiredMixin, View):
         messages.success(
             request, f"Processing queued for '{boq.boq_name}' (run {job.boq_run.run_number})."
         )
-        return redirect("boq:detail", pk=boq.pk)
+        return redirect("processing:list")
 
 
 class RunStatusView(LoginRequiredMixin, View):
@@ -40,7 +40,7 @@ class RunStatusView(LoginRequiredMixin, View):
 class ProcessingListView(LoginRequiredMixin, ListView):
     template_name = "processing/job_list.html"
     context_object_name = "jobs"
-    paginate_by = 25
+    paginate_by = 10
 
     def get_queryset(self):
         qs = ProcessingJob.objects.select_related("boq_run", "boq_run__boq", "boq_run__boq__user")

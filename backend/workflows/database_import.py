@@ -1,9 +1,8 @@
 """Database import workflow.
 
-Validate -> Backup -> Import -> Embeddings -> Activate
+Validate -> Backup -> Import -> Activate -> Embeddings
 (docs/PROJECT_STRUCTURE.md - Import Rules). Thin orchestration over
-DatabaseImportService so it can be invoked from a Celery task (background) or
-synchronously in tests.
+DatabaseImportService for synchronous database uploads.
 """
 from __future__ import annotations
 

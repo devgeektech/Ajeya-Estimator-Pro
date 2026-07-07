@@ -56,7 +56,7 @@ class ProcessPipelineTests(_PipelineFixture):
         self.run.refresh_from_db()
         self.boq.refresh_from_db()
         self.assertEqual(self.run.status, RunStatus.COMPLETED)
-        self.assertEqual(self.boq.status, BOQStatus.COMPLETED)
+        self.assertEqual(self.boq.status, BOQStatus.UNDER_REVIEW)
 
         match = ProductMatch.objects.get(boq_item=self.item)
         self.assertEqual(match.product, self.pipe)
@@ -75,6 +75,7 @@ class ProcessPipelineTests(_PipelineFixture):
             ).exists()
         )
 
+    @override_settings(OPENAI_API_KEY="placeholder-key")
     def test_failure_path_marks_failed_and_notifies(self):
         with mock.patch(
             "apps.matching.services.matching_service.ProductMatchingService.match_run",

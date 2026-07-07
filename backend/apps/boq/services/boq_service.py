@@ -16,7 +16,7 @@ from apps.make_list.models import MakeListEntry
 from common.choices import BOQStatus, RunStatus
 from apps.audit.services import record
 
-from .parser import parse_boq_items, parse_make_list
+from .parser import parse_boq_workbook, parse_make_list
 
 logger = logging.getLogger("boq_ai")
 
@@ -48,10 +48,12 @@ class BOQCreationService:
 
     def _capture_items(self, run: BOQRun, boq: BOQ) -> None:
         try:
-            items = parse_boq_items(boq.uploaded_file.path)
+            headers, items = parse_boq_workbook(boq.uploaded_file.path)
         except Exception:  # noqa: BLE001 - parsing is best-effort at upload
             logger.exception("Failed to parse BOQ items for BOQ %s", boq.pk)
             return
+        run.original_headers = headers
+        run.save(update_fields=["original_headers"])
         objects = [BOQItem(boq_run=run, **item) for item in items]
         if objects:
             BOQItem.objects.bulk_create(objects, batch_size=500)

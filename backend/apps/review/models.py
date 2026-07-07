@@ -1,6 +1,6 @@
 """Review models.
 
-Captures expert modifications to product / vendor selection during review
+Captures expert modifications to product / rate selection during review
 (docs/DATABASE_ARCHITECTURE.md - Review Tables). Experts may change product,
 vendor and costs but may not modify the master database
 (docs/AGENTS.md - Review Rules).

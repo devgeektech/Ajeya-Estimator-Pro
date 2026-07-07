@@ -26,28 +26,27 @@ class ProcessingJobService:
     def __init__(self, boq: BOQ):
         self.boq = boq
 
-    @transaction.atomic
     def start(self) -> ProcessingJob:
         """Queue processing for the BOQ and dispatch the background task."""
-        run = self._resolve_target_run()
+        with transaction.atomic():  # type: ignore
+            run = self._resolve_target_run()
+            job, _ = ProcessingJob.objects.get_or_create(boq_run=run)
+            job.status = RunStatus.QUEUED
+            job.progress = 0
+            job.message = "Queued"
+            job.save(update_fields=["status", "progress", "message", "updated_at"])
 
-        job, _ = ProcessingJob.objects.get_or_create(boq_run=run)
-        job.status = RunStatus.QUEUED
-        job.progress = 0
-        job.message = "Queued"
-        job.save(update_fields=["status", "progress", "message", "updated_at"])
+            run.status = RunStatus.QUEUED
+            run.started_at = None
+            run.completed_at = None
+            run.save(update_fields=["status", "started_at", "completed_at"])
 
-        run.status = RunStatus.QUEUED
-        run.started_at = None
-        run.completed_at = None
-        run.save(update_fields=["status", "started_at", "completed_at"])
+            self.boq.status = BOQStatus.PROCESSING
+            self.boq.save(update_fields=["status"])
 
-        self.boq.status = BOQStatus.PROCESSING
-        self.boq.save(update_fields=["status"])
-
-        transaction.on_commit(lambda: self._dispatch(run.pk))
-        logger.info("Queued processing for BOQ %s (run %s)", self.boq.pk, run.run_number)
-        return job
+            transaction.on_commit(lambda: self._dispatch(run.pk))
+            logger.info("Queued processing for BOQ %s (run %s)", self.boq.pk, run.run_number)
+            return job
 
     def _resolve_target_run(self) -> BOQRun:
         latest = self.boq.runs.order_by("-run_number").first()
@@ -65,6 +64,7 @@ class ProcessingJobService:
             boq=self.boq,
             run_number=source.run_number + 1,
             status=RunStatus.QUEUED,
+            original_headers=source.original_headers,
         )
         items = [
             BOQItem(
@@ -73,6 +73,8 @@ class ProcessingJobService:
                 description=item.description,
                 quantity=item.quantity,
                 unit=item.unit,
+                original_data=item.original_data,
+                row_json=item.row_json,
             )
             for item in source.items.all()
         ]
@@ -89,4 +91,4 @@ class ProcessingJobService:
 
     @staticmethod
     def _dispatch(run_id: int) -> None:
-        process_boq_task.delay(run_id)
+        process_boq_task.delay(run_id)  # type: ignore

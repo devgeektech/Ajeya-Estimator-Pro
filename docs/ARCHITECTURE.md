@@ -110,7 +110,7 @@ Responsibilities:
 Responsibilities:
 
 * BOQ processing.
-* Vendor selection.
+* Lowest final-amount rate selection.
 * Cost calculation.
 * Confidence scoring.
 * Review logic.
@@ -299,9 +299,7 @@ AI Analysis
         |
 Product Matching
         |
-Make Filtering
-        |
-Vendor Selection
+Lowest Final Amount Rate Selection
         |
 Cost Calculation
         |
@@ -333,9 +331,9 @@ AI never performs:
 # AI Workflow
 
 ```text
-BOQ Description
+Grouped BOQ Row JSON
         |
-OpenAI
+OpenAI + Active Database Context
         |
 Structured Data
         |
@@ -343,6 +341,11 @@ Database Search
         |
 Confidence Calculation
 ```
+
+The BOQ parser creates one structured JSON payload per business row. A
+serial-numbered row and its inherited blank-serial child/detail rows are kept
+together in that payload. The AI layer receives that JSON plus compact active
+database vocabulary from Rate_Master, Labour_Master, and TOR_Labour.
 
 ---
 
@@ -355,19 +358,16 @@ Search Priority:
 3. Embedding Match
 4. AI Validation
 
+Matching searches the original BOQ description first, then database-shaped AI
+product candidates and database hints extracted from the grouped row JSON.
+
 ---
 
-# Vendor Architecture
+# Rate Selection Architecture
 
-Project Level:
-
-* Lowest Cost.
-* Preferred Vendor.
-* Custom Mode.
-
-Review Level:
-
-* Row-level override.
+When product matching returns multiple Rate_Master rows for one product, the
+processing workflow selects the row with the lowest `Final_Amount_(Excl GST)`.
+Vendor selection modes are not active in the current pipeline.
 
 ---
 
@@ -426,7 +426,12 @@ Backup Old Version
 Import New Data
         |
 Activate
+        |
+Generate Embeddings
 ```
+
+Database upload/import is synchronous. Celery is not used for database import or
+database embedding generation in the active workflow.
 
 Versions:
 
@@ -498,11 +503,12 @@ Exported
 
 Contains:
 
-* Product.
-* Vendor.
-* Labour.
-* Costs.
-* Confidence.
+* Breakdown List sheet.
+* AI interpretation.
+* Selected rate row.
+* Make and supplier.
+* Material/commercial cost values.
+* Labour and confidence.
 
 Allows:
 
@@ -516,13 +522,18 @@ Allows:
 
 Sheet 1:
 
-Internal Review.
+Breakdown List.
 
 Sheet 2:
 
 Client BOQ.
 
 Both sheets remain linked.
+
+The Client BOQ sheet preserves the uploaded BOQ layout where available and only
+fills Unit, Quantity, Rate, and Amount. Existing Unit and Quantity values are
+preserved; Rate and Amount are placed on the child/detail row when that row
+contains the product unit or quantity.
 
 ---
 
@@ -629,6 +640,8 @@ Logs:
 
 * User actions.
 * BOQ processing.
+* Runtime AI instructions.
+* Row-level AI extraction results.
 * AI calls.
 * Errors.
 * Exports.
@@ -659,18 +672,6 @@ Jobs may be retried.
 
 ---
 
-# Future Expansion
-
-Possible additions:
-
-* Multiple AI providers.
-* Dashboard analytics.
-* Vendor analytics.
-* ERP integrations.
-* API integrations.
-
----
-
 # Architecture Decisions
 
 | Decision       | Choice     |
@@ -698,4 +699,4 @@ This document is the authoritative source for:
 * Application structure.
 * Technical decisions.
 
-All future technical documents shall conform to this architecture.
+All technical documents shall conform to this architecture.

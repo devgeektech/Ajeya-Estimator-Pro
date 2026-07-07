@@ -2,12 +2,11 @@
 
 Implements the documented import workflow (docs/AGENTS.md - Database Rules):
 
-    Validate -> Backup -> Import -> Generate Embeddings -> Activate
+Validate -> Backup -> Import -> Activate -> Generate Embeddings
 
 The whole operation runs inside a single transaction so a failure leaves the
-previously active database untouched. Embedding generation is delegated to the
-AI layer and is deferred until the AI/matching sprints; the hook is invoked
-here so the workflow order is preserved.
+previously active database untouched. Embedding generation runs synchronously
+after activation and never queues a Celery task.
 """
 from __future__ import annotations
 
@@ -47,45 +46,109 @@ def _to_str(value) -> str:
     return "" if value is None else str(value).strip()
 
 
+def _row_value(row: dict, *keys: str):
+    for key in keys:
+        value = row.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _stable_code_part(value) -> str:
+    text = _to_str(value)
+    if not text:
+        return ""
+    return "_".join(text.upper().replace("/", " ").replace("-", " ").split())
+
+
+def _synth_rate_code(row: dict) -> str:
+    parts = [
+        row.get("category"),
+        _row_value(row, "sub_category", "subcategory"),
+        row.get("class"),
+        _row_value(row, "size_mm", "size", "capacity", "head"),
+    ]
+    return "_".join(part for part in (_stable_code_part(value) for value in parts) if part)
+
+
+def _synth_description(row: dict) -> str:
+    parts = [
+        row.get("category"),
+        _row_value(row, "sub_category", "subcategory"),
+        row.get("class"),
+        _row_value(row, "size_mm", "size"),
+        row.get("capacity"),
+        row.get("head"),
+        row.get("unit"),
+    ]
+    return " ".join(_to_str(part) for part in parts if _to_str(part))
+
+
+def _discounted_rate(row: dict):
+    rate = _row_value(
+        row,
+        "net_material_rate",
+        "net_purchase_rate",
+    )
+    if rate not in (None, ""):
+        return rate
+
+    base_rate = _row_value(row, "base_purchase_rate", "purchase_rate")
+    discount = _row_value(row, "discount", "discount_percent")
+    if base_rate in (None, ""):
+        return 0
+    base = _to_decimal(base_rate)
+    if discount in (None, ""):
+        return base
+    discount_value = _to_decimal(discount)
+    if discount_value:
+        return base * (Decimal("1") - (discount_value / Decimal("100")))
+    return base
+
+
+def _final_amount(row: dict):
+    value = _row_value(row, "final_amount_excl_gst", "final_amount", "final_expenditure")
+    if value not in (None, ""):
+        return value
+    return _discounted_rate(row)
+
+
 # Per-sheet field extraction. Each builder receives a normalized row dict and
 # returns model field kwargs (excluding the database_version FK).
 def _rate_fields(row: dict) -> dict:
-    # 1. Product code: Excel has "tech_key"
-    p_code = _to_str(row.get("tech_key") or row.get("product_code"))
-    
-    # 2. Description: if not present, synthesize from category, subcategory, class, size
-    desc = _to_str(row.get("description"))
-    if not desc:
-        parts = [
-            _to_str(row.get("category")),
-            _to_str(row.get("sub_category") or row.get("subcategory")),
-            _to_str(row.get("class")),
-            _to_str(row.get("size_mm") or row.get("size")),
-        ]
-        desc = " ".join([p for p in parts if p])
-    
-    # 3. Purchase rate: prioritize net rate, then base purchase rate, then purchase rate
-    p_rate = row.get("net_material_rate") or row.get("net_purchase_rate") or row.get("base_purchase_rate") or row.get("purchase_rate") or 0
-
+    p_code = _to_str(_row_value(row, "tech_key", "product_code", "match_key", "source_key"))
+    if not p_code:
+        p_code = _synth_rate_code(row)
+    desc = _to_str(_row_value(row, "description", "match_key")) or _synth_description(row)
     return {
         "product_code": p_code,
         "description": desc,
         "make": _to_str(row.get("make")),
-        "vendor": _to_str(row.get("supplier") or row.get("vendor")),
-        "purchase_rate": _to_decimal(p_rate),
+        "vendor": _to_str(_row_value(row, "supplier", "vendor")),
+        "purchase_rate": _to_decimal(_discounted_rate(row)),
+        "final_amount_excl_gst": _to_decimal(_final_amount(row)),
         "unit": _to_str(row.get("unit")),
         "category": _to_str(row.get("category")),
-        "subcategory": _to_str(row.get("sub_category") or row.get("subcategory")),
-        "remarks": _to_str(row.get("remarks") or row.get("status")),
+        "subcategory": _to_str(_row_value(row, "sub_category", "subcategory")),
+        "remarks": _to_str(_row_value(row, "remarks", "status")),
         "spec_json": row,
     }
 
 
 def _labour_fields(row: dict) -> dict:
-    l_code = _to_str(row.get("tech_key") or row.get("labour_code"))
-    l_name = _to_str(row.get("category") or row.get("labour_name") or row.get("sub_category") or row.get("subcategory"))
-    # Prioritize multi-factor rate, then per-unit, then base rate
-    l_rate = row.get("total_labour_per_unit_with__labour__multipler") or row.get("total_labour_per_unit") or row.get("labour_rate_per_unit") or row.get("labour_rate") or row.get("base_rate") or 0
+    l_code = _to_str(_row_value(row, "tech_key", "labour_code")) or _synth_rate_code(row)
+    l_name = _to_str(
+        _row_value(row, "labour_name", "category", "sub_category", "subcategory")
+    )
+    l_rate = _row_value(
+        row,
+        "total_labour_per_unit_with_labour_multipler",
+        "total_labour_per_unit_with_labour_multipler",
+        "total_labour_per_unit",
+        "labour_rate_per_unit",
+        "labour_rate",
+        "base_rate",
+    ) or 0
 
     return {
         "labour_code": l_code,
@@ -97,25 +160,31 @@ def _labour_fields(row: dict) -> dict:
 
 
 def _tor_main_fields(row: dict) -> dict:
+    tor_code = _to_str(_row_value(row, "tor_code", "category"))
     return {
-        "tor_code": _to_str(row.get("tor_code")),
-        "description": _to_str(row.get("description")),
+        "tor_code": tor_code,
+        "description": _to_str(_row_value(row, "description", "category")),
+        "spec_json": row,
     }
 
 
 def _tor_labour_fields(row: dict) -> dict:
     return {
-        "tor_code": _to_str(row.get("tor_code")),
-        "labour_code": _to_str(row.get("labour_code")),
-        "quantity": _to_decimal(row.get("quantity")),
+        "tor_code": _to_str(_row_value(row, "tor_code", "category")),
+        "labour_code": _to_str(_row_value(row, "labour_code", "labour_type")),
+        "quantity": _to_decimal(_row_value(row, "quantity", "labour_buffer")),
+        "spec_json": row,
     }
 
 
 def _tor_accessories_fields(row: dict) -> dict:
     return {
-        "tor_code": _to_str(row.get("tor_code")),
-        "accessory_code": _to_str(row.get("accessory_code")),
-        "quantity": _to_decimal(row.get("quantity")),
+        "tor_code": _to_str(_row_value(row, "tor_code", "category")),
+        "accessory_code": _to_str(
+            _row_value(row, "accessory_code", "sub_category", "subcategory")
+        ),
+        "quantity": _to_decimal(_row_value(row, "quantity", "accessories")),
+        "spec_json": row,
     }
 
 
@@ -127,6 +196,18 @@ VERSIONED_SHEETS = {
     "TOR_Labour": (TORLabour, _tor_labour_fields),
     "TOR_Accessories": (TORAccessories, _tor_accessories_fields),
 }
+
+REQUIRED_MODEL_FIELDS = {
+    RateMaster: ("product_code", "description"),
+    LabourMaster: ("labour_code",),
+    TORMain: ("tor_code",),
+    TORLabour: ("tor_code", "labour_code"),
+    TORAccessories: ("tor_code",),
+}
+
+
+def _has_required_fields(model, fields: dict) -> bool:
+    return all(_to_str(fields.get(field)) for field in REQUIRED_MODEL_FIELDS.get(model, ()))
 
 
 class DatabaseImportService:
@@ -151,8 +232,8 @@ class DatabaseImportService:
                 version = self._create_version()
                 self._import_versioned_sheets(version)
                 self._import_state_control()
-                self._generate_embeddings(version)
                 self._activate(version)
+            self._generate_embeddings(version)
             self._enforce_retention()
         except ImportError_:
             raise
@@ -178,19 +259,28 @@ class DatabaseImportService:
     def _import_versioned_sheets(self, version: DatabaseVersion) -> None:
         for sheet_name, (model, builder) in VERSIONED_SHEETS.items():
             rows = read_rows(self.file_path, sheet_name)
-            objects = [
-                model(database_version=version, **builder(row))
-                for row in rows
-            ]
+            objects = []
+            skipped = 0
+            for row in rows:
+                fields = builder(row)
+                if not _has_required_fields(model, fields):
+                    skipped += 1
+                    continue
+                objects.append(model(database_version=version, **fields))
             if objects:
                 model.objects.bulk_create(objects, batch_size=500)
-            logger.info("Imported %s rows from %s", len(objects), sheet_name)
+            logger.info(
+                "Imported %s rows from %s (%s skipped)",
+                len(objects),
+                sheet_name,
+                skipped,
+            )
 
     def _import_state_control(self) -> None:
         """State control is not version-scoped; upsert by state name."""
         rows = read_rows(self.file_path, "State_Control_List")
         for row in rows:
-            state_name = _to_str(row.get("state_name"))
+            state_name = _to_str(_row_value(row, "state_name", "state"))
             if not state_name:
                 continue
             StateControl.objects.update_or_create(
@@ -204,13 +294,11 @@ class DatabaseImportService:
             )
 
     def _generate_embeddings(self, version: DatabaseVersion) -> None:
-        """Embedding generation hook.
+        """Generate embeddings inline for the imported RateMaster rows."""
+        from ai.embeddings.generate_database_embeddings import generate_embeddings_for_version
 
-        Real generation is implemented in the AI/matching sprints
-        (docs/DATABASE_ARCHITECTURE.md - Embedding Strategy). Kept in the
-        workflow so ordering is preserved.
-        """
-        logger.info("Embedding generation deferred to AI sprint for v%s", version.version_number)
+        summary = generate_embeddings_for_version(version.pk)
+        logger.info("Embedding generation finished for v%s: %s", version.version_number, summary)
 
     def _activate(self, version: DatabaseVersion) -> None:
         DatabaseVersion.objects.exclude(pk=version.pk).update(is_active=False)

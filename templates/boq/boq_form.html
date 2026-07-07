@@ -5,9 +5,9 @@
 {% block content %}
 <div class="panel panel--narrow">
     <p class="panel__text" style="margin-bottom:20px;">
-        Upload a BOQ workbook and, optionally, its make list. The original rows
-        are captured and a processing run is created. Your BOQ is private to
-        your account.
+        Upload a BOQ workbook and, optionally, its make list as Excel or PDF.
+        PDF is supported for make lists only. The original BOQ rows are captured
+        and a processing run is created.
     </p>
     <form method="post" enctype="multipart/form-data" novalidate>
         {% csrf_token %}

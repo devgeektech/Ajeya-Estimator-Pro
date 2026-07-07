@@ -60,6 +60,43 @@ def build_workbook(skip_sheet: str | None = None) -> bytes:
     return buffer.getvalue()
 
 
+def build_client_database_workbook() -> bytes:
+    wb = Workbook()
+    wb.remove(wb.active)
+
+    ws = wb.create_sheet("Rate_Master")
+    ws.append([
+        "Column1", "Category", "Sub Category", "Class", "Size_mm", "Make",
+        "Unit", "Supplier", "Base_Purchase_Rate", "Discount %",
+        "Net Material Rate", "Handling_%", "Profit_%", "Final_Amount_(Excl GST)", "Tech_Key",
+    ])
+    ws.append([None, "PIPE", "MS", "C", 400, "TATA", "mm", "Tiger", 10977, 44, None, 0.02, 0.1, 7200, None])
+
+    ws = wb.create_sheet("Labour_Master")
+    ws.append(["Tech_Key", "Category", "Sub_Category", "Size", "Unit", "Base_Rate"])
+    ws.append(["PIPE_MS_C_400", "PIPE", "MS", 400, "mm", 100])
+
+    ws = wb.create_sheet("TOR_Main")
+    ws.append(["Category  ", " Handling_%  ", "Wastage_%", "Profit_%  ", "Project_State"])
+    ws.append(["PIPE", 0.02, 0.01, 0.1, "Delhi"])
+
+    ws = wb.create_sheet("TOR_Labour")
+    ws.append(["Testing_%", "Scaffolding_%", "Consumables_%", "Painting_Rate", "Labour_Buffer_%"])
+    ws.append([0.05, 0.1, 0.05, 55, 0.04])
+
+    ws = wb.create_sheet("TOR_Accessories")
+    ws.append(["Category ", "Sub_Category ", "Min_Size", "Max_Size", "Accessories_% "])
+    ws.append(["PIPE", "MS", 200, 400, 0.15])
+
+    ws = wb.create_sheet("State_Control_List")
+    ws.append(["State", "Labour_Multiplier"])
+    ws.append(["Delhi", 1.2])
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
+
+
 def write_temp_workbook(skip_sheet: str | None = None) -> str:
     data = build_workbook(skip_sheet)
     tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
@@ -97,6 +134,7 @@ class ReadRowsTests(TestCase):
             Path(path).unlink(missing_ok=True)
 
 
+@override_settings(OPENAI_API_KEY="placeholder-key")
 class ImportServiceTests(TestCase):
     def setUp(self):
         self.admin = User.objects.create_superuser("admin@example.com", "pass12345")
@@ -145,7 +183,27 @@ class ImportServiceTests(TestCase):
         self._import()
         self.assertEqual(StateControl.objects.filter(state_name="Maharashtra").count(), 1)
 
+    def test_imports_client_database_shape_with_synthesized_codes(self):
+        tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
+        tmp.write(build_client_database_workbook())
+        tmp.close()
+        try:
+            version = DatabaseImportService(tmp.name, self.admin, "client.xlsx").run()
+        finally:
+            Path(tmp.name).unlink(missing_ok=True)
 
+        rate = RateMaster.objects.get(database_version=version)
+        self.assertEqual(rate.product_code, "PIPE_MS_C_400")
+        self.assertEqual(rate.description, "PIPE MS C 400 mm")
+        self.assertEqual(rate.vendor, "Tiger")
+        self.assertEqual(str(rate.purchase_rate), "6147.12")
+        self.assertEqual(str(rate.final_amount_excl_gst), "7200.00")
+        self.assertEqual(rate.spec_json["handling"], 0.02)
+        self.assertEqual(TORMain.objects.get(database_version=version).tor_code, "PIPE")
+        self.assertEqual(str(StateControl.objects.get(state_name="Delhi").labour_multiplier), "1.2000")
+
+
+@override_settings(OPENAI_API_KEY="placeholder-key")
 class RollbackServiceTests(TestCase):
     def setUp(self):
         self.admin = User.objects.create_superuser("admin@example.com", "pass12345")
@@ -168,7 +226,7 @@ class RollbackServiceTests(TestCase):
         self.assertFalse(second.is_active)
 
 
-@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp(), OPENAI_API_KEY="placeholder-key")
 class DatabaseAccessTests(TestCase):
     def setUp(self):
         self.admin = User.objects.create_superuser("admin@example.com", "pass12345")
@@ -190,14 +248,8 @@ class DatabaseAccessTests(TestCase):
         self.client.force_login(self.admin)
         self.assertEqual(self.client.get(reverse("database:list")).status_code, 200)
 
-    @override_settings(CELERY_TASK_ALWAYS_EAGER=True)
     def test_upload_imports_database(self):
-        """Admin can upload a workbook and the import runs synchronously in tests.
-
-        The form requires a 'name' field (added 2026-07-02). The Celery task is forced
-        to run eagerly via CELERY_TASK_ALWAYS_EAGER so the import completes synchronously
-        and we can assert on the database state.
-        """
+        """Admin can upload a workbook and the import runs synchronously."""
         self.client.force_login(self.admin)
         upload = SimpleUploadedFile(
             "master.xlsx",

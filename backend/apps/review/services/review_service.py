@@ -19,7 +19,6 @@ from apps.matching.models import ProductMatch
 from apps.notifications.services import notify
 from apps.review.models import ReviewItem
 from common.choices import BOQStatus
-from common.choices import VendorSelectionMode
 from common.exceptions import ValidationError
 
 logger = logging.getLogger("boq_ai")
@@ -77,24 +76,18 @@ class ReviewService:
             return qs.filter(product_code=match.product.product_code)
         return qs
 
-    def apply_selection(self, item, rate, user=None, notes: str = "", custom_maker: str = ""):
+    def apply_selection(self, item, rate, user=None, notes: str = ""):
         """Re-point an item's match at ``rate``; record + recalculate.
 
         Works for both vendor changes (same product_code) and product changes
-        (different product_code). When ``custom_maker`` is provided the Expert
-        has typed a maker name manually — stored on ProductMatch and recorded
-        in the ReviewItem notes for full audit trail.
+        (different product_code).
         """
         if rate is None:
-            raise ValidationError("A target product/vendor row is required.")
+            raise ValidationError("A target product/rate row is required.")
 
         match = item.product_matches.first()
         if match is None:
             match = ProductMatch(boq_item=item)
-
-        audit_notes = notes
-        if custom_maker:
-            audit_notes = f"Custom maker: {custom_maker}" + (f" | {notes}" if notes else "")
 
         review = ReviewItem.objects.create(
             boq_item=item,
@@ -102,15 +95,13 @@ class ReviewService:
             original_product=match.product.product_code if match.product else "",
             revised_product=rate.product_code,
             original_vendor=match.vendor or "",
-            revised_vendor=custom_maker if custom_maker else (rate.vendor or ""),
-            notes=audit_notes,
+            revised_vendor=rate.vendor or "",
+            notes=notes,
         )
 
         match.product = rate
-        match.vendor = custom_maker if custom_maker else (rate.vendor or "")
-        match.make = custom_maker if custom_maker else (rate.make or "")
-        match.vendor_mode = VendorSelectionMode.CUSTOM if custom_maker else VendorSelectionMode.LOWEST_COST
-        match.custom_maker = custom_maker
+        match.vendor = rate.vendor or ""
+        match.make = rate.make or ""
         match.match_reason = "manual"
         match.confidence_score = 100  # expert override is authoritative
         match.save()
@@ -122,6 +113,6 @@ class ReviewService:
             "Item %s re-pointed to %s%s by review",
             item.pk,
             rate.product_code,
-            f" [custom maker: {custom_maker}]" if custom_maker else "",
+            "",
         )
         return review

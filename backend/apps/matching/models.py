@@ -8,7 +8,6 @@ from django.db import models
 
 from apps.boq.models import BOQItem
 from apps.database_manager.models import RateMaster
-from common.choices import VendorSelectionMode
 
 
 class ProductMatch(models.Model):
@@ -27,19 +26,6 @@ class ProductMatch(models.Model):
     vendor = models.CharField(max_length=150, blank=True)
     match_reason = models.CharField(max_length=255, blank=True)
     ai_explanation = models.TextField(blank=True)
-    # Vendor selection mode — set by VendorSelectionService or overridden during review.
-    vendor_mode = models.CharField(
-        max_length=20,
-        choices=VendorSelectionMode.choices,
-        default=VendorSelectionMode.LOWEST_COST,
-        blank=True,
-    )
-    # When the Expert selects a custom maker during review, the typed name is stored here.
-    custom_maker = models.CharField(
-        max_length=255,
-        blank=True,
-        help_text="Custom maker name entered by the Expert during review.",
-    )
 
     class Meta:
         ordering = ["boq_item", "-confidence_score"]

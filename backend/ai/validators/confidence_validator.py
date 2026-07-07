@@ -1,4 +1,4 @@
-"""Confidence validation helpers (scaffold - Phase 5)."""
+"""Confidence validation helpers."""
 from __future__ import annotations
 
 from common.constants import confidence_band

@@ -30,8 +30,8 @@
         </form>
         {% endif %}
         {% if latest_export %}
-        <a href="{{ latest_export.internal_sheet.url }}" class="btn btn--ghost btn--small">Internal sheet</a>
-        <a href="{{ latest_export.client_sheet.url }}" class="btn btn--ghost btn--small">Client sheet</a>
+        <a href="{% url 'exports:download' boq.pk 'client' %}" class="btn btn--ghost btn--small">Download BOQ</a>
+        <a href="{% url 'exports:download' boq.pk 'breakdown' %}" class="btn btn--ghost btn--small">Breakdown list</a>
         {% endif %}
     </div>
 </div>
@@ -45,7 +45,7 @@
                 <th>Description</th>
                 <th>Qty</th>
                 <th>Product</th>
-                <th>Vendor selection</th>
+                <th>Rate option</th>
                 <th>Final rate</th>
                 <th>Confidence</th>
             </tr>

@@ -9,6 +9,12 @@ from __future__ import annotations
 from utils.text import normalize
 
 
+def selection_amount(rate):
+    """Amount used when multiple RateMaster rows match the same product."""
+    value = getattr(rate, "final_amount_excl_gst", None)
+    return value if value not in (None, 0) else getattr(rate, "purchase_rate", 0)
+
+
 def find_exact(query: str, rates) -> object | None:
     """Return the RateMaster whose code/description equals the query, else None.
 
@@ -18,9 +24,11 @@ def find_exact(query: str, rates) -> object | None:
     target = normalize(query)
     if not target:
         return None
-    for rate in rates:
-        if normalize(rate.product_code) == target:
-            return rate
-        if normalize(rate.description) == target:
-            return rate
-    return None
+    matches = [
+        rate
+        for rate in rates
+        if normalize(rate.product_code) == target or normalize(rate.description) == target
+    ]
+    if not matches:
+        return None
+    return min(matches, key=selection_amount)

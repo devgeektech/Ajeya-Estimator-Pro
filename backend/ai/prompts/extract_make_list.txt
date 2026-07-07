@@ -1,0 +1,14 @@
+Extract the list of approved makes (brands, manufacturers) and their associated categories from the following document text.
+
+If categories are not explicitly provided alongside a make, you can leave the category empty or infer it if it is a section header. 
+Ensure there are no duplicates.
+
+Return ONLY a JSON object with a "makes" array. Each array item must have the exact keys "make" and "category".
+For example:
+{{"makes": [
+  {{"make": "BrandA", "category": "Pipes"}},
+  {{"make": "BrandB", "category": ""}}
+]}}
+
+Document Text:
+{text}

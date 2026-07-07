@@ -1,4 +1,4 @@
-"""Celery task: process a BOQ run asynchronously (scaffold).
+"""Celery task: process a BOQ run asynchronously.
 
 Wraps workflows.boq_processing.process_boq_run. Views must never block
 (docs/AGENTS.md - Background Jobs).

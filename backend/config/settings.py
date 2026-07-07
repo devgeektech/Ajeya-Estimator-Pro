@@ -250,6 +250,20 @@ LOGGING = {
             "level": "ERROR",
             "formatter": "verbose",
         },
+        "ai_extraction_file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": str(LOGS_DIR / "ai_extractions.log"),
+            "maxBytes": 10 * 1024 * 1024,
+            "backupCount": 10,
+            "formatter": "verbose",
+        },
+        "ai_instruction_file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": str(LOGS_DIR / "ai_instructions.log"),
+            "maxBytes": 10 * 1024 * 1024,
+            "backupCount": 10,
+            "formatter": "verbose",
+        },
     },
     "root": {
         "handlers": ["console", "app_file"],
@@ -258,6 +272,16 @@ LOGGING = {
     "loggers": {
         "boq_ai": {
             "handlers": ["console", "app_file", "error_file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "boq_ai.ai_rows": {
+            "handlers": ["ai_extraction_file", "error_file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "boq_ai.ai_instructions": {
+            "handlers": ["ai_instruction_file", "error_file"],
             "level": "INFO",
             "propagate": False,
         },

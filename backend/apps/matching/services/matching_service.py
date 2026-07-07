@@ -12,9 +12,8 @@ reason. Items scoring below the pending threshold (< 30%) leave the product
 blank and are queued for Super Admin approval
 (docs/AGENTS.md - Pending Product Rules).
 
-Confidence *scoring refinement* and explanations land in Sprint 11; here we
-assign deterministic scores per strategy so downstream stages have data to work
-with.
+Confidence scoring is refined after matching; this service assigns the
+deterministic strategy score used by downstream stages.
 """
 from __future__ import annotations
 
@@ -45,12 +44,54 @@ class ProductMatchingService:
         self._ai_enabled = AIService.is_enabled()
 
     @staticmethod
-    def _query_text(item) -> str:
-        """Build the search text from AI extraction, falling back to the row."""
+    def _query_texts(item) -> list[str]:
+        """Build database-search queries, always preferring the source BOQ row."""
         extraction = item.ai_extraction or {}
-        parts = [extraction.get(field) for field in ("product", "size", "material", "make")]
-        text = " ".join(str(p) for p in parts if p)
-        return text or item.description
+        candidates: list[str] = [item.description]
+
+        top_level = ProductMatchingService._product_query(extraction)
+        if top_level:
+            candidates.append(top_level)
+
+        products = extraction.get("products")
+        if isinstance(products, list):
+            for product in products:
+                if not isinstance(product, dict):
+                    continue
+                candidates.extend(
+                    query
+                    for query in (
+                        ProductMatchingService._product_query(product),
+                        product.get("database_hint"),
+                    )
+                    if query
+                )
+
+        queries: list[str] = []
+        seen: set[str] = set()
+        for query in candidates:
+            text = str(query).strip()
+            key = normalize(text)
+            if not text or key in seen:
+                continue
+            seen.add(key)
+            queries.append(text)
+        return queries
+
+    @staticmethod
+    def _product_query(product: dict) -> str:
+        parts = [
+            product.get(field)
+            for field in (
+                "product",
+                "size",
+                "material",
+                "make",
+                "category",
+                "subcategory",
+            )
+        ]
+        return " ".join(str(part) for part in parts if part).strip()
 
     def _match_one(self, query: str, rates, rates_by_code: dict):
         """Return (rate_or_None, confidence, reason) for a query."""
@@ -77,8 +118,13 @@ class ProductMatchingService:
         if rates is None or rates_by_code is None:
             rates, rates_by_code = self._load_rates()
 
-        query = self._query_text(item)
-        rate, confidence, reason = self._match_one(query, rates, rates_by_code)
+        rate = None
+        confidence = 0.0
+        reason = "no_match"
+        for query in self._query_texts(item):
+            rate, confidence, reason = self._match_one(query, rates, rates_by_code)
+            if rate is not None:
+                break
 
         # Idempotent reprocessing: clear prior results for this item.
         item.product_matches.all().delete()
@@ -86,7 +132,6 @@ class ProductMatchingService:
             boq_item=item, status=PendingProductStatus.PENDING
         ).delete()
 
-        extraction = item.ai_extraction or {}
         below_threshold = confidence < CONFIDENCE_PENDING_THRESHOLD
 
         # Below threshold -> leave the product blank and queue it for approval.
@@ -94,7 +139,7 @@ class ProductMatchingService:
             boq_item=item,
             product=None if below_threshold else rate,
             confidence_score=confidence,
-            make=(extraction.get("make") or (rate.make if rate else "")) or "",
+            make=(rate.make if (rate and not below_threshold) else "") or "",
             vendor=(rate.vendor if (rate and not below_threshold) else ""),
             match_reason=reason,
         )
@@ -102,7 +147,7 @@ class ProductMatchingService:
         if below_threshold:
             PendingProduct.objects.create(
                 description=item.description,
-                suggested_product=(rate.product_code if rate else extraction.get("product") or ""),
+                suggested_product=(rate.product_code if rate else ""),
                 confidence_score=confidence,
                 boq_item=item,
                 created_by=created_by,
@@ -127,5 +172,7 @@ class ProductMatchingService:
             logger.warning("No active database version; matching has no candidates")
             return [], {}
         rates = list(RateMaster.objects.filter(database_version=version))
-        rates_by_code = {normalize(rate.product_code): rate for rate in rates}
+        rates_by_code: dict[str, list[RateMaster]] = {}
+        for rate in rates:
+            rates_by_code.setdefault(normalize(rate.product_code), []).append(rate)
         return rates, rates_by_code

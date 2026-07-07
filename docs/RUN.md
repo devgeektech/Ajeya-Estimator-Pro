@@ -62,6 +62,7 @@ DATABASE_URL=postgres://boq_user:localpass@localhost:5432/boq_db
 REDIS_URL=redis://localhost:6379/0
 CELERY_BROKER_URL=redis://localhost:6379/0
 CELERY_RESULT_BACKEND=redis://localhost:6379/1
+CELERY_TASK_ALWAYS_EAGER=False
 SECRET_KEY=paste-your-generated-key-here
 ```
 
@@ -71,7 +72,40 @@ To generate a completely random, secure `SECRET_KEY`, run this command in your t
 python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
 ```
 
-### 4. Database Migration, Static Files, & Run
+### 4. Redis and Celery for Local Windows Development
+
+On Windows without Docker, run Redis through WSL/Ubuntu.
+
+Start Redis in WSL:
+
+```bash
+sudo service redis-server start
+redis-cli ping
+```
+
+The expected Redis response is:
+
+```text
+PONG
+```
+
+From PowerShell, with the project virtual environment active, verify that the
+Django/Celery Python environment can reach Redis:
+
+```powershell
+python -c "import redis; print(redis.Redis.from_url('redis://localhost:6379/0').ping())"
+```
+
+The expected Python response is:
+
+```text
+True
+```
+
+For local development, keep Redis running in WSL. You do not need to keep
+`redis-cli` open.
+
+### 5. Database Migration, Static Files, & Run
 
 Run the migrations to build the tables, collect the CSS/JS files, create an admin account, and start the server:
 
@@ -84,6 +118,17 @@ python manage.py runserver
 ```
 
 You can now access the app at `http://127.0.0.1:8000`.
+
+In a separate PowerShell terminal, start the Celery worker:
+
+```powershell
+cd C:\Users\vikas.DESKTOP-61LEE8B\Projects\BOQ_AI\backend
+python -m celery -A config worker --loglevel=info --pool=solo
+```
+
+Keep both the Django `runserver` terminal and the Celery worker terminal open
+while using the app locally. If the Celery terminal is closed, background jobs
+may queue in Redis but will not process until the worker is started again.
 
 ---
 
@@ -252,7 +297,32 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-## 9. Later: Domain, TLS, SMTP
+## 9. Deploying Future Feature Updates
+
+After pulling code updates on EC2, run checks, migrations, static collection,
+and service restarts:
+
+```bash
+cd /srv/boq_ai
+sudo -u boq_ai git pull
+sudo -u boq_ai .venv/bin/pip install -r requirements.txt
+cd backend
+sudo -u boq_ai bash -c 'set -a; source ../.env; set +a; ../.venv/bin/python manage.py check'
+sudo -u boq_ai bash -c 'set -a; source ../.env; set +a; ../.venv/bin/python manage.py migrate'
+sudo -u boq_ai bash -c 'set -a; source ../.env; set +a; ../.venv/bin/python manage.py collectstatic --noinput'
+sudo systemctl restart boq_ai-gunicorn boq_ai-celery
+```
+
+Verify the services:
+
+```bash
+systemctl status redis-server boq_ai-gunicorn boq_ai-celery
+journalctl -u boq_ai-gunicorn -n 50 --no-pager
+journalctl -u boq_ai-celery -n 50 --no-pager
+curl -I http://13.205.90.58/
+```
+
+## 10. Later: Domain, TLS, SMTP
 
 After buying a domain, install Certbot and enable HTTPS:
 

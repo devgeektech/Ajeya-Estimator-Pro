@@ -143,16 +143,17 @@ AI shall never:
 
 # Background Jobs
 
-Long-running operations must use Celery.
+Long-running BOQ operations must use Celery.
 
 Examples:
 
 * BOQ processing.
-* Embedding generation.
 * Exports.
 * Notifications.
 
-Views must never block.
+BOQ processing views must never block. Database upload/import is the active
+exception: it runs synchronously through the database import service so the
+database is active when the upload request completes.
 
 ---
 
@@ -168,8 +169,8 @@ All imports must:
 1. Validate.
 2. Backup.
 3. Import.
-4. Generate embeddings.
-5. Activate.
+4. Activate.
+5. Generate embeddings.
 
 ---
 
@@ -592,16 +593,6 @@ BOQ_AI currently uses a single EC2 runtime:
   not part of the active workflow.
 * Production-ready work only: use real client data, real PostgreSQL migrations,
   and real operational assumptions.
-
-# Future Documentation
-
-Still pending (post-UAT backlog):
-
-* API_SPEC.md — if a public REST API is added.
-* TEST_PLAN.md — formal test coverage report.
-* CURRENT_SPRINT.md — only needed when new sprints are opened.
-
----
 
 # Golden Rule
 

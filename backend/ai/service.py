@@ -23,6 +23,7 @@ from common.exceptions import AIServiceError
 from .openai_client import get_client, is_configured, load_prompt
 
 logger = logging.getLogger("boq_ai")
+instruction_logger = logging.getLogger("boq_ai.ai_instructions")
 
 
 class AIService:
@@ -35,12 +36,19 @@ class AIService:
     def is_enabled() -> bool:
         return is_configured()
 
-    def complete(self, prompt: str, *, json_mode: bool = False) -> str:
+    def complete(
+        self,
+        prompt: str,
+        *,
+        json_mode: bool = False,
+        template_name: str = "",
+    ) -> str:
         """Send a single-prompt chat completion and return the raw content."""
         if not self.is_enabled():
             raise AIServiceError("AI is disabled: configure OPENAI_API_KEY.")
 
         client = get_client()
+        self._log_instruction(prompt, json_mode=json_mode, template_name=template_name)
         kwargs: dict[str, Any] = {
             "model": str(self.model),
             "messages": [{"role": "user", "content": prompt}],
@@ -67,7 +75,7 @@ class AIService:
             prompt = template.format(**context)
         except KeyError as exc:
             raise AIServiceError(f"Missing prompt variable: {exc}") from exc
-        return self.complete(prompt)
+        return self.complete(prompt, template_name=template_name)
 
     def run_json_prompt(self, template_name: str, **context) -> dict:
         """Run a prompt expecting a JSON object response and parse it."""
@@ -77,8 +85,19 @@ class AIService:
         except KeyError as exc:
             raise AIServiceError(f"Missing prompt variable: {exc}") from exc
 
-        raw = self.complete(prompt, json_mode=True)
+        raw = self.complete(prompt, json_mode=True, template_name=template_name)
         try:
             return json.loads(raw)
         except json.JSONDecodeError as exc:
             raise AIServiceError(f"AI returned invalid JSON: {exc}") from exc
+
+    def _log_instruction(self, prompt: str, *, json_mode: bool, template_name: str) -> None:
+        """Log the full runtime instruction sent to the AI provider."""
+        payload = {
+            "event": "ai_runtime_instruction",
+            "model": str(self.model),
+            "template_name": template_name,
+            "json_mode": json_mode,
+            "instruction_text": prompt,
+        }
+        instruction_logger.info(json.dumps(payload, ensure_ascii=False, default=str))

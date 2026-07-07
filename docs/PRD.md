@@ -21,7 +21,7 @@ Approved
 
 BOQ_AI is an AI-assisted BOQ estimation and tender costing platform designed specifically for Fire Protection and MEP estimation workflows.
 
-The platform assists estimation teams in understanding BOQ descriptions, identifying products, selecting vendors, calculating material and execution costs, applying commercial rules, and generating final BOQ outputs while maintaining full human review and approval.
+The platform assists estimation teams in understanding BOQ descriptions, identifying products, calculating material and execution costs, applying commercial rules, and generating final BOQ outputs while maintaining full human review and approval.
 
 The objective is to reduce manual effort, improve consistency, minimize estimation errors, and increase tender processing capacity.
 
@@ -35,7 +35,7 @@ Current BOQ estimation processes depend heavily on experienced estimators who ma
 * Understand technical requirements.
 * Identify products.
 * Apply make restrictions.
-* Select vendors.
+* Select the lowest final-amount product rate row.
 * Calculate material costs.
 * Calculate labour costs.
 * Apply transportation and accessories.
@@ -185,7 +185,7 @@ File Processing:
 5. Make List Module
 6. AI Processing Module
 7. Product Matching Module
-8. Vendor Selection Module
+8. Rate Selection Module
 9. Cost Calculation Engine
 10. Confidence Engine
 11. Review Workflow Module
@@ -205,8 +205,8 @@ The system shall:
 * Validate structure.
 * Create database version.
 * Import data into PostgreSQL.
-* Generate product embeddings.
 * Activate imported database.
+* Generate product embeddings.
 
 The system shall maintain:
 
@@ -234,11 +234,15 @@ Import New Data
 
 ↓
 
-Generate Embeddings
+Activate Version
 
 ↓
 
-Activate Version
+Generate Embeddings
+
+Database upload and import run synchronously from the upload request. When the
+request completes, the imported database version is active and embedding
+generation has either completed or been skipped because AI is disabled.
 
 ---
 
@@ -253,7 +257,18 @@ Expert uploads:
 System creates:
 
 * BOQ record.
-* Processing job.
+* First BOQ run.
+* BOQ item rows grouped by source serial number.
+
+When a BOQ row has a serial number and following child/detail rows inherit that
+serial number by leaving the serial cell blank, the system treats the parent and
+children as one BOQ item. That grouped item is stored as structured JSON before
+AI processing so the full source context is preserved.
+
+When a parent or section row has no unit and quantity, it is treated as context
+for the measured child rows below it. Rows that carry the actual unit or
+quantity become the processing rows so final client BOQ exports fill the values
+on the same rows where the client expects rates and amounts.
 
 ---
 
@@ -299,6 +314,10 @@ AI is not used for:
 * Commercial calculations.
 * Vendor calculations.
 
+AI extraction shall receive database-aware context from the active master
+database so product and activity names are shaped toward Rate_Master,
+Labour_Master, and TOR_Labour terminology.
+
 ---
 
 # Product Matching Workflow
@@ -307,7 +326,11 @@ BOQ Description
 
 ↓
 
-AI Understanding
+Grouped BOQ row JSON
+
+↓
+
+Database-aware AI Understanding
 
 ↓
 
@@ -319,11 +342,7 @@ Embedding Search
 
 ↓
 
-Make Filtering
-
-↓
-
-Vendor Selection
+Lowest Final Amount Rate Selection
 
 ↓
 
@@ -345,6 +364,9 @@ The system shall:
 * Match sizes.
 * Match specifications.
 * Match makes.
+* Preserve product candidates extracted from one grouped BOQ row.
+* Search Rate_Master using the original BOQ description first, then extracted
+  product candidates and database hints.
 
 ---
 
@@ -356,41 +378,32 @@ Only approved makes may be selected.
 
 The system shall filter products according to the make list.
 
----
+Make lists are attached to a specific uploaded BOQ and are never shared by BOQ
+name or file name. Two BOQs with the same BOQ name and same make-list filename
+must remain separate records with separate make-list entries.
 
-# Vendor Selection
-
-The system shall support:
-
-## Lowest Cost Vendor
-
-Select lowest priced vendor.
-
----
-
-## Preferred Vendor
-
-Select predefined vendor.
+Make-list extraction shall tolerate common client formats, including title rows
+before the table, make/brand/manufacturer/OEM header aliases, multiple make
+columns, and cells containing multiple makes separated by common delimiters.
+The same make may be valid for multiple material categories; the system shall
+preserve each unique make and category pair.
 
 ---
 
-## Custom Vendor Selection
+# Rate Selection
 
-Allow expert to override vendor during review.
+When multiple Rate_Master rows match the same product, the system shall select
+the row with the lowest `Final_Amount_(Excl GST)`.
 
----
-
-# Row-Level Vendor Override
-
-Experts may modify vendor selection during review.
-
-The system shall recalculate costs accordingly.
+Vendor-specific selection modes, preferred vendor rules, and custom vendor
+override are not part of the active processing workflow.
 
 ---
 
 # Activity Extraction
 
-The system shall identify:
+The system shall identify labour/execution activities using active
+Labour_Master and TOR_Labour terminology, including:
 
 * Excavation.
 * Trenching.
@@ -493,24 +506,22 @@ Approved products become available in future BOQs.
 
 ---
 
-# Internal Review Sheet
+# Breakdown List
 
 Contains:
 
-* Original description.
-* Product selected.
-* Make selected.
-* Vendor selected.
-* Purchase rate.
-* Labour.
-* Transportation.
-* Accessories.
-* Overheads.
-* Profit.
-* Final rate.
+* BOQ serial number.
+* Original BOQ description.
+* AI interpretation.
+* Matched database serial/product code.
+* Approved make.
+* Supplier.
+* Purchase/material/commercial breakdown values.
+* Profit and final amount excluding GST.
+* Labour per-unit value.
 * Confidence score.
 
-This sheet is used internally.
+This sheet is used internally as the breakdown list.
 
 ---
 
@@ -518,11 +529,20 @@ This sheet is used internally.
 
 Contains:
 
-* Original BOQ format.
-* Final approved rates.
-* Final amounts.
+* The uploaded BOQ sheet layout preserved as closely as possible.
+* Unit.
+* Quantity.
+* Rate.
+* Amount.
 
 Values are linked to the internal sheet.
+
+The uploaded BOQ file remains preserved for audit history. Exported client BOQs
+start from the uploaded BOQ sheet when available and only fill or add Unit,
+Quantity, Rate, and Amount columns. If Unit or Quantity already exists in the
+uploaded BOQ, the existing value is preserved and used for amount calculation.
+When a parent row contains only a heading/description and a child row contains
+the product unit/quantity, Rate and Amount are filled on the child row.
 
 Changes in the internal sheet update the client sheet.
 
@@ -534,7 +554,7 @@ Expert:
 
 * Reviews results.
 * Modifies products.
-* Modifies vendors.
+* Modifies matched products/rate rows.
 * Modifies calculations.
 
 Status changes:
@@ -632,18 +652,6 @@ Recommended server:
 * 2 vCPU
 * 8 GB RAM
 * 100 GB SSD
-
----
-
-# Future Scope
-
-* Multiple AI providers.
-* Advanced analytics.
-* Dashboard reporting.
-* Cost forecasting.
-* Vendor analytics.
-* Approval workflows.
-* Multi-company support.
 
 ---
 

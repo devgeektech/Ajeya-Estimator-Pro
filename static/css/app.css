@@ -248,6 +248,9 @@ body {
 .badge--orange { background: #ffedd5; color: #9a3412; border-color: transparent; }
 .badge--blank { background: var(--surface-alt); color: var(--text-muted); }
 .badge--warn { background: #ffedd5; color: #9a3412; border-color: transparent; }
+.badge--purple { background: #f3e8ff; color: #7e22ce; border-color: transparent; }
+.badge--blue { background: #dbeafe; color: #1d4ed8; border-color: transparent; }
+.badge--gray { background: #f1f5f9; color: #475569; border-color: transparent; }
 
 /* ---------- Review ---------- */
 .select { padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font-size: .85rem; }

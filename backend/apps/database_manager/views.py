@@ -12,8 +12,8 @@ from django.views.generic import FormView, ListView, View
 from apps.audit.services import record
 from common.exceptions import BOQAIError
 from common.mixins import DatabaseAccessRequiredMixin
-from tasks.import_database import import_database_task
 from utils.files import unique_filename
+from workflows.database_import import import_database
 
 from .forms import DatabaseUploadForm
 from .models import DatabaseVersion, StateControl
@@ -62,18 +62,11 @@ class DatabaseUploadView(DatabaseAccessRequiredMixin, FormView):
         file_path = storage.path(stored_name)
 
         try:
-            result = import_database_task.delay(
+            import_database(
                 file_path, self.request.user.pk, upload.name, name, stored_name
             )
-            # In local/eager mode the result is available immediately and
-            # exceptions propagate; in production this returns at once.
-            if getattr(result, "successful", None) and result.successful():
-                record(self.request.user, "database_import", "Workbook", upload.name)
-                messages.success(self.request, "Database imported and activated.")
-            else:
-                messages.info(
-                    self.request, "Database import has been queued for processing."
-                )
+            record(self.request.user, "database_import", "Workbook", upload.name)
+            messages.success(self.request, "Database imported and activated.")
         except BOQAIError as exc:
             messages.error(self.request, str(exc))
             return self.form_invalid(form)
@@ -105,8 +98,9 @@ class DatabaseDownloadView(LoginRequiredMixin, View):
         if not version.file or not version.file.storage.exists(version.file.name):
             messages.error(request, "File not found for this version.")
             return redirect("database:list")
-        
-        response = FileResponse(version.file.open('rb'), as_attachment=True, filename=version.source_filename)
+        response = FileResponse(
+            version.file.open("rb"), as_attachment=True, filename=version.source_filename
+        )
         return response
 
 

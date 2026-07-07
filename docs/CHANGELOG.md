@@ -1,5 +1,199 @@
 # Changelog
 
+## 2026-07-07 — Synchronous Database Upload
+
+- Changed database uploads to run synchronously from the upload request.
+- Removed the unused Celery database import task and moved database embedding
+  generation into a synchronous AI embedding helper.
+- Stopped queuing `generate_embeddings_task`, fixing unregistered Celery task
+  errors after database upload.
+
+## 2026-07-07 — Final Validation and Cleanup
+
+- Ran the final validation sweep for the current BOQ upload, grouped JSON,
+  processing, lowest final-amount matching, and export flow.
+- Fixed reprocessing so cloned BOQ runs preserve `row_json` grouped source
+  context.
+- Replaced stale scaffold helpers with working implementations and cleaned
+  misleading comments/future-scope language from active documentation.
+- Confirmed the breakdown export includes the product-focused `Confidence`
+  column.
+
+## 2026-07-07 — BOQ Measured Child Row Parsing
+
+- Updated BOQ row grouping so parent/specification rows without unit or
+  quantity are carried as context for measured child rows instead of becoming
+  standalone processing items.
+- Preserved child rows with their own unit or quantity as the processing/export
+  target rows so client BOQ exports fill Rate and Amount where the original
+  BOQ expects them.
+- Fixed serial classification so parenthesized child letters such as `(A)` and
+  `(D)` are not treated as Roman-numeral section headings.
+- Added parser regression coverage for child quantity rows and serial
+  specification rows.
+
+## 2026-07-07 — Make List Category Pair Extraction
+
+- Fixed make-list parsing so the same approved make is preserved separately for
+  each material/category instead of being removed after its first occurrence.
+- Improved make splitting for slash-delimited manufacturer cells so names like
+  `Jindal, Hissar` remain one make when they appear inside slash-separated
+  lists.
+- Added parser regression coverage for `Make/Manufacturers Name` style sheets
+  with repeated makes across different materials.
+
+## 2026-07-07 — Export Download and BOQ Layout Preservation
+
+- Added authenticated export download endpoints for the client BOQ and
+  breakdown list files.
+- Changed the internal export sheet to a `Breakdown List` matching the provided
+  19-column format.
+- Changed client BOQ export to preserve the uploaded BOQ worksheet where
+  available and fill only Unit, Quantity, Rate, and Amount.
+- Preserved existing Unit and Quantity cells and placed Rate/Amount on child
+  rows when child rows carry the product unit or quantity.
+- Tightened product extraction instructions so AI does not force products from
+  headings, notes, or execution-only rows.
+
+## 2026-07-07 — Runtime AI Instruction Logs
+
+- Added `logs/ai_instructions.log` for structured runtime AI instruction
+  entries.
+- Logged every rendered AI prompt before the provider call with model,
+  template name, JSON-mode flag, and full instruction text.
+
+## 2026-07-07 — Explicit AI Row JSON Logging
+
+- Added explicit `fetched_row_json` and `ai_output_json` fields to row-level AI
+  extraction logs so the grouped BOQ JSON fetched from each row and the AI
+  extraction result are visible in `logs/ai_extractions.log`.
+
+## 2026-07-07 — Grouped BOQ Row JSON and Database-Aware Extraction
+
+- Added grouped BOQ row JSON so serial-numbered BOQ rows and inherited
+  blank-serial child rows are processed as one structured item.
+- Added active database context for AI prompts so product and activity
+  extraction stays close to Rate_Master, Labour_Master, and TOR_Labour
+  terminology.
+- Expanded product extraction to preserve per-row product candidates and
+  database hints for matching.
+- Updated product matching to search the original BOQ text first, then extracted
+  product candidates and database hints.
+
+## 2026-07-07 — Lowest Final Amount Rate Selection
+
+- Removed the standalone vendor-selection processing stage and service.
+- Added `RateMaster.final_amount_excl_gst` and import mapping for
+  `Final_Amount_(Excl GST)` from the updated Rate_Master workbook.
+- Changed product matching to select the lowest final-amount Rate_Master row
+  when multiple rows match the same product.
+- Added product embedding generation to the database import workflow.
+- Renamed the BOQ detail action to `Calculate BOQ` / `Recalculate BOQ`.
+
+## 2026-07-06 — Row-Level AI Extraction Logging
+
+- Added a dedicated `logs/ai_extractions.log` file for structured BOQ row AI
+  extraction payloads during processing.
+- Logged each successfully analyzed row with BOQ/run/item IDs, Excel row number,
+  source description, product extraction JSON, and extracted activities.
+- Logged row-level AI extraction failures to the same file so failed rows can be
+  audited without stopping the whole BOQ run.
+
+## 2026-07-06 — Sample-Driven BOQ and Database Import Hardening
+
+- Improved make-list Excel extraction to scan all workbook sheets and read
+  merged/continued approved-make columns, fixing real formats like `Make_1`.
+- Added make-list aliases for `Materials` and make/manufacturer headers so
+  client make categories and makes are preserved across formats.
+- Tightened BOQ extraction so rate/amount subheader rows such as `(Rs.)` are not
+  captured as BOQ items when the description column is blank.
+- Hardened database import for the March client workbook shape by synthesizing
+  product codes from category/subcategory/class/size when key fields are blank,
+  importing discounted rates, preserving raw workbook fields in `spec_json`, and
+  skipping incomplete master rows.
+- Updated costing fallbacks to read normalized commercial keys such as
+  `handling`, `profit`, and `accessories` from imported `spec_json`.
+- Fixed linked client export formulas so amount cells reference the client
+  quantity cell and the internal final-rate cell.
+
+## 2026-07-06 — Make List View Without Pagination
+
+- Removed pagination from the BOQ make-list page so all linked make-list entries
+  are visible together.
+- Added regression coverage confirming make-list pages show entries beyond the
+  previous first page and no longer render pagination controls.
+
+## 2026-07-06 — Robust Make List Extraction and BOQ Isolation
+
+- Improved Excel make-list extraction to detect later header rows and accept
+  aliases such as approved make, brand, manufacturer, and OEM.
+- Added support for multiple make columns and cells containing multiple makes
+  separated by common delimiters.
+- Added regression coverage proving two BOQs with the same BOQ name and same
+  make-list filename remain separate BOQs with separate make-list entries.
+
+## 2026-07-06 — Canonical BOQ Field Mapping
+
+- Changed BOQ extraction output to map header aliases into a static field set:
+  S No, Description, Unit, and Quantity.
+- Added aliases for abbreviated BOQ headers such as `SNo`, `QTY`, `un`, and
+  `ut`, so differently formatted sheets still populate the correct fields.
+- Updated the BOQ detail UI and client BOQ output to use the canonical columns
+  instead of arbitrary uploaded workbook columns.
+
+## 2026-07-06 — Robust BOQ Excel Extraction
+
+- Improved BOQ Excel extraction to detect later header rows when workbooks
+  include title, project, or tender-reference rows before the actual BOQ table.
+- Normalized messy header labels such as `S. No.`, `Sr. No.`, `Qty.`, and
+  `UOM` so different BOQ formats map into the same extraction flow.
+- Cleaned floating-point display artifacts in preserved BOQ row data, so values
+  such as `27.200000000000003` are stored and shown as `27.2` while quantity
+  calculations still use the raw numeric cell value.
+
+## 2026-07-06 — Make List Replacement UI
+
+- Removed BOQ item pagination from the BOQ detail page so all captured BOQ rows
+  are listed together.
+- Removed make-list upload controls from the BOQ detail page.
+- Changed the make-list page to show the currently linked make-list filename and
+  a replace action; replacement updates that BOQ's single linked make list and
+  deletes the previous parsed make-list entries.
+
+## 2026-07-06 — BOQ-Scoped Make List Upload
+
+- Added a BOQ detail make-list upload flow that saves the file to that BOQ and
+  replaces entries only on the BOQ's latest run.
+- Added service-level validation so empty or unreadable make-list uploads return
+  a clear error instead of silently creating zero entries.
+- Added tests proving make-list updates on one BOQ do not affect another BOQ.
+
+## 2026-07-06 — Make List PDFs and BOQ Row Preservation
+
+- Allowed PDF uploads for make lists only, updated the BOQ upload UI copy, and
+  corrected the make-list extraction prompt to return JSON compatible with the
+  AI service.
+- Preserved uploaded BOQ worksheet row numbers, original headers, and original
+  row cells so nested BOQ rows with blank serial-number cells remain blank in
+  the UI and client export.
+- Updated the BOQ detail table and client export to start from the original
+  workbook columns before appending final rate and amount.
+
+## 2026-07-06 — Runbook Redis and Celery Notes
+
+- Added local Windows guidance for running Redis through WSL and starting the
+  Celery worker with the Windows-compatible solo pool.
+- Added an EC2 feature-update command sequence that explicitly runs
+  `collectstatic --noinput` before restarting Gunicorn and Celery.
+
+## 2026-07-03 — Enhanced BOQ Upload and PDF Make Lists
+
+- Updated `BOQItem` model to store `original_data` for preserving all columns from uploaded Excel while skipping empty rows.
+- Added `pypdf` dependency for PDF extraction.
+- Implemented AI-powered PDF extraction for Make Lists and integrated it into the parsing logic.
+- Added capability to upload Make Lists directly from the BOQ details view.
+- Updated BOQ items UI table to display Rate and Amount from cost breakdown dynamically.
+
 ## 2026-07-03 — Settings Consolidation and Import Cleanup
 
 - Consolidated Django configuration into the single active settings module
@@ -466,9 +660,8 @@ All notable changes to BOQ_AI are recorded here. Format loosely follows
   transaction; version auto-increment, activation, and retention of the active
   version plus two previous versions. State control rows are upserted by name.
 - `DatabaseRollbackService` to re-activate a retained previous version.
-- `workflows/database_import.py` orchestration + `tasks/import_database.py`
-  Celery task (runs eagerly locally, background in production — views never
-  block).
+- `workflows/database_import.py` orchestration. This was later changed to run
+  synchronously from the upload request.
 - Super-Admin database management UI: version list, upload (multipart) with
   validation, and rollback action; `Database` nav link added.
 - Embedding generation is invoked as a deferred hook (real generation in the

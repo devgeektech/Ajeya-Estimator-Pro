@@ -12,7 +12,7 @@ Stage pipeline (fixed order):
 Each stage delegates to its dedicated service module:
 - ``ai_analysis``:  Product + activity extraction via AIService (Sprints 8-9).
                    Skipped gracefully when AI is disabled (placeholder key).
-- ``matching``:    Exact/alias/vector matching + vendor selection (Sprints 10-12).
+- ``matching``:    Exact/alias/vector matching with lowest final-amount selection.
 - ``costing``:     Material + labour + commercial cost breakdown (Sprints 13-15).
 - ``confidence``:  Factor-weighted scoring + colour bands (Sprint 11).
 
@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 
+from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 from ai.extractors.analyzer import analyze_run
@@ -31,7 +32,6 @@ from apps.boq.models import BOQRun
 from apps.costing.services.cost_service import CostCalculationService
 from apps.matching.services.confidence import ConfidenceService
 from apps.matching.services.matching_service import ProductMatchingService
-from apps.matching.services.vendor_selection import VendorSelectionService
 from apps.notifications.services import notify
 from apps.processing.models import ProcessingJob
 from common.choices import BOQStatus, RunStatus
@@ -39,7 +39,7 @@ from common.exceptions import ProcessingError
 
 logger = logging.getLogger("boq_ai")
 
-# (progress %, label, stage key). Stage keys map to future service hooks.
+# (progress %, label, stage key). Stage keys map to the implemented service calls below.
 STAGES = [
     (30, "Analyzing descriptions", "ai_analysis"),
     (60, "Matching products", "matching"),
@@ -69,8 +69,8 @@ def _run_stage(run, stage_key: str) -> None:
     All four stages are fully implemented:
     - ai_analysis: product + activity extraction via AIService (Sprints 8-9);
                    skipped gracefully when OPENAI_API_KEY is a placeholder.
-    - matching:    ProductMatchingService (exact/alias/vector) + VendorSelectionService
-                   (make-list aware) — runs with or without AI (Sprints 10-12).
+    - matching:    ProductMatchingService (exact/alias/vector), selecting the
+                   lowest Final_Amount_(Excl GST) RateMaster row among matches.
     - costing:     Full per-item cost breakdown: material, labour, accessories,
                    transportation, overhead, profit (Sprints 13-15).
     - confidence:  Factor-weighted scoring, colour bands, match explanations (Sprint 11).
@@ -84,7 +84,6 @@ def _run_stage(run, stage_key: str) -> None:
 
     if stage_key == "matching":
         ProductMatchingService().match_run(run, created_by=run.boq.user)
-        VendorSelectionService().select_run(run)
         return
 
     if stage_key == "costing":
@@ -95,7 +94,7 @@ def _run_stage(run, stage_key: str) -> None:
         ConfidenceService().score_run(run)
         return
 
-    logger.info("Run %s: stage '%s' pending implementation", run.pk, stage_key)
+    raise ProcessingError(f"Unknown processing stage: {stage_key}")
 
 
 def process_boq_run(boq_run_id: int) -> int:
@@ -119,7 +118,7 @@ def process_boq_run(boq_run_id: int) -> int:
         run.status = RunStatus.COMPLETED
         run.completed_at = timezone.now()
         run.save(update_fields=["status", "completed_at"])
-        boq.status = BOQStatus.COMPLETED
+        boq.status = BOQStatus.UNDER_REVIEW
         boq.save(update_fields=["status"])
         _update_job(job, progress=100, status=RunStatus.COMPLETED, message="Completed")
         logger.info("Run %s completed", run.pk)
@@ -129,6 +128,14 @@ def process_boq_run(boq_run_id: int) -> int:
             "Processing complete",
             f"'{boq.boq_name}' (run {run.run_number}) is ready for review.",
         )
+        User = get_user_model()
+        for admin in User.objects.filter(role="SUPERADMIN").exclude(pk=boq.user.pk):
+            notify(
+                admin,
+                "Processing complete",
+                f"'{boq.boq_name}' (uploaded by {boq.user.full_name}) is ready for review.",
+            )
+
         return run.pk
 
     except Exception as exc:  # noqa: BLE001 - record failure then re-raise
@@ -138,4 +145,8 @@ def process_boq_run(boq_run_id: int) -> int:
         _update_job(job, status=RunStatus.FAILED, message=f"Failed: {exc}")
 
         notify(boq.user, "Processing failed", f"'{boq.boq_name}' failed: {exc}")
+        User = get_user_model()
+        for admin in User.objects.filter(role="SUPERADMIN").exclude(pk=boq.user.pk):
+            notify(admin, "Processing failed", f"'{boq.boq_name}' failed: {exc}")
+
         raise ProcessingError(str(exc)) from exc

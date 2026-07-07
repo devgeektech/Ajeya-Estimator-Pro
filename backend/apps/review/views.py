@@ -21,7 +21,7 @@ def _owned_boq_qs(user):
 
 
 def _row_context(item, service: ReviewService):
-    """Build the per-row context (match, cost, band, candidate vendors)."""
+    """Build the per-row context (match, cost, band, candidate rate options)."""
     match = item.product_matches.first()
     breakdown = getattr(match, "cost_breakdown", None) if match else None
     return {
@@ -53,7 +53,7 @@ class ReviewView(LoginRequiredMixin, View):
 
 
 class ApplyReviewView(LoginRequiredMixin, View):
-    """Apply a product/vendor change to one item (HTMX row swap)."""
+    """Apply a product/rate change to one item (HTMX row swap)."""
 
     def post(self, request, item_id):
         item = get_object_or_404(
@@ -64,9 +64,8 @@ class ApplyReviewView(LoginRequiredMixin, View):
             return render(request, "review/_row.html", {"row": None}, status=403)
 
         rate = get_object_or_404(RateMaster, pk=request.POST.get("rate_id"))
-        custom_maker = request.POST.get("custom_maker", "").strip()
         service = ReviewService()
-        service.apply_selection(item, rate, user=request.user, custom_maker=custom_maker)
+        service.apply_selection(item, rate, user=request.user)
 
         if request.headers.get("HX-Request"):
             return render(
