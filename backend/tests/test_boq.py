@@ -1,4 +1,5 @@
 """Tests for BOQ upload, parsing and ownership."""
+
 import io
 import tempfile
 from unittest.mock import Mock, patch
@@ -9,7 +10,9 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from openpyxl import Workbook
 
+from apps.costing.models import RateDetail
 from apps.make_list.models import MakeListEntry
+from apps.matching.models import ProductMatch
 from common.choices import BOQStatus, RunStatus
 
 from apps.boq.models import BOQ, BOQItem
@@ -129,7 +132,9 @@ def build_child_quantity_boq_workbook() -> bytes:
     ws.title = "BOQ"
     ws.append(["S.No", "Description", "Unit", "Qty", "Rate", "Amount"])
     ws.append([1.1, "External hydrant pipework", None, None, None, None])
-    ws.append([None, "Material: G.I. pipe conforming to IS:1239", None, None, None, None])
+    ws.append(
+        [None, "Material: G.I. pipe conforming to IS:1239", None, None, None, None]
+    )
     ws.append([None, "a) 150 mm dia Heavy Class", "M", 175, None, 0])
     ws.append([None, "b) 100 mm dia Heavy Class", "M", 10, None, 0])
     buffer = io.BytesIO()
@@ -142,7 +147,16 @@ def build_serial_spec_child_boq_workbook() -> bytes:
     ws = wb.active
     ws.title = "BOQ"
     ws.append(["S.No", "Description", "Unit", "Qty", "Rate", "Amount"])
-    ws.append([12, "Electric driven terrace pump consisting of following", None, None, None, None])
+    ws.append(
+        [
+            12,
+            "Electric driven terrace pump consisting of following",
+            None,
+            None,
+            None,
+            None,
+        ]
+    )
     ws.append(["(a)", "Horizontal multistage centrifugal pump", None, None, None, None])
     ws.append(["(b)", "TEFC motor suitable for 415 volts", None, None, None, None])
     ws.append([12.1, "900 lpm at 35 m Head", "Each", 1, None, None])
@@ -152,11 +166,19 @@ def build_serial_spec_child_boq_workbook() -> bytes:
 
 
 def boq_upload(name="boq.xlsx"):
-    return SimpleUploadedFile(name, build_boq_workbook(), content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    return SimpleUploadedFile(
+        name,
+        build_boq_workbook(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 def make_upload(name="makes.xlsx"):
-    return SimpleUploadedFile(name, build_make_workbook(), content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    return SimpleUploadedFile(
+        name,
+        build_make_workbook(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 def custom_make_upload(name, entries):
@@ -198,7 +220,9 @@ class ParserTests(TestCase):
 
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]["row_number"], 5)
-        self.assertEqual(items[0]["description"], "Hydrant valve\nNested row without serial")
+        self.assertEqual(
+            items[0]["description"], "Hydrant valve\nNested row without serial"
+        )
         self.assertEqual(str(items[0]["quantity"]), "2")
         self.assertEqual(items[0]["unit"], "nos")
         self.assertEqual(items[0]["original_data"]["s_no"], "27.2")
@@ -206,7 +230,9 @@ class ParserTests(TestCase):
         self.assertEqual(items[0]["row_json"]["excel_row_numbers"], [5, 6])
         self.assertEqual(len(items[0]["row_json"]["rows"]), 2)
         self.assertIsNone(items[0]["row_json"]["rows"][1]["serial_number"])
-        self.assertEqual(items[0]["row_json"]["rows"][1]["description"], "Nested row without serial")
+        self.assertEqual(
+            items[0]["row_json"]["rows"][1]["description"], "Nested row without serial"
+        )
 
     def test_parse_boq_items_maps_aliases_to_static_fields(self):
         tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
@@ -278,8 +304,12 @@ class ParserTests(TestCase):
                 return_value={"makes": [{"make": "TATA", "category": "Pipes"}]},
             ),
         ):
-            reader_mock.return_value.pages = [Mock(extract_text=lambda: "Approved makes TATA")]
-            self.assertEqual(parse_make_list(tmp.name), [{"make": "TATA", "category": "Pipes"}])
+            reader_mock.return_value.pages = [
+                Mock(extract_text=lambda: "Approved makes TATA")
+            ]
+            self.assertEqual(
+                parse_make_list(tmp.name), [{"make": "TATA", "category": "Pipes"}]
+            )
 
     def test_parse_make_list_detects_later_headers_aliases_and_multi_make_cells(self):
         tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
@@ -394,24 +424,36 @@ class BOQCreationServiceTests(TestCase):
             user=self.expert,
             boq_name="Second",
             uploaded_file=boq_upload("second.xlsx"),
-            make_list_file=custom_make_upload("old_second_makes.xlsx", [("OldMake", "Old")]),
+            make_list_file=custom_make_upload(
+                "old_second_makes.xlsx", [("OldMake", "Old")]
+            ),
         ).run()
         self.assertEqual(second.runs.latest("run_number").make_list_entries.count(), 1)
 
         count = BOQMakeListUploadService(
             boq=second,
-            make_list_file=custom_make_upload("second_makes.xlsx", [("Victaulic", "Pipes")]),
+            make_list_file=custom_make_upload(
+                "second_makes.xlsx", [("Victaulic", "Pipes")]
+            ),
         ).run()
 
         self.assertEqual(count, 1)
         self.assertEqual(first.runs.latest("run_number").make_list_entries.count(), 2)
         self.assertEqual(second.runs.latest("run_number").make_list_entries.count(), 1)
         self.assertEqual(
-            set(first.runs.latest("run_number").make_list_entries.values_list("make", flat=True)),
+            set(
+                first.runs.latest("run_number").make_list_entries.values_list(
+                    "make", flat=True
+                )
+            ),
             {"TATA", "Zoloto"},
         )
         self.assertEqual(
-            set(second.runs.latest("run_number").make_list_entries.values_list("make", flat=True)),
+            set(
+                second.runs.latest("run_number").make_list_entries.values_list(
+                    "make", flat=True
+                )
+            ),
             {"Victaulic"},
         )
 
@@ -438,7 +480,9 @@ class BOQCreationServiceTests(TestCase):
 
         BOQMakeListUploadService(
             boq=first,
-            make_list_file=custom_make_upload("same_makes.xlsx", [("Victaulic", "Valves")]),
+            make_list_file=custom_make_upload(
+                "same_makes.xlsx", [("Victaulic", "Valves")]
+            ),
         ).run()
 
         self.assertEqual(
@@ -484,7 +528,11 @@ class BOQOwnershipTests(TestCase):
         self.client.force_login(self.bob)
         response = self.client.post(
             reverse("boq:upload"),
-            {"boq_name": "Bob BOQ", "uploaded_file": boq_upload(), "make_list_file": make_upload()},
+            {
+                "boq_name": "Bob BOQ",
+                "uploaded_file": boq_upload(),
+                "make_list_file": make_upload(),
+            },
         )
         boq = BOQ.objects.get(boq_name="Bob BOQ")
         self.assertRedirects(response, reverse("boq:detail", args=[boq.pk]))
@@ -496,11 +544,15 @@ class BOQOwnershipTests(TestCase):
             reverse("boq:make_list_upload", args=[self.alice_boq.pk]),
             {"make_list_file": make_upload("alice_makes.xlsx")},
         )
-        self.assertRedirects(response, reverse("boq:make_list", args=[self.alice_boq.pk]))
+        self.assertRedirects(
+            response, reverse("boq:make_list", args=[self.alice_boq.pk])
+        )
         run = self.alice_boq.runs.latest("run_number")
         self.assertEqual(run.make_list_entries.count(), 2)
 
-    def test_detail_shows_all_boq_items_without_make_list_upload_card_or_pagination(self):
+    def test_detail_shows_all_boq_items_without_make_list_upload_card_or_pagination(
+        self,
+    ):
         run = self.alice_boq.runs.latest("run_number")
         run.original_headers = [{"key": "ignored", "label": "Ignored Column"}]
         run.save(update_fields=["original_headers"])
@@ -533,6 +585,46 @@ class BOQOwnershipTests(TestCase):
         self.assertNotContains(response, "Make list upload")
         self.assertNotContains(response, "Upload make list")
         self.assertNotContains(response, "Page 1")
+
+    def test_detail_hides_calculated_prices_while_run_is_processing(self):
+        run = self.alice_boq.runs.latest("run_number")
+        item = run.items.first()
+        match = ProductMatch.objects.create(
+            boq_item=item,
+            confidence_score=95,
+            match_reason="exact",
+        )
+        RateDetail.objects.create(product_match=match, rate_contribution="123.45")
+        run.status = RunStatus.PROCESSING
+        run.save(update_fields=["status"])
+        self.alice_boq.status = BOQStatus.PROCESSING
+        self.alice_boq.save(update_fields=["status"])
+
+        self.client.force_login(self.alice)
+        response = self.client.get(reverse("boq:detail", args=[self.alice_boq.pk]))
+
+        self.assertIsNone(response.context["item_rows"][0]["final_rate"])
+        self.assertNotContains(response, "123.45")
+
+    def test_detail_shows_calculated_prices_after_run_completes(self):
+        run = self.alice_boq.runs.latest("run_number")
+        item = run.items.first()
+        match = ProductMatch.objects.create(
+            boq_item=item,
+            confidence_score=95,
+            match_reason="exact",
+        )
+        RateDetail.objects.create(product_match=match, rate_contribution="123.45")
+        run.status = RunStatus.COMPLETED
+        run.save(update_fields=["status"])
+        self.alice_boq.status = BOQStatus.UNDER_REVIEW
+        self.alice_boq.save(update_fields=["status"])
+
+        self.client.force_login(self.alice)
+        response = self.client.get(reverse("boq:detail", args=[self.alice_boq.pk]))
+
+        self.assertEqual(str(response.context["item_rows"][0]["final_rate"]), "123.45")
+        self.assertContains(response, "123.45")
 
     def test_make_list_page_shows_current_file_and_replace_action(self):
         self.client.force_login(self.alice)

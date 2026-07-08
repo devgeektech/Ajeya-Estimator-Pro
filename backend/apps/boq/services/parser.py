@@ -138,6 +138,7 @@ def _row_payload(group: list[dict], primary: dict | None = None) -> dict:
     return {
         "schema": "boq_row_group_v1",
         "primary_excel_row_number": primary["row_number"],
+        "target_excel_row": primary["row_number"],
         "excel_row_numbers": [item["row_number"] for item in group],
         "serial_number": _serial_value(primary),
         "description": "\n".join(descriptions),
@@ -171,6 +172,7 @@ def _build_grouped_item(group: list[dict], primary: dict) -> dict:
     payload = _row_payload(group, primary)
     return {
         "row_number": primary["row_number"],
+        "target_excel_row": primary["row_number"],
         "description": payload["description"],
         "quantity": primary["quantity"],
         "unit": primary["unit"],

@@ -19,9 +19,14 @@ Approved
 
 # Product Overview
 
-BOQ_AI is an AI-assisted BOQ estimation and tender costing platform designed specifically for Fire Protection and MEP estimation workflows.
+BOQ_AI is an AI-assisted BOQ estimation and tender rate-retrieval platform
+designed specifically for Fire Protection and MEP estimation workflows.
 
-The platform assists estimation teams in understanding BOQ descriptions, identifying products, calculating material and execution costs, applying commercial rules, and generating final BOQ outputs while maintaining full human review and approval.
+The platform assists estimation teams in understanding BOQ descriptions,
+identifying products, selecting the correct Rate_Master row, retrieving linked
+Labour_Master details, and generating final BOQ outputs while maintaining full
+human review and approval. It does not recalculate workbook costing formulas
+already supplied in the client database.
 
 The objective is to reduce manual effort, improve consistency, minimize estimation errors, and increase tender processing capacity.
 
@@ -36,10 +41,9 @@ Current BOQ estimation processes depend heavily on experienced estimators who ma
 * Identify products.
 * Apply make restrictions.
 * Select the lowest final-amount product rate row.
-* Calculate material costs.
-* Calculate labour costs.
-* Apply transportation and accessories.
-* Calculate commercial margins.
+* Read precomputed material and labour values.
+* Read transportation, accessory, commercial, margin, and final amount values
+  from the client workbook.
 * Prepare final tender submissions.
 
 This process is:
@@ -90,7 +94,7 @@ Responsible for:
 * Uploading make lists.
 * Processing BOQs.
 * Reviewing results.
-* Modifying calculations.
+* Reviewing or modifying selected output values.
 * Approving estimates.
 * Exporting final BOQs.
 
@@ -186,7 +190,7 @@ File Processing:
 6. AI Processing Module
 7. Product Matching Module
 8. Rate Selection Module
-9. Cost Calculation Engine
+9. Rate And Labour Detail Retrieval Module
 10. Confidence Engine
 11. Review Workflow Module
 12. Export Module
@@ -207,6 +211,27 @@ The system shall:
 * Import data into PostgreSQL.
 * Activate imported database.
 * Generate product embeddings.
+
+The active master workbook structure is:
+
+* Rate_Master.
+* Labour_Master.
+* TOR_Main.
+* Labour_Structure_Source.
+* TOR_Labour.
+* TOR_Accessories.
+* State_Control_List.
+
+Rate_Master is the primary material table. Product lookup and embeddings use
+its category, sub category, class, size, make, capacity, unit, supplier, and
+technical/product fields. Deprecated lookup keys are not part of the
+active workflow and must not be used for matching. The selected Rate_Master row
+is the source of precomputed material,
+commercial, supplier, make, and final amount fields. Its `tech_key` links to
+Labour_Master so the system can retrieve the corresponding precomputed labour
+charge details. Labour_Structure_Source may be used only as a lookup fallback
+to resolve a Rate_Master category/sub_category/size row to a Labour_Master
+`tech_key`.
 
 The system shall maintain:
 
@@ -270,6 +295,12 @@ for the measured child rows below it. Rows that carry the actual unit or
 quantity become the processing rows so final client BOQ exports fill the values
 on the same rows where the client expects rates and amounts.
 
+The uploaded BOQ workbook remains the audit source for UI preview and final
+export layout. Backend processing uses a structured grouped-row representation
+that stores the parent row, child/detail rows, original Excel row numbers,
+canonical BOQ fields, and the target Excel row where final rate/amount output
+must be written.
+
 ---
 
 # BOQ Status
@@ -305,18 +336,29 @@ OpenAI is used for:
 * Specification extraction.
 * Activity extraction.
 * Product matching validation.
-* Confidence calculation.
+* Match confidence support.
 
 AI is not used for:
 
 * Pricing.
 * Labour calculations.
 * Commercial calculations.
-* Vendor calculations.
+* Cost, profit, overhead, accessory, transportation, or final-rate
+  calculations.
+* Supplier selection calculations.
 
-AI extraction shall receive database-aware context from the active master
-database so product and activity names are shaped toward Rate_Master,
-Labour_Master, and TOR_Labour terminology.
+AI extraction shall receive compact database-aware context from the active
+master database. Product context is limited to unique Rate_Master vocabulary
+from category, sub_category, class, size_mm, make, capacity, unit, supplier, and
+other product/specification fields needed for matching. Deprecated lookup keys
+are excluded. Activity context is shaped toward Labour_Master and TOR_Labour
+terminology. BOQ row extraction shall batch multiple grouped rows
+into one AI request so the shared instruction and database context are not
+resent for every row. The target batch size is 10 finalized grouped BOQ items
+per request and remains configurable.
+The active database context shall be cached by database version and placed
+before variable BOQ row data so repeated extraction requests can reuse the same
+stable instruction/context prefix.
 
 ---
 
@@ -338,7 +380,7 @@ Database Search
 
 ↓
 
-Embedding Search
+Chroma Embedding Search
 
 ↓
 
@@ -346,7 +388,11 @@ Lowest Final Amount Rate Selection
 
 ↓
 
-Confidence Calculation
+Rate And Labour Detail Retrieval
+
+↓
+
+Confidence Scoring
 
 ↓
 
@@ -364,9 +410,43 @@ The system shall:
 * Match sizes.
 * Match specifications.
 * Match makes.
-* Preserve product candidates extracted from one grouped BOQ row.
-* Search Rate_Master using the original BOQ description first, then extracted
-  product candidates and database hints.
+* Preserve every product/equipment/component candidate extracted from one
+  grouped BOQ row.
+* Extract product candidates with Product Name, Category, Sub Category, Class,
+  Size MM, Make, Capacity, Unit, Height, Working Pressure, Test Pressure,
+  Temperature, Throw, K Factor, Head, Supplier, Product Quantity, Product Unit,
+  and Quantity Basis fields.
+* When one grouped BOQ row describes multiple equipment/products, extract each
+  as a separate product candidate object.
+* Preserve extracted products even when they are not present in Rate_Master.
+  Matching shall split extracted candidates into `database_products[]` and
+  `missing_products[]`.
+* Return extraction JSON in three reviewable segments:
+  `database_products[]` for products that appear present in the active database
+  context, `missing_products[]` for products not represented in the active
+  database context, and `activities[]` for activity/execution context. Final
+  database presence is still confirmed by PostgreSQL matching.
+* Batch extraction must return one fixed JSON extraction object for every input
+  grouped BOQ row id, including empty product/activity lists when no extraction
+  is possible.
+* Search Rate_Master independently for each extracted product candidate. If no
+  candidate is extracted, fall back to the grouped BOQ description.
+
+BOQ-level unit and quantity are not automatically applied to every extracted
+product. Each product candidate shall carry its own `product_quantity`,
+`product_unit`, and `quantity_basis`:
+
+* `per_boq_unit` means the product quantity is required for each BOQ unit.
+* `total_for_boq_row` means the product quantity is the total quantity described
+  by the grouped BOQ row.
+* `unknown` means review is required before pricing/export can be trusted.
+
+Unit and quantity priority is:
+
+1. Existing BOQ unit/quantity columns.
+2. Parsed nearby child/detail rows in the grouped BOQ item.
+3. AI-extracted unit/quantity fallback.
+4. Blank output with review required.
 
 ---
 
@@ -395,8 +475,18 @@ preserve each unique make and category pair.
 When multiple Rate_Master rows match the same product, the system shall select
 the row with the lowest `Final_Amount_(Excl GST)`.
 
-Vendor-specific selection modes, preferred vendor rules, and custom vendor
+Supplier-specific selection modes, preferred supplier rules, and custom supplier
 override are not part of the active processing workflow.
+
+Search priority:
+
+1. Exact structured field search using active DatabaseVersion rows.
+2. Alias search.
+3. Chroma embedding similarity search over active-version Rate_Master product
+   fields.
+4. AI validation of top candidates when needed.
+
+Deprecated lookup keys shall not be used in any search priority.
 
 ---
 
@@ -414,18 +504,27 @@ Labour_Master and TOR_Labour terminology, including:
 * Painting.
 * Supports.
 
-Activities contribute to:
-
-* Labour.
-* Transportation.
-* Equipment.
-* Overheads.
+Activities are preserved as review and matching context only. They do not cause
+the application to calculate labour, transportation, equipment, overhead, profit,
+or final rates.
 
 ---
 
-# Cost Calculation
+# Rate And Labour Detail Retrieval
 
-The system shall calculate:
+The system shall not recalculate cost components already supplied by the client
+database workbook.
+
+After product matching and rate selection, the system shall:
+
+* Use the selected Rate_Master row as the source of precomputed rate,
+  commercial, supplier, make, and final amount fields.
+* Use `Rate_Master.tech_key` to fetch the corresponding Labour_Master row.
+* Copy required Rate_Master and Labour_Master columns into processing results,
+  review screens, and exports.
+* Preserve source database values for audit and human review.
+
+The system shall not calculate:
 
 * Material cost.
 * Labour cost.
@@ -434,16 +533,25 @@ The system shall calculate:
 * Equipment.
 * Overheads.
 * Profit.
+* Final rate.
 
-Final rate:
+Any future derived value must be documented as a human-approved business rule
+before implementation.
 
-Material + Labour + Accessories + Overheads + Profit
+---
+
+## Deprecated Cost Calculation Rule
+
+Earlier documentation described a Cost Calculation Engine. That is no longer
+the active business rule. BOQ_AI retrieves precomputed values from the imported
+client database and does not recompute the workbook's costing logic.
 
 ---
 
 # Confidence Scoring
 
-Each BOQ row receives a confidence score.
+Each matched product/equipment receives a confidence score. A single BOQ row
+may therefore have multiple confidence scores in the breakdown sheet.
 
 ---
 
@@ -511,17 +619,33 @@ Approved products become available in future BOQs.
 Contains:
 
 * BOQ serial number.
+* Original source Excel row and target Excel row.
 * Original BOQ description.
 * AI interpretation.
+* Extraction index.
+* Extracted product/component name.
 * Matched database serial/product code.
+* Matched Rate_Master row id.
+* Match type.
 * Approved make.
 * Supplier.
-* Purchase/material/commercial breakdown values.
-* Profit and final amount excluding GST.
-* Labour per-unit value.
+* Product quantity.
+* Product unit.
+* Quantity basis.
+* Selected Rate_Master precomputed material/commercial fields.
+* Selected final amount excluding GST.
+* `tech_key`.
+* Linked Labour_Master labour charge fields.
 * Confidence score.
+* Review required flag.
+* Missing product flag.
 
 This sheet is used internally as the breakdown list.
+
+If one BOQ row contains multiple products/equipment, the Breakdown List shows
+one line per matched product/equipment while preserving the same original BOQ
+description for traceability. Products extracted from hidden wording inside a
+single BOQ row must be visible as separate Breakdown List rows.
 
 ---
 
@@ -540,9 +664,19 @@ Values are linked to the internal sheet.
 The uploaded BOQ file remains preserved for audit history. Exported client BOQs
 start from the uploaded BOQ sheet when available and only fill or add Unit,
 Quantity, Rate, and Amount columns. If Unit or Quantity already exists in the
-uploaded BOQ, the existing value is preserved and used for amount calculation.
+uploaded BOQ, the existing value is preserved and used according to documented
+export rules.
 When a parent row contains only a heading/description and a child row contains
 the product unit/quantity, Rate and Amount are filled on the child row.
+When one BOQ row produces multiple breakdown lines, the client Rate is sourced
+from the selected precomputed final amount fields and product-level quantity
+basis. Any amount handling must preserve the uploaded BOQ layout and use
+documented export rules rather than recalculating cost components.
+
+Client export shall reopen the original uploaded workbook, locate or create
+Rate and Amount columns, and write output only to each BOQItem's stored
+`target_excel_row`. All unrelated workbook content and formatting should be
+preserved as closely as possible.
 
 Changes in the internal sheet update the client sheet.
 
@@ -555,7 +689,7 @@ Expert:
 * Reviews results.
 * Modifies products.
 * Modifies matched products/rate rows.
-* Modifies calculations.
+* Modifies selected output values for review/export when required.
 
 Status changes:
 

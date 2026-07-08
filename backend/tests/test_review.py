@@ -21,16 +21,28 @@ class ReviewServiceTests(TestCase):
             version_number=1, is_active=True, source_filename="db.xlsx"
         )
         self.cheap = RateMaster.objects.create(
-            database_version=self.version, product_code="PIPE150",
-            description="150 NB MS Pipe", make="APL", vendor="V1", purchase_rate=Decimal("800.00"),
+            database_version=self.version,
+            tech_key="PIPE150",
+            make="APL",
+            supplier="V1",
+            net_material_rate=Decimal("800.00"),
+            final_amount_excl_gst=Decimal("800.00"),
         )
         self.pricey = RateMaster.objects.create(
-            database_version=self.version, product_code="PIPE150",
-            description="150 NB MS Pipe", make="Tata", vendor="V2", purchase_rate=Decimal("1000.00"),
+            database_version=self.version,
+            tech_key="PIPE150",
+            make="Tata",
+            supplier="V2",
+            net_material_rate=Decimal("1000.00"),
+            final_amount_excl_gst=Decimal("1000.00"),
         )
         self.other = RateMaster.objects.create(
-            database_version=self.version, product_code="VALVE1",
-            description="Gate valve", make="Zoloto", vendor="V3", purchase_rate=Decimal("500.00"),
+            database_version=self.version,
+            tech_key="VALVE1",
+            make="Zoloto",
+            supplier="V3",
+            net_material_rate=Decimal("500.00"),
+            final_amount_excl_gst=Decimal("500.00"),
         )
         self.boq = BOQ.objects.create(
             user=self.user, boq_name="B", uploaded_file="boq/x.xlsx", status=BOQStatus.COMPLETED
@@ -40,30 +52,29 @@ class ReviewServiceTests(TestCase):
             boq_run=self.run, row_number=1, description="150 NB MS Pipe", quantity=Decimal("1")
         )
         self.match = ProductMatch.objects.create(
-            boq_item=self.item, product=self.cheap, make="APL", vendor="V1",
+            boq_item=self.item, product=self.cheap, make="APL", supplier="V1",
             confidence_score=90, match_reason="exact",
         )
 
-    def test_candidate_rates_same_product_code(self):
+    def test_candidate_rates_same_tech_key(self):
         candidates = list(ReviewService().candidate_rates(self.item))
         self.assertIn(self.cheap, candidates)
         self.assertIn(self.pricey, candidates)
         self.assertNotIn(self.other, candidates)
 
-    def test_apply_selection_changes_vendor_and_recalcs(self):
+    def test_apply_selection_changes_supplier_and_recalcs(self):
         ReviewService().apply_selection(self.item, self.pricey, user=self.user)
         self.match.refresh_from_db()
         self.assertEqual(self.match.product, self.pricey)
-        self.assertEqual(self.match.vendor, "V2")
+        self.assertEqual(self.match.supplier, "V2")
         self.assertEqual(float(self.match.confidence_score), 100.0)
-        # Cost recalculated from the new (pricier) vendor rate.
-        self.assertEqual(self.match.cost_breakdown.material_cost, Decimal("1000.00"))
+        self.assertEqual(self.match.rate_detail.net_material_rate, Decimal("1000.00"))
 
     def test_apply_selection_records_review_item(self):
         ReviewService().apply_selection(self.item, self.pricey, user=self.user)
         review = ReviewItem.objects.get(boq_item=self.item)
-        self.assertEqual(review.original_vendor, "V1")
-        self.assertEqual(review.revised_vendor, "V2")
+        self.assertEqual(review.original_supplier, "V1")
+        self.assertEqual(review.revised_supplier, "V2")
         self.assertEqual(review.reviewed_by, self.user)
 
     def test_apply_selection_moves_boq_under_review(self):
@@ -114,12 +125,18 @@ class ReviewViewTests(TestCase):
             version_number=1, is_active=True, source_filename="db.xlsx"
         )
         self.rate = RateMaster.objects.create(
-            database_version=self.version, product_code="PIPE150",
-            description="150 NB MS Pipe", make="APL", vendor="V1", purchase_rate=Decimal("800.00"),
+            database_version=self.version,
+            tech_key="PIPE150",
+            make="APL",
+            supplier="V1",
+            net_material_rate=Decimal("800.00"),
         )
         self.alt = RateMaster.objects.create(
-            database_version=self.version, product_code="PIPE150",
-            description="150 NB MS Pipe", make="Tata", vendor="V2", purchase_rate=Decimal("1000.00"),
+            database_version=self.version,
+            tech_key="PIPE150",
+            make="Tata",
+            supplier="V2",
+            net_material_rate=Decimal("1000.00"),
         )
         self.boq = BOQ.objects.create(
             user=self.owner, boq_name="B", uploaded_file="boq/x.xlsx", status=BOQStatus.COMPLETED
@@ -129,7 +146,7 @@ class ReviewViewTests(TestCase):
             boq_run=self.run, row_number=1, description="150 NB MS Pipe", quantity=Decimal("1")
         )
         self.match = ProductMatch.objects.create(
-            boq_item=self.item, product=self.rate, make="APL", vendor="V1",
+            boq_item=self.item, product=self.rate, make="APL", supplier="V1",
             confidence_score=90, match_reason="exact",
         )
 
@@ -153,7 +170,7 @@ class ReviewViewTests(TestCase):
         )
         self.assertEqual(resp.status_code, 200)
         self.match.refresh_from_db()
-        self.assertEqual(self.match.vendor, "V2")
+        self.assertEqual(self.match.supplier, "V2")
 
     def test_non_owner_apply_forbidden(self):
         self.client.force_login(self.other)
@@ -162,7 +179,7 @@ class ReviewViewTests(TestCase):
         )
         self.assertEqual(resp.status_code, 403)
         self.match.refresh_from_db()
-        self.assertEqual(self.match.vendor, "V1")  # unchanged
+        self.assertEqual(self.match.supplier, "V1")  # unchanged
 
     def test_owner_can_approve(self):
         self.client.force_login(self.owner)

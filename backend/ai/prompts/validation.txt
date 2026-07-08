@@ -10,4 +10,4 @@ Return JSON:
 - reason: short explanation
 
 Judge only technical equivalence (product, size, material, make). Do not
-consider price or vendor.
+consider price or supplier selection.

@@ -1,15 +1,15 @@
 from django.contrib import admin
 
-from .models import CostBreakdown
+from .models import RateDetail
 
 
-@admin.register(CostBreakdown)
-class CostBreakdownAdmin(admin.ModelAdmin):
+@admin.register(RateDetail)
+class RateDetailAdmin(admin.ModelAdmin):
     list_display = (
         "product_match",
-        "material_cost",
-        "labour_cost",
-        "overhead_cost",
-        "profit",
-        "final_rate",
+        "tech_key",
+        "supplier",
+        "final_amount_excl_gst",
+        "rate_contribution",
+        "total_labour_with_multiplier",
     )

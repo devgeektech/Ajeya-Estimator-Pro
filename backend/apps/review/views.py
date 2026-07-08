@@ -23,11 +23,12 @@ def _owned_boq_qs(user):
 def _row_context(item, service: ReviewService):
     """Build the per-row context (match, cost, band, candidate rate options)."""
     match = item.product_matches.first()
-    breakdown = getattr(match, "cost_breakdown", None) if match else None
+    detail = getattr(match, "rate_detail", None) if match else None
     return {
         "item": item,
         "match": match,
-        "breakdown": breakdown,
+        "breakdown": detail,
+        "rate_detail": detail,
         "band": band_for(match.confidence_score) if match else "blank",
         "candidates": service.candidate_rates(item),
     }

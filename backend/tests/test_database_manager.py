@@ -27,20 +27,24 @@ User = get_user_model()
 
 REQUIRED_SHEETS = {
     "Rate_Master": (
-        ["product_code", "description", "make", "vendor", "purchase_rate",
-         "unit", "category", "subcategory", "remarks"],
-        [["P-100", "150 NB MS Pipe", "TATA", "VendorA", 1200, "m", "Pipes", "MS", ""]],
+        ["Tech_Key", "Match_Key", "Make", "Supplier", "Net Material Rate",
+         "Unit", "Category", "Sub_Category"],
+        [["P-100", "150 NB MS Pipe", "TATA", "VendorA", 1200, "m", "Pipes", "MS"]],
     ),
     "Labour_Master": (
-        ["labour_code", "labour_name", "labour_rate", "unit"],
+        ["Tech_Key", "Labour_Type", "Total_Labour_with_Multiplier", "Unit"],
         [["L-1", "Fitter", 500, "day"]],
     ),
-    "TOR_Main": (["tor_code", "description"], [["T-1", "Install pipe"]]),
-    "TOR_Labour": (["tor_code", "labour_code", "quantity"], [["T-1", "L-1", 2]]),
-    "TOR_Accessories": (["tor_code", "accessory_code", "quantity"], [["T-1", "A-1", 4]]),
+    "TOR_Main": (["Category"], [["Pipes"]]),
+    "Labour_Structure_Source": (
+        ["category", "sub_category", "size", "unit", "tech_key"],
+        [["Pipes", "MS", "150", "m", "P-100"]],
+    ),
+    "TOR_Labour": (["Testing_%", "Scaffolding_%"], [[5, 10]]),
+    "TOR_Accessories": (["Category", "Sub_Category", "Min_Size", "Max_Size", "Accessories_%"], [["Pipes", "MS", 0, 200, 5]]),
     "State_Control_List": (
-        ["state_name", "labour_multiplier", "transportation_multiplier"],
-        [["Maharashtra", "1.1", "1.2"]],
+        ["State", "Labour_Multiplier"],
+        [["Maharashtra", "1.1"]],
     ),
 }
 
@@ -79,6 +83,10 @@ def build_client_database_workbook() -> bytes:
     ws = wb.create_sheet("TOR_Main")
     ws.append(["Category  ", " Handling_%  ", "Wastage_%", "Profit_%  ", "Project_State"])
     ws.append(["PIPE", 0.02, 0.01, 0.1, "Delhi"])
+
+    ws = wb.create_sheet("Labour_Structure_Source")
+    ws.append(["Category", "Sub_Category", "Size", "Unit", "Tech_Key"])
+    ws.append(["PIPE", "MS", 400, "mm", "PIPE_MS_C_400"])
 
     ws = wb.create_sheet("TOR_Labour")
     ws.append(["Testing_%", "Scaffolding_%", "Consumables_%", "Painting_Rate", "Labour_Buffer_%"])
@@ -129,7 +137,7 @@ class ReadRowsTests(TestCase):
         try:
             rows = read_rows(path, "Rate_Master")
             self.assertEqual(len(rows), 1)
-            self.assertEqual(rows[0]["product_code"], "P-100")
+            self.assertEqual(rows[0]["tech_key"], "P-100")
         finally:
             Path(path).unlink(missing_ok=True)
 
@@ -155,8 +163,8 @@ class ImportServiceTests(TestCase):
         self.assertEqual(TORMain.objects.filter(database_version=version).count(), 1)
         self.assertEqual(StateControl.objects.count(), 1)
         rate = RateMaster.objects.get(database_version=version)
-        self.assertEqual(rate.product_code, "P-100")
-        self.assertEqual(str(rate.purchase_rate), "1200.00")
+        self.assertEqual(rate.tech_key, "P-100")
+        self.assertEqual(str(rate.net_material_rate), "1200.00")
 
     def test_second_import_increments_and_deactivates_previous(self):
         first = self._import()
@@ -166,22 +174,18 @@ class ImportServiceTests(TestCase):
         self.assertTrue(second.is_active)
         self.assertFalse(first.is_active)
 
-    def test_retention_keeps_ten_versions(self):
-        """Import service retains the 10 most recent versions (1 active + 9 archived).
-
-        The retention policy was updated in the July 2, 2026 session from 3 to 10
-        (docs/DATABASE_ARCHITECTURE.md). Importing 11 times should leave exactly 10.
-        """
-        for _ in range(11):
+    def test_retention_keeps_three_versions(self):
+        """Import service retains active + two rollback versions."""
+        for _ in range(5):
             self._import()
-        self.assertEqual(DatabaseVersion.objects.count(), 10)
+        self.assertEqual(DatabaseVersion.objects.count(), 3)
         numbers = sorted(DatabaseVersion.objects.values_list("version_number", flat=True))
-        self.assertEqual(numbers, list(range(2, 12)))
+        self.assertEqual(numbers, [3, 4, 5])
 
     def test_state_control_is_upserted(self):
         self._import()
         self._import()
-        self.assertEqual(StateControl.objects.filter(state_name="Maharashtra").count(), 1)
+        self.assertEqual(StateControl.objects.filter(state="Maharashtra").count(), 1)
 
     def test_imports_client_database_shape_with_synthesized_codes(self):
         tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
@@ -193,14 +197,12 @@ class ImportServiceTests(TestCase):
             Path(tmp.name).unlink(missing_ok=True)
 
         rate = RateMaster.objects.get(database_version=version)
-        self.assertEqual(rate.product_code, "PIPE_MS_C_400")
-        self.assertEqual(rate.description, "PIPE MS C 400 mm")
-        self.assertEqual(rate.vendor, "Tiger")
-        self.assertEqual(str(rate.purchase_rate), "6147.12")
+        self.assertEqual(rate.tech_key, "PIPE_MS_C_400")
+        self.assertEqual(rate.supplier, "Tiger")
+        self.assertEqual(str(rate.net_material_rate), "6147.12")
         self.assertEqual(str(rate.final_amount_excl_gst), "7200.00")
-        self.assertEqual(rate.spec_json["handling"], 0.02)
-        self.assertEqual(TORMain.objects.get(database_version=version).tor_code, "PIPE")
-        self.assertEqual(str(StateControl.objects.get(state_name="Delhi").labour_multiplier), "1.2000")
+        self.assertEqual(TORMain.objects.get(database_version=version).category, "PIPE")
+        self.assertEqual(str(StateControl.objects.get(state="Delhi").labour_multiplier), "1.2000")
 
 
 @override_settings(OPENAI_API_KEY="placeholder-key")

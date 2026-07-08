@@ -3,9 +3,10 @@
 Centralises OpenAI access so prompts, models and error handling live in one
 place (docs/AGENTS.md - OpenAI Rules). Business rules must NOT be hardcoded
 here; prompts live in ai/prompts/. AI is used only for understanding,
-extraction and validation - never pricing or vendor selection
+extraction and validation - never pricing or supplier selection
 (docs/AGENTS.md - AI Rules).
 """
+
 from __future__ import annotations
 
 import logging
@@ -48,5 +49,10 @@ def get_client():
         raise AIServiceError("OPENAI_API_KEY is not configured (placeholder in use).")
     return OpenAI(
         api_key=str(settings.OPENAI_API_KEY),
-        timeout=float(settings.OPENAI_TIMEOUT_SECONDS) if getattr(settings, "OPENAI_TIMEOUT_SECONDS", None) else None,
+        timeout=(
+            float(settings.OPENAI_TIMEOUT_SECONDS)
+            if getattr(settings, "OPENAI_TIMEOUT_SECONDS", None)
+            else None
+        ),
+        max_retries=int(getattr(settings, "OPENAI_MAX_RETRIES", 1)),
     )

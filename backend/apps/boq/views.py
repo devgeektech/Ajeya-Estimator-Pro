@@ -1,4 +1,5 @@
 """BOQ views (thin). Experts access their own BOQs; Super Admin sees all."""
+
 import logging
 from decimal import Decimal
 from pathlib import PurePath
@@ -9,6 +10,7 @@ from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.views.generic import DetailView, FormView, ListView, View
 
+from common.choices import RunStatus
 from common.exceptions import ValidationError
 
 from .forms import BOQUploadForm, MakeListUploadForm
@@ -46,7 +48,7 @@ class BOQDetailView(LoginRequiredMixin, OwnedBOQQuerysetMixin, DetailView):
         return CANONICAL_BOQ_HEADERS
 
     @staticmethod
-    def _display_row(item, headers):
+    def _display_row(item, headers, *, show_pricing: bool):
         original_data = item.original_data or {}
         row_values = {
             "s_no": original_data.get("s_no"),
@@ -58,31 +60,48 @@ class BOQDetailView(LoginRequiredMixin, OwnedBOQQuerysetMixin, DetailView):
                 else item.quantity
             ),
         }
-        cells = ["" if row_values.get(header["key"]) is None else row_values.get(header["key"]) for header in headers]
-        matches = list(item.product_matches.all())
-        match = matches[0] if matches else None
-        breakdown = getattr(match, "cost_breakdown", None) if match else None
-        final_rate = breakdown.final_rate if breakdown else None
+        cells = [
+            ""
+            if row_values.get(header["key"]) is None
+            else row_values.get(header["key"])
+            for header in headers
+        ]
+        final_rate = None
+        if show_pricing:
+            matches = list(item.product_matches.all())
+            match = matches[0] if matches else None
+            detail = getattr(match, "rate_detail", None) if match else None
+            final_rate = detail.rate_contribution if detail else None
         amount = (
             (final_rate * item.quantity).quantize(Decimal("0.01"))
-            if final_rate is not None else None
+            if final_rate is not None
+            else None
         )
-        return {"item": item, "cells": cells, "final_rate": final_rate, "amount": amount}
+        return {
+            "item": item,
+            "cells": cells,
+            "final_rate": final_rate,
+            "amount": amount,
+        }
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
         latest_run = self.object.runs.order_by("-run_number").first()
         ctx["latest_run"] = latest_run
         if latest_run:
-            items_qs = latest_run.items.all().order_by("row_number").prefetch_related(
-                "product_matches__cost_breakdown"
+            items_qs = (
+                latest_run.items.all()
+                .order_by("row_number")
+                .prefetch_related("product_matches__rate_detail")
             )
             ctx["total_items"] = items_qs.count()
 
             display_headers = self._display_headers(latest_run)
+            show_pricing = latest_run.status == RunStatus.COMPLETED
             ctx["display_headers"] = display_headers
             ctx["item_rows"] = [
-                self._display_row(item, display_headers) for item in items_qs
+                self._display_row(item, display_headers, show_pricing=show_pricing)
+                for item in items_qs
             ]
             ctx["items"] = items_qs
 
@@ -107,7 +126,8 @@ class BOQMakeListView(LoginRequiredMixin, OwnedBOQQuerysetMixin, DetailView):
         ctx["make_list_form"] = MakeListUploadForm()
         ctx["make_list_filename"] = (
             PurePath(self.object.make_list_file.name).name
-            if self.object.make_list_file else ""
+            if self.object.make_list_file
+            else ""
         )
         if latest_run:
             make_qs = latest_run.make_list_entries.all().order_by("category", "make")

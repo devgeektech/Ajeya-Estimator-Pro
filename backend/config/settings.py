@@ -1,10 +1,10 @@
-
 """Single settings module for BOQ_AI.
 
 All runtimes use this module. Environment values are read from ``.env`` in the
 project root when present, and production safety checks are enabled whenever
 ``DEBUG=False``.
 """
+
 from pathlib import Path
 import sys
 
@@ -134,7 +134,9 @@ LOGIN_REDIRECT_URL = "dashboard:home"
 LOGOUT_REDIRECT_URL = "accounts:login"
 
 AUTH_PASSWORD_VALIDATORS = [
-    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"
+    },
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
@@ -181,9 +183,17 @@ CELERY_TASK_ALWAYS_EAGER = env.bool("CELERY_TASK_ALWAYS_EAGER", default=False)
 # --- OpenAI -----------------------------------------------------------------
 
 OPENAI_API_KEY = env("OPENAI_API_KEY", default="")
-OPENAI_MODEL = env("OPENAI_MODEL", default="gpt-4o-mini")
+OPENAI_MODEL = env("OPENAI_MODEL", default="gpt-5-mini")
 OPENAI_EMBEDDING_MODEL = env("OPENAI_EMBEDDING_MODEL", default="text-embedding-3-small")
-OPENAI_TIMEOUT_SECONDS = env.int("OPENAI_TIMEOUT_SECONDS", default=30)
+OPENAI_EMBEDDING_DIMENSIONS = env.int("OPENAI_EMBEDDING_DIMENSIONS", default=1536)
+OPENAI_TIMEOUT_SECONDS = env.int("OPENAI_TIMEOUT_SECONDS", default=120)
+OPENAI_MAX_RETRIES = env.int("OPENAI_MAX_RETRIES", default=1)
+AI_ROW_EXTRACTION_BATCH_SIZE = env.int("AI_ROW_EXTRACTION_BATCH_SIZE", default=10)
+
+# --- Chroma -----------------------------------------------------------------
+
+CHROMA_PATH = env("CHROMA_PATH", default=str(MEDIA_ROOT / "chroma"))
+CHROMA_COLLECTION = env("CHROMA_COLLECTION", default="rate_master_products")
 
 # --- Email ------------------------------------------------------------------
 

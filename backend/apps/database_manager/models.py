@@ -3,9 +3,6 @@
 Schema sourced from docs/DATABASE_ARCHITECTURE.md (System, Master and
 Product tables). The master workbook is imported per database version so
 historical BOQs remain reproducible.
-
-Note: ProductEmbedding.embedding_vector is stored as JSON for V1 so vectors can
-be stored without extra database extensions.
 """
 from django.conf import settings
 from django.db import models
@@ -41,24 +38,48 @@ class RateMaster(models.Model):
     database_version = models.ForeignKey(
         DatabaseVersion, on_delete=models.CASCADE, related_name="rates"
     )
-    product_code = models.CharField(max_length=100, db_index=True)
-    description = models.TextField()
+    tech_key = models.CharField(max_length=255, blank=True, db_index=True)
     make = models.CharField(max_length=150, blank=True)
-    vendor = models.CharField(max_length=150, blank=True)
-    purchase_rate = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     final_amount_excl_gst = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     unit = models.CharField(max_length=50, blank=True)
     category = models.CharField(max_length=150, blank=True)
-    subcategory = models.CharField(max_length=150, blank=True)
-    remarks = models.TextField(blank=True)
-    # Extra columns / evolving schema mapping (flexible V1 design).
-    spec_json = models.JSONField(default=dict, blank=True, help_text="All raw Excel columns stored as key-value pairs.")
+    sub_category = models.CharField(max_length=150, blank=True)
+    product_class = models.CharField(max_length=100, blank=True, db_column="class")
+    size_mm = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    capacity = models.CharField(max_length=100, blank=True)
+    height = models.CharField(max_length=50, blank=True)
+    working_pressure = models.CharField(max_length=50, blank=True)
+    test_pressure = models.CharField(max_length=50, blank=True)
+    temperature = models.CharField(max_length=50, blank=True)
+    throw_distance = models.CharField(max_length=50, blank=True)
+    k_factor = models.CharField(max_length=50, blank=True)
+    head = models.CharField(max_length=100, blank=True)
+    supplier = models.CharField(max_length=150, blank=True)
+    base_purchase_rate = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    discount_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    net_material_rate = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    accessories_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    handling_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    wastage_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    profit_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    status = models.CharField(max_length=50, blank=True)
+    last_updated = models.DateTimeField(null=True, blank=True)
+    procurement_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    procurement_value = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    commercial_material_base = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    accessories_value = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    handling_value = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    wastage_value = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    subtotal_before_profit = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    profit_value = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    final_expenditure = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    margin_percent_on_selling = models.DecimalField(max_digits=6, decimal_places=2, default=0)
 
     class Meta:
-        indexes = [models.Index(fields=["database_version", "product_code"])]
+        indexes = [models.Index(fields=["database_version", "tech_key"])]
 
     def __str__(self) -> str:
-        return f"{self.product_code} - {self.make}"
+        return f"{self.tech_key} - {self.make}"
 
 
 class LabourMaster(models.Model):
@@ -67,15 +88,32 @@ class LabourMaster(models.Model):
     database_version = models.ForeignKey(
         DatabaseVersion, on_delete=models.CASCADE, related_name="labour_rates"
     )
-    labour_code = models.CharField(max_length=100, db_index=True)
-    labour_name = models.CharField(max_length=255)
-    labour_rate = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    tech_key = models.CharField(max_length=255, blank=True, db_index=True)
+    state = models.CharField(max_length=100, blank=True, db_index=True)
+    category = models.CharField(max_length=100, blank=True)
+    sub_category = models.CharField(max_length=100, blank=True)
+    size = models.CharField(max_length=50, blank=True)
     unit = models.CharField(max_length=50, blank=True)
-    # Extra columns / evolving schema mapping (flexible V1 design).
-    spec_json = models.JSONField(default=dict, blank=True, help_text="All raw Excel columns stored as key-value pairs.")
+    labour_type = models.CharField(max_length=100, blank=True)
+    base_rate = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    size_factor = models.DecimalField(max_digits=10, decimal_places=4, default=0)
+    labour_rate_per_unit = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    testing_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    scaffolding_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    consumables_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    painting_rate = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    testing_labour_value = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    scaffolding_labour_value = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    consumables_labour_value = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    painting_labour_value = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    labour_buffer_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    labour_buffer_value = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_labour_per_unit = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    labour_multiplier = models.DecimalField(max_digits=10, decimal_places=4, default=1)
+    total_labour_with_multiplier = models.DecimalField(max_digits=12, decimal_places=2, default=0)
 
     def __str__(self) -> str:
-        return self.labour_code
+        return self.tech_key
 
 
 class TORMain(models.Model):
@@ -84,12 +122,32 @@ class TORMain(models.Model):
     database_version = models.ForeignKey(
         DatabaseVersion, on_delete=models.CASCADE, related_name="tor_main"
     )
-    tor_code = models.CharField(max_length=100, db_index=True)
-    description = models.TextField(blank=True)
-    spec_json = models.JSONField(default=dict, blank=True)
+    category = models.CharField(max_length=100, blank=True, db_index=True)
+    handling_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    wastage_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    profit_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    procurement_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    risk_buffer_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    project_state = models.CharField(max_length=100, blank=True)
 
     def __str__(self) -> str:
-        return self.tor_code
+        return self.category
+
+
+class LabourStructureSource(models.Model):
+    """Source: Labour_Structure_Source sheet."""
+
+    database_version = models.ForeignKey(
+        DatabaseVersion, on_delete=models.CASCADE, related_name="labour_structures"
+    )
+    category = models.CharField(max_length=100, blank=True)
+    sub_category = models.CharField(max_length=100, blank=True)
+    size = models.CharField(max_length=50, blank=True)
+    unit = models.CharField(max_length=30, blank=True)
+    tech_key = models.CharField(max_length=255, blank=True, db_index=True)
+
+    def __str__(self) -> str:
+        return self.tech_key
 
 
 class TORLabour(models.Model):
@@ -98,10 +156,11 @@ class TORLabour(models.Model):
     database_version = models.ForeignKey(
         DatabaseVersion, on_delete=models.CASCADE, related_name="tor_labour"
     )
-    tor_code = models.CharField(max_length=100, db_index=True)
-    labour_code = models.CharField(max_length=100)
-    quantity = models.DecimalField(max_digits=14, decimal_places=4, default=0)
-    spec_json = models.JSONField(default=dict, blank=True)
+    testing_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    scaffolding_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    consumables_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    painting_rate = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    labour_buffer_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0)
 
 
 class TORAccessories(models.Model):
@@ -110,47 +169,45 @@ class TORAccessories(models.Model):
     database_version = models.ForeignKey(
         DatabaseVersion, on_delete=models.CASCADE, related_name="tor_accessories"
     )
-    tor_code = models.CharField(max_length=100, db_index=True)
-    accessory_code = models.CharField(max_length=100)
-    quantity = models.DecimalField(max_digits=14, decimal_places=4, default=0)
-    spec_json = models.JSONField(default=dict, blank=True)
+    category = models.CharField(max_length=100, blank=True)
+    sub_category = models.CharField(max_length=100, blank=True)
+    min_size = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    max_size = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    accessories_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0)
 
 
 class StateControl(models.Model):
     """Source: State_Control_List sheet."""
 
-    state_name = models.CharField(max_length=150, unique=True)
+    state = models.CharField(max_length=150, unique=True)
     labour_multiplier = models.DecimalField(max_digits=8, decimal_places=4, default=1)
-    transportation_multiplier = models.DecimalField(
-        max_digits=8, decimal_places=4, default=1
-    )
 
     def __str__(self) -> str:
-        return self.state_name
+        return self.state
 
 
 class ProductAlias(models.Model):
     """Alternative product descriptions (e.g. '150 NB Pipe', 'ERW Pipe')."""
 
     alias = models.CharField(max_length=255, db_index=True)
-    product_code = models.CharField(max_length=100, db_index=True)
+    tech_key = models.CharField(max_length=255, db_index=True)
 
     class Meta:
         verbose_name_plural = "Product aliases"
 
     def __str__(self) -> str:
-        return f"{self.alias} -> {self.product_code}"
+        return f"{self.alias} -> {self.tech_key}"
 
 
 class ProductEmbedding(models.Model):
-    """Vector embedding for AI-assisted product search.
+    """Audit record for products indexed in the local Chroma vector store."""
 
-    Stored as JSON in V1; migrates to pgvector in the AI sprint.
-    """
-
-    product_code = models.CharField(max_length=100, db_index=True)
-    embedding_vector = models.JSONField(default=list)
+    tech_key = models.CharField(max_length=255, db_index=True)
+    database_version_id = models.PositiveBigIntegerField(null=True, blank=True, db_index=True)
+    rate_master_id = models.PositiveBigIntegerField(null=True, blank=True, db_index=True)
+    chroma_id = models.CharField(max_length=255, blank=True, db_index=True)
+    embedding_model = models.CharField(max_length=100, blank=True)
     generated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self) -> str:
-        return f"Embedding({self.product_code})"
+        return f"ChromaIndex({self.tech_key})"

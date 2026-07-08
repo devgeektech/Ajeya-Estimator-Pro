@@ -41,16 +41,16 @@ class PendingProductService:
         logger.info("Pending %s rejected", pending.pk)
         return pending
 
-    def merge(self, pending, product_code: str, user=None):
+    def merge(self, pending, tech_key: str, user=None):
         """Map the pending description to an existing master product."""
         version = self._active_version()
-        code = (product_code or "").strip()
+        code = (tech_key or "").strip()
         if not code:
-            raise ValidationError("A product code is required to merge.")
-        if not RateMaster.objects.filter(database_version=version, product_code=code).exists():
+            raise ValidationError("A tech key is required to merge.")
+        if not RateMaster.objects.filter(database_version=version, tech_key=code).exists():
             raise ValidationError(f"No product '{code}' in the active database.")
 
-        ProductAlias.objects.get_or_create(alias=pending.description, product_code=code)
+        ProductAlias.objects.get_or_create(alias=pending.description, tech_key=code)
         pending.suggested_product = code
         pending.status = PendingProductStatus.APPROVED
         pending.reviewed_by = user
@@ -62,32 +62,32 @@ class PendingProductService:
         self,
         pending,
         *,
-        product_code: str,
-        description: str = "",
-        purchase_rate=Decimal("0"),
+        tech_key: str,
+        net_material_rate=Decimal("0"),
         make: str = "",
-        vendor: str = "",
+        supplier: str = "",
         unit: str = "",
         user=None,
     ):
         """Create a new master product (active version) and alias to it."""
         version = self._active_version()
-        code = (product_code or "").strip()
+        code = (tech_key or "").strip()
         if not code:
-            raise ValidationError("A product code is required to add a product.")
-        if RateMaster.objects.filter(database_version=version, product_code=code).exists():
+            raise ValidationError("A tech key is required to add a product.")
+        if RateMaster.objects.filter(database_version=version, tech_key=code).exists():
             raise ValidationError(f"Product '{code}' already exists; use merge instead.")
 
+        amount = Decimal(net_material_rate or 0)
         rate = RateMaster.objects.create(
             database_version=version,
-            product_code=code,
-            description=description or pending.description,
+            tech_key=code,
             make=make,
-            vendor=vendor,
-            purchase_rate=Decimal(purchase_rate or 0),
+            supplier=supplier,
+            net_material_rate=amount,
+            final_amount_excl_gst=amount,
             unit=unit,
         )
-        ProductAlias.objects.get_or_create(alias=pending.description, product_code=code)
+        ProductAlias.objects.get_or_create(alias=pending.description, tech_key=code)
         pending.suggested_product = code
         pending.status = PendingProductStatus.APPROVED
         pending.reviewed_by = user

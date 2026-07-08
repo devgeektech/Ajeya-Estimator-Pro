@@ -298,7 +298,7 @@ Deliverables:
 
 ---
 
-# Phase 6 – Vendor Selection
+# Phase 6 - Rate Selection
 
 Estimated:
 
@@ -310,17 +310,16 @@ Estimated:
 
 Features:
 
-* Lowest vendor.
-* Preferred vendor.
-* Custom vendor.
+* Lowest Final_Amount_(Excl GST) row.
+* Make and supplier traceability.
 
 Deliverables:
 
-* Vendor service.
+* Rate selection inside matching service.
 
 ---
 
-# Phase 7 – Cost Engine
+# Phase 7 – Rate And Labour Detail Retrieval
 
 Estimated:
 
@@ -328,37 +327,42 @@ Estimated:
 
 ---
 
+Status:
+
+Superseded by the 2026-07-08 business rule clarification. The active workflow
+retrieves precomputed Rate_Master and linked Labour_Master values from the
+imported client database. BOQ_AI does not recalculate workbook costing formulas.
+
 ## Sprint 13
 
-### Material Cost
+### Material Rate Fields
 
 Features:
 
-* Material rates.
-* Vendor prices.
+* Selected Rate_Master material fields.
+* Selected Rate_Master net material and final amount fields.
 
 ---
 
 ## Sprint 14
 
-### Labour Cost
+### Labour Detail Fields
 
 Features:
 
-* Labour calculations.
-* Activity costs.
+* Labour_Master lookup by `tech_key`.
+* Selected Labour_Master labour charge fields.
 
 ---
 
 ## Sprint 15
 
-### Commercial Costing
+### Commercial Rate Fields
 
 Features:
 
-* Overheads.
-* Profit.
-* Final rate.
+* Selected precomputed commercial fields.
+* Selected precomputed profit and final amount fields.
 
 ---
 
@@ -378,7 +382,7 @@ Features:
 
 * Editable rows.
 * Product changes.
-* Vendor changes.
+* Selected-rate/supplier changes.
 
 ---
 
@@ -513,16 +517,16 @@ Deliverables:
 
 # Development Dependencies
 
-| Feature         | Depends On     |
-| --------------- | -------------- |
-| Authentication  | None           |
-| Database Import | Authentication |
-| BOQ Upload      | Authentication |
-| AI Engine       | BOQ Upload     |
-| Matching        | AI             |
-| Cost Engine     | Matching       |
-| Review          | Costing        |
-| Export          | Review         |
+| Feature                | Depends On             |
+| ---------------------- | ---------------------- |
+| Authentication         | None                   |
+| Database Import        | Authentication         |
+| BOQ Upload             | Authentication         |
+| AI Engine              | BOQ Upload             |
+| Matching               | AI                     |
+| Rate/Labour Retrieval  | Matching               |
+| Review                 | Rate/Labour Retrieval  |
+| Export                 | Review                 |
 
 ---
 
@@ -692,19 +696,19 @@ Mitigation:
 
 # Expected Timeline
 
-| Phase          | Duration |
-| -------------- | -------- |
-| Foundation     | Complete |
-| Core Platform  | 1 Week   |
-| Database       | 1 Week   |
-| BOQ Management | 1 Week   |
-| AI Engine      | 1 Week   |
-| Matching       | 1 Week   |
-| Costing        | 1 Week   |
-| Review         | 1 Week   |
-| Export         | 1 Week   |
-| Testing        | 1 Week   |
-| Deployment     | 3 Days   |
+| Phase                 | Duration |
+| --------------------- | -------- |
+| Foundation            | Complete |
+| Core Platform         | 1 Week   |
+| Database              | 1 Week   |
+| BOQ Management        | 1 Week   |
+| AI Engine             | 1 Week   |
+| Matching              | 1 Week   |
+| Rate/Labour Retrieval | 1 Week   |
+| Review                | 1 Week   |
+| Export                | 1 Week   |
+| Testing               | 1 Week   |
+| Deployment            | 3 Days   |
 
 ---
 
@@ -776,7 +780,7 @@ Matching
 
 ↓
 
-Costing
+Rate/Labour Retrieval
 
 ↓
 

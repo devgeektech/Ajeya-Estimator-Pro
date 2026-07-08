@@ -40,11 +40,20 @@ Database:
 
 Vector Search:
 
-* pgvector
+* Chroma local persistent vector index
 
 ORM:
 
 * Django ORM
+
+Migration baseline:
+
+* Application migrations are a fresh model-aligned `0001_initial` baseline.
+* Historical app migration files were intentionally removed during the July 8,
+  2026 cleanup after the schema was restructured.
+* Existing non-empty PostgreSQL databases must not apply this baseline as a
+  normal incremental migration. Reset the database, restore into a compatible
+  clean schema, or use a reviewed `--fake-initial` deployment plan.
 
 ---
 
@@ -108,7 +117,7 @@ Fields:
 Retention:
 
 * Current active version
-* Up to 9 previous archived versions (10 total)
+* Two previous archived versions for rollback
 
 ---
 
@@ -126,32 +135,56 @@ Fields:
 
 * id
 * database_version
-* product_code (from workbook key fields when present; synthesized from
-  category/subcategory/class/size when the client workbook leaves the key blank)
-* description (from workbook description/match key, or synthesized from product
-  attributes)
-* make
-* vendor
-* purchase_rate
-* final_amount_excl_gst (from `Final_Amount_(Excl GST)`)
-* unit
 * category
-* subcategory
-* remarks
-* spec_json (all normalized raw workbook columns for evolving client fields such
-  as discount, handling, accessories, profit, state, and source fields)
+* sub_category
+* product_class (`class` column)
+* size_mm
+* make
+* capacity
+* unit
+* height
+* working_pressure
+* test_pressure
+* temperature
+* throw_distance
+* k_factor
+* head
+* supplier
+* base_purchase_rate
+* discount_percent
+* net_material_rate
+* accessories_percent
+* handling_percent
+* wastage_percent
+* profit_percent
+* tech_key
+* status
+* last_updated
+* procurement_percent
+* procurement_value
+* commercial_material_base
+* accessories_value
+* handling_value
+* wastage_value
+* subtotal_before_profit
+* profit_value
+* final_expenditure
+* final_amount_excl_gst
+* margin_percent_on_selling
 
 Import:
 
-* `Tech_Key`, `product_code`, `Match_Key`, and `Source_Key` are accepted as
-  explicit product identifiers.
-* If no identifier is supplied, the importer creates a stable product key from
-  available attributes such as category, subcategory, class, and size.
-* Net/material rates populate `purchase_rate`. `Final_Amount_(Excl GST)` is
-  stored separately as `final_amount_excl_gst` and is used to choose the lowest
-  final-amount Rate_Master row during product matching.
+* `Tech_Key` is stored directly and indexed for Rate_Master to Labour_Master
+  retrieval.
+* If no key is supplied, the importer synthesizes a stable code from category,
+  sub_category, class, and size.
+* `Net Material Rate` populates `net_material_rate`.
+* `Final_Amount_(Excl GST)` is stored as `final_amount_excl_gst` and remains
+  the rate-selection amount.
 * Blank or structurally incomplete master rows are skipped instead of creating
   empty product records.
+* Deprecated lookup keys are not part of the active schema or matching
+  workflow.
 
 ---
 
@@ -165,10 +198,29 @@ Fields:
 
 * id
 * database_version
-* labour_code
-* labour_name
-* labour_rate
+* tech_key
+* state
+* category
+* sub_category
+* size
 * unit
+* labour_type
+* base_rate
+* size_factor
+* labour_rate_per_unit
+* testing_percent
+* scaffolding_percent
+* consumables_percent
+* painting_rate
+* testing_labour_value
+* scaffolding_labour_value
+* consumables_labour_value
+* painting_labour_value
+* labour_buffer_percent
+* labour_buffer_value
+* total_labour_per_unit
+* labour_multiplier
+* total_labour_with_multiplier
 
 ---
 
@@ -182,9 +234,31 @@ Fields:
 
 * id
 * database_version
-* tor_code (from tor_code or category)
-* description
-* spec_json
+* category
+* handling_percent
+* wastage_percent
+* profit_percent
+* procurement_percent
+* risk_buffer_percent
+* project_state
+
+---
+
+## LabourStructureSource
+
+Source:
+
+Labour_Structure_Source.
+
+Fields:
+
+* id
+* database_version
+* category
+* sub_category
+* size
+* unit
+* tech_key
 
 ---
 
@@ -198,9 +272,11 @@ Fields:
 
 * id
 * database_version
-* tor_code
-* labour_code
-* quantity
+* testing_percent
+* scaffolding_percent
+* consumables_percent
+* painting_rate
+* labour_buffer_percent
 
 ---
 
@@ -214,9 +290,11 @@ Fields:
 
 * id
 * database_version
-* tor_code
-* accessory_code
-* quantity
+* category
+* sub_category
+* min_size
+* max_size
+* accessories_percent
 
 ---
 
@@ -229,14 +307,45 @@ State_Control_List.
 Fields:
 
 * id
-* state_name
+* state
 * labour_multiplier
-* transportation_multiplier
 
 Import:
 
-* `State` and `state_name` headers are both accepted.
-* Missing transportation multipliers default to 1.0.
+* `State` is stored as `state`.
+* State control affects labour multiplier only in the active schema.
+
+---
+
+# MASTER RELATIONSHIPS
+
+```text
+RateMaster.tech_key
+    -> LabourMaster.tech_key
+
+RateMaster(category, sub_category, size_mm, unit)
+    -> LabourStructureSource(category, sub_category, size, unit)
+    -> LabourMaster.tech_key
+
+RateMaster.category
+    -> TORMain.category
+
+RateMaster(category, sub_category, size_mm)
+    -> TORAccessories(category, sub_category, min_size, max_size)
+
+LabourMaster.state
+    -> StateControl.state
+```
+
+Rate selection still chooses the matched RateMaster row with the lowest
+`final_amount_excl_gst`.
+
+The selected RateMaster row is the source of precomputed material, commercial,
+supplier, make, and final amount values. The selected row's `tech_key` links to
+LabourMaster so the system can retrieve corresponding precomputed labour charge
+details. TOR and StateControl tables are imported for reference, traceability,
+and future approved rules, but the active pipeline does not recalculate workbook
+costing formulas from them.
 
 ---
 
@@ -260,7 +369,7 @@ Fields:
 
 * id
 * alias
-* product_code
+* tech_key
 
 ---
 
@@ -268,13 +377,17 @@ Fields:
 
 Purpose:
 
-AI search.
+Audit record for Rate_Master rows indexed in the local Chroma vector store.
+Chroma stores the vectors; PostgreSQL remains the source of truth.
 
 Fields:
 
 * id
-* product_code
-* embedding_vector
+* tech_key
+* database_version_id
+* rate_master_id
+* chroma_id
+* embedding_model
 * generated_at
 
 ---
@@ -362,6 +475,7 @@ Fields:
 * description
 * quantity
 * unit
+* target_excel_row
 * original_data (JSON canonical source values: s_no, description, unit, quantity)
 * row_json (JSON grouped source row payload)
 * ai_extraction (JSON)
@@ -375,14 +489,40 @@ Row grouping:
 * `row_json.schema` is `boq_row_group_v1`.
 * `row_json.rows` preserves the Excel row number, serial number, description,
   unit, quantity, and canonical source values for each parent/child row.
+* `target_excel_row` identifies the original workbook row where Rate and Amount
+  output should be written during client export.
 
 AI extraction:
 
-* `ai_extraction` stores top-level product fields and a `products` candidate
-  list extracted from `row_json`.
-* Product candidates may include category, subcategory, make, and
-  database_hint values shaped toward active Rate_Master terminology.
+* `ai_extraction` stores `database_products[]`, `missing_products[]`, and
+  `activities[]` extracted from `row_json`.
+* One BOQItem can contain multiple product/equipment/component candidates.
+* Product candidates use product_name plus database-shaped fields: category,
+  sub_category, class, size_mm, make, capacity, unit, height, working_pressure,
+  test_pressure, temperature, throw, k_factor, head, supplier,
+  product_quantity, product_unit, quantity_basis, and quantity_source.
+* Duplicate extracted product candidates are removed before storage.
+* AI may initially classify candidates into `database_products[]` and
+  `missing_products[]` using compact active database context. PostgreSQL
+  matching is authoritative and may update the final split with matched product
+  details or pending-product metadata.
+* AI extraction requests are batched by grouped BOQ item id. The provider
+  returns row_id-keyed extraction objects, and each BOQItem still stores only
+  its own extraction result.
+* Active database context used for AI extraction is cached by DatabaseVersion;
+  uploading and activating a new database version naturally uses a new cache
+  key.
+* Runtime row extraction logs store one `source_row` object and one
+  `extraction` object with `database_products[]`, `missing_products[]`, and
+  `activities[]`.
 * Activity extraction is shaped toward Labour_Master and TOR_Labour terminology.
+
+Quantity rules:
+
+* BOQItem unit/quantity are client billing/export values.
+* Product candidate product_quantity/product_unit are component values.
+* `quantity_basis` is `per_boq_unit`, `total_for_boq_row`, or `unknown`.
+* `unknown` quantity basis requires review before confident client export.
 
 ---
 
@@ -424,7 +564,24 @@ Fields:
 * product
 * confidence_score
 * make
-* vendor
+* supplier
+* extraction_index
+* match_type
+* product_quantity
+* product_unit
+* quantity_basis
+* quantity_source
+* review_required
+
+Rules:
+
+* One BOQItem may have multiple ProductMatch rows.
+* `extraction_index` points to the matching product/equipment/component object
+  in `BOQItem.ai_extraction.database_products[]` or
+  `BOQItem.ai_extraction.missing_products[]`.
+* Confidence and breakdown rows are evaluated per ProductMatch.
+* Low-confidence or unresolved candidates are visible in the Breakdown List and
+  routed to pending product review when required.
 
 ---
 
@@ -443,21 +600,55 @@ Fields:
 
 ---
 
-# COST TABLES
+# RATE AND LABOUR DETAIL TABLES
 
 ---
 
-## CostBreakdown
+## RateDetail
+
+Purpose:
+
+Store selected/imported Rate_Master output values and linked Labour_Master
+details for a matched product. This record is retrieval output for review and
+export, not a costing calculator.
 
 Fields:
 
-* material_cost
-* labour_cost
-* transportation_cost
-* accessories_cost
-* overhead_cost
-* profit
-* final_rate
+* product_match
+* labour_master_id
+* tech_key
+* make
+* supplier
+* base_purchase_rate
+* discount_percent
+* net_material_rate
+* commercial_material_base
+* accessories_value
+* handling_value
+* wastage_value
+* subtotal_before_profit
+* profit_value
+* final_expenditure
+* final_amount_excl_gst
+* margin_percent_on_selling
+* labour_type
+* labour_state
+* labour_rate_per_unit
+* total_labour_per_unit
+* total_labour_with_multiplier
+* rate_contribution
+
+Rules:
+
+* Values are copied from the selected RateMaster and linked LabourMaster rows as
+  required by the active export/review workflow.
+* The application does not calculate material, labour, transportation,
+  accessory, overhead, profit, commercial percentage, supplier-selection, or
+  final-rate values.
+* `rate_contribution` is an export allocation helper derived from the selected
+  imported final amount and the extracted product quantity basis. Unknown
+  quantity basis or review-required matches must not produce client pricing.
+* Any future derived field requires a documented, human-approved business rule.
 
 ---
 
@@ -475,8 +666,8 @@ Fields:
 
 * original_product
 * revised_product
-* original_vendor
-* revised_vendor
+* original_supplier
+* revised_supplier
 * notes
 
 ---
@@ -578,6 +769,10 @@ BOQ Items
 
 ↓
 
+AI Extraction Into database_products/missing_products/activities
+
+↓
+
 Matching
 
 ↓
@@ -586,7 +781,7 @@ Lowest Final Amount Rate Selection
 
 ↓
 
-Costing
+Rate And Labour Detail Retrieval
 
 ↓
 
@@ -610,8 +805,16 @@ Embeddings are not generated for:
 
 * Labour
 * Costs
-* Vendors
+* Supplier selection
 * Overheads
+
+Embeddings are generated after successful database upload/import and activation
+so the search index matches the active DatabaseVersion. PostgreSQL remains the
+source of truth; Chroma is a rebuildable product lookup index.
+
+Embedding text is built from Rate_Master product/specification fields such as
+category, sub_category, class, size_mm, make, capacity, unit, supplier, and
+other descriptive technical columns. Deprecated lookup keys are not used.
 
 ---
 
@@ -621,7 +824,7 @@ Priority:
 
 1. Exact Match
 2. Alias Match
-3. Vector Search
+3. Chroma vector similarity search
 4. OpenAI Validation
 
 ---
@@ -666,7 +869,7 @@ Pending product created.
 Keep:
 
 * Current active database.
-* Up to 9 previous archived versions (10 total retained).
+* Two previous archived database versions for rollback.
 
 Keep:
 

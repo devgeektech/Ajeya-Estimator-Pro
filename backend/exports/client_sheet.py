@@ -137,6 +137,8 @@ def _ensure_column(ws, header_row: int, columns: dict[str, int], keys, label: st
 
 
 def _target_excel_row(item, unit_col: int | None, qty_col: int | None, ws) -> int:
+    if item.target_excel_row:
+        return item.target_excel_row
     rows = (item.row_json or {}).get("rows") or []
     for row in rows:
         excel_row = row.get("excel_row_number")
@@ -154,9 +156,34 @@ def _target_excel_row(item, unit_col: int | None, qty_col: int | None, ws) -> in
 
 
 def _breakdown_rate(item) -> float:
-    match = item.product_matches.first()
-    breakdown = getattr(match, "cost_breakdown", None) if match else None
-    return _num(breakdown.final_rate) if breakdown else 0.0
+    if any(match.review_required or match.product_id is None for match in item.product_matches.all()):
+        return 0.0
+    total = 0.0
+    for match in item.product_matches.all():
+        detail = getattr(match, "rate_detail", None)
+        total += _num(detail.rate_contribution) if detail else 0.0
+    return total
+
+
+def _breakdown_rows_by_item(run) -> dict[int, list[int]]:
+    """Return internal breakdown row numbers keyed by BOQItem id."""
+    mapping: dict[int, list[int]] = {}
+    row = 2
+    for item in run.items.all().order_by("row_number"):
+        matches = list(item.product_matches.all())
+        row_count = max(1, len(matches))
+        mapping[item.pk] = list(range(row, row + row_count))
+        row += row_count
+    return mapping
+
+
+def _linked_rate_formula(link_sheet: str, final_rate_letter: str, rows: list[int]) -> str:
+    refs = [f"'{link_sheet}'!{final_rate_letter}{row}" for row in rows]
+    if not refs:
+        return "0"
+    if len(refs) == 1:
+        return refs[0]
+    return f"SUM({','.join(refs)})"
 
 
 def _write_original_client_sheet(ws, run, *, link_sheet: str | None) -> bool:
@@ -171,8 +198,9 @@ def _write_original_client_sheet(ws, run, *, link_sheet: str | None) -> bool:
     rate_col = _ensure_column(ws, header_row, columns, RATE_KEYS, "Rate")
     amount_col = _ensure_column(ws, header_row, columns, AMOUNT_KEYS, "Amount")
     final_rate_letter = get_column_letter(FINAL_RATE_COL)
+    breakdown_rows = _breakdown_rows_by_item(run)
 
-    for breakdown_row, item in enumerate(run.items.all().order_by("row_number"), start=2):
+    for item in run.items.all().order_by("row_number"):
         target_row = _target_excel_row(item, unit_col, qty_col, ws)
         if unit_col and ws.cell(target_row, unit_col).value in (None, ""):
             ws.cell(target_row, unit_col, value=item.unit)
@@ -181,14 +209,22 @@ def _write_original_client_sheet(ws, run, *, link_sheet: str | None) -> bool:
 
         qty_ref = f"{get_column_letter(qty_col)}{target_row}"
         if link_sheet:
-            rate_ref = f"'{link_sheet}'!{final_rate_letter}{breakdown_row}"
-            ws.cell(target_row, rate_col, value=f"={rate_ref}")
-            ws.cell(target_row, amount_col, value=f"={rate_ref}*{qty_ref}")
+            rate_ref = _linked_rate_formula(
+                link_sheet,
+                final_rate_letter,
+                breakdown_rows.get(item.pk, []),
+            )
+            if _breakdown_rate(item):
+                ws.cell(target_row, rate_col, value=f"={rate_ref}")
+                ws.cell(target_row, amount_col, value=f"={rate_ref}*{qty_ref}")
+            else:
+                ws.cell(target_row, rate_col, value=None)
+                ws.cell(target_row, amount_col, value=None)
         else:
             final_rate = _breakdown_rate(item)
             qty = _num(ws.cell(target_row, qty_col).value) or _num(item.quantity)
-            ws.cell(target_row, rate_col, value=final_rate)
-            ws.cell(target_row, amount_col, value=round(final_rate * qty, 2))
+            ws.cell(target_row, rate_col, value=final_rate or None)
+            ws.cell(target_row, amount_col, value=round(final_rate * qty, 2) if final_rate else None)
     return True
 
 
@@ -213,12 +249,11 @@ def write_client_sheet(ws, run, *, link_sheet: str | None = None) -> None:
         if header["key"] == "quantity"
     )
     quantity_letter = get_column_letter(quantity_col)
+    breakdown_rows = _breakdown_rows_by_item(run)
     row = 2
     for item in run.items.all().order_by("row_number"):
-        match = item.product_matches.first()
-        breakdown = getattr(match, "cost_breakdown", None) if match else None
         qty = _num(item.quantity)
-        final_rate = _num(breakdown.final_rate) if breakdown else 0.0
+        final_rate = _breakdown_rate(item)
 
         for column, header in enumerate(base_headers, start=1):
             ws.cell(row=row, column=column, value=_cell_value(item, header))
@@ -226,12 +261,16 @@ def write_client_sheet(ws, run, *, link_sheet: str | None = None) -> None:
         rate_col = len(base_headers) + 1
         amount_col = len(base_headers) + 2
         if link_sheet:
-            ref = f"'{link_sheet}'!{col_letter}{row}"
-            ws.cell(row=row, column=rate_col, value=f"={ref}")
-            ws.cell(row=row, column=amount_col, value=f"={ref}*{quantity_letter}{row}")
+            ref = _linked_rate_formula(link_sheet, col_letter, breakdown_rows.get(item.pk, []))
+            if final_rate:
+                ws.cell(row=row, column=rate_col, value=f"={ref}")
+                ws.cell(row=row, column=amount_col, value=f"={ref}*{quantity_letter}{row}")
+            else:
+                ws.cell(row=row, column=rate_col, value=None)
+                ws.cell(row=row, column=amount_col, value=None)
         else:
-            ws.cell(row=row, column=rate_col, value=final_rate)
-            ws.cell(row=row, column=amount_col, value=round(final_rate * qty, 2))
+            ws.cell(row=row, column=rate_col, value=final_rate or None)
+            ws.cell(row=row, column=amount_col, value=round(final_rate * qty, 2) if final_rate else None)
         row += 1
 
     return None

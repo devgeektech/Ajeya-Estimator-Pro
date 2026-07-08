@@ -169,21 +169,21 @@ Responsible for:
 
 * Selecting the lowest `Final_Amount_(Excl GST)` Rate_Master row among matched
   product candidates.
-* Preserving make/vendor data from the selected Rate_Master row for review and
+* Preserving make/supplier data from the selected Rate_Master row for review and
   audit.
 
 ---
 
-## Cost Engine
+## Rate And Labour Detail Retrieval Service
 
 Responsible for:
 
-* Material calculation
-* Labour calculation
-* Transportation
-* Accessories
-* Overheads
-* Profit
+* Reading selected Rate_Master precomputed rate and commercial fields.
+* Fetching Labour_Master details through `Rate_Master.tech_key`.
+* Copying required database values into processing results, review screens, and
+  exports.
+* Preserving imported workbook values without recalculating client costing
+  formulas.
 
 ---
 
@@ -289,7 +289,7 @@ Product Matching
     ↓
 Lowest Final Amount Rate Selection
     ↓
-Cost Calculation
+Rate And Labour Detail Retrieval
     ↓
 Confidence Scoring
     ↓
@@ -298,8 +298,13 @@ Generate Results
 
 BOQ Excel parsing keeps original worksheet row numbers and groups structural
 parent/specification rows into the JSON context of measured child rows. Rows
-with the actual unit or quantity are the rows processed for costing and the
+with the actual unit or quantity are the rows processed for matching and the
 rows targeted by client-sheet rate/amount fills.
+
+Each BOQItem stores a backend grouped-row payload with parent row, child/detail
+rows, original Excel row numbers, canonical source fields, and
+`target_excel_row`. The uploaded workbook remains the UI/audit/export source;
+the grouped payload is the processing source.
 
 ---
 
@@ -318,29 +323,47 @@ Redis is used as the message broker.
 
 # AI Processing Workflow
 
-BOQ Row
+BOQ Row Batch
 
 ↓
 
-Build grouped BOQ row JSON
+Build grouped BOQ row JSON payloads
 
 ↓
 
-OpenAI Analysis with active database context
+Single OpenAI batch analysis with compact active database context
 
 ↓
 
 Extract:
 
-* Product
-* Size
-* Material
-* Product candidates
-* Activities
+* `database_products[]` candidates that appear represented in active database
+  context.
+* `missing_products[]` candidates not represented in active database context.
+* `activities[]` context shaped by active labour/activity vocabulary.
 
 ↓
 
 Return structured data.
+
+Extraction preserves all purchasable product/equipment candidates from the BOQ
+row. Final database presence is confirmed by PostgreSQL matching; AI context
+classification is advisory and reviewable.
+
+Product and activity extraction are handled in configurable batches of grouped
+BOQ items. The batch request sends the shared extraction instruction and active
+database context once, then returns row_id-keyed extraction results for each
+input row. If a batch extraction request fails or times out, the analyzer
+retries by splitting the batch into smaller row groups before skipping any
+individual failed rows. The target extraction batch size is 10 finalized grouped
+BOQ items, OpenAI completion timeout is 120 seconds, and SDK retries are bounded by
+`OPENAI_MAX_RETRIES`.
+The active database context is cached per DatabaseVersion and rendered before
+the variable row payload so repeated batch requests keep a stable prompt prefix.
+Database import and rollback invalidate the context cache after the active
+DatabaseVersion changes, so any of the retained master database versions can be
+made active without reusing stale AI vocabulary.
+AI provider token usage logs include cached prompt token counts when returned.
 
 ---
 
@@ -350,17 +373,31 @@ Priority:
 
 1. Exact Match
 2. Alias Match
-3. Embedding Match
+3. Chroma Embedding Match
 4. OpenAI Validation
 
 Search queries are built in this order:
 
-1. Original grouped BOQ description.
-2. Top-level AI extraction fields.
-3. Extracted product candidate fields.
-4. AI-provided database hints that point toward active Rate_Master terminology.
+1. Extracted product candidate fields, one candidate at a time.
+2. Search variants built from structured fields such as size_mm plus
+   sub_category.
+3. Original grouped BOQ description, only when no product candidate is
+   available.
 
-The original BOQ text remains authoritative and is searched first.
+Each product candidate from `database_products[]` or `missing_products[]` is
+matched independently and stored as a separate ProductMatch with its
+`extraction_index`. This allows one BOQ item to produce multiple matched
+equipment/product lines while activities remain row-level.
+The full deduplicated product candidate list remains stored on
+BOQItem.ai_extraction across `database_products[]` and `missing_products[]` for
+review and pending-product workflows.
+Embedding search uses the local Chroma persistent vector index. Chroma returns
+candidate Rate_Master metadata, and the matching service resolves candidates
+back to PostgreSQL before applying the lowest-final-amount rule.
+
+deprecated lookup keys are removed from the active matching workflow.
+Exact matching uses normalized Rate_Master product/specification fields and
+`tech_key` only for Rate_Master-to-Labour_Master retrieval.
 
 ---
 
@@ -368,10 +405,12 @@ The original BOQ text remains authoritative and is searched first.
 
 Factors:
 
-* Product match.
-* Size match.
-* Make match.
-* Activity match.
+* Category and sub category match.
+* Class and size_mm match.
+* Make, capacity, unit, and supplier match.
+
+Confidence is evaluated per ProductMatch against the corresponding extracted
+product candidate identified by `extraction_index`.
 
 ---
 
@@ -427,26 +466,69 @@ When exact, alias, or embedding search returns multiple Rate_Master rows for
 the same product, the active workflow selects the row with the lowest
 `Final_Amount_(Excl GST)`.
 
-Vendor selection modes are not part of the active workflow.
+Supplier selection modes are not part of the active workflow.
 
 ---
 
-# Cost Calculation Engine
+# Master Database Relationships
 
-Final Rate:
+The active PostgreSQL master schema follows the client workbook:
 
 ```text
-Material
-+ Labour
-+ Transportation
-+ Accessories
-+ Overheads
-+ Profit
+Rate_Master.tech_key -> Labour_Master.tech_key
+Rate_Master -> Labour_Structure_Source -> Labour_Master
+Rate_Master.category -> TOR_Main.category
+Rate_Master(category, sub_category, size_mm) -> TOR_Accessories size band
+Labour_Master.state -> State_Control_List.state
 ```
 
-The AI system does not perform calculations.
+Matching and embeddings use Rate_Master key/specification fields. The selected
+Rate_Master row supplies precomputed material, commercial, supplier, make, and
+final amount values. `Rate_Master.tech_key` links to Labour_Master so the
+system can retrieve the corresponding precomputed labour charge details.
+Labour_Structure_Source may be used only as a lookup fallback to resolve a
+Rate_Master category/sub_category/size row to a Labour_Master `tech_key`.
 
-All calculations are rule based.
+---
+
+# Rate And Labour Detail Retrieval
+
+BOQ_AI does not recalculate costing formulas from the imported workbook.
+
+After matching and lowest-final-amount rate selection, the system retrieves and
+stores the required fields from:
+
+* Rate_Master.
+* Labour_Master, joined by `tech_key`.
+
+The system shall not calculate material cost, labour cost, transportation,
+accessories, overheads, profit, commercial percentages, supplier selection, or
+final rate. Imported workbook values remain authoritative.
+
+Any future derived value must be documented as a human-approved business rule
+before implementation.
+
+---
+
+# BOQ Quantity And Product Quantity
+
+BOQ-level unit and quantity are billing/export fields for the grouped BOQ item.
+They must not be blindly applied to every extracted product/component.
+
+Each extracted product candidate shall include:
+
+* `product_quantity`.
+* `product_unit`.
+* `quantity_basis`: `per_boq_unit`, `total_for_boq_row`, or `unknown`.
+* `quantity_source`: BOQ column, grouped child/detail row, AI fallback, or
+  review.
+
+Unit and quantity resolution priority:
+
+1. Existing BOQ unit/quantity columns.
+2. Parsed child/detail rows inside the grouped BOQ item.
+3. AI-extracted fallback.
+4. Blank/review-required result.
 
 ---
 
@@ -457,10 +539,24 @@ Contains:
 * Breakdown List workbook sheet.
 * Original BOQ description.
 * AI interpretation.
+* Original source Excel row and target Excel row.
+* Extraction index.
+* Extracted product/component name.
 * Matched database product code.
+* Matched Rate_Master row id.
+* Match type.
 * Approved make and supplier.
-* Purchase/material/commercial breakdown values.
-* Profit, final amount excluding GST, margin, labour, and confidence.
+* Product quantity, product unit, and quantity basis.
+* Selected Rate_Master material/commercial/final amount fields.
+* `tech_key`.
+* Linked Labour_Master labour charge fields.
+* Confidence.
+* Review required and missing product flags.
+
+If a BOQ item contains multiple extracted products/equipment, this sheet writes
+one breakdown row per extracted product/component candidate. Unmatched
+candidates are written as missing/pending rows so hidden products from one BOQ
+row remain visible for expert review.
 
 ---
 
@@ -474,6 +570,11 @@ Contains:
 * Rate.
 * Amount.
 
+If a BOQ item has multiple ProductMatch rows, the client-sheet rate is sourced
+from the selected precomputed final amount fields and product-level quantity
+basis according to documented export rules. The application does not recompute
+workbook cost components.
+
 Linked to internal sheet.
 
 Uploaded BOQ files are preserved for auditability. Client export starts from the
@@ -481,6 +582,10 @@ uploaded workbook sheet when available and fills only Unit, Quantity, Rate, and
 Amount. Existing Unit and Quantity cells are not overwritten. If the product
 details live in a child/inherited row, Rate and Amount are filled on that child
 row.
+
+Client export uses each BOQItem's `target_excel_row` to map summarized output
+back to the original workbook. If no confident target row exists, the item is
+review-required and client output remains blank.
 
 ---
 
@@ -546,7 +651,9 @@ System logs:
 * User actions.
 * Processing jobs.
 * Runtime AI instructions rendered from prompt templates before provider calls.
-* Row-level AI extraction payloads for BOQ processing review.
+* Row-level AI extraction payloads with `source_row` and a single `extraction`
+  object containing `database_products[]`, `missing_products[]`, and
+  `activities[]`.
 * Errors.
 * Approvals.
 * Database uploads.
@@ -620,7 +727,7 @@ Additional services:
 4. BOQ Upload
 5. AI Processing
 6. Product Matching
-7. Cost Engine
+7. Rate And Labour Detail Retrieval
 8. Export System
 9. Review Workflow
 10. Pending Product Queue

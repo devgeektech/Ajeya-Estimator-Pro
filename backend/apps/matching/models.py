@@ -23,12 +23,19 @@ class ProductMatch(models.Model):
     )
     confidence_score = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     make = models.CharField(max_length=150, blank=True)
-    vendor = models.CharField(max_length=150, blank=True)
+    supplier = models.CharField(max_length=150, blank=True)
     match_reason = models.CharField(max_length=255, blank=True)
     ai_explanation = models.TextField(blank=True)
+    extraction_index = models.PositiveIntegerField(default=0)
+    match_type = models.CharField(max_length=50, blank=True)
+    product_quantity = models.DecimalField(max_digits=14, decimal_places=4, default=1)
+    product_unit = models.CharField(max_length=50, blank=True)
+    quantity_basis = models.CharField(max_length=50, default="unknown")
+    quantity_source = models.CharField(max_length=50, blank=True)
+    review_required = models.BooleanField(default=False)
 
     class Meta:
-        ordering = ["boq_item", "-confidence_score"]
+        ordering = ["boq_item", "extraction_index", "-confidence_score"]
 
     def __str__(self) -> str:
         return f"Match({self.boq_item_id}) {self.confidence_score}%"

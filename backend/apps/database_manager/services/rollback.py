@@ -5,12 +5,14 @@ retention policy keeps the active version plus two previous versions
 (docs/DATABASE_ARCHITECTURE.md - Retention Policy), so only retained versions
 can be rolled back to.
 """
+
 from __future__ import annotations
 
 import logging
 
 from django.db import transaction
 
+from ai.context import clear_database_context_cache
 from common.exceptions import BOQAIError
 
 from ..models import DatabaseVersion
@@ -33,7 +35,6 @@ class DatabaseRollbackService:
             self.target_version.is_active = True
             self.target_version.save(update_fields=["is_active"])
 
-        logger.info(
-            "Database rolled back to v%s", self.target_version.version_number
-        )
+        clear_database_context_cache()
+        logger.info("Database rolled back to v%s", self.target_version.version_number)
         return self.target_version

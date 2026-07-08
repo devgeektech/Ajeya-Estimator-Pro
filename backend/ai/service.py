@@ -3,13 +3,14 @@
 Single entry point for OpenAI-backed text understanding. Prompts live in
 ai/prompts/ and are formatted with caller-supplied context; business rules are
 never hardcoded here (docs/AGENTS.md - OpenAI Rules). AI is used only for
-understanding/extraction/validation, never pricing or vendor selection
+understanding/extraction/validation, never pricing or supplier selection
 (docs/AGENTS.md - AI Rules).
 
 The service degrades gracefully: when no real API key is configured it reports
 ``is_enabled() == False`` so callers (e.g. the processing pipeline) can skip AI
 work instead of failing.
 """
+
 from __future__ import annotations
 
 import json
@@ -36,6 +37,12 @@ class AIService:
     def is_enabled() -> bool:
         return is_configured()
 
+    @staticmethod
+    def _supports_custom_temperature(model: str) -> bool:
+        model_name = model.lower()
+        default_temperature_only_prefixes = ("gpt-5", "o1", "o3", "o4")
+        return not model_name.startswith(default_temperature_only_prefixes)
+
     def complete(
         self,
         prompt: str,
@@ -52,15 +59,19 @@ class AIService:
         kwargs: dict[str, Any] = {
             "model": str(self.model),
             "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0,
         }
+        if self._supports_custom_temperature(str(self.model)):
+            kwargs["temperature"] = 0
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
 
         try:
             response = client.chat.completions.create(**kwargs)
             content = response.choices[0].message.content or ""  # type: ignore[attr-defined]
-            logger.info("AI completion ok (model=%s, chars=%s)", self.model, len(content))
+            self._log_usage(response, template_name=template_name)
+            logger.info(
+                "AI completion ok (model=%s, chars=%s)", self.model, len(content)
+            )
             return content
         except AIServiceError:
             raise
@@ -91,7 +102,9 @@ class AIService:
         except json.JSONDecodeError as exc:
             raise AIServiceError(f"AI returned invalid JSON: {exc}") from exc
 
-    def _log_instruction(self, prompt: str, *, json_mode: bool, template_name: str) -> None:
+    def _log_instruction(
+        self, prompt: str, *, json_mode: bool, template_name: str
+    ) -> None:
         """Log the full runtime instruction sent to the AI provider."""
         payload = {
             "event": "ai_runtime_instruction",
@@ -101,3 +114,26 @@ class AIService:
             "instruction_text": prompt,
         }
         instruction_logger.info(json.dumps(payload, ensure_ascii=False, default=str))
+
+    def _log_usage(self, response, *, template_name: str) -> None:
+        """Log provider token usage, including cached prompt tokens when present."""
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return
+        prompt_details = self._usage_value(usage, "prompt_tokens_details") or {}
+        payload = {
+            "event": "ai_token_usage",
+            "model": str(self.model),
+            "template_name": template_name,
+            "prompt_tokens": self._usage_value(usage, "prompt_tokens"),
+            "completion_tokens": self._usage_value(usage, "completion_tokens"),
+            "total_tokens": self._usage_value(usage, "total_tokens"),
+            "cached_tokens": self._usage_value(prompt_details, "cached_tokens"),
+        }
+        instruction_logger.info(json.dumps(payload, ensure_ascii=False, default=str))
+
+    @staticmethod
+    def _usage_value(usage, key: str):
+        if isinstance(usage, dict):
+            return usage.get(key)
+        return getattr(usage, key, None)

@@ -1,7 +1,7 @@
 """Review service (Phase 8, Sprint 16).
 
-Experts review processing results and may change the selected product/vendor per
-row; costs are recalculated immediately (docs/PRD.md - Internal Review Sheet).
+Experts review processing results and may change the selected product/supplier
+per row; rate/labour details are refreshed immediately.
 Experts may NOT modify the master database (docs/AGENTS.md - Review Rules) - they
 only re-point a BOQ item's match at an existing master row.
 
@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 
 from apps.audit.services import record
-from apps.costing.services.cost_service import CostCalculationService
+from apps.costing.services.rate_detail import RateDetailRetrievalService
 from apps.database_manager.models import DatabaseVersion, RateMaster
 from apps.matching.models import ProductMatch
 from apps.notifications.services import notify
@@ -25,7 +25,7 @@ logger = logging.getLogger("boq_ai")
 
 
 class ReviewService:
-    """Apply expert review changes and keep costs in sync."""
+    """Apply expert review changes and keep retrieved details in sync."""
 
     # Allowed source states for each transition (docs/PRD.md - BOQ Workflow:
     # Completed -> Under Review -> Approved -> Exported).
@@ -66,21 +66,20 @@ class ReviewService:
         return boq
 
     def candidate_rates(self, item):
-        """Master rows the item can be re-pointed to (same product_code first)."""
+        """Master rows the item can be re-pointed to (same tech_key first)."""
         version = DatabaseVersion.objects.filter(is_active=True).first()
         if version is None:
             return RateMaster.objects.none()
         match = item.product_matches.first()
         qs = RateMaster.objects.filter(database_version=version)
         if match and match.product:
-            return qs.filter(product_code=match.product.product_code)
+            return qs.filter(tech_key=match.product.tech_key)
         return qs
 
     def apply_selection(self, item, rate, user=None, notes: str = ""):
-        """Re-point an item's match at ``rate``; record + recalculate.
+        """Re-point an item's match at ``rate``; record and refresh details.
 
-        Works for both vendor changes (same product_code) and product changes
-        (different product_code).
+        Works for same-tech-key rate changes and product changes.
         """
         if rate is None:
             raise ValidationError("A target product/rate row is required.")
@@ -92,27 +91,29 @@ class ReviewService:
         review = ReviewItem.objects.create(
             boq_item=item,
             reviewed_by=user,
-            original_product=match.product.product_code if match.product else "",
-            revised_product=rate.product_code,
-            original_vendor=match.vendor or "",
-            revised_vendor=rate.vendor or "",
+            original_product=match.product.tech_key if match.product else "",
+            revised_product=rate.tech_key,
+            original_supplier=match.supplier or "",
+            revised_supplier=rate.supplier or "",
             notes=notes,
         )
 
         match.product = rate
-        match.vendor = rate.vendor or ""
+        match.supplier = rate.supplier or ""
         match.make = rate.make or ""
         match.match_reason = "manual"
+        match.match_type = "manual"
         match.confidence_score = 100  # expert override is authoritative
+        match.review_required = False
         match.save()
 
-        CostCalculationService().calculate_item(match)
+        RateDetailRetrievalService().retrieve_item(match)
         # Reviewing implies the BOQ is under review.
         self.start_review(item.boq_run.boq, user)
         logger.info(
             "Item %s re-pointed to %s%s by review",
             item.pk,
-            rate.product_code,
+            rate.tech_key,
             "",
         )
         return review

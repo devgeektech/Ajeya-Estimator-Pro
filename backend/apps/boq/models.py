@@ -64,6 +64,7 @@ class BOQItem(models.Model):
 
     boq_run = models.ForeignKey(BOQRun, on_delete=models.CASCADE, related_name="items")
     row_number = models.PositiveIntegerField()
+    target_excel_row = models.PositiveIntegerField(null=True, blank=True)
     description = models.TextField()
     quantity = models.DecimalField(max_digits=14, decimal_places=4, default=0)
     unit = models.CharField(max_length=50, blank=True)

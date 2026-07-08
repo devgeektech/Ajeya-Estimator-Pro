@@ -13,7 +13,7 @@ from django.test import TestCase, override_settings
 
 from apps.audit.models import AuditLog
 from apps.boq.models import BOQ, BOQItem, BOQRun
-from apps.costing.models import CostBreakdown
+from apps.costing.models import RateDetail
 from apps.database_manager.models import DatabaseVersion, RateMaster
 from apps.exports.services.export_service import ExportService
 from apps.matching.models import ProductMatch
@@ -22,6 +22,7 @@ from apps.processing.models import ProcessingJob
 from apps.review.services.review_service import ReviewService
 from common.choices import BOQStatus, RunStatus
 from common.exceptions import ProcessingError, ValidationError
+from tasks.process_boq import process_boq_task
 from workflows.boq_processing import process_boq_run
 
 
@@ -33,11 +34,14 @@ class _PipelineFixture(TestCase):
         )
         self.pipe = RateMaster.objects.create(
             database_version=self.version,
-            product_code="PIPE150",
-            description="150 NB MS Pipe",
+            tech_key="PIPE150",
+            category="Pipe",
+            sub_category="MS Pipe",
+            size_mm=150,
             make="Jindal",
-            vendor="ACME",
-            purchase_rate=1000,
+            supplier="ACME",
+            net_material_rate=1000,
+            final_amount_excl_gst=1000,
         )
         self.boq = BOQ.objects.create(
             user=self.user, boq_name="Tower A", uploaded_file="boq/x.xlsx"
@@ -49,6 +53,24 @@ class _PipelineFixture(TestCase):
 
 
 class ProcessPipelineTests(_PipelineFixture):
+    def test_missing_run_is_skipped_without_error(self):
+        missing_id = self.run.pk + 999
+
+        with self.assertLogs("boq_ai", level="WARNING") as captured:
+            result = process_boq_run(missing_id)
+
+        self.assertIsNone(result)
+        self.assertIn(f"run {missing_id} no longer exists", captured.output[0])
+
+    def test_missing_run_task_is_skipped_without_error(self):
+        missing_id = self.run.pk + 999
+
+        with self.assertLogs("boq_ai", level="WARNING") as captured:
+            result = process_boq_task.run(missing_id)
+
+        self.assertIsNone(result)
+        self.assertIn(f"run {missing_id} no longer exists", captured.output[0])
+
     @override_settings(OPENAI_API_KEY="placeholder-key")
     def test_full_pipeline_completes(self):
         process_boq_run(self.run.pk)
@@ -63,7 +85,7 @@ class ProcessPipelineTests(_PipelineFixture):
         self.assertEqual(match.match_reason, "exact")
         self.assertEqual(float(match.confidence_score), 100.0)
 
-        self.assertTrue(CostBreakdown.objects.exists())
+        self.assertTrue(RateDetail.objects.exists())
 
         job = ProcessingJob.objects.get(boq_run=self.run)
         self.assertEqual(job.progress, 100)

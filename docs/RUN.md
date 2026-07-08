@@ -117,6 +117,11 @@ python manage.py createsuperuser
 python manage.py runserver
 ```
 
+The project currently uses a fresh app migration baseline. For a brand-new
+local database, `python manage.py migrate` is enough. For an existing database
+created from the old migration chain, reset the local database before applying
+the fresh baseline, or use a reviewed `--fake-initial` plan if preserving data.
+
 You can now access the app at `http://127.0.0.1:8000`.
 
 In a separate PowerShell terminal, start the Celery worker:
@@ -190,6 +195,11 @@ DATABASE_URL=postgres://boq_user:replace-with-password@localhost:5432/boq_db
 REDIS_URL=redis://localhost:6379/0
 CELERY_BROKER_URL=redis://localhost:6379/0
 CELERY_RESULT_BACKEND=redis://localhost:6379/1
+OPENAI_MODEL=gpt-5-mini
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+OPENAI_EMBEDDING_DIMENSIONS=1536
+CHROMA_PATH=media/chroma
+CHROMA_COLLECTION=rate_master_products
 EMAIL_HOST=
 ```
 

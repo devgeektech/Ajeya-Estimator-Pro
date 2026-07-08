@@ -5,7 +5,7 @@
     <td>{{ row.item.quantity|floatformat:"-2" }} {{ row.item.unit }}</td>
     <td>
         {% if row.match and row.match.product %}
-            <strong>{{ row.match.product.product_code }}</strong>
+            <strong>{{ row.match.product.tech_key }}</strong>
             <span class="muted">{{ row.match.make }}</span>
         {% else %}
             <span class="badge badge--warn">Pending</span>
@@ -21,7 +21,7 @@
                     {% for rate in row.candidates %}
                     <option value="{{ rate.pk }}"
                         {% if row.match and row.match.product_id == rate.pk %}selected{% endif %}>
-                        {{ rate.make }} / {{ rate.vendor }} &mdash; {{ rate.purchase_rate }}
+                        {{ rate.make }} / {{ rate.supplier }} &mdash; {{ rate.net_material_rate }}
                     </option>
                     {% endfor %}
                 </select>
@@ -32,7 +32,7 @@
         <span class="muted">No alternatives</span>
         {% endif %}
     </td>
-    <td>{% if row.breakdown %}{{ row.breakdown.final_rate }}{% else %}&mdash;{% endif %}</td>
+    <td>{% if row.rate_detail %}{{ row.rate_detail.rate_contribution }}{% else %}&mdash;{% endif %}</td>
     <td>
         <span class="badge badge--{{ row.band }}">
             {{ row.match.confidence_score|floatformat:"-2"|default:"0" }}%

@@ -3,6 +3,7 @@ from django.contrib import admin
 from .models import (
     DatabaseVersion,
     LabourMaster,
+    LabourStructureSource,
     ProductAlias,
     ProductEmbedding,
     RateMaster,
@@ -22,27 +23,43 @@ class DatabaseVersionAdmin(admin.ModelAdmin):
 @admin.register(RateMaster)
 class RateMasterAdmin(admin.ModelAdmin):
     list_display = (
-        "product_code",
+        "tech_key",
+        "category",
+        "sub_category",
         "make",
-        "vendor",
-        "purchase_rate",
+        "supplier",
+        "net_material_rate",
         "final_amount_excl_gst",
         "unit",
         "database_version",
     )
-    search_fields = ("product_code", "description", "make", "vendor")
-    list_filter = ("database_version", "category")
+    search_fields = ("tech_key", "category", "sub_category", "make", "supplier")
+    list_filter = ("database_version", "category", "sub_category")
 
 
 @admin.register(LabourMaster)
 class LabourMasterAdmin(admin.ModelAdmin):
-    list_display = ("labour_code", "labour_name", "labour_rate", "unit", "database_version")
-    search_fields = ("labour_code", "labour_name")
+    list_display = ("tech_key", "state", "category", "sub_category", "total_labour_with_multiplier", "unit", "database_version")
+    search_fields = ("tech_key", "labour_type", "category", "sub_category")
 
 
 admin.site.register(TORMain)
+admin.site.register(LabourStructureSource)
 admin.site.register(TORLabour)
 admin.site.register(TORAccessories)
 admin.site.register(StateControl)
 admin.site.register(ProductAlias)
-admin.site.register(ProductEmbedding)
+
+
+@admin.register(ProductEmbedding)
+class ProductEmbeddingAdmin(admin.ModelAdmin):
+    list_display = (
+        "tech_key",
+        "database_version_id",
+        "rate_master_id",
+        "chroma_id",
+        "embedding_model",
+        "generated_at",
+    )
+    search_fields = ("tech_key", "chroma_id", "embedding_model")
+    list_filter = ("database_version_id", "embedding_model")

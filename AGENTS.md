@@ -117,9 +117,12 @@ services/
 Examples:
 
 * Product matching.
-* Cost calculations.
-* Vendor selection.
-* Confidence calculation.
+* Rate_Master row selection.
+* Labour_Master detail retrieval by `tech_key`.
+* Confidence scoring.
+
+Do not use `match_key` or `source_key` for matching, embeddings, or imports in
+the active workflow.
 
 ---
 
@@ -136,7 +139,7 @@ AI shall never:
 
 * Calculate costs.
 * Calculate profits.
-* Select vendors.
+* Select vendors/suppliers.
 * Determine pricing.
 
 ---
@@ -193,8 +196,8 @@ Never overwrite historical BOQ data.
 Experts may modify:
 
 * Product.
-* Vendor.
-* Costs.
+* Supplier.
+* Selected output values for review/export.
 
 Experts may not:
 
@@ -233,7 +236,7 @@ Services:
 ```text id="12hdnm"
 ProductMatchingService
 
-CostCalculationService
+RateDetailRetrievalService
 ```
 
 Tasks:

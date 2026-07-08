@@ -1,13 +1,13 @@
 """Confidence scoring + explanations (Phase 5, Sprint 11).
 
 Refines the base score produced by matching into a factor-weighted confidence
-(docs/TRD.md - Confidence Calculation): product, size, material and make
-agreement between the BOQ item's extraction and the matched master product.
+(docs/TRD.md - Confidence Calculation): extracted product specification
+agreement between the BOQ item and the matched master product.
 Stores a colour band (docs/TRD.md - Confidence Thresholds via
 common.constants.confidence_band) and a human-readable explanation.
 
 When AI is enabled the OpenAI validation prompt enriches the explanation and
-blends its confidence; AI is used only for validation, never pricing/vendor
+blends its confidence; AI is used only for validation, never pricing/supplier selection
 (docs/AGENTS.md - AI Rules). With AI disabled, scoring is fully deterministic.
 """
 from __future__ import annotations
@@ -24,7 +24,16 @@ from apps.matching.models import ProductMatch
 logger = logging.getLogger("boq_ai")
 
 # Factor weights (sum to 100) used when the item has AI extraction to compare.
-FACTOR_WEIGHTS = {"product": 40, "size": 25, "material": 15, "make": 20}
+FACTOR_WEIGHTS = {
+    "category": 15,
+    "sub_category": 15,
+    "class": 15,
+    "size_mm": 20,
+    "make": 15,
+    "capacity": 5,
+    "unit": 5,
+    "supplier": 10,
+}
 
 # Authoritative base score per match strategy.
 BASE_SCORES = {"exact": 100.0, "alias": 90.0, "no_match": 0.0}
@@ -37,19 +46,44 @@ class ConfidenceService:
         self._ai_enabled = AIService.is_enabled()
 
     @staticmethod
-    def _factor_agreement(extraction: dict, product) -> tuple[float | None, list[str], list[str]]:
+    def _factor_agreement(extraction: dict, match) -> tuple[float | None, list[str], list[str]]:
         """Return (factor_percent, matched_factors, missing_factors).
 
         factor_percent is None when the extraction provides no comparable fields.
         """
-        haystack = normalize(f"{product.description} {product.make}")
+        product = match.product
+        comparable = ConfidenceService._product_extraction_for_match(extraction, match)
+        haystack = normalize(
+            " ".join(
+                str(value)
+                for value in (
+                    product.tech_key,
+                    product.category,
+                    product.sub_category,
+                    product.unit,
+                    product.make,
+                    product.supplier,
+                    product.product_class,
+                    product.size_mm,
+                    product.capacity,
+                    product.height,
+                    product.working_pressure,
+                    product.test_pressure,
+                    product.temperature,
+                    product.throw_distance,
+                    product.k_factor,
+                    product.head,
+                )
+                if value
+            )
+        )
         considered_weight = 0
         earned_weight = 0
         matched: list[str] = []
         missing: list[str] = []
 
         for field, weight in FACTOR_WEIGHTS.items():
-            value = normalize(extraction.get(field))
+            value = normalize(comparable.get(field))
             if not value:
                 continue
             considered_weight += weight
@@ -64,13 +98,27 @@ class ConfidenceService:
             return None, matched, missing
         return round(earned_weight / considered_weight * 100, 2), matched, missing
 
+    @staticmethod
+    def _product_extraction_for_match(extraction: dict, match) -> dict:
+        products = extraction.get("products") if isinstance(extraction, dict) else None
+        if isinstance(products, list):
+            index = getattr(match, "extraction_index", 0) or 0
+            if 0 <= index < len(products) and isinstance(products[index], dict):
+                return products[index]
+            for product in products:
+                if isinstance(product, dict):
+                    return product
+        return extraction if isinstance(extraction, dict) else {}
+
     def _ai_validation(self, description: str, product):
         """Return (confidence_or_None, reason_or_None) from OpenAI validation."""
         if not self._ai_enabled or product is None:
             return None, None
         try:
             result = AIService().run_json_prompt(
-                "validation.txt", description=description, candidate=product.description
+                "validation.txt",
+                description=description,
+                candidate=self._product_candidate_text(product),
             )
         except AIServiceError:
             logger.warning("AI validation skipped (AI error)")
@@ -81,6 +129,24 @@ class ConfidenceService:
         except (TypeError, ValueError):
             confidence = None
         return confidence, result.get("reason")
+
+    @staticmethod
+    def _product_candidate_text(product) -> str:
+        return " ".join(
+            str(value)
+            for value in (
+                product.tech_key,
+                product.category,
+                product.sub_category,
+                product.product_class,
+                product.size_mm,
+                product.make,
+                product.capacity,
+                product.unit,
+                product.supplier,
+            )
+            if value
+        )
 
     def evaluate(self, match) -> float:
         """Recompute confidence + explanation for a single ProductMatch."""
@@ -96,7 +162,7 @@ class ConfidenceService:
             return 0.0
 
         base = BASE_SCORES.get(reason, float(match.confidence_score))
-        factor_pct, matched, missing = self._factor_agreement(extraction, product)
+        factor_pct, matched, missing = self._factor_agreement(extraction, match)
 
         # Exact matches are authoritative; otherwise blend base with factor
         # agreement when extraction data is available.

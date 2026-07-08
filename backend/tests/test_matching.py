@@ -3,6 +3,8 @@
 Exact/alias matching needs no AI. Vector matching mocks the embedding call so no
 real API requests are made.
 """
+
+from types import SimpleNamespace
 from unittest import mock
 
 from django.contrib.auth import get_user_model
@@ -12,7 +14,6 @@ from apps.boq.models import BOQ, BOQItem, BOQRun
 from apps.database_manager.models import (
     DatabaseVersion,
     ProductAlias,
-    ProductEmbedding,
     RateMaster,
 )
 from apps.matching.models import ProductMatch
@@ -21,6 +22,7 @@ from apps.matching.services.matching_service import ProductMatchingService
 from apps.pending_products.models import PendingProduct
 
 
+@override_settings(OPENAI_API_KEY="placeholder-key")
 class MatchingEngineTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user(email="e@x.com", password="x")
@@ -29,18 +31,26 @@ class MatchingEngineTests(TestCase):
         )
         self.pipe = RateMaster.objects.create(
             database_version=self.version,
-            product_code="PIPE150",
-            description="150 NB MS Pipe",
+            tech_key="PIPE150",
+            category="Pipe",
+            sub_category="MS Pipe",
+            size_mm=150,
             make="Jindal",
-            vendor="ACME",
-            purchase_rate=1000,
+            supplier="ACME",
+            net_material_rate=1000,
+            final_amount_excl_gst=1000,
         )
-        boq = BOQ.objects.create(user=self.user, boq_name="B", uploaded_file="boq/x.xlsx")
+        boq = BOQ.objects.create(
+            user=self.user, boq_name="B", uploaded_file="boq/x.xlsx"
+        )
         self.run = BOQRun.objects.create(boq=boq, run_number=1)
 
     def _item(self, description, extraction=None):
         return BOQItem.objects.create(
-            boq_run=self.run, row_number=1, description=description, ai_extraction=extraction
+            boq_run=self.run,
+            row_number=1,
+            description=description,
+            ai_extraction=extraction,
         )
 
     def test_exact_match_by_description(self):
@@ -50,16 +60,18 @@ class MatchingEngineTests(TestCase):
         self.assertEqual(match.product, self.pipe)
         self.assertEqual(match.match_reason, "exact")
         self.assertEqual(float(match.confidence_score), 100.0)
-        self.assertEqual(match.vendor, "ACME")
+        self.assertEqual(match.supplier, "ACME")
 
     def test_exact_match_selects_lowest_final_amount(self):
         cheaper = RateMaster.objects.create(
             database_version=self.version,
-            product_code="PIPE150",
-            description="150 NB MS Pipe",
+            tech_key="PIPE150",
+            category="Pipe",
+            sub_category="MS Pipe",
+            size_mm=150,
             make="APL",
-            vendor="BestValue",
-            purchase_rate=900,
+            supplier="BestValue",
+            net_material_rate=900,
             final_amount_excl_gst=750,
         )
         self.pipe.final_amount_excl_gst = 1000
@@ -70,9 +82,9 @@ class MatchingEngineTests(TestCase):
 
         match = ProductMatch.objects.get(boq_item=item)
         self.assertEqual(match.product, cheaper)
-        self.assertEqual(match.vendor, "BestValue")
+        self.assertEqual(match.supplier, "BestValue")
 
-    def test_exact_match_by_product_code(self):
+    def test_exact_match_by_tech_key(self):
         item = self._item("pipe150")
         ProductMatchingService().match_item(item)
         match = ProductMatch.objects.get(boq_item=item)
@@ -80,7 +92,7 @@ class MatchingEngineTests(TestCase):
         self.assertEqual(match.match_reason, "exact")
 
     def test_alias_match(self):
-        ProductAlias.objects.create(alias="ERW Pipe 150", product_code="PIPE150")
+        ProductAlias.objects.create(alias="ERW Pipe 150", tech_key="PIPE150")
         item = self._item("Supply of ERW Pipe 150 for water line")
         ProductMatchingService().match_item(item)
         match = ProductMatch.objects.get(boq_item=item)
@@ -101,7 +113,12 @@ class MatchingEngineTests(TestCase):
     def test_source_description_match_wins_over_bad_ai_extraction(self):
         item = self._item(
             "150 NB MS Pipe",
-            {"product": "unknown imagined product", "size": None, "material": None, "make": None},
+            {
+                "product": "unknown imagined product",
+                "size": None,
+                "material": None,
+                "make": None,
+            },
         )
 
         ProductMatchingService().match_item(item, created_by=self.user)
@@ -115,7 +132,12 @@ class MatchingEngineTests(TestCase):
     def test_unmatched_ai_extraction_does_not_create_database_product_suggestion(self):
         item = self._item(
             "Unknown exotic widget",
-            {"product": "AI invented product", "size": None, "material": None, "make": "Imagined"},
+            {
+                "product": "AI invented product",
+                "size": None,
+                "material": None,
+                "make": "Imagined",
+            },
         )
 
         ProductMatchingService().match_item(item, created_by=self.user)
@@ -126,19 +148,16 @@ class MatchingEngineTests(TestCase):
         pending = PendingProduct.objects.get(boq_item=item)
         self.assertEqual(pending.suggested_product, "")
 
-    def test_product_candidate_database_hint_is_searched(self):
+    def test_product_candidate_fields_are_searched(self):
         item = self._item(
             "Supply and fixing as per specification",
             {
-                "products": [
+                "database_products": [
                     {
-                        "product": "MS Pipe",
-                        "size": "150 NB",
-                        "material": "MS",
                         "make": None,
                         "category": "Pipe",
-                        "subcategory": "MS Pipe",
-                        "database_hint": "PIPE150",
+                        "sub_category": "MS Pipe",
+                        "size_mm": "150 NB",
                     }
                 ]
             },
@@ -151,11 +170,75 @@ class MatchingEngineTests(TestCase):
         self.assertEqual(match.match_reason, "exact")
         self.assertFalse(PendingProduct.objects.filter(boq_item=item).exists())
 
+    def test_multiple_product_candidates_create_multiple_matches(self):
+        valve = RateMaster.objects.create(
+            database_version=self.version,
+            tech_key="VALVE80",
+            sub_category="Butterfly Valve",
+            size_mm=80,
+            make="Zoloto",
+            supplier="ValveVendor",
+            net_material_rate=500,
+            final_amount_excl_gst=450,
+        )
+        item = self._item(
+            "Supply and fixing pipe with valve",
+            {
+                "database_products": [
+                    {"sub_category": "MS Pipe", "size_mm": "150 NB"},
+                    {"sub_category": "Butterfly Valve", "size_mm": "80 MM"},
+                ]
+            },
+        )
+
+        ProductMatchingService().match_item(item, created_by=self.user)
+
+        matches = list(ProductMatch.objects.filter(boq_item=item))
+        self.assertEqual(len(matches), 2)
+        self.assertEqual(matches[0].product, self.pipe)
+        self.assertEqual(matches[0].extraction_index, 0)
+        self.assertEqual(matches[1].product, valve)
+        self.assertEqual(matches[1].extraction_index, 1)
+
+    def test_extraction_json_splits_database_and_missing_products(self):
+        item = self._item(
+            "Supply pipe with custom cabinet",
+            {
+                "database_products": [
+                    {
+                        "product_name": "MS Pipe",
+                        "sub_category": "MS Pipe",
+                        "size_mm": "150 NB",
+                    },
+                    {"product_name": "Custom fabricated cabinet"},
+                ]
+            },
+        )
+
+        ProductMatchingService().match_item(item, created_by=self.user)
+
+        item.refresh_from_db()
+        self.assertEqual(len(item.ai_extraction["database_products"]), 1)
+        self.assertEqual(
+            item.ai_extraction["database_products"][0]["matched_product"]["tech_key"],
+            "PIPE150",
+        )
+        self.assertEqual(len(item.ai_extraction["missing_products"]), 1)
+        self.assertEqual(
+            item.ai_extraction["missing_products"][0]["product_name"],
+            "Custom fabricated cabinet",
+        )
+        pending = PendingProduct.objects.get(boq_item=item)
+        self.assertEqual(pending.description, "Custom fabricated cabinet")
+
     @override_settings(OPENAI_API_KEY="sk-realLookingKey123")
-    @mock.patch("ai.embeddings.generator.generate_embedding")
-    def test_vector_match_when_ai_enabled(self, generate_embedding):
-        ProductEmbedding.objects.create(product_code="PIPE150", embedding_vector=[1.0, 0.0, 0.0])
-        generate_embedding.return_value = [0.9, 0.1, 0.0]
+    @mock.patch("apps.matching.services.embedding_match.ChromaEmbeddingStore")
+    @mock.patch("apps.matching.services.embedding_match.generator.generate_embedding")
+    def test_vector_match_when_ai_enabled(self, generate_embedding, store_cls):
+        generate_embedding.return_value = [0.9, 0.1]
+        store_cls.return_value.query.return_value = [
+            SimpleNamespace(rate_master_id=self.pipe.pk, similarity=0.88)
+        ]
         item = self._item("MS tubular conduit", {"product": "tubular conduit"})
 
         ProductMatchingService().match_item(item)
@@ -189,21 +272,31 @@ class ConfidenceServiceTests(TestCase):
         )
         self.pipe = RateMaster.objects.create(
             database_version=self.version,
-            product_code="PIPE150",
-            description="150 NB MS Pipe",
+            tech_key="PIPE150",
+            category="Pipe",
+            sub_category="MS Pipe",
+            size_mm=150,
             make="Jindal",
-            vendor="ACME",
-            purchase_rate=1000,
+            supplier="ACME",
+            net_material_rate=1000,
         )
-        boq = BOQ.objects.create(user=self.user, boq_name="B", uploaded_file="boq/x.xlsx")
+        boq = BOQ.objects.create(
+            user=self.user, boq_name="B", uploaded_file="boq/x.xlsx"
+        )
         self.run = BOQRun.objects.create(boq=boq, run_number=1)
 
     def _match(self, *, reason, product, extraction=None, confidence=0):
         item = BOQItem.objects.create(
-            boq_run=self.run, row_number=1, description="150 NB MS Pipe", ai_extraction=extraction
+            boq_run=self.run,
+            row_number=1,
+            description="150 NB MS Pipe",
+            ai_extraction=extraction,
         )
         return ProductMatch.objects.create(
-            boq_item=item, product=product, confidence_score=confidence, match_reason=reason
+            boq_item=item,
+            product=product,
+            confidence_score=confidence,
+            match_reason=reason,
         )
 
     def test_exact_match_stays_authoritative(self):
@@ -224,7 +317,12 @@ class ConfidenceServiceTests(TestCase):
         match = self._match(
             reason="alias",
             product=self.pipe,
-            extraction={"product": "pipe", "size": "150 NB", "material": "MS", "make": "Jindal"},
+            extraction={
+                "product": "pipe",
+                "size": "150 NB",
+                "material": "MS",
+                "make": "Jindal",
+            },
         )
         score = ConfidenceService().evaluate(match)
         self.assertEqual(score, 95.0)  # (90 base + 100 factors) / 2
@@ -243,7 +341,11 @@ class ConfidenceServiceTests(TestCase):
     @override_settings(OPENAI_API_KEY="sk-realLookingKey123")
     @mock.patch("apps.matching.services.confidence.AIService.run_json_prompt")
     def test_ai_validation_enriches_explanation(self, run_json_prompt):
-        run_json_prompt.return_value = {"is_match": True, "confidence": 80, "reason": "sizes match"}
+        run_json_prompt.return_value = {
+            "is_match": True,
+            "confidence": 80,
+            "reason": "sizes match",
+        }
         match = self._match(reason="exact", product=self.pipe)
         score = ConfidenceService().evaluate(match)
         self.assertEqual(score, 90.0)  # (100 + 80) / 2

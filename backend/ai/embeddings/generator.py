@@ -25,10 +25,14 @@ def generate_embedding(text: str) -> list[float]:
     """
     client = get_client()
     try:
-        response = client.embeddings.create(
-            model=str(settings.OPENAI_EMBEDDING_MODEL),
-            input=text,
-        )
+        kwargs = {
+            "model": str(settings.OPENAI_EMBEDDING_MODEL),
+            "input": text,
+        }
+        dimensions = int(getattr(settings, "OPENAI_EMBEDDING_DIMENSIONS", 1536) or 0)
+        if dimensions:
+            kwargs["dimensions"] = dimensions
+        response = client.embeddings.create(**kwargs)
         return list(response.data[0].embedding)
     except AIServiceError:
         raise

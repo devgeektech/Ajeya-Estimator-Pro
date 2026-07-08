@@ -19,8 +19,9 @@ class PendingServiceTests(TestCase):
             version_number=1, is_active=True, source_filename="db.xlsx"
         )
         self.rate = RateMaster.objects.create(
-            database_version=self.version, product_code="PIPE150",
-            description="150 NB MS Pipe", purchase_rate=Decimal("800.00"),
+            database_version=self.version,
+            tech_key="PIPE150",
+            net_material_rate=Decimal("800.00"),
         )
         self.pending = PendingProduct.objects.create(
             description="150NB pipe unknown", confidence_score=Decimal("12.00")
@@ -38,7 +39,7 @@ class PendingServiceTests(TestCase):
         self.assertEqual(self.pending.status, PendingProductStatus.APPROVED)
         self.assertTrue(
             ProductAlias.objects.filter(
-                alias="150NB pipe unknown", product_code="PIPE150"
+                alias="150NB pipe unknown", tech_key="PIPE150"
             ).exists()
         )
 
@@ -48,19 +49,22 @@ class PendingServiceTests(TestCase):
 
     def test_add_new_creates_rate_and_alias(self):
         PendingProductService().add_new(
-            self.pending, product_code="VALVE9", description="Gate valve",
-            purchase_rate=Decimal("499.99"), make="Zoloto", user=self.admin,
+            self.pending,
+            tech_key="VALVE9",
+            net_material_rate=Decimal("499.99"),
+            make="Zoloto",
+            user=self.admin,
         )
         self.pending.refresh_from_db()
         self.assertEqual(self.pending.status, PendingProductStatus.APPROVED)
-        rate = RateMaster.objects.get(database_version=self.version, product_code="VALVE9")
-        self.assertEqual(rate.purchase_rate, Decimal("499.99"))
-        self.assertTrue(ProductAlias.objects.filter(product_code="VALVE9").exists())
+        rate = RateMaster.objects.get(database_version=self.version, tech_key="VALVE9")
+        self.assertEqual(rate.net_material_rate, Decimal("499.99"))
+        self.assertTrue(ProductAlias.objects.filter(tech_key="VALVE9").exists())
 
     def test_add_new_duplicate_code_raises(self):
         with self.assertRaises(ValidationError):
             PendingProductService().add_new(
-                self.pending, product_code="PIPE150", user=self.admin
+                self.pending, tech_key="PIPE150", user=self.admin
             )
 
 
@@ -74,8 +78,9 @@ class PendingViewAccessTests(TestCase):
             version_number=1, is_active=True, source_filename="db.xlsx"
         )
         RateMaster.objects.create(
-            database_version=self.version, product_code="PIPE150",
-            description="150 NB MS Pipe", purchase_rate=Decimal("800.00"),
+            database_version=self.version,
+            tech_key="PIPE150",
+            net_material_rate=Decimal("800.00"),
         )
         self.pending = PendingProduct.objects.create(
             description="unknown thing", confidence_score=Decimal("10.00")
@@ -96,7 +101,7 @@ class PendingViewAccessTests(TestCase):
         self.client.force_login(self.admin)
         resp = self.client.post(
             reverse("pending_products:merge", args=[self.pending.pk]),
-            {"product_code": "PIPE150"},
+            {"tech_key": "PIPE150"},
         )
         self.assertEqual(resp.status_code, 302)
         self.pending.refresh_from_db()

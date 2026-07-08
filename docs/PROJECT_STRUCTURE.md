@@ -108,6 +108,13 @@ apps/
 └── audit/
 ```
 
+Migration folders:
+
+* Each local Django app keeps `migrations/__init__.py`.
+* Apps with models keep one fresh `migrations/0001_initial.py` generated from
+  the current model state.
+* Historical app migration files are not part of the active project structure.
+
 ---
 
 # accounts
@@ -215,7 +222,7 @@ confidence.py
 ```
 
 Matching also performs lowest `Final_Amount_(Excl GST)` rate-row selection
-inside the matching services. A separate vendor-selection service is not active.
+inside the matching services. A separate supplier-selection service is not active.
 
 ---
 
@@ -223,22 +230,22 @@ inside the matching services. A separate vendor-selection service is not active.
 
 Responsibilities:
 
-* Labour.
-* Material.
-* Transportation.
-* Overheads.
-* Profit.
+* Retrieve selected Rate_Master precomputed fields.
+* Retrieve linked Labour_Master fields through `tech_key`.
+* Preserve imported workbook values for review/export.
 
 Services:
 
 ```text
 costing/services/
 
-material.py
-labour.py
-transport.py
-profit.py
+rate_detail.py
+labour_detail.py
 ```
+
+Legacy cost calculation helpers must be retired or refactored during the code
+restructure. The active business rule is value retrieval from the imported
+client workbook data, not recalculation.
 
 ---
 
@@ -347,9 +354,9 @@ embeddings/
 ```text
 ai/prompts/
 
-product_extraction.txt
+boq_row_extraction.txt
 
-activity_extraction.txt
+boq_row_batch_extraction.txt
 
 validation.txt
 ```
@@ -361,14 +368,23 @@ validation.txt
 ```text
 extractors/
 
-product_extractor.py
-
-activity_extractor.py
+row_extractor.py
 ```
 
-`ai/context.py` builds compact active database vocabulary for extraction
-prompts so AI product and activity JSON stays close to Rate_Master,
-Labour_Master, and TOR_Labour terminology.
+`ai/context.py` builds compact active database vocabulary for the row extraction
+prompt so AI product and activity JSON stays close to Rate_Master,
+Labour_Master, and TOR_Labour terminology. AI extraction batches grouped BOQ
+items so one provider call extracts database-present product candidates,
+missing product candidates, and activities for multiple rows while returning
+row_id-keyed results. The target batch size is 10 finalized grouped BOQ items
+and remains configurable.
+The database context is cached per active DatabaseVersion and rendered before
+variable row data to keep extraction prompts cache-friendly.
+Database import also reads `Labour_Structure_Source` so retrieval can resolve
+category/sub_category/size rows back to Labour_Master `tech_key` rows when a
+direct Rate_Master `tech_key` match is not available.
+Deprecated lookup keys are not part of the active matching or embedding
+workflow.
 
 ---
 
@@ -395,6 +411,13 @@ generate_database_embeddings.py
 
 search.py
 ```
+
+Embedding search uses a local Chroma persistent vector index. PostgreSQL
+stores Rate_Master rows and a lightweight `ProductEmbedding` audit record;
+Chroma stores the vectors.
+Embedding text is built from Rate_Master product/specification fields such as
+category, sub_category, class, size_mm, make, capacity, unit, supplier, and
+other descriptive technical columns. Deprecated lookup keys are excluded.
 
 ---
 
@@ -423,6 +446,10 @@ Parse
 
 ↓
 
+Group Rows With target_excel_row
+
+↓
+
 AI
 
 ↓
@@ -435,7 +462,7 @@ Lowest Final Amount Rate Selection
 
 ↓
 
-Costing
+Rate And Labour Detail Retrieval
 
 ↓
 
@@ -445,6 +472,16 @@ Review
 
 Export
 ```
+
+BOQ parsing must preserve the uploaded workbook for UI/audit/export while
+creating a backend grouped-row payload for processing. Grouped items store
+parent rows, child/detail rows, original Excel row numbers, canonical source
+fields, and `target_excel_row`.
+
+AI extraction results are logged with one `source_row` and one extraction object
+containing `database_products[]`, `missing_products[]`, and `activities[]`.
+Product candidates include product-level quantity, unit, quantity basis, and
+quantity source so one BOQ row can safely contain multiple hidden components.
 
 ---
 
@@ -574,7 +611,7 @@ application.log    # All INFO+ events (app + root logger)
 
 errors.log         # ERROR+ events only
 
-ai_extractions.log # One structured JSON log line per BOQ row AI extraction
+ai_extractions.log # One structured JSON log line per BOQ row with source_row + extraction
 
 ai_instructions.log # One structured JSON log line per rendered AI instruction
 ```
@@ -666,6 +703,7 @@ Models:
 ```text
 BOQ
 BOQItem
+LabourStructureSource
 ProductMatch
 ```
 
@@ -673,7 +711,7 @@ Services:
 
 ```text
 ProductMatchingService
-CostCalculationService
+RateDetailRetrievalService
 ```
 
 Tasks:
@@ -694,6 +732,12 @@ DATABASE_URL
 ALLOWED_HOSTS
 
 OPENAI_API_KEY
+
+OPENAI_TIMEOUT_SECONDS
+
+OPENAI_MAX_RETRIES
+
+AI_ROW_EXTRACTION_BATCH_SIZE
 
 REDIS_URL
 
@@ -745,6 +789,10 @@ Embeddings
 
 Database imports run synchronously in the upload request through
 `workflows/database_import.py` and `DatabaseImportService`.
+
+Embeddings are generated after successful import and activation so product
+similarity search matches the active DatabaseVersion. PostgreSQL remains the
+source of truth; the vector index is rebuildable.
 
 ---
 

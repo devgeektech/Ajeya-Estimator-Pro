@@ -8,6 +8,7 @@ The whole operation runs inside a single transaction so a failure leaves the
 previously active database untouched. Embedding generation runs synchronously
 after activation and never queues a Celery task.
 """
+
 from __future__ import annotations
 
 import logging
@@ -18,10 +19,12 @@ from django.db import transaction
 from common.constants import DATABASE_VERSIONS_TO_RETAIN
 from common.exceptions import ImportError_
 from utils.excel import read_rows
+from ai.context import clear_database_context_cache
 
 from ..models import (
     DatabaseVersion,
     LabourMaster,
+    LabourStructureSource,
     RateMaster,
     StateControl,
     TORAccessories,
@@ -40,6 +43,15 @@ def _to_decimal(value, default="0") -> Decimal:
         return Decimal(str(value))
     except (InvalidOperation, ValueError):
         return Decimal(default)
+
+
+def _to_optional_decimal(value) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
 
 
 def _to_str(value) -> str:
@@ -64,24 +76,13 @@ def _stable_code_part(value) -> str:
 def _synth_rate_code(row: dict) -> str:
     parts = [
         row.get("category"),
-        _row_value(row, "sub_category", "subcategory"),
+        row.get("sub_category"),
         row.get("class"),
         _row_value(row, "size_mm", "size", "capacity", "head"),
     ]
-    return "_".join(part for part in (_stable_code_part(value) for value in parts) if part)
-
-
-def _synth_description(row: dict) -> str:
-    parts = [
-        row.get("category"),
-        _row_value(row, "sub_category", "subcategory"),
-        row.get("class"),
-        _row_value(row, "size_mm", "size"),
-        row.get("capacity"),
-        row.get("head"),
-        row.get("unit"),
-    ]
-    return " ".join(_to_str(part) for part in parts if _to_str(part))
+    return "_".join(
+        part for part in (_stable_code_part(value) for value in parts) if part
+    )
 
 
 def _discounted_rate(row: dict):
@@ -93,7 +94,7 @@ def _discounted_rate(row: dict):
     if rate not in (None, ""):
         return rate
 
-    base_rate = _row_value(row, "base_purchase_rate", "purchase_rate")
+    base_rate = row.get("base_purchase_rate")
     discount = _row_value(row, "discount", "discount_percent")
     if base_rate in (None, ""):
         return 0
@@ -107,7 +108,9 @@ def _discounted_rate(row: dict):
 
 
 def _final_amount(row: dict):
-    value = _row_value(row, "final_amount_excl_gst", "final_amount", "final_expenditure")
+    value = _row_value(
+        row, "final_amount_excl_gst", "final_amount", "final_expenditure"
+    )
     if value not in (None, ""):
         return value
     return _discounted_rate(row)
@@ -116,75 +119,156 @@ def _final_amount(row: dict):
 # Per-sheet field extraction. Each builder receives a normalized row dict and
 # returns model field kwargs (excluding the database_version FK).
 def _rate_fields(row: dict) -> dict:
-    p_code = _to_str(_row_value(row, "tech_key", "product_code", "match_key", "source_key"))
-    if not p_code:
-        p_code = _synth_rate_code(row)
-    desc = _to_str(_row_value(row, "description", "match_key")) or _synth_description(row)
+    tech_key = _to_str(row.get("tech_key")) or _synth_rate_code(row)
+    supplier = _to_str(row.get("supplier"))
+    sub_category = _to_str(row.get("sub_category"))
+    net_material_rate = _to_decimal(_discounted_rate(row))
+    final_amount = _to_decimal(_final_amount(row))
     return {
-        "product_code": p_code,
-        "description": desc,
+        "tech_key": tech_key,
         "make": _to_str(row.get("make")),
-        "vendor": _to_str(_row_value(row, "supplier", "vendor")),
-        "purchase_rate": _to_decimal(_discounted_rate(row)),
-        "final_amount_excl_gst": _to_decimal(_final_amount(row)),
+        "final_amount_excl_gst": final_amount,
         "unit": _to_str(row.get("unit")),
         "category": _to_str(row.get("category")),
-        "subcategory": _to_str(_row_value(row, "sub_category", "subcategory")),
-        "remarks": _to_str(_row_value(row, "remarks", "status")),
-        "spec_json": row,
+        "sub_category": sub_category,
+        "product_class": _to_str(row.get("class")),
+        "size_mm": _to_optional_decimal(_row_value(row, "size_mm", "size")),
+        "capacity": _to_str(row.get("capacity")),
+        "height": _to_str(row.get("height")),
+        "working_pressure": _to_str(row.get("working_pressure")),
+        "test_pressure": _to_str(row.get("test_pressure")),
+        "temperature": _to_str(_row_value(row, "temperature", "temp")),
+        "throw_distance": _to_str(_row_value(row, "throw_distance", "throw")),
+        "k_factor": _to_str(_row_value(row, "k_factor", "kfactor")),
+        "head": _to_str(row.get("head")),
+        "supplier": supplier,
+        "base_purchase_rate": _to_decimal(row.get("base_purchase_rate")),
+        "discount_percent": _to_decimal(
+            _row_value(row, "discount_percent", "discount")
+        ),
+        "net_material_rate": net_material_rate,
+        "accessories_percent": _to_decimal(
+            _row_value(row, "accessories_percent", "accessories")
+        ),
+        "handling_percent": _to_decimal(
+            _row_value(row, "handling_percent", "handling")
+        ),
+        "wastage_percent": _to_decimal(_row_value(row, "wastage_percent", "wastage")),
+        "profit_percent": _to_decimal(_row_value(row, "profit_percent", "profit")),
+        "status": _to_str(row.get("status")),
+        "procurement_percent": _to_decimal(
+            _row_value(row, "procurement_percent", "procurement")
+        ),
+        "procurement_value": _to_decimal(row.get("procurement_value")),
+        "commercial_material_base": _to_decimal(row.get("commercial_material_base")),
+        "accessories_value": _to_decimal(row.get("accessories_value")),
+        "handling_value": _to_decimal(row.get("handling_value")),
+        "wastage_value": _to_decimal(row.get("wastage_value")),
+        "subtotal_before_profit": _to_decimal(row.get("subtotal_before_profit")),
+        "profit_value": _to_decimal(row.get("profit_value")),
+        "final_expenditure": _to_decimal(row.get("final_expenditure")),
+        "margin_percent_on_selling": _to_decimal(
+            _row_value(row, "margin_percent_on_selling", "margin_on_selling")
+        ),
     }
 
 
 def _labour_fields(row: dict) -> dict:
-    l_code = _to_str(_row_value(row, "tech_key", "labour_code")) or _synth_rate_code(row)
-    l_name = _to_str(
-        _row_value(row, "labour_name", "category", "sub_category", "subcategory")
-    )
-    l_rate = _row_value(
-        row,
-        "total_labour_per_unit_with_labour_multipler",
-        "total_labour_per_unit_with_labour_multipler",
-        "total_labour_per_unit",
-        "labour_rate_per_unit",
-        "labour_rate",
-        "base_rate",
-    ) or 0
+    tech_key = _to_str(row.get("tech_key")) or _synth_rate_code(row)
+    sub_category = _to_str(row.get("sub_category"))
 
     return {
-        "labour_code": l_code,
-        "labour_name": l_name if l_name else l_code,
-        "labour_rate": _to_decimal(l_rate),
+        "tech_key": tech_key,
+        "state": _to_str(row.get("state")),
+        "category": _to_str(row.get("category")),
+        "sub_category": sub_category,
+        "size": _to_str(row.get("size")),
         "unit": _to_str(row.get("unit")),
-        "spec_json": row,
+        "labour_type": _to_str(row.get("labour_type")),
+        "base_rate": _to_decimal(row.get("base_rate")),
+        "size_factor": _to_decimal(row.get("size_factor")),
+        "labour_rate_per_unit": _to_decimal(row.get("labour_rate_per_unit")),
+        "testing_percent": _to_decimal(_row_value(row, "testing_percent", "testing")),
+        "scaffolding_percent": _to_decimal(
+            _row_value(row, "scaffolding_percent", "scaffolding")
+        ),
+        "consumables_percent": _to_decimal(
+            _row_value(row, "consumables_percent", "consumables")
+        ),
+        "painting_rate": _to_decimal(row.get("painting_rate")),
+        "testing_labour_value": _to_decimal(row.get("testing_labour_value")),
+        "scaffolding_labour_value": _to_decimal(row.get("scaffolding_labour_value")),
+        "consumables_labour_value": _to_decimal(row.get("consumables_labour_value")),
+        "painting_labour_value": _to_decimal(row.get("painting_labour_value")),
+        "labour_buffer_percent": _to_decimal(
+            _row_value(row, "labour_buffer_percent", "labour_buffer")
+        ),
+        "labour_buffer_value": _to_decimal(row.get("labour_buffer_value")),
+        "total_labour_per_unit": _to_decimal(row.get("total_labour_per_unit")),
+        "labour_multiplier": _to_decimal(row.get("labour_multiplier"), "1"),
+        "total_labour_with_multiplier": _to_decimal(
+            _row_value(
+                row,
+                "total_labour_with_multiplier",
+                "total_labour_per_unit_with_labour_multiplier",
+            )
+        ),
     }
 
 
 def _tor_main_fields(row: dict) -> dict:
-    tor_code = _to_str(_row_value(row, "tor_code", "category"))
     return {
-        "tor_code": tor_code,
-        "description": _to_str(_row_value(row, "description", "category")),
-        "spec_json": row,
+        "category": _to_str(row.get("category")),
+        "handling_percent": _to_decimal(
+            _row_value(row, "handling_percent", "handling")
+        ),
+        "wastage_percent": _to_decimal(_row_value(row, "wastage_percent", "wastage")),
+        "profit_percent": _to_decimal(_row_value(row, "profit_percent", "profit")),
+        "procurement_percent": _to_decimal(
+            _row_value(row, "procurement_percent", "procurement")
+        ),
+        "risk_buffer_percent": _to_decimal(
+            _row_value(row, "risk_buffer_percent", "risk_buffer")
+        ),
+        "project_state": _to_str(row.get("project_state")),
+    }
+
+
+def _labour_structure_fields(row: dict) -> dict:
+    return {
+        "category": _to_str(row.get("category")),
+        "sub_category": _to_str(row.get("sub_category")),
+        "size": _to_str(row.get("size")),
+        "unit": _to_str(row.get("unit")),
+        "tech_key": _to_str(row.get("tech_key")),
     }
 
 
 def _tor_labour_fields(row: dict) -> dict:
     return {
-        "tor_code": _to_str(_row_value(row, "tor_code", "category")),
-        "labour_code": _to_str(_row_value(row, "labour_code", "labour_type")),
-        "quantity": _to_decimal(_row_value(row, "quantity", "labour_buffer")),
-        "spec_json": row,
+        "testing_percent": _to_decimal(_row_value(row, "testing_percent", "testing")),
+        "scaffolding_percent": _to_decimal(
+            _row_value(row, "scaffolding_percent", "scaffolding")
+        ),
+        "consumables_percent": _to_decimal(
+            _row_value(row, "consumables_percent", "consumables")
+        ),
+        "painting_rate": _to_decimal(row.get("painting_rate")),
+        "labour_buffer_percent": _to_decimal(
+            _row_value(row, "labour_buffer_percent", "labour_buffer")
+        ),
     }
 
 
 def _tor_accessories_fields(row: dict) -> dict:
     return {
-        "tor_code": _to_str(_row_value(row, "tor_code", "category")),
-        "accessory_code": _to_str(
-            _row_value(row, "accessory_code", "sub_category", "subcategory")
+        "category": _to_str(row.get("category")),
+        "sub_category": _to_str(row.get("sub_category")),
+        "min_size": _to_optional_decimal(row.get("min_size")),
+        "max_size": _to_optional_decimal(row.get("max_size")),
+        "accessories_percent": _to_decimal(
+            _row_value(row, "accessories_percent", "accessories")
         ),
-        "quantity": _to_decimal(_row_value(row, "quantity", "accessories")),
-        "spec_json": row,
     }
 
 
@@ -193,27 +277,38 @@ VERSIONED_SHEETS = {
     "Rate_Master": (RateMaster, _rate_fields),
     "Labour_Master": (LabourMaster, _labour_fields),
     "TOR_Main": (TORMain, _tor_main_fields),
+    "Labour_Structure_Source": (LabourStructureSource, _labour_structure_fields),
     "TOR_Labour": (TORLabour, _tor_labour_fields),
     "TOR_Accessories": (TORAccessories, _tor_accessories_fields),
 }
 
 REQUIRED_MODEL_FIELDS = {
-    RateMaster: ("product_code", "description"),
-    LabourMaster: ("labour_code",),
-    TORMain: ("tor_code",),
-    TORLabour: ("tor_code", "labour_code"),
-    TORAccessories: ("tor_code",),
+    RateMaster: ("tech_key",),
+    LabourMaster: ("tech_key",),
+    TORMain: ("category",),
+    LabourStructureSource: ("tech_key",),
+    TORLabour: (),
+    TORAccessories: ("category", "sub_category"),
 }
 
 
 def _has_required_fields(model, fields: dict) -> bool:
-    return all(_to_str(fields.get(field)) for field in REQUIRED_MODEL_FIELDS.get(model, ()))
+    return all(
+        _to_str(fields.get(field)) for field in REQUIRED_MODEL_FIELDS.get(model, ())
+    )
 
 
 class DatabaseImportService:
     """Orchestrates importing a master workbook into a new DatabaseVersion."""
 
-    def __init__(self, file_path: str, uploaded_by, source_filename: str | None = None, version_name: str = "", stored_name: str = ""):
+    def __init__(
+        self,
+        file_path: str,
+        uploaded_by,
+        source_filename: str | None = None,
+        version_name: str = "",
+        stored_name: str = "",
+    ):
         self.file_path = file_path
         self.uploaded_by = uploaded_by
         self.source_filename = source_filename or str(file_path)
@@ -222,7 +317,9 @@ class DatabaseImportService:
 
     def run(self) -> DatabaseVersion:
         """Execute the full import workflow and return the activated version."""
-        logger.info("Database import started by %s", getattr(self.uploaded_by, "email", "?"))
+        logger.info(
+            "Database import started by %s", getattr(self.uploaded_by, "email", "?")
+        )
 
         # 1. Validate structure before touching the database.
         validate_workbook(self.file_path)
@@ -233,6 +330,7 @@ class DatabaseImportService:
                 self._import_versioned_sheets(version)
                 self._import_state_control()
                 self._activate(version)
+            clear_database_context_cache()
             self._generate_embeddings(version)
             self._enforce_retention()
         except ImportError_:
@@ -277,28 +375,29 @@ class DatabaseImportService:
             )
 
     def _import_state_control(self) -> None:
-        """State control is not version-scoped; upsert by state name."""
+        """State control is not version-scoped; upsert by state."""
         rows = read_rows(self.file_path, "State_Control_List")
         for row in rows:
-            state_name = _to_str(_row_value(row, "state_name", "state"))
-            if not state_name:
+            state = _to_str(row.get("state"))
+            if not state:
                 continue
             StateControl.objects.update_or_create(
-                state_name=state_name,
+                state=state,
                 defaults={
                     "labour_multiplier": _to_decimal(row.get("labour_multiplier"), "1"),
-                    "transportation_multiplier": _to_decimal(
-                        row.get("transportation_multiplier"), "1"
-                    ),
                 },
             )
 
     def _generate_embeddings(self, version: DatabaseVersion) -> None:
         """Generate embeddings inline for the imported RateMaster rows."""
-        from ai.embeddings.generate_database_embeddings import generate_embeddings_for_version
+        from ai.embeddings.generate_database_embeddings import (
+            generate_embeddings_for_version,
+        )
 
         summary = generate_embeddings_for_version(version.pk)
-        logger.info("Embedding generation finished for v%s: %s", version.version_number, summary)
+        logger.info(
+            "Embedding generation finished for v%s: %s", version.version_number, summary
+        )
 
     def _activate(self, version: DatabaseVersion) -> None:
         DatabaseVersion.objects.exclude(pk=version.pk).update(is_active=False)
@@ -306,27 +405,12 @@ class DatabaseImportService:
         version.save(update_fields=["is_active"])
 
     def _enforce_retention(self) -> None:
-        """Keep up to 10 versions total, but only keep parsed master data for top 3 (active + 2 previous)."""
+        """Keep only the active version and two rollback versions."""
         versions = list(DatabaseVersion.objects.order_by("-version_number"))
-        
-        # 1. Total retention (delete DatabaseVersion older than 10)
-        keep_total = versions[:DATABASE_VERSIONS_TO_RETAIN]
-        if len(versions) > DATABASE_VERSIONS_TO_RETAIN:
-            stale_ids = [v.pk for v in versions[DATABASE_VERSIONS_TO_RETAIN:]]
-            stale_versions = DatabaseVersion.objects.filter(pk__in=stale_ids)
-            deleted_count = stale_versions.count()
-            stale_versions.delete()
-            logger.info("Retention: archived %s old database version(s)", deleted_count)
-            
-        # 2. Data retention (delete parsed rows for versions older than top 3)
-        if len(keep_total) > 3:
-            stale_data_versions = keep_total[3:]
-            stale_pks = [v.pk for v in stale_data_versions]
+        if len(versions) <= DATABASE_VERSIONS_TO_RETAIN:
+            return
 
-            RateMaster.objects.filter(database_version_id__in=stale_pks).delete()
-            LabourMaster.objects.filter(database_version_id__in=stale_pks).delete()
-            TORMain.objects.filter(database_version_id__in=stale_pks).delete()
-            TORLabour.objects.filter(database_version_id__in=stale_pks).delete()
-            TORAccessories.objects.filter(database_version_id__in=stale_pks).delete()
-            
-            logger.info("Retention: cleared master data for %s old database version(s)", len(stale_data_versions))
+        stale_ids = [v.pk for v in versions[DATABASE_VERSIONS_TO_RETAIN:]]
+        deleted_count = DatabaseVersion.objects.filter(pk__in=stale_ids).count()
+        DatabaseVersion.objects.filter(pk__in=stale_ids).delete()
+        logger.info("Retention: removed %s old database version(s)", deleted_count)

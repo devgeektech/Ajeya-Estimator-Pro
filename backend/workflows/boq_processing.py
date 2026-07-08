@@ -7,13 +7,13 @@ Jobs).
 
 Stage pipeline (fixed order):
 
-    AI analysis → product matching → costing → confidence scoring
+    AI analysis → product matching → rate/labour retrieval → confidence scoring
 
 Each stage delegates to its dedicated service module:
 - ``ai_analysis``:  Product + activity extraction via AIService (Sprints 8-9).
                    Skipped gracefully when AI is disabled (placeholder key).
 - ``matching``:    Exact/alias/vector matching with lowest final-amount selection.
-- ``costing``:     Material + labour + commercial cost breakdown (Sprints 13-15).
+- ``rate_detail``: Retrieve selected Rate_Master/Labour_Master values.
 - ``confidence``:  Factor-weighted scoring + colour bands (Sprint 11).
 
 All stages are fully implemented and deterministic. AI stages degrade gracefully
@@ -29,7 +29,7 @@ from django.utils import timezone
 from ai.extractors.analyzer import analyze_run
 from ai.service import AIService
 from apps.boq.models import BOQRun
-from apps.costing.services.cost_service import CostCalculationService
+from apps.costing.services.rate_detail import RateDetailRetrievalService
 from apps.matching.services.confidence import ConfidenceService
 from apps.matching.services.matching_service import ProductMatchingService
 from apps.notifications.services import notify
@@ -43,7 +43,7 @@ logger = logging.getLogger("boq_ai")
 STAGES = [
     (30, "Analyzing descriptions", "ai_analysis"),
     (60, "Matching products", "matching"),
-    (85, "Calculating costs", "costing"),
+    (85, "Retrieving rate and labour details", "rate_detail"),
     (95, "Scoring confidence", "confidence"),
 ]
 
@@ -71,8 +71,7 @@ def _run_stage(run, stage_key: str) -> None:
                    skipped gracefully when OPENAI_API_KEY is a placeholder.
     - matching:    ProductMatchingService (exact/alias/vector), selecting the
                    lowest Final_Amount_(Excl GST) RateMaster row among matches.
-    - costing:     Full per-item cost breakdown: material, labour, accessories,
-                   transportation, overhead, profit (Sprints 13-15).
+    - rate_detail: Selected Rate_Master and linked Labour_Master value retrieval.
     - confidence:  Factor-weighted scoring, colour bands, match explanations (Sprint 11).
     """
     if stage_key == "ai_analysis":
@@ -86,8 +85,8 @@ def _run_stage(run, stage_key: str) -> None:
         ProductMatchingService().match_run(run, created_by=run.boq.user)
         return
 
-    if stage_key == "costing":
-        CostCalculationService().calculate_run(run)
+    if stage_key == "rate_detail":
+        RateDetailRetrievalService().retrieve_run(run)
         return
 
     if stage_key == "confidence":
@@ -97,9 +96,14 @@ def _run_stage(run, stage_key: str) -> None:
     raise ProcessingError(f"Unknown processing stage: {stage_key}")
 
 
-def process_boq_run(boq_run_id: int) -> int:
-    """Process a BOQ run end-to-end. Returns the run id."""
-    run = BOQRun.objects.select_related("boq").get(pk=boq_run_id)
+def process_boq_run(boq_run_id: int) -> int | None:
+    """Process a BOQ run end-to-end. Returns the run id when processed."""
+    try:
+        run = BOQRun.objects.select_related("boq").get(pk=boq_run_id)
+    except BOQRun.DoesNotExist:
+        logger.warning("Skipping BOQ processing task: run %s no longer exists", boq_run_id)
+        return None
+
     job, _ = ProcessingJob.objects.get_or_create(boq_run=run)
     boq = run.boq
 

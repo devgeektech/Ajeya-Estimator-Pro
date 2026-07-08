@@ -5,8 +5,8 @@ from .models import ActivityMatch, ProductMatch
 
 @admin.register(ProductMatch)
 class ProductMatchAdmin(admin.ModelAdmin):
-    list_display = ("boq_item", "product", "make", "vendor", "confidence_score")
-    list_filter = ("make", "vendor")
+    list_display = ("boq_item", "product", "make", "supplier", "confidence_score")
+    list_filter = ("make", "supplier")
 
 
 @admin.register(ActivityMatch)

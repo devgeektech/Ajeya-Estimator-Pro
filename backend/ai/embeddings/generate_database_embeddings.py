@@ -1,7 +1,10 @@
 """Synchronous embedding generation for imported master database versions."""
 import logging
 
+from django.conf import settings
+
 from ai.embeddings.generator import generate_embedding
+from ai.embeddings.chroma_store import ChromaEmbeddingStore, rate_document
 from ai.openai_client import is_configured
 from apps.database_manager.models import DatabaseVersion, ProductEmbedding, RateMaster
 from common.exceptions import AIServiceError
@@ -27,30 +30,34 @@ def generate_embeddings_for_version(database_version_id: int) -> dict:
     products = RateMaster.objects.filter(database_version=version)
     total = products.count()
     generated = skipped = errors = 0
+    store = ChromaEmbeddingStore()
+    store.reset_version(version.pk)
+    ProductEmbedding.objects.filter(database_version_id=version.pk).delete()
 
     for product in products.iterator():
-        text = " ".join(
-            part
-            for part in (product.product_code, product.description, product.make, product.unit)
-            if part
-        )
+        text = rate_document(product)
         if not text.strip():
-            skipped += 1
-            continue
-
-        if ProductEmbedding.objects.filter(product_code=product.product_code).exists():
             skipped += 1
             continue
 
         try:
             vector = generate_embedding(text)
+            chroma_id = store.upsert_rate(product, vector)
             ProductEmbedding.objects.update_or_create(
-                product_code=product.product_code,
-                defaults={"embedding_vector": vector},
+                rate_master_id=product.pk,
+                defaults={
+                    "tech_key": product.tech_key,
+                    "database_version_id": version.pk,
+                    "chroma_id": chroma_id,
+                    "embedding_model": str(settings.OPENAI_EMBEDDING_MODEL),
+                },
             )
             generated += 1
         except AIServiceError:
             logger.exception("Embedding failed for RateMaster row %s", product.pk)
+            errors += 1
+        except Exception:
+            logger.exception("Chroma indexing failed for RateMaster row %s", product.pk)
             errors += 1
 
     summary = {"total": total, "generated": generated, "skipped": skipped, "errors": errors}

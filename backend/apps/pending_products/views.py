@@ -61,7 +61,9 @@ class PendingMergeView(_PendingActionView):
 
     def handle(self, request, pending):
         PendingProductService().merge(
-            pending, request.POST.get("product_code", ""), user=request.user
+            pending,
+            request.POST.get("tech_key", ""),
+            user=request.user,
         )
         messages.success(request, "Pending product merged into existing product.")
 
@@ -72,11 +74,10 @@ class PendingAddView(_PendingActionView):
     def handle(self, request, pending):
         PendingProductService().add_new(
             pending,
-            product_code=request.POST.get("product_code", ""),
-            description=request.POST.get("description", ""),
-            purchase_rate=request.POST.get("purchase_rate") or 0,
+            tech_key=request.POST.get("tech_key", ""),
+            net_material_rate=request.POST.get("net_material_rate") or 0,
             make=request.POST.get("make", ""),
-            vendor=request.POST.get("vendor", ""),
+            supplier=request.POST.get("supplier", ""),
             unit=request.POST.get("unit", ""),
             user=request.user,
         )

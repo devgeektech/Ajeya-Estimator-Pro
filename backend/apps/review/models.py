@@ -2,7 +2,7 @@
 
 Captures expert modifications to product / rate selection during review
 (docs/DATABASE_ARCHITECTURE.md - Review Tables). Experts may change product,
-vendor and costs but may not modify the master database
+supplier and costs but may not modify the master database
 (docs/AGENTS.md - Review Rules).
 """
 from django.conf import settings
@@ -23,8 +23,8 @@ class ReviewItem(models.Model):
     )
     original_product = models.CharField(max_length=150, blank=True)
     revised_product = models.CharField(max_length=150, blank=True)
-    original_vendor = models.CharField(max_length=150, blank=True)
-    revised_vendor = models.CharField(max_length=150, blank=True)
+    original_supplier = models.CharField(max_length=150, blank=True)
+    revised_supplier = models.CharField(max_length=150, blank=True)
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

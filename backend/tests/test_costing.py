@@ -1,200 +1,146 @@
-"""Tests for the cost engine (Sprint 13 - material cost)."""
+"""Tests for rate and labour detail retrieval."""
+
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from apps.boq.models import BOQ, BOQItem, BOQRun
-from apps.costing.models import CostBreakdown
-from apps.costing.services.cost_service import CostCalculationService, recompute_final_rate
-from apps.database_manager.models import (
-    DatabaseVersion,
-    LabourMaster,
-    RateMaster,
-    StateControl,
-    TORAccessories,
-    TORLabour,
-)
+from apps.costing.models import RateDetail
+from apps.costing.services.rate_detail import RateDetailRetrievalService
+from apps.database_manager.models import DatabaseVersion, LabourMaster, LabourStructureSource, RateMaster
 from apps.matching.models import ProductMatch
 
 
-class MaterialCostTests(TestCase):
+class RateDetailRetrievalTests(TestCase):
     def setUp(self):
-        self.user = get_user_model().objects.create_user(email="cost@x.com", password="x")
+        self.user = get_user_model().objects.create_user(email="rate@x.com", password="x")
         self.version = DatabaseVersion.objects.create(
             version_number=1, is_active=True, source_filename="db.xlsx"
         )
         self.rate = RateMaster.objects.create(
-            database_version=self.version, product_code="PIPE150",
-            description="150 NB MS Pipe", make="APL", vendor="V1", purchase_rate=Decimal("850.50"),
+            database_version=self.version,
+            tech_key="PIPE150",
+            category="Pipes",
+            sub_category="MS",
+            size_mm=Decimal("150"),
+            unit="m",
+            make="APL",
+            supplier="S1",
+            base_purchase_rate=Decimal("1000.00"),
+            discount_percent=Decimal("10.00"),
+            net_material_rate=Decimal("900.00"),
+            commercial_material_base=Decimal("900.00"),
+            accessories_value=Decimal("90.00"),
+            handling_value=Decimal("10.00"),
+            wastage_value=Decimal("5.00"),
+            subtotal_before_profit=Decimal("1005.00"),
+            profit_value=Decimal("100.50"),
+            final_expenditure=Decimal("1105.50"),
+            final_amount_excl_gst=Decimal("1200.00"),
+            margin_percent_on_selling=Decimal("8.00"),
+        )
+        self.labour = LabourMaster.objects.create(
+            database_version=self.version,
+            tech_key="PIPE150",
+            state="Maharashtra",
+            labour_type="Fitter",
+            labour_rate_per_unit=Decimal("25.00"),
+            total_labour_per_unit=Decimal("100.00"),
+            total_labour_with_multiplier=Decimal("125.00"),
         )
         boq = BOQ.objects.create(user=self.user, boq_name="B", uploaded_file="boq/x.xlsx")
         self.run = BOQRun.objects.create(boq=boq, run_number=1)
 
-    def _match(self, product, quantity="10"):
+    def _match(self, *, quantity="10", product_quantity="1", basis="per_boq_unit"):
         item = BOQItem.objects.create(
-            boq_run=self.run, row_number=1, description="150 NB MS Pipe", quantity=Decimal(quantity)
+            boq_run=self.run,
+            row_number=1,
+            target_excel_row=1,
+            description="150 NB MS Pipe",
+            quantity=Decimal(quantity),
+            unit="m",
         )
         return ProductMatch.objects.create(
-            boq_item=item, product=product, confidence_score=100, match_reason="exact"
+            boq_item=item,
+            product=self.rate,
+            confidence_score=100,
+            match_reason="exact",
+            match_type="exact",
+            product_quantity=Decimal(product_quantity),
+            product_unit="m",
+            quantity_basis=basis,
         )
 
-    def test_material_cost_uses_vendor_purchase_rate(self):
-        match = self._match(self.rate)
-        breakdown = CostCalculationService().calculate_item(match)
-        self.assertEqual(breakdown.material_cost, Decimal("850.50"))
+    def test_retrieves_rate_master_and_labour_master_fields(self):
+        match = self._match()
+        detail = RateDetailRetrievalService().retrieve_item(match)
 
-    def test_final_rate_equals_sum_of_components(self):
-        match = self._match(self.rate)
-        breakdown = CostCalculationService().calculate_item(match)
-        expected = (
-            breakdown.material_cost
-            + breakdown.labour_cost
-            + breakdown.accessories_cost
-            + breakdown.transportation_cost
-            + breakdown.overhead_cost
-            + breakdown.profit
-        )
-        self.assertEqual(breakdown.final_rate, expected)
+        self.assertEqual(detail.tech_key, "PIPE150")
+        self.assertEqual(detail.final_amount_excl_gst, Decimal("1200.00"))
+        self.assertEqual(detail.net_material_rate, Decimal("900.00"))
+        self.assertEqual(detail.labour_master_id, self.labour.pk)
+        self.assertEqual(detail.total_labour_with_multiplier, Decimal("125.00"))
 
-    def test_pending_item_gets_no_breakdown(self):
-        match = self._match(product=None)
-        result = CostCalculationService().calculate_item(match)
+    def test_pending_item_gets_no_rate_detail(self):
+        match = self._match()
+        match.product = None
+        match.save(update_fields=["product"])
+
+        result = RateDetailRetrievalService().retrieve_item(match)
+
         self.assertIsNone(result)
-        self.assertFalse(CostBreakdown.objects.filter(product_match=match).exists())
+        self.assertFalse(RateDetail.objects.filter(product_match=match).exists())
 
-    def test_calculate_run_is_idempotent(self):
-        self._match(self.rate)
-        service = CostCalculationService()
-        service.calculate_run(self.run)
-        service.calculate_run(self.run)
-        self.assertEqual(CostBreakdown.objects.count(), 1)
+    def test_retrieve_run_is_idempotent(self):
+        self._match()
+        service = RateDetailRetrievalService()
 
-    def test_recompute_sums_all_components(self):
-        match = self._match(self.rate)
-        breakdown = CostCalculationService().calculate_item(match)
-        breakdown.material_cost = Decimal("500.00")
-        breakdown.labour_cost = Decimal("100.00")
-        breakdown.accessories_cost = Decimal("50.00")
-        breakdown.transportation_cost = Decimal("10.00")
-        breakdown.overhead_cost = Decimal("66.00")
-        breakdown.profit = Decimal("72.60")
-        recompute_final_rate(breakdown)
-        self.assertEqual(breakdown.final_rate, Decimal("798.60"))
+        service.retrieve_run(self.run)
+        service.retrieve_run(self.run)
 
+        self.assertEqual(RateDetail.objects.count(), 1)
 
-class LabourCostTests(TestCase):
-    def setUp(self):
-        self.user = get_user_model().objects.create_user(email="lab@x.com", password="x")
-        self.version = DatabaseVersion.objects.create(
-            version_number=1, is_active=True, source_filename="db.xlsx"
-        )
-        self.pipe = RateMaster.objects.create(
-            database_version=self.version, product_code="PIPE150",
-            description="150 NB MS Pipe", make="APL", vendor="V1", purchase_rate=Decimal("850.50"),
-        )
-        # Accessory product (priced via RateMaster).
-        RateMaster.objects.create(
-            database_version=self.version, product_code="CLAMP1",
-            description="Pipe clamp", purchase_rate=Decimal("20.00"),
-        )
-        LabourMaster.objects.create(
-            database_version=self.version, labour_code="L1", labour_name="Fitter",
-            labour_rate=Decimal("50.00"),
-        )
-        TORLabour.objects.create(
-            database_version=self.version, tor_code="PIPE150", labour_code="L1",
-            quantity=Decimal("2"),
-        )
-        TORAccessories.objects.create(
-            database_version=self.version, tor_code="PIPE150", accessory_code="CLAMP1",
-            quantity=Decimal("3"),
-        )
-        boq = BOQ.objects.create(user=self.user, boq_name="B", uploaded_file="boq/x.xlsx")
-        self.run = BOQRun.objects.create(boq=boq, run_number=1)
-        item = BOQItem.objects.create(
-            boq_run=self.run, row_number=1, description="150 NB MS Pipe", quantity=Decimal("10")
-        )
-        self.match = ProductMatch.objects.create(
-            boq_item=item, product=self.pipe, confidence_score=100, match_reason="exact"
-        )
+    def test_per_boq_unit_quantity_sets_rate_contribution(self):
+        match = self._match(product_quantity="2", basis="per_boq_unit")
 
-    def test_labour_cost_expands_from_tor(self):
-        breakdown = CostCalculationService().calculate_item(self.match)
-        self.assertEqual(breakdown.labour_cost, Decimal("100.00"))  # 2 x 50
+        detail = RateDetailRetrievalService().retrieve_item(match)
 
-    def test_accessories_cost_expands_from_tor(self):
-        breakdown = CostCalculationService().calculate_item(self.match)
-        self.assertEqual(breakdown.accessories_cost, Decimal("60.00"))  # 3 x 20
+        self.assertEqual(detail.rate_contribution, Decimal("2400.00"))
 
-    def test_final_rate_sums_all_components(self):
-        breakdown = CostCalculationService().calculate_item(self.match)
-        expected = (
-            breakdown.material_cost
-            + breakdown.labour_cost
-            + breakdown.accessories_cost
-            + breakdown.transportation_cost
-            + breakdown.overhead_cost
-            + breakdown.profit
-        )
-        self.assertEqual(breakdown.final_rate, expected)
+    def test_total_for_boq_row_quantity_sets_rate_contribution(self):
+        match = self._match(quantity="4", product_quantity="8", basis="total_for_boq_row")
 
-    def test_missing_labour_rate_is_skipped(self):
-        TORLabour.objects.create(
-            database_version=self.version, tor_code="PIPE150", labour_code="UNKNOWN",
-            quantity=Decimal("5"),
-        )
-        breakdown = CostCalculationService().calculate_item(self.match)
-        self.assertEqual(breakdown.labour_cost, Decimal("100.00"))  # unknown skipped
+        detail = RateDetailRetrievalService().retrieve_item(match)
 
+        self.assertEqual(detail.rate_contribution, Decimal("2400.00"))
 
-class CommercialCostingTests(TestCase):
-    def setUp(self):
-        self.user = get_user_model().objects.create_user(email="com@x.com", password="x")
-        self.version = DatabaseVersion.objects.create(
-            version_number=1, is_active=True, source_filename="db.xlsx"
-        )
-        self.rate = RateMaster.objects.create(
-            database_version=self.version, product_code="PIPE150",
-            description="150 NB MS Pipe", make="APL", vendor="V1", purchase_rate=Decimal("850.50"),
-        )
-        LabourMaster.objects.create(
-            database_version=self.version, labour_code="L1", labour_name="Fitter",
-            labour_rate=Decimal("50.00"),
-        )
-        TORLabour.objects.create(
-            database_version=self.version, tor_code="PIPE150", labour_code="L1",
-            quantity=Decimal("2"),
-        )
-        StateControl.objects.create(
-            state_name="Maharashtra", labour_multiplier=Decimal("2"),
-            transportation_multiplier=Decimal("3"),
-        )
-        boq = BOQ.objects.create(user=self.user, boq_name="B", uploaded_file="boq/x.xlsx")
-        self.run = BOQRun.objects.create(boq=boq, run_number=1)
-        item = BOQItem.objects.create(
-            boq_run=self.run, row_number=1, description="150 NB MS Pipe", quantity=Decimal("1")
-        )
-        self.match = ProductMatch.objects.create(
-            boq_item=item, product=self.rate, confidence_score=100, match_reason="exact"
-        )
+    def test_unknown_quantity_basis_blanks_contribution(self):
+        match = self._match(product_quantity="2", basis="unknown")
 
-    def test_commercial_components_with_defaults(self):
-        # material=850.50, labour=100, transport=2% material=17.01
-        # base=967.51, overhead=10%=96.75, profit=10% of 1064.26=106.43
-        breakdown = CostCalculationService().calculate_item(self.match)
-        self.assertEqual(breakdown.transportation_cost, Decimal("17.01"))
-        self.assertEqual(breakdown.overhead_cost, Decimal("96.75"))
-        self.assertEqual(breakdown.profit, Decimal("106.43"))
-        self.assertEqual(breakdown.final_rate, Decimal("1170.69"))
+        detail = RateDetailRetrievalService().retrieve_item(match)
 
-    def test_state_multipliers_applied(self):
-        CostCalculationService().calculate_run(self.run, state_name="Maharashtra")
-        breakdown = self.match.cost_breakdown
-        self.assertEqual(breakdown.labour_cost, Decimal("200.00"))  # 100 x 2
-        self.assertEqual(breakdown.transportation_cost, Decimal("51.03"))  # 17.01 x 3
+        self.assertEqual(detail.rate_contribution, Decimal("0.00"))
 
-    def test_unknown_state_uses_neutral_multipliers(self):
-        CostCalculationService().calculate_run(self.run, state_name="Atlantis")
-        breakdown = self.match.cost_breakdown
-        self.assertEqual(breakdown.labour_cost, Decimal("100.00"))
+    def test_labour_structure_source_fallback(self):
+        LabourMaster.objects.filter(database_version=self.version).delete()
+        fallback = LabourMaster.objects.create(
+            database_version=self.version,
+            tech_key="L1",
+            labour_type="Fitter",
+            total_labour_with_multiplier=Decimal("75.00"),
+        )
+        LabourStructureSource.objects.create(
+            database_version=self.version,
+            category="Pipes",
+            sub_category="MS",
+            size="150",
+            unit="m",
+            tech_key="L1",
+        )
+        match = self._match()
+
+        detail = RateDetailRetrievalService().retrieve_item(match)
+
+        self.assertEqual(detail.labour_master_id, fallback.pk)
+        self.assertEqual(detail.total_labour_with_multiplier, Decimal("75.00"))

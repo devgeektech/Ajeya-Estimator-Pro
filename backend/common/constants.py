@@ -3,7 +3,6 @@
 Confidence thresholds and database retention sourced from docs/PRD.md,
 docs/TRD.md and docs/DATABASE_ARCHITECTURE.md.
 """
-from decimal import Decimal
 
 # Confidence thresholds (percentage).
 CONFIDENCE_GREEN = 90  # > 90  -> accept
@@ -28,22 +27,15 @@ def confidence_band(score: float) -> str:
     return "blank"
 
 
-# Database version retention: active + 9 previous versions (10 total).
-DATABASE_VERSIONS_TO_RETAIN = 10
-
-
-# Commercial costing defaults (percentages). The docs defer exact values to
-# commercial rules (docs/PRD.md - Cost Calculation); these are tunable defaults.
-# All costing is rule-based - AI never prices (docs/AGENTS.md - AI Rules).
-TRANSPORTATION_PERCENT = Decimal("2")  # % of material cost
-OVERHEAD_PERCENT = Decimal("10")  # % of (material + labour + accessories + transport)
-PROFIT_PERCENT = Decimal("10")  # % of (base + overhead)
+# Database version retention: active + two rollback versions.
+DATABASE_VERSIONS_TO_RETAIN = 3
 
 # Master workbook sheet names (docs/DATABASE_ARCHITECTURE.md).
 MASTER_SHEETS = [
     "Rate_Master",
     "Labour_Master",
     "TOR_Main",
+    "Labour_Structure_Source",
     "TOR_Labour",
     "TOR_Accessories",
     "State_Control_List",
