@@ -212,6 +212,12 @@ Earlier delivered foundation:
 
 - Application migrations are a fresh `0001_initial` baseline generated from the
   current model state.
+- Idempotent repair migrations exist after the fresh baseline to add missing
+  BOQ/export mapping and ProductMatch review/quantity columns when an existing
+  PostgreSQL database has baseline migration history but an older physical
+  schema.
+- The repair migration set also recreates a missing `costing_ratedetail` table
+  when the costing baseline was marked applied without the table existing.
 - Existing databases created from the old migration chain require a reset,
   restore into a compatible clean schema, or reviewed `--fake-initial` plan
   before applying this baseline.
@@ -240,6 +246,33 @@ Tests: 192 passed
 ```
 
 ## Session Log
+
+### 2026-07-08 — Schema Drift Repair Migrations
+
+Completed:
+
+- Added idempotent migration repairs for missing `BOQItem.target_excel_row` and
+  current `ProductMatch` review/quantity columns on drifted PostgreSQL schemas.
+- Added an idempotent migration repair for a missing `costing_ratedetail` table.
+- Applied migrations locally and confirmed no model tables or columns are
+  missing.
+- Reproduced the Django admin delete-preview cascade path without deleting data
+  and confirmed it completes successfully.
+- Verified Ruff, Django check, migration dry-run, and 192 backend tests.
+
+Pending:
+
+- Restart Django/Celery if they were running before this migration was applied.
+
+Issues:
+
+- The traceback was caused by migration history showing the fresh baseline as
+  applied while the physical PostgreSQL schema lacked newer columns/tables.
+
+Next:
+
+- Retry the admin delete action and BOQ processing/export flow against the
+  repaired database.
 
 ### 2026-07-08 — Fresh Migration Baseline Cleanup
 

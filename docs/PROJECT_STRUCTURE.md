@@ -113,6 +113,9 @@ Migration folders:
 * Each local Django app keeps `migrations/__init__.py`.
 * Apps with models keep one fresh `migrations/0001_initial.py` generated from
   the current model state.
+* Small idempotent repair migrations may follow the fresh baseline when needed
+  to align an existing PostgreSQL schema whose migration history already shows
+  the baseline as applied.
 * Historical app migration files are not part of the active project structure.
 
 ---

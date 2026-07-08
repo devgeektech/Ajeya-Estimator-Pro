@@ -51,6 +51,9 @@ Migration baseline:
 * Application migrations are a fresh model-aligned `0001_initial` baseline.
 * Historical app migration files were intentionally removed during the July 8,
   2026 cleanup after the schema was restructured.
+* Post-baseline repair migrations may add missing nullable/defaulted columns
+  with `IF NOT EXISTS` for environments whose migration history was already
+  marked applied while PostgreSQL still had an older physical schema.
 * Existing non-empty PostgreSQL databases must not apply this baseline as a
   normal incremental migration. Reset the database, restore into a compatible
   clean schema, or use a reviewed `--fake-initial` deployment plan.

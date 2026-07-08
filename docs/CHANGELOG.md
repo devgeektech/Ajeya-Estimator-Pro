@@ -4,6 +4,16 @@ This changelog is intentionally compact. It records meaningful product and
 technical changes only. Detailed implementation notes belong in the relevant
 source-of-truth documents.
 
+## 2026-07-08 — Schema Drift Repair Migrations
+
+- Added idempotent repair migrations for existing PostgreSQL databases whose
+  migration history marked the fresh baseline as applied while missing
+  `BOQItem.target_excel_row` and current `ProductMatch` review/quantity fields.
+- Added an idempotent repair migration to create the missing
+  `costing_ratedetail` table in drifted PostgreSQL schemas.
+- Applied the repair locally and verified the database model-column drift check
+  returns no missing tables or columns.
+
 ## 2026-07-08 — Fresh Migration Baseline Cleanup
 
 - Removed historical application migration files and regenerated clean
