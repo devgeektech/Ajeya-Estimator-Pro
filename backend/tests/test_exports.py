@@ -285,6 +285,28 @@ class ExportServiceTests(TestCase):
         with self.assertRaises(ValidationError):
             ExportService().export_run(self.run, self.user)
 
+    def test_preview_creates_draft_workbook_without_changing_status(self):
+        self.boq.status = BOQStatus.UNDER_REVIEW
+        self.boq.save(update_fields=["status"])
+        preview = ExportService().preview_run(self.run, self.user)
+        self.assertTrue(preview.is_preview)
+        self.assertTrue(preview.internal_sheet.name)
+        self.assertFalse(preview.client_sheet)
+        self.boq.refresh_from_db()
+        self.assertEqual(self.boq.status, BOQStatus.UNDER_REVIEW)
+        wb = load_workbook(io.BytesIO(preview.internal_sheet.read()))
+        self.assertEqual(wb.sheetnames, ["Breakdown List", "Client BOQ"])
+
+    def test_final_export_removes_preview_records(self):
+        self.boq.status = BOQStatus.UNDER_REVIEW
+        self.boq.save(update_fields=["status"])
+        ExportService().preview_run(self.run, self.user)
+        self.boq.status = BOQStatus.APPROVED
+        self.boq.save(update_fields=["status"])
+        ExportService().export_run(self.run, self.user)
+        self.assertFalse(ExportFile.objects.filter(boq_run=self.run, is_preview=True).exists())
+        self.assertTrue(ExportFile.objects.filter(boq_run=self.run, is_preview=False).exists())
+
 
 @override_settings(MEDIA_ROOT=_MEDIA)
 class ExportViewTests(TestCase):
@@ -335,6 +357,17 @@ class ExportViewTests(TestCase):
         self.assertEqual(breakdown_resp.status_code, 200)
         self.assertIn("attachment", client_resp["Content-Disposition"])
         self.assertIn("attachment", breakdown_resp["Content-Disposition"])
+
+    def test_owner_can_generate_and_download_preview(self):
+        self.boq.status = BOQStatus.UNDER_REVIEW
+        self.boq.save(update_fields=["status"])
+        self.client.force_login(self.owner)
+        resp = self.client.post(reverse("review:preview", args=[self.boq.pk]))
+        self.assertEqual(resp.status_code, 302)
+        preview_resp = self.client.get(reverse("exports:download", args=[self.boq.pk, "preview"]))
+        self.assertEqual(preview_resp.status_code, 200)
+        self.boq.refresh_from_db()
+        self.assertEqual(self.boq.status, BOQStatus.UNDER_REVIEW)
 
     def test_non_owner_cannot_export(self):
         self.client.force_login(self.other)

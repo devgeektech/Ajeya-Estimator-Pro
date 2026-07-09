@@ -36,12 +36,19 @@ class GenerateExportView(LoginRequiredMixin, View):
 
 
 class DownloadExportView(LoginRequiredMixin, View):
-    """Download a generated client BOQ or breakdown workbook."""
+    """Download a generated client BOQ, breakdown, or draft preview workbook."""
 
     def get(self, request, pk, kind):
         boq = get_object_or_404(_owned_boq_qs(request.user), pk=pk)
         run = boq.runs.order_by("-run_number").first()
-        export = run.exports.first() if run else None
+        if run is None:
+            messages.error(request, "No export file is available yet.")
+            return redirect("review:detail", pk=boq.pk)
+
+        if kind == "preview":
+            export = run.exports.filter(is_preview=True).first()
+        else:
+            export = run.exports.filter(is_preview=False).first()
         if export is None:
             messages.error(request, "No export file is available yet.")
             return redirect("review:detail", pk=boq.pk)
@@ -54,6 +61,8 @@ class DownloadExportView(LoginRequiredMixin, View):
 
     def _file_for_kind(self, export: ExportFile, kind: str):
         prefix = f"boq{export.boq_run.boq_id}_run{export.boq_run.run_number}"
+        if kind == "preview":
+            return export.internal_sheet, f"{prefix}_preview_workbook.xlsx"
         if kind == "client":
             return export.client_sheet, f"{prefix}_client_boq.xlsx"
         if kind == "breakdown":

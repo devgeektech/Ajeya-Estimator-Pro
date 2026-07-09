@@ -10,6 +10,7 @@ from apps.database_manager.models import DatabaseVersion, RateMaster
 from apps.matching.models import ProductMatch
 from apps.review.models import ReviewItem
 from apps.review.services.review_service import ReviewService
+from apps.review.services.row_context import build_review_row_context
 from common.choices import BOQStatus, RunStatus
 from common.exceptions import ValidationError
 
@@ -149,12 +150,40 @@ class ReviewViewTests(TestCase):
             boq_item=self.item, product=self.rate, make="APL", supplier="V1",
             confidence_score=90, match_reason="exact",
         )
+        self.item.ai_extraction = {
+            "database_products": [
+                {
+                    "product_name": "MS Pipe",
+                    "matched_product": {"tech_key": "PIPE150"},
+                    "confidence_score": 90,
+                }
+            ],
+            "missing_products": [{"product_name": "Gasket set"}],
+            "database_activities": ["installation"],
+            "missing_activities": ["scaffolding"],
+            "activities": ["installation"],
+        }
+        self.item.save(update_fields=["ai_extraction"])
 
     def test_owner_can_view_review(self):
         self.client.force_login(self.owner)
         resp = self.client.get(reverse("review:detail", args=[self.boq.pk]))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "150 NB MS Pipe")
+        self.assertContains(resp, "Products in database")
+        self.assertContains(resp, "Products not in database")
+        self.assertContains(resp, "Activities in database")
+        self.assertContains(resp, "Activities not in database")
+        self.assertContains(resp, "Gasket set")
+        self.assertContains(resp, "scaffolding")
+        self.assertContains(resp, "Generate preview workbook")
+
+    def test_row_context_splits_products_and_activities(self):
+        row = build_review_row_context(self.item, ReviewService())
+        self.assertEqual(len(row["database_products"]), 1)
+        self.assertEqual(len(row["missing_products"]), 1)
+        self.assertEqual(row["database_activities"], ["installation"])
+        self.assertEqual(row["missing_activities"], ["scaffolding"])
 
     def test_non_owner_cannot_view(self):
         self.client.force_login(self.other)

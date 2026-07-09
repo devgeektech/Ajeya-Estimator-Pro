@@ -167,7 +167,13 @@ def _compact_extraction(extraction: dict) -> dict:
     return {
         "database_products": _compact_products(extraction.get("database_products", [])),
         "missing_products": _compact_products(extraction.get("missing_products", [])),
-        "activities": extraction.get("activities", []) or [],
+        "database_activities": extraction.get("database_activities")
+        or extraction.get("activities", [])
+        or [],
+        "missing_activities": extraction.get("missing_activities", []) or [],
+        "activities": extraction.get("database_activities")
+        or extraction.get("activities", [])
+        or [],
     }
 
 
@@ -212,6 +218,8 @@ def _log_row_extraction(item, source_row: dict, extraction: dict) -> None:
         "serial_number": source_row.get("serial_number"),
         "description": source_row.get("description"),
         "products": compact["database_products"] + compact["missing_products"],
+        "database_activities": compact["database_activities"],
+        "missing_activities": compact["missing_activities"],
         "activities": compact["activities"],
         "source_row": _log_source_row(source_row),
         "extraction": compact,
@@ -285,11 +293,17 @@ def _extract_batch_with_fallback(
 
 
 def _persist_extraction(item, source_row: dict, extraction: dict) -> None:
+    database_activities = extraction.get("database_activities")
+    if not isinstance(database_activities, list):
+        database_activities = extraction.get("activities", [])
+    missing_activities = extraction.get("missing_activities", [])
     item.ai_extraction = {
         "schema": "boq_product_extraction_v1",
         "database_products": extraction.get("database_products", []),
         "missing_products": extraction.get("missing_products", []),
-        "activities": extraction.get("activities", []),
+        "database_activities": database_activities,
+        "missing_activities": missing_activities,
+        "activities": database_activities,
     }
     item.save(update_fields=["ai_extraction"])
 
@@ -298,7 +312,7 @@ def _persist_extraction(item, source_row: dict, extraction: dict) -> None:
     ActivityMatch.objects.bulk_create(
         [
             ActivityMatch(boq_item=item, activity_name=name)
-            for name in extraction.get("activities", [])
+            for name in database_activities
         ]
     )
     _log_row_extraction(item, source_row, extraction)
@@ -351,6 +365,8 @@ def analyze_run(run) -> int:
                     "schema": "boq_ai_extraction_v1",
                     "database_products": [],
                     "missing_products": [],
+                    "database_activities": [],
+                    "missing_activities": [],
                     "activities": [],
                 }
             _persist_extraction(item, source_rows[item.pk], extraction)

@@ -213,6 +213,8 @@ class RowExtractorTests(SimpleTestCase):
         self.assertEqual(result["schema"], "boq_ai_extraction_v1")
         self.assertEqual(result["database_products"][0]["category"], "Pipe")
         self.assertEqual(result["database_products"][0]["size_mm"], "150 NB")
+        self.assertEqual(result["database_activities"], ["installation"])
+        self.assertEqual(result["missing_activities"], ["dancing"])
         self.assertEqual(result["activities"], ["installation"])
 
     @mock.patch("ai.service.get_client")

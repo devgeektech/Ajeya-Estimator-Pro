@@ -4,6 +4,16 @@ This changelog is intentionally compact. It records meaningful product and
 technical changes only. Detailed implementation notes belong in the relevant
 source-of-truth documents.
 
+## 2026-07-09 — Review Product/Activity Buckets And Draft Preview Export
+
+- Review page now shows products and activities split into in-database vs
+  not-in-database buckets per BOQ row, with summary metrics and all product
+  matches visible.
+- AI extraction preserves unknown activities in `missing_activities[]` instead of
+  dropping them silently.
+- Added draft preview workbook generation before approval: one `.xlsx` with
+  Breakdown List + linked Client BOQ sheets; final export still requires approval.
+
 ## 2026-07-09 — Readable AI Extraction Logs And Cleaner Row Input
 
 - AI extraction logs now record the analyzed description, serial number, and

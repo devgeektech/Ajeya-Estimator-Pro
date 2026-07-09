@@ -262,6 +262,27 @@ body {
 .review-row--orange { border-left: 3px solid #ea580c; }
 .review-row--red { border-left: 3px solid var(--red); }
 .review-row--blank { border-left: 3px solid var(--border); }
+.review-row__detail td { background: var(--surface-alt); padding-top: 0; }
+.review-detail { padding: 8px 0 12px; }
+.review-detail__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+}
+.review-detail__title {
+    margin: 0 0 8px;
+    font-size: .72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--text-muted);
+}
+.review-detail__list {
+    margin: 0;
+    padding-left: 18px;
+}
+.review-detail__list li { margin-bottom: 6px; }
+.review-detail__matches { margin-top: 12px; }
 
 /* ---------- Alerts / messages ---------- */
 .messages { display: flex; flex-direction: column; gap: 10px; padding: 16px 28px 0; }

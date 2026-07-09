@@ -26,6 +26,10 @@ class ExportFile(models.Model):
         related_name="exports",
     )
     exported_at = models.DateTimeField(auto_now_add=True)
+    is_preview = models.BooleanField(
+        default=False,
+        help_text="Draft workbook generated before approval/export.",
+    )
 
     class Meta:
         ordering = ["-exported_at"]

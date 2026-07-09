@@ -9,5 +9,6 @@ urlpatterns = [
     path("boq/<int:pk>/start/", views.StartReviewView.as_view(), name="start"),
     path("boq/<int:pk>/approve/", views.ApproveView.as_view(), name="approve"),
     path("boq/<int:pk>/revise/", views.ReviseView.as_view(), name="revise"),
+    path("boq/<int:pk>/preview/", views.PreviewExportView.as_view(), name="preview"),
     path("item/<int:item_id>/apply/", views.ApplyReviewView.as_view(), name="apply"),
 ]

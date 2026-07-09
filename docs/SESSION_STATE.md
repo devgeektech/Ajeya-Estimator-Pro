@@ -18,8 +18,8 @@ PROJECT_STRUCTURE, and AGENTS.
 - GPT-5/o-series chat requests omit custom `temperature` and use model default.
 - Embedding model: `text-embedding-3-small`.
 - Embedding storage/search: local Chroma persistent index at `CHROMA_PATH`.
-- Test status: 184 tests passing, verified 2026-07-09 (serial display,
-  processing progress, and readable AI extraction logs).
+- Test status: 188 tests passing, verified 2026-07-09 (review buckets, draft
+  preview export, readable AI logs, serial display, processing progress).
 - Active master sheets: Rate_Master, Labour_Master, TOR_Main,
   Labour_Structure_Source, TOR_Labour, TOR_Accessories, State_Control_List.
 
@@ -249,6 +249,26 @@ Tests: 192 passed
 ```
 
 ## Session Log
+
+### 2026-07-09 — Review Buckets And Draft Preview Export
+
+Completed:
+
+- Review UI shows per-row products/activities in database vs not-in-database
+  buckets, all product matches, and summary metrics.
+- AI extraction stores `database_activities` and `missing_activities`.
+- Draft preview workbook (Breakdown List + Client BOQ) available before approval
+  via review page; final export still requires approval.
+- 188 tests passing.
+
+Pending:
+
+- Run UAT on a real BOQ to validate preview workbook and review buckets against
+  client data.
+
+Next:
+
+- Optional: block approve when critical rows still have `review_required`.
 
 ### 2026-07-09 — Readable AI Extraction Logs And Cleaner Row Input
 

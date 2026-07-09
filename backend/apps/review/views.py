@@ -8,8 +8,9 @@ from django.views.generic import View
 
 from apps.boq.models import BOQ, BOQItem
 from apps.database_manager.models import RateMaster
-from apps.matching.services.confidence import band_for
+from apps.exports.services.export_service import ExportService
 from apps.review.services.review_service import ReviewService
+from apps.review.services.row_context import build_review_row_context, build_review_summary
 from common.exceptions import ValidationError
 
 logger = logging.getLogger("boq_ai")
@@ -18,20 +19,6 @@ logger = logging.getLogger("boq_ai")
 def _owned_boq_qs(user):
     qs = BOQ.objects.select_related("user")
     return qs if user.is_super_admin else qs.filter(user=user)
-
-
-def _row_context(item, service: ReviewService):
-    """Build the per-row context (match, cost, band, candidate rate options)."""
-    match = item.product_matches.first()
-    detail = getattr(match, "rate_detail", None) if match else None
-    return {
-        "item": item,
-        "match": match,
-        "breakdown": detail,
-        "rate_detail": detail,
-        "band": band_for(match.confidence_score) if match else "blank",
-        "candidates": service.candidate_rates(item),
-    }
 
 
 class ReviewView(LoginRequiredMixin, View):
@@ -43,13 +30,24 @@ class ReviewView(LoginRequiredMixin, View):
         service = ReviewService()
         rows = []
         if run:
-            items = run.items.prefetch_related("product_matches").all()
-            rows = [_row_context(item, service) for item in items]
-        latest_export = run.exports.first() if run else None
+            items = run.items.prefetch_related(
+                "product_matches__product",
+                "product_matches__rate_detail",
+            ).all()
+            rows = [build_review_row_context(item, service) for item in items]
+        latest_export = run.exports.filter(is_preview=False).first() if run else None
+        latest_preview = run.exports.filter(is_preview=True).first() if run else None
         return render(
             request,
             "review/review.html",
-            {"boq": boq, "run": run, "rows": rows, "latest_export": latest_export},
+            {
+                "boq": boq,
+                "run": run,
+                "rows": rows,
+                "summary": build_review_summary(rows),
+                "latest_export": latest_export,
+                "latest_preview": latest_preview,
+            },
         )
 
 
@@ -67,10 +65,16 @@ class ApplyReviewView(LoginRequiredMixin, View):
         rate = get_object_or_404(RateMaster, pk=request.POST.get("rate_id"))
         service = ReviewService()
         service.apply_selection(item, rate, user=request.user)
+        item = BOQItem.objects.prefetch_related(
+            "product_matches__product",
+            "product_matches__rate_detail",
+        ).get(pk=item.pk)
 
         if request.headers.get("HX-Request"):
             return render(
-                request, "review/_row.html", {"row": _row_context(item, service)}
+                request,
+                "review/_row.html",
+                {"row": build_review_row_context(item, service)},
             )
         messages.success(request, "Row updated.")
         return redirect("review:detail", pk=boq.pk)
@@ -101,6 +105,26 @@ class ReviseView(LoginRequiredMixin, View):
         try:
             ReviewService().revise(boq, request.user)
             messages.success(request, f"'{boq.boq_name}' reopened for review.")
+        except ValidationError as exc:
+            messages.error(request, str(exc))
+        return redirect("review:detail", pk=boq.pk)
+
+
+class PreviewExportView(LoginRequiredMixin, View):
+    """Generate a draft Breakdown + Client BOQ workbook before approval."""
+
+    def post(self, request, pk):
+        boq = get_object_or_404(_owned_boq_qs(request.user), pk=pk)
+        run = boq.runs.order_by("-run_number").first()
+        if run is None:
+            messages.error(request, "Nothing to preview yet.")
+            return redirect("review:detail", pk=boq.pk)
+        try:
+            ExportService().preview_run(run, request.user)
+            messages.success(
+                request,
+                "Draft preview workbook generated. Download it before approving.",
+            )
         except ValidationError as exc:
             messages.error(request, str(exc))
         return redirect("review:detail", pk=boq.pk)

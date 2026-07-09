@@ -34,6 +34,42 @@ def _workbook_bytes(wb) -> bytes:
 class ExportService:
     """Build and persist export workbooks for an approved BOQ run."""
 
+    _PREVIEW_FROM = {
+        BOQStatus.COMPLETED,
+        BOQStatus.UNDER_REVIEW,
+        BOQStatus.APPROVED,
+    }
+
+    @staticmethod
+    def _build_internal_workbook(run):
+        internal_wb = Workbook()
+        write_internal_sheet(internal_wb.active, run)
+        write_client_sheet(
+            internal_wb.create_sheet("Client BOQ"), run, link_sheet=BREAKDOWN_SHEET_TITLE
+        )
+        return internal_wb
+
+    def preview_run(self, run, user=None):
+        """Generate a draft 2-sheet workbook without changing BOQ status."""
+        boq = run.boq
+        if boq.status not in self._PREVIEW_FROM:
+            raise ValidationError(
+                f"Preview is not available for '{boq.get_status_display()}' BOQs."
+            )
+
+        internal_wb = self._build_internal_workbook(run)
+        prefix = f"boq{boq.pk}_run{run.run_number}_preview"
+        export = ExportFile(boq_run=run, exported_by=user, is_preview=True)
+        export.internal_sheet.save(
+            f"{prefix}_internal.xlsx",
+            ContentFile(_workbook_bytes(internal_wb)),
+            save=False,
+        )
+        export.save()
+        ExportFile.objects.filter(boq_run=run, is_preview=True).exclude(pk=export.pk).delete()
+        logger.info("BOQ %s preview workbook generated (run %s)", boq.pk, run.run_number)
+        return export
+
     def export_run(self, run, user=None):
         boq = run.boq
         if boq.status != BOQStatus.APPROVED:
@@ -42,18 +78,15 @@ class ExportService:
             )
 
         # Internal workbook: Breakdown List + linked Client BOQ.
-        internal_wb = Workbook()
-        write_internal_sheet(internal_wb.active, run)
-        write_client_sheet(
-            internal_wb.create_sheet("Client BOQ"), run, link_sheet=BREAKDOWN_SHEET_TITLE
-        )
+        internal_wb = self._build_internal_workbook(run)
 
         # Standalone client workbook (computed values, safe to share).
         client_wb = Workbook()
         write_client_sheet(client_wb.active, run, link_sheet=None)
 
         prefix = f"boq{boq.pk}_run{run.run_number}"
-        export = ExportFile(boq_run=run, exported_by=user)
+        ExportFile.objects.filter(boq_run=run, is_preview=True).delete()
+        export = ExportFile(boq_run=run, exported_by=user, is_preview=False)
         export.internal_sheet.save(
             f"{prefix}_internal.xlsx", ContentFile(_workbook_bytes(internal_wb)), save=False
         )

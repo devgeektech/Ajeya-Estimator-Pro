@@ -73,6 +73,8 @@ def _empty_result() -> dict:
         "schema": "boq_ai_extraction_v1",
         "database_products": [],
         "missing_products": [],
+        "database_activities": [],
+        "missing_activities": [],
         "activities": [],
     }
 
@@ -142,14 +144,26 @@ def _allowed_activities(database_context: str) -> set[str]:
     }
 
 
-def _clean_activities(activities, database_context: str) -> list[str]:
+def _split_activities(activities, database_context: str) -> tuple[list[str], list[str]]:
+    """Split extracted activities into database vocabulary vs unknown terms."""
     allowed = _allowed_activities(database_context)
-    result: list[str] = []
+    database_activities: list[str] = []
+    missing_activities: list[str] = []
     for activity in activities if isinstance(activities, list) else []:
         text = str(activity).strip().lower()
-        if text and text in allowed and text not in result:
-            result.append(text)
-    return result
+        if not text:
+            continue
+        if text in allowed:
+            if text not in database_activities:
+                database_activities.append(text)
+        elif text not in missing_activities:
+            missing_activities.append(text)
+    return database_activities, missing_activities
+
+
+def _clean_activities(activities, database_context: str) -> list[str]:
+    database_activities, _ = _split_activities(activities, database_context)
+    return database_activities
 
 
 def extract_boq_row(
@@ -193,11 +207,16 @@ def _clean_extraction(data: dict, database_context: str) -> dict:
         and any(_value(data, field) for field in PRODUCT_FIELDS)
     ):
         database_products = [data]
+    database_activities, missing_activities = _split_activities(
+        data.get("activities"), database_context
+    )
     return {
         "schema": "boq_ai_extraction_v1",
         "database_products": _clean_products(database_products),
         "missing_products": _clean_products(missing_products),
-        "activities": _clean_activities(data.get("activities"), database_context),
+        "database_activities": database_activities,
+        "missing_activities": missing_activities,
+        "activities": database_activities,
     }
 
 

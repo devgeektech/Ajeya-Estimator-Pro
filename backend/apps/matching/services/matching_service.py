@@ -195,7 +195,11 @@ class ProductMatchingService:
             **extraction,
             "database_products": database_products,
             "missing_products": missing_products,
-            "activities": extraction.get("activities", []),
+            "database_activities": extraction.get("database_activities")
+            or extraction.get("activities", []),
+            "missing_activities": extraction.get("missing_activities", []),
+            "activities": extraction.get("database_activities")
+            or extraction.get("activities", []),
         }
         item.save(update_fields=["ai_extraction"])
 
