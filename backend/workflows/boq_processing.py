@@ -82,7 +82,7 @@ def _run_stage(run, stage_key: str) -> None:
         return
 
     if stage_key == "matching":
-        ProductMatchingService().match_run(run, created_by=run.boq.user)
+        ProductMatchingService().match_run(run)
         return
 
     if stage_key == "rate_detail":

@@ -95,7 +95,7 @@ class ProcessingViewTests(TestCase):
         self.client.force_login(self.alice)
         with self.captureOnCommitCallbacks(execute=True):
             response = self.client.post(reverse("processing:start", args=[self.boq.pk]))
-        self.assertRedirects(response, reverse("processing:list"))
+        self.assertRedirects(response, reverse("boq:detail", args=[self.boq.pk]))
         self.boq.refresh_from_db()
         self.assertEqual(self.boq.status, BOQStatus.UNDER_REVIEW)
 

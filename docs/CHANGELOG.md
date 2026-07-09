@@ -4,6 +4,44 @@ This changelog is intentionally compact. It records meaningful product and
 technical changes only. Detailed implementation notes belong in the relevant
 source-of-truth documents.
 
+## 2026-07-09 — Readable AI Extraction Logs And Cleaner Row Input
+
+- AI extraction logs now record the analyzed description, serial number, and
+  only the non-null product fields the model returned, so reviewers can see
+  exactly what was fetched from each BOQ row instead of walls of null fields.
+- Rows without a stated quantity now send `null` to the model instead of `0`,
+  so a heading/section row is not read as a quantity of zero.
+
+## 2026-07-09 — Fix BOQ Serial Display And Processing Progress
+
+- BOQ parser now preserves Excel section serials like `21.0` / `30.0`, flushes
+  orphan section rows, and clears consumed grouping context after measured rows.
+- BOQ detail expands grouped `row_json.rows` so section headers appear in the
+  items table; processing redirects back to the BOQ detail page with live HTMX
+  progress polling.
+
+
+- Deleted the `pending_products` app, templates, tests, and all matching hooks
+  that created pending-product queue rows.
+- Removed unused `ProductAlias`, `alias_match`, `product_validator`, and unwired
+  Celery tasks `export_files_task` / `send_notification_task`.
+- Matching now leaves low-confidence rows blank for expert review only.
+
+## 2026-07-09 — Version State Control And Remove Alias/Pending Flow
+
+- Versioned `State_Control_List` imports through `database_version` like the
+  other master sheets.
+- Removed `ProductAlias`, alias matching, and the inactive pending-products
+  workflow wiring from runtime settings, URLs, and matching.
+
+## 2026-07-09 — Removed ProductEmbedding Table
+
+- Removed the redundant `ProductEmbedding` PostgreSQL audit model, admin, and
+  import-time writes; Chroma is now the single source of the product vector
+  index.
+- Dropped `ProductEmbedding` from the `database_manager` initial migration and
+  added an idempotent migration to drop the table from existing databases.
+
 ## 2026-07-08 — Schema Drift Repair Migrations
 
 - Added idempotent repair migrations for existing PostgreSQL databases whose

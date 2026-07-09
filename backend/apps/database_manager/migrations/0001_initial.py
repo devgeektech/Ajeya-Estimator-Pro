@@ -15,37 +15,6 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.CreateModel(
-            name='ProductAlias',
-            fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('alias', models.CharField(db_index=True, max_length=255)),
-                ('tech_key', models.CharField(db_index=True, max_length=255)),
-            ],
-            options={
-                'verbose_name_plural': 'Product aliases',
-            },
-        ),
-        migrations.CreateModel(
-            name='ProductEmbedding',
-            fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('tech_key', models.CharField(db_index=True, max_length=255)),
-                ('database_version_id', models.PositiveBigIntegerField(blank=True, db_index=True, null=True)),
-                ('rate_master_id', models.PositiveBigIntegerField(blank=True, db_index=True, null=True)),
-                ('chroma_id', models.CharField(blank=True, db_index=True, max_length=255)),
-                ('embedding_model', models.CharField(blank=True, max_length=100)),
-                ('generated_at', models.DateTimeField(auto_now=True)),
-            ],
-        ),
-        migrations.CreateModel(
-            name='StateControl',
-            fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('state', models.CharField(max_length=150, unique=True)),
-                ('labour_multiplier', models.DecimalField(decimal_places=4, default=1, max_digits=8)),
-            ],
-        ),
-        migrations.CreateModel(
             name='DatabaseVersion',
             fields=[
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
@@ -185,6 +154,18 @@ class Migration(migrations.Migration):
             ],
             options={
                 'indexes': [models.Index(fields=['database_version', 'tech_key'], name='database_ma_databas_faf569_idx')],
+            },
+        ),
+        migrations.CreateModel(
+            name='StateControl',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('state', models.CharField(max_length=150)),
+                ('labour_multiplier', models.DecimalField(decimal_places=4, default=1, max_digits=8)),
+                ('database_version', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='state_controls', to='database_manager.databaseversion')),
+            ],
+            options={
+                'constraints': [models.UniqueConstraint(fields=('database_version', 'state'), name='uniq_state_control_per_version')],
             },
         ),
     ]

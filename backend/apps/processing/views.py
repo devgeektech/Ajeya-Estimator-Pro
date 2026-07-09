@@ -21,7 +21,7 @@ class StartProcessingView(LoginRequiredMixin, View):
         messages.success(
             request, f"Processing queued for '{boq.boq_name}' (run {job.boq_run.run_number})."
         )
-        return redirect("processing:list")
+        return redirect("boq:detail", pk=boq.pk)
 
 
 class RunStatusView(LoginRequiredMixin, View):

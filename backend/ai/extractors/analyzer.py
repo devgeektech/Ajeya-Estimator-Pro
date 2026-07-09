@@ -123,7 +123,9 @@ def _source_row_payload(item) -> dict:
     unit = original.get("unit") or item.unit
     quantity = original.get("quantity")
     if quantity in (None, ""):
-        quantity = item.quantity
+        # No stated quantity (e.g. a section/heading row): send null, not 0, so
+        # the model does not read it as an actual quantity of zero.
+        quantity = item.quantity if item.quantity else None
 
     row = {
         "unit": unit,
@@ -145,29 +147,89 @@ def _source_row_payload(item) -> dict:
     }
 
 
+def _compact_products(products) -> list[dict]:
+    """Keep only fields the AI actually returned so logs are readable."""
+    compact: list[dict] = []
+    for product in products if isinstance(products, list) else []:
+        if not isinstance(product, dict):
+            continue
+        entry = {
+            key: value for key, value in product.items() if value not in (None, "")
+        }
+        if entry:
+            compact.append(entry)
+    return compact
+
+
+def _compact_extraction(extraction: dict) -> dict:
+    """Drop null product fields so the log shows what was fetched, not blanks."""
+    extraction = extraction if isinstance(extraction, dict) else {}
+    return {
+        "database_products": _compact_products(extraction.get("database_products", [])),
+        "missing_products": _compact_products(extraction.get("missing_products", [])),
+        "activities": extraction.get("activities", []) or [],
+    }
+
+
+def _log_source_row(source_row: dict) -> dict:
+    """Readable source row for logs without the duplicated canonical scaffolding."""
+    source_row = source_row if isinstance(source_row, dict) else {}
+    rows = [
+        {
+            "excel_row_number": row.get("excel_row_number"),
+            "serial_number": row.get("serial_number"),
+            "description": row.get("description"),
+            "unit": row.get("unit"),
+            "quantity": row.get("quantity"),
+        }
+        for row in source_row.get("rows", [])
+        if isinstance(row, dict)
+    ]
+    return {
+        "serial_number": source_row.get("serial_number"),
+        "excel_row_numbers": source_row.get("excel_row_numbers"),
+        "description": source_row.get("description"),
+        "unit": source_row.get("unit"),
+        "quantity": source_row.get("quantity"),
+        "rows": rows,
+    }
+
+
 def _log_row_extraction(item, source_row: dict, extraction: dict) -> None:
-    """Write one structured AI extraction log line for a BOQ item."""
+    """Write one readable AI extraction log line for a BOQ item.
+
+    The line surfaces the analyzed description, the serial number, and only the
+    non-null product fields the AI returned so a reviewer can see exactly what
+    was fetched from the BOQ row.
+    """
+    compact = _compact_extraction(extraction)
     payload = {
         "event": "ai_row_extraction",
         "boq_id": item.boq_run.boq_id,
         "boq_run_id": item.boq_run_id,
         "boq_item_id": item.pk,
         "excel_row_number": item.row_number,
-        "source_row": source_row,
-        "extraction": extraction,
+        "serial_number": source_row.get("serial_number"),
+        "description": source_row.get("description"),
+        "products": compact["database_products"] + compact["missing_products"],
+        "activities": compact["activities"],
+        "source_row": _log_source_row(source_row),
+        "extraction": compact,
     }
     row_logger.info(json.dumps(payload, ensure_ascii=False, default=str))
 
 
 def _log_row_failure(item, source_row: dict, error: Exception) -> None:
-    """Write one structured AI extraction failure log line for a BOQ item."""
+    """Write one readable AI extraction failure log line for a BOQ item."""
     payload = {
         "event": "ai_row_extraction_failed",
         "boq_id": item.boq_run.boq_id,
         "boq_run_id": item.boq_run_id,
         "boq_item_id": item.pk,
         "excel_row_number": item.row_number,
-        "source_row": source_row,
+        "serial_number": source_row.get("serial_number"),
+        "description": source_row.get("description"),
+        "source_row": _log_source_row(source_row),
         "error": str(error),
     }
     row_logger.error(json.dumps(payload, ensure_ascii=False, default=str))

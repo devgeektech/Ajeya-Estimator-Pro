@@ -1,12 +1,10 @@
 """Synchronous embedding generation for imported master database versions."""
 import logging
 
-from django.conf import settings
-
 from ai.embeddings.generator import generate_embedding
 from ai.embeddings.chroma_store import ChromaEmbeddingStore, rate_document
 from ai.openai_client import is_configured
-from apps.database_manager.models import DatabaseVersion, ProductEmbedding, RateMaster
+from apps.database_manager.models import DatabaseVersion, RateMaster
 from common.exceptions import AIServiceError
 
 logger = logging.getLogger("boq_ai")
@@ -32,7 +30,6 @@ def generate_embeddings_for_version(database_version_id: int) -> dict:
     generated = skipped = errors = 0
     store = ChromaEmbeddingStore()
     store.reset_version(version.pk)
-    ProductEmbedding.objects.filter(database_version_id=version.pk).delete()
 
     for product in products.iterator():
         text = rate_document(product)
@@ -42,16 +39,7 @@ def generate_embeddings_for_version(database_version_id: int) -> dict:
 
         try:
             vector = generate_embedding(text)
-            chroma_id = store.upsert_rate(product, vector)
-            ProductEmbedding.objects.update_or_create(
-                rate_master_id=product.pk,
-                defaults={
-                    "tech_key": product.tech_key,
-                    "database_version_id": version.pk,
-                    "chroma_id": chroma_id,
-                    "embedding_model": str(settings.OPENAI_EMBEDDING_MODEL),
-                },
-            )
+            store.upsert_rate(product, vector)
             generated += 1
         except AIServiceError:
             logger.exception("Embedding failed for RateMaster row %s", product.pk)

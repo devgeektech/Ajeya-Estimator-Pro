@@ -13,13 +13,11 @@ from django.test import TestCase, override_settings
 from apps.boq.models import BOQ, BOQItem, BOQRun
 from apps.database_manager.models import (
     DatabaseVersion,
-    ProductAlias,
     RateMaster,
 )
 from apps.matching.models import ProductMatch
 from apps.matching.services.confidence import ConfidenceService, band_for
 from apps.matching.services.matching_service import ProductMatchingService
-from apps.pending_products.models import PendingProduct
 
 
 @override_settings(OPENAI_API_KEY="placeholder-key")
@@ -91,24 +89,14 @@ class MatchingEngineTests(TestCase):
         self.assertEqual(match.product, self.pipe)
         self.assertEqual(match.match_reason, "exact")
 
-    def test_alias_match(self):
-        ProductAlias.objects.create(alias="ERW Pipe 150", tech_key="PIPE150")
-        item = self._item("Supply of ERW Pipe 150 for water line")
-        ProductMatchingService().match_item(item)
-        match = ProductMatch.objects.get(boq_item=item)
-        self.assertEqual(match.product, self.pipe)
-        self.assertEqual(match.match_reason, "alias")
-        self.assertEqual(float(match.confidence_score), 90.0)
-
-    def test_no_match_creates_pending_product(self):
+    def test_no_match_leaves_product_blank(self):
         item = self._item("Unknown exotic widget")
-        ProductMatchingService().match_item(item, created_by=self.user)
+        ProductMatchingService().match_item(item)
         match = ProductMatch.objects.get(boq_item=item)
         self.assertIsNone(match.product)
         self.assertEqual(match.match_reason, "no_match")
         self.assertEqual(float(match.confidence_score), 0.0)
-        pending = PendingProduct.objects.get(boq_item=item)
-        self.assertEqual(pending.created_by, self.user)
+        self.assertTrue(match.review_required)
 
     def test_source_description_match_wins_over_bad_ai_extraction(self):
         item = self._item(
@@ -121,15 +109,14 @@ class MatchingEngineTests(TestCase):
             },
         )
 
-        ProductMatchingService().match_item(item, created_by=self.user)
+        ProductMatchingService().match_item(item)
 
         match = ProductMatch.objects.get(boq_item=item)
         self.assertEqual(match.product, self.pipe)
         self.assertEqual(match.match_reason, "exact")
         self.assertEqual(match.make, "Jindal")
-        self.assertFalse(PendingProduct.objects.filter(boq_item=item).exists())
 
-    def test_unmatched_ai_extraction_does_not_create_database_product_suggestion(self):
+    def test_unmatched_ai_extraction_leaves_product_blank(self):
         item = self._item(
             "Unknown exotic widget",
             {
@@ -140,13 +127,12 @@ class MatchingEngineTests(TestCase):
             },
         )
 
-        ProductMatchingService().match_item(item, created_by=self.user)
+        ProductMatchingService().match_item(item)
 
         match = ProductMatch.objects.get(boq_item=item)
         self.assertIsNone(match.product)
         self.assertEqual(match.make, "")
-        pending = PendingProduct.objects.get(boq_item=item)
-        self.assertEqual(pending.suggested_product, "")
+        self.assertTrue(match.review_required)
 
     def test_product_candidate_fields_are_searched(self):
         item = self._item(
@@ -163,12 +149,11 @@ class MatchingEngineTests(TestCase):
             },
         )
 
-        ProductMatchingService().match_item(item, created_by=self.user)
+        ProductMatchingService().match_item(item)
 
         match = ProductMatch.objects.get(boq_item=item)
         self.assertEqual(match.product, self.pipe)
         self.assertEqual(match.match_reason, "exact")
-        self.assertFalse(PendingProduct.objects.filter(boq_item=item).exists())
 
     def test_multiple_product_candidates_create_multiple_matches(self):
         valve = RateMaster.objects.create(
@@ -191,7 +176,7 @@ class MatchingEngineTests(TestCase):
             },
         )
 
-        ProductMatchingService().match_item(item, created_by=self.user)
+        ProductMatchingService().match_item(item)
 
         matches = list(ProductMatch.objects.filter(boq_item=item))
         self.assertEqual(len(matches), 2)
@@ -215,7 +200,7 @@ class MatchingEngineTests(TestCase):
             },
         )
 
-        ProductMatchingService().match_item(item, created_by=self.user)
+        ProductMatchingService().match_item(item)
 
         item.refresh_from_db()
         self.assertEqual(len(item.ai_extraction["database_products"]), 1)
@@ -228,8 +213,6 @@ class MatchingEngineTests(TestCase):
             item.ai_extraction["missing_products"][0]["product_name"],
             "Custom fabricated cabinet",
         )
-        pending = PendingProduct.objects.get(boq_item=item)
-        self.assertEqual(pending.description, "Custom fabricated cabinet")
 
     @override_settings(OPENAI_API_KEY="sk-realLookingKey123")
     @mock.patch("apps.matching.services.embedding_match.ChromaEmbeddingStore")
@@ -255,12 +238,12 @@ class MatchingEngineTests(TestCase):
         service.match_run(self.run)
         self.assertEqual(ProductMatch.objects.count(), 1)
 
-    def test_low_confidence_vector_routes_to_pending(self):
-        # AI disabled -> vector skipped -> no match -> pending; product blank.
+    def test_low_confidence_leaves_product_blank(self):
         item = self._item("totally unrelated text")
-        ProductMatchingService().match_item(item, created_by=self.user)
-        self.assertEqual(PendingProduct.objects.filter(boq_item=item).count(), 1)
-        self.assertIsNone(ProductMatch.objects.get(boq_item=item).product)
+        ProductMatchingService().match_item(item)
+        match = ProductMatch.objects.get(boq_item=item)
+        self.assertIsNone(match.product)
+        self.assertTrue(match.review_required)
 
 
 @override_settings(OPENAI_API_KEY="placeholder-key")

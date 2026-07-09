@@ -103,7 +103,6 @@ apps/
 ├── costing/
 ├── review/
 ├── exports/
-├── pending_products/
 ├── notifications/
 └── audit/
 ```
@@ -210,7 +209,7 @@ Responsibilities:
 Responsibilities:
 
 * Product search.
-* Alias search.
+* Embedding search.
 * Confidence.
 
 Services:
@@ -219,7 +218,6 @@ Services:
 matching/services/
 
 exact_match.py
-alias_match.py
 embedding_match.py
 confidence.py
 ```
@@ -243,7 +241,6 @@ Services:
 costing/services/
 
 rate_detail.py
-labour_detail.py
 ```
 
 Legacy cost calculation helpers must be retired or refactored during the code
@@ -269,15 +266,6 @@ Responsibilities:
 * Excel generation.
 * Internal sheets.
 * Client sheets.
-
----
-
-# pending_products
-
-Responsibilities:
-
-* Unknown products.
-* Admin approval.
 
 ---
 
@@ -326,7 +314,6 @@ apps/
 ├── costing/services/
 ├── review/services/
 ├── exports/services/
-├── pending_products/services/
 └── processing/services/
 
 workflows/
@@ -396,8 +383,6 @@ workflow.
 ```text
 validators/
 
-product_validator.py
-
 confidence_validator.py
 ```
 
@@ -416,8 +401,8 @@ search.py
 ```
 
 Embedding search uses a local Chroma persistent vector index. PostgreSQL
-stores Rate_Master rows and a lightweight `ProductEmbedding` audit record;
-Chroma stores the vectors.
+stores Rate_Master rows and Chroma stores the vectors; there is no PostgreSQL
+embedding table.
 Embedding text is built from Rate_Master product/specification fields such as
 category, sub_category, class, size_mm, make, capacity, unit, supplier, and
 other descriptive technical columns. Deprecated lookup keys are excluded.
@@ -508,10 +493,6 @@ formatter.py
 tasks/
 
 process_boq.py
-
-export_files.py
-
-notifications.py
 ```
 
 ---
@@ -677,8 +658,6 @@ test_costing.py
 test_review.py
 
 test_exports.py
-
-test_pending_products.py
 
 test_notifications.py
 

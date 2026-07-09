@@ -25,9 +25,3 @@ class RunStatus(models.TextChoices):
     PROCESSING = "PROCESSING", "Processing"
     COMPLETED = "COMPLETED", "Completed"
     FAILED = "FAILED", "Failed"
-
-
-class PendingProductStatus(models.TextChoices):
-    PENDING = "PENDING", "Pending"
-    APPROVED = "APPROVED", "Approved"
-    REJECTED = "REJECTED", "Rejected"

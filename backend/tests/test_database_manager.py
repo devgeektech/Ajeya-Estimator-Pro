@@ -161,7 +161,7 @@ class ImportServiceTests(TestCase):
         self.assertEqual(RateMaster.objects.filter(database_version=version).count(), 1)
         self.assertEqual(LabourMaster.objects.filter(database_version=version).count(), 1)
         self.assertEqual(TORMain.objects.filter(database_version=version).count(), 1)
-        self.assertEqual(StateControl.objects.count(), 1)
+        self.assertEqual(StateControl.objects.filter(database_version=version).count(), 1)
         rate = RateMaster.objects.get(database_version=version)
         self.assertEqual(rate.tech_key, "P-100")
         self.assertEqual(str(rate.net_material_rate), "1200.00")
@@ -182,10 +182,21 @@ class ImportServiceTests(TestCase):
         numbers = sorted(DatabaseVersion.objects.values_list("version_number", flat=True))
         self.assertEqual(numbers, [3, 4, 5])
 
-    def test_state_control_is_upserted(self):
-        self._import()
-        self._import()
-        self.assertEqual(StateControl.objects.filter(state="Maharashtra").count(), 1)
+    def test_state_control_is_version_scoped(self):
+        first = self._import()
+        second = self._import()
+        self.assertEqual(
+            StateControl.objects.filter(
+                database_version=first, state="Maharashtra"
+            ).count(),
+            1,
+        )
+        self.assertEqual(
+            StateControl.objects.filter(
+                database_version=second, state="Maharashtra"
+            ).count(),
+            1,
+        )
 
     def test_imports_client_database_shape_with_synthesized_codes(self):
         tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
@@ -202,7 +213,14 @@ class ImportServiceTests(TestCase):
         self.assertEqual(str(rate.net_material_rate), "6147.12")
         self.assertEqual(str(rate.final_amount_excl_gst), "7200.00")
         self.assertEqual(TORMain.objects.get(database_version=version).category, "PIPE")
-        self.assertEqual(str(StateControl.objects.get(state="Delhi").labour_multiplier), "1.2000")
+        self.assertEqual(
+            str(
+                StateControl.objects.get(
+                    database_version=version, state="Delhi"
+                ).labour_multiplier
+            ),
+            "1.2000",
+        )
 
 
 @override_settings(OPENAI_API_KEY="placeholder-key")

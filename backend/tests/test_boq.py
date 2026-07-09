@@ -100,6 +100,20 @@ def build_repeated_make_category_workbook() -> bytes:
     return buffer.getvalue()
 
 
+def build_section_serial_boq_workbook() -> bytes:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "BOQ"
+    ws.append(["S.No", "Description", "Unit", "Qty"])
+    ws.append([21.0, "Fire pump room works", None, None])
+    ws.append([21.1, "Main pump set", "Each", 1])
+    ws.append([30.0, "Hydrant system", None, None])
+    ws.append([30.1, "Landing valve", "nos", 2])
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
+
+
 def build_titled_boq_workbook() -> bytes:
     wb = Workbook()
     ws = wb.active
@@ -211,6 +225,18 @@ class ParserTests(TestCase):
         self.assertEqual(items[0]["row_json"]["schema"], "boq_row_group_v1")
         self.assertEqual(items[0]["row_json"]["excel_row_numbers"], [2])
         self.assertEqual(items[2]["row_number"], 5)
+
+    def test_parse_boq_items_preserves_float_section_serial_numbers(self):
+        tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
+        tmp.write(build_section_serial_boq_workbook())
+        tmp.close()
+        items = parse_boq_items(tmp.name)
+
+        self.assertEqual(len(items), 2)
+        self.assertEqual(items[0]["row_json"]["rows"][0]["serial_number"], "21.0")
+        self.assertEqual(items[0]["original_data"]["s_no"], "21.1")
+        self.assertEqual(items[1]["row_json"]["rows"][0]["serial_number"], "30.0")
+        self.assertEqual(items[1]["original_data"]["s_no"], "30.1")
 
     def test_parse_boq_items_detects_later_header_and_cleans_serial_numbers(self):
         tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
@@ -502,6 +528,25 @@ class BOQOwnershipTests(TestCase):
         self.alice = User.objects.create_user("alice@example.com", "pass12345")
         self.bob = User.objects.create_user("bob@example.com", "pass12345")
         self.alice_boq = BOQCreationService(self.alice, "Alice BOQ", boq_upload()).run()
+
+    def test_detail_shows_section_serial_rows_from_grouped_items(self):
+        boq = BOQCreationService(
+            user=self.alice,
+            boq_name="Section BOQ",
+            uploaded_file=SimpleUploadedFile(
+                "section_boq.xlsx",
+                build_section_serial_boq_workbook(),
+                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ),
+        ).run()
+
+        self.client.force_login(self.alice)
+        response = self.client.get(reverse("boq:detail", args=[boq.pk]))
+
+        self.assertContains(response, "21.0")
+        self.assertContains(response, "30.0")
+        self.assertContains(response, "Fire pump room works")
+        self.assertContains(response, "Hydrant system")
 
     def test_expert_sees_only_own_boqs(self):
         self.client.force_login(self.bob)

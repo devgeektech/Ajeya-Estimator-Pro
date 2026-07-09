@@ -17,7 +17,7 @@ from .forms import BOQUploadForm, MakeListUploadForm
 from .models import BOQ
 from .services.boq_service import BOQCreationService
 from .services.make_list_service import BOQMakeListUploadService
-from .services.parser import CANONICAL_BOQ_HEADERS
+from .services.parser import CANONICAL_BOQ_HEADERS, format_serial_number
 
 logger = logging.getLogger("boq_ai")
 
@@ -48,22 +48,33 @@ class BOQDetailView(LoginRequiredMixin, OwnedBOQQuerysetMixin, DetailView):
         return CANONICAL_BOQ_HEADERS
 
     @staticmethod
+    def _display_quantity(original_data: dict, item) -> object:
+        qty = original_data.get("quantity")
+        if qty not in (None, ""):
+            return qty
+        if not (original_data.get("unit") or item.unit) and item.quantity == Decimal("0"):
+            return ""
+        return item.quantity
+
+    @staticmethod
+    def _format_cell_value(key: str, value):
+        if value in (None, ""):
+            return ""
+        if key == "s_no":
+            return format_serial_number(value) or ""
+        return value
+
+    @staticmethod
     def _display_row(item, headers, *, show_pricing: bool):
         original_data = item.original_data or {}
         row_values = {
             "s_no": original_data.get("s_no"),
             "description": original_data.get("description") or item.description,
             "unit": original_data.get("unit") or item.unit,
-            "quantity": (
-                original_data.get("quantity")
-                if original_data.get("quantity") not in (None, "")
-                else item.quantity
-            ),
+            "quantity": BOQDetailView._display_quantity(original_data, item),
         }
         cells = [
-            ""
-            if row_values.get(header["key"]) is None
-            else row_values.get(header["key"])
+            BOQDetailView._format_cell_value(header["key"], row_values.get(header["key"]))
             for header in headers
         ]
         final_rate = None
@@ -84,6 +95,54 @@ class BOQDetailView(LoginRequiredMixin, OwnedBOQQuerysetMixin, DetailView):
             "amount": amount,
         }
 
+    @classmethod
+    def _expand_display_rows(cls, item, headers, *, show_pricing: bool):
+        row_json = item.row_json or {}
+        nested_rows = row_json.get("rows") or []
+        if len(nested_rows) <= 1:
+            return [cls._display_row(item, headers, show_pricing=show_pricing)]
+
+        primary_row_num = (
+            row_json.get("target_excel_row")
+            or row_json.get("primary_excel_row_number")
+            or item.row_number
+        )
+        base = cls._display_row(item, headers, show_pricing=show_pricing)
+        final_rate = base["final_rate"]
+        amount = base["amount"]
+        expanded = []
+        for nested in nested_rows:
+            row_values = {
+                "s_no": nested.get("serial_number"),
+                "description": nested.get("description"),
+                "unit": nested.get("unit"),
+                "quantity": nested.get("quantity"),
+            }
+            cells = [
+                cls._format_cell_value(header["key"], row_values.get(header["key"]))
+                for header in headers
+            ]
+            is_primary = nested.get("excel_row_number") == primary_row_num
+            if is_primary and show_pricing:
+                expanded.append(
+                    {
+                        "item": item,
+                        "cells": cells,
+                        "final_rate": final_rate,
+                        "amount": amount,
+                    }
+                )
+            else:
+                expanded.append(
+                    {
+                        "item": item,
+                        "cells": cells,
+                        "final_rate": None,
+                        "amount": None,
+                    }
+                )
+        return expanded
+
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
         latest_run = self.object.runs.order_by("-run_number").first()
@@ -100,8 +159,11 @@ class BOQDetailView(LoginRequiredMixin, OwnedBOQQuerysetMixin, DetailView):
             show_pricing = latest_run.status == RunStatus.COMPLETED
             ctx["display_headers"] = display_headers
             ctx["item_rows"] = [
-                self._display_row(item, display_headers, show_pricing=show_pricing)
+                display_row
                 for item in items_qs
+                for display_row in self._expand_display_rows(
+                    item, display_headers, show_pricing=show_pricing
+                )
             ]
             ctx["items"] = items_qs
 

@@ -356,71 +356,24 @@ costing formulas from them.
 
 ---
 
-## ProductAlias
+## StateControl
 
-Purpose:
+Source:
 
-Alternative descriptions.
-
-Examples:
-
-* 150 NB Pipe
-* ERW Pipe
-* MS Pipe
+State_Control_List.
 
 Fields:
 
 * id
-* alias
-* tech_key
+* database_version
+* state
+* labour_multiplier
 
----
+Import:
 
-## ProductEmbedding
-
-Purpose:
-
-Audit record for Rate_Master rows indexed in the local Chroma vector store.
-Chroma stores the vectors; PostgreSQL remains the source of truth.
-
-Fields:
-
-* id
-* tech_key
-* database_version_id
-* rate_master_id
-* chroma_id
-* embedding_model
-* generated_at
-
----
-
-# PENDING PRODUCTS
-
----
-
-## PendingProduct
-
-Purpose:
-
-Unknown products.
-
-Fields:
-
-* id
-* description
-* suggested_product
-* confidence_score
-* boq_item
-* status
-* created_by
-* reviewed_by
-
-Statuses:
-
-* Pending
-* Approved
-* Rejected
+* Version-scoped like the other master sheets.
+* Each database version keeps its own state multiplier rows.
+* Rollback restores the selected version's state-control rows.
 
 ---
 
@@ -801,8 +754,7 @@ Export
 
 Embeddings are generated for:
 
-* Products
-* Product aliases
+* Rate_Master products
 
 Embeddings are not generated for:
 
@@ -826,9 +778,8 @@ other descriptive technical columns. Deprecated lookup keys are not used.
 Priority:
 
 1. Exact Match
-2. Alias Match
-3. Chroma vector similarity search
-4. OpenAI Validation
+2. Chroma vector similarity search
+3. OpenAI Validation
 
 ---
 
@@ -842,16 +793,12 @@ Every match stores:
 
 ---
 
-# UNKNOWN PRODUCT RULE
+# LOW-CONFIDENCE RULE
 
 Confidence:
 
 * Above 30 → show result.
-* Below 30 → pending product.
-
-The row remains blank.
-
-Pending product created.
+* Below 30 → leave product blank and flag review required.
 
 ---
 

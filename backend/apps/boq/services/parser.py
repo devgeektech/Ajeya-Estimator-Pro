@@ -86,6 +86,20 @@ def _json_safe(value):
     return value
 
 
+def format_serial_number(value) -> str | None:
+    """Preserve Excel-style serial numbers (e.g. 21.0) for UI and exports."""
+    if value in (None, ""):
+        return None
+    if isinstance(value, float) and value.is_integer():
+        return f"{int(value)}.0"
+    if isinstance(value, int):
+        return f"{value}.0"
+    text = str(value).strip()
+    if re.fullmatch(r"\d+", text):
+        return f"{text}.0"
+    return text or None
+
+
 def _fallback_description(row: dict) -> str:
     for value in row.values():
         if value not in (None, ""):
@@ -93,13 +107,14 @@ def _fallback_description(row: dict) -> str:
     return ""
 
 
-def _canonical_original_data(row: dict) -> dict:
-    serial_no = _pick(row, SERIAL_KEYS)
+def _canonical_original_data(row: dict, *, raw_row: dict | None = None) -> dict:
+    serial_source = raw_row if raw_row is not None else row
+    serial_no = format_serial_number(_pick(serial_source, SERIAL_KEYS))
     description = _pick(row, DESCRIPTION_KEYS)
     unit = _pick(row, UNIT_KEYS)
     quantity = _pick(row, QUANTITY_KEYS)
     return {
-        "s_no": _json_safe(serial_no),
+        "s_no": serial_no,
         "description": _json_safe(description),
         "unit": _json_safe(unit),
         "quantity": _json_safe(quantity),
@@ -127,7 +142,7 @@ def _row_payload(group: list[dict], primary: dict | None = None) -> dict:
         rows.append(
             {
                 "excel_row_number": item["row_number"],
-                "serial_number": original.get("s_no"),
+                "serial_number": format_serial_number(original.get("s_no")),
                 "description": description,
                 "unit": original.get("unit") or item.get("unit", ""),
                 "quantity": original.get("quantity"),
@@ -140,7 +155,7 @@ def _row_payload(group: list[dict], primary: dict | None = None) -> dict:
         "primary_excel_row_number": primary["row_number"],
         "target_excel_row": primary["row_number"],
         "excel_row_numbers": [item["row_number"] for item in group],
-        "serial_number": _serial_value(primary),
+        "serial_number": format_serial_number(_serial_value(primary)),
         "description": "\n".join(descriptions),
         "unit": (primary.get("original_data") or {}).get("unit") or primary.get("unit", ""),
         "quantity": (primary.get("original_data") or {}).get("quantity"),
@@ -206,6 +221,8 @@ def _measured_boq_groups(items: list[dict]) -> list[tuple[list[dict], dict]]:
             group = _current_context(context_by_level) + context_details + variant_details + [item]
             groups.append((group, item))
             previous_group = group
+            context_by_level = {}
+            context_details = []
             variant_details = []
             continue
 
@@ -232,6 +249,10 @@ def _measured_boq_groups(items: list[dict]) -> list[tuple[list[dict], dict]]:
             previous_group.append(item)
         else:
             context_details.append(item)
+
+    trailing = _current_context(context_by_level) + context_details + variant_details
+    if trailing:
+        groups.append((trailing, trailing[0]))
 
     return groups
 
@@ -323,7 +344,7 @@ def parse_boq_workbook(file_path: str) -> tuple[list[dict], list[dict]]:
                 "description": str(description).strip(),
                 "quantity": _to_decimal(_pick(raw_row, QUANTITY_KEYS)),
                 "unit": (str(_pick(row, UNIT_KEYS)).strip() if _pick(row, UNIT_KEYS) else ""),
-                "original_data": _canonical_original_data(row),
+                "original_data": _canonical_original_data(row, raw_row=raw_row),
             }
         )
     return CANONICAL_BOQ_HEADERS, _group_boq_items(captured)

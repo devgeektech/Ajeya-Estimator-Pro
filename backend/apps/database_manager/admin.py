@@ -4,8 +4,6 @@ from .models import (
     DatabaseVersion,
     LabourMaster,
     LabourStructureSource,
-    ProductAlias,
-    ProductEmbedding,
     RateMaster,
     StateControl,
     TORAccessories,
@@ -48,18 +46,3 @@ admin.site.register(LabourStructureSource)
 admin.site.register(TORLabour)
 admin.site.register(TORAccessories)
 admin.site.register(StateControl)
-admin.site.register(ProductAlias)
-
-
-@admin.register(ProductEmbedding)
-class ProductEmbeddingAdmin(admin.ModelAdmin):
-    list_display = (
-        "tech_key",
-        "database_version_id",
-        "rate_master_id",
-        "chroma_id",
-        "embedding_model",
-        "generated_at",
-    )
-    search_fields = ("tech_key", "chroma_id", "embedding_model")
-    list_filter = ("database_version_id", "embedding_model")

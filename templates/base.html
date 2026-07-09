@@ -287,7 +287,6 @@
             </a>
 
             {% if user.is_super_admin %}
-            <!-- <a href="{% url 'pending_products:list' %}" class="nav-link">Pending Products</a> -->
             <a href="{% url 'audit:list' %}" class="nav-link">Audit Log</a>
             <a href="{% url 'users:list' %}" class="nav-link">User Management</a>
             {% if user.is_superadmin %}<a href="{% url 'admin:index' %}" class="nav-link">Admin</a>{% endif %}

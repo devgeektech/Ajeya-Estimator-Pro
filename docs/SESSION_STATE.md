@@ -18,7 +18,8 @@ PROJECT_STRUCTURE, and AGENTS.
 - GPT-5/o-series chat requests omit custom `temperature` and use model default.
 - Embedding model: `text-embedding-3-small`.
 - Embedding storage/search: local Chroma persistent index at `CHROMA_PATH`.
-- Test status: 192 tests passing, verified 2026-07-08.
+- Test status: 184 tests passing, verified 2026-07-09 (serial display,
+  processing progress, and readable AI extraction logs).
 - Active master sheets: Rate_Master, Labour_Master, TOR_Main,
   Labour_Structure_Source, TOR_Labour, TOR_Accessories, State_Control_List.
 
@@ -106,8 +107,10 @@ Matching and rate/labour retrieval:
 - Structured AI product candidates are searched first, one candidate at a time.
 - Original BOQ description is used as fallback when no product candidate is
   extracted.
-- Exact, alias, and embedding matching are active.
+- Exact and embedding matching are active.
 - Deprecated lookup keys are removed from the active matching workflow.
+- Pending product queue and alias matching are removed; low-confidence rows stay
+  blank for expert review.
 - Embedding matching queries Chroma, then resolves hits back to PostgreSQL
   Rate_Master rows.
 - If multiple Rate_Master rows match, select the lowest
@@ -222,8 +225,8 @@ Earlier delivered foundation:
   restore into a compatible clean schema, or reviewed `--fake-initial` plan
   before applying this baseline.
 - Chroma vectors are rebuildable from Rate_Master after database upload.
-- `ProductEmbedding` is an audit record for Chroma-indexed Rate_Master rows;
-  Chroma stores the vectors.
+- Product vectors live only in the local Chroma index; there is no PostgreSQL
+  embedding table.
 - Existing Redis messages from removed database-import/embedding Celery tasks
   may need a one-time purge if present in an old running environment.
 - Already-uploaded BOQs may need re-upload/reprocess to capture the latest
@@ -246,6 +249,66 @@ Tests: 192 passed
 ```
 
 ## Session Log
+
+### 2026-07-09 — Readable AI Extraction Logs And Cleaner Row Input
+
+Completed:
+
+- Rewrote `ai_extractions.log` records to surface description, serial number,
+  compact `products` (non-null fields only), and `activities` per BOQ row.
+- Section/heading rows with no quantity now send `null` to the model instead of
+  `0`.
+- 184 tests passing.
+
+Pending:
+
+- Re-run a real BOQ with a configured `OPENAI_API_KEY` to confirm the compact
+  extraction log reads clearly against production rows.
+
+Next:
+
+- Review confidence scoring output once real extractions are available.
+
+### 2026-07-09 — Fix BOQ Serial Display And Processing Progress
+
+Completed:
+
+- Fixed BOQ parser serial formatting (`21.0`, `30.0`) using raw Excel values and
+  grouping context cleanup so section headers are not duplicated or dropped.
+- BOQ detail now expands grouped workbook rows so section serials are visible in
+  the items table.
+- Processing start redirects to BOQ detail; progress panel polls via HTMX with
+  stage messages.
+- 184 tests passing.
+
+Pending:
+
+- Re-upload existing BOQs to refresh parsed rows if section serials were missing
+  from earlier uploads.
+
+Next:
+
+- Confirm Celery worker is running locally so progress advances beyond 0% when
+  `CELERY_TASK_ALWAYS_EAGER=False`.
+
+### 2026-07-09 — Remove Pending Products And Stale Code
+
+Completed:
+
+- Deleted the `pending_products` app, template, tests, `ProductAlias`, `alias_match`,
+  `product_validator`, and unwired Celery task modules.
+- Matching no longer creates pending-product rows; low-confidence items remain blank
+  for expert review.
+- Updated architecture/database/project docs for exact + embedding search only.
+
+Pending:
+
+- Restart Django/Celery after pulling these changes.
+
+Next:
+
+- Re-upload the master database if `State_Control_List` versioning is needed on the
+  current environment.
 
 ### 2026-07-08 — Schema Drift Repair Migrations
 

@@ -179,35 +179,19 @@ class TORAccessories(models.Model):
 class StateControl(models.Model):
     """Source: State_Control_List sheet."""
 
-    state = models.CharField(max_length=150, unique=True)
+    database_version = models.ForeignKey(
+        DatabaseVersion, on_delete=models.CASCADE, related_name="state_controls"
+    )
+    state = models.CharField(max_length=150)
     labour_multiplier = models.DecimalField(max_digits=8, decimal_places=4, default=1)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["database_version", "state"],
+                name="uniq_state_control_per_version",
+            )
+        ]
 
     def __str__(self) -> str:
         return self.state
-
-
-class ProductAlias(models.Model):
-    """Alternative product descriptions (e.g. '150 NB Pipe', 'ERW Pipe')."""
-
-    alias = models.CharField(max_length=255, db_index=True)
-    tech_key = models.CharField(max_length=255, db_index=True)
-
-    class Meta:
-        verbose_name_plural = "Product aliases"
-
-    def __str__(self) -> str:
-        return f"{self.alias} -> {self.tech_key}"
-
-
-class ProductEmbedding(models.Model):
-    """Audit record for products indexed in the local Chroma vector store."""
-
-    tech_key = models.CharField(max_length=255, db_index=True)
-    database_version_id = models.PositiveBigIntegerField(null=True, blank=True, db_index=True)
-    rate_master_id = models.PositiveBigIntegerField(null=True, blank=True, db_index=True)
-    chroma_id = models.CharField(max_length=255, blank=True, db_index=True)
-    embedding_model = models.CharField(max_length=100, blank=True)
-    generated_at = models.DateTimeField(auto_now=True)
-
-    def __str__(self) -> str:
-        return f"ChromaIndex({self.tech_key})"

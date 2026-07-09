@@ -63,7 +63,6 @@ LOCAL_APPS = [
     "apps.costing",
     "apps.review",
     "apps.exports",
-    "apps.pending_products",
     "apps.notifications",
     "apps.audit",
 ]

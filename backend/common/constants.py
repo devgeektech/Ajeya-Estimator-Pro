@@ -8,8 +8,8 @@ docs/TRD.md and docs/DATABASE_ARCHITECTURE.md.
 CONFIDENCE_GREEN = 90  # > 90  -> accept
 CONFIDENCE_YELLOW = 80  # 80-90 -> review
 CONFIDENCE_ORANGE = 70  # 70-80 -> strong review
-CONFIDENCE_RED = 30  # 30-70 -> manual review; < 30 -> pending product
-CONFIDENCE_PENDING_THRESHOLD = 30  # below this -> blank row + pending product
+CONFIDENCE_RED = 30  # 30-70 -> manual review
+CONFIDENCE_PENDING_THRESHOLD = 30  # below this -> blank row for expert review
 
 
 def confidence_band(score: float) -> str:

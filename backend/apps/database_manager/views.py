@@ -16,7 +16,7 @@ from utils.files import unique_filename
 from workflows.database_import import import_database
 
 from .forms import DatabaseUploadForm
-from .models import DatabaseVersion, StateControl
+from .models import DatabaseVersion
 from .services.rollback import DatabaseRollbackService
 
 logger = logging.getLogger("boq_ai")
@@ -114,6 +114,6 @@ class DatabaseVersionDetailView(LoginRequiredMixin, View):
             "tor_main_count": version.tor_main.count(),
             "tor_labour_count": version.tor_labour.count(),
             "tor_accessories_count": version.tor_accessories.count(),
-            "state_control_count": StateControl.objects.count(),
+            "state_control_count": version.state_controls.count(),
         }
         return render(request, "database/version_detail.html", context)

@@ -274,15 +274,6 @@ Responsibilities:
 
 ---
 
-## pending_products
-
-Responsibilities:
-
-* Unknown items.
-* Product approval.
-
----
-
 # BOQ Processing Architecture
 
 ```text
@@ -373,9 +364,8 @@ they are not found in the active database.
 Search Priority:
 
 1. Exact Match
-2. Alias Match
-3. Chroma Embedding Match
-4. AI Validation
+2. Chroma Embedding Match
+3. OpenAI Validation
 
 Matching searches each database-shaped AI product candidate extracted from the
 grouped row JSON. If no product candidate exists, matching falls back to the
@@ -385,7 +375,7 @@ stores the candidate position as `extraction_index`; activities stay attached
 to the BOQ item as row-level execution context.
 After matching, candidates with a selected RateMaster row are recorded under
 `database_products[]`, while unresolved candidates are recorded under
-`missing_products[]` and routed to pending product review.
+`missing_products[]` for expert review in the breakdown sheet.
 Embedding search is executed through the local Chroma vector index and resolved
 back to PostgreSQL Rate_Master rows before rate selection.
 
@@ -487,23 +477,7 @@ Output:
 | 80-90 | Yellow  |
 | 70-80 | Orange  |
 | 30-70 | Red     |
-| <30   | Pending |
-
----
-
-# Pending Product Architecture
-
-```text
-Unknown Product
-        |
-Pending Queue
-        |
-Super Admin
-        |
-Approve
-        |
-Database
-```
+| <30   | Blank (review required) |
 
 ---
 

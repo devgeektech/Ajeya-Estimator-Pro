@@ -4,13 +4,11 @@ ProductMatchingService applies the documented search strategy in priority order
 (docs/DATABASE_ARCHITECTURE.md - Search Strategy):
 
     1. Exact match
-    2. Alias match
-    3. Vector (embedding) match
+    2. Vector (embedding) match
 
 It persists a ProductMatch per BOQ item with a confidence score and match
-reason. Items scoring below the pending threshold (< 30%) leave the product
-blank and are queued for Super Admin approval
-(docs/AGENTS.md - Pending Product Rules).
+reason. Items scoring below the confidence threshold (< 30%) leave the product
+blank for expert review.
 
 Confidence scoring is refined after matching; this service assigns the
 deterministic strategy score used by downstream stages.
@@ -28,15 +26,12 @@ from utils.text import normalize
 from ai.service import AIService
 from apps.database_manager.models import DatabaseVersion, RateMaster
 from apps.matching.models import ProductMatch
-from apps.matching.services import alias_match, embedding_match, exact_match
-from apps.pending_products.models import PendingProduct
-from common.choices import PendingProductStatus
+from apps.matching.services import embedding_match, exact_match
 
 logger = logging.getLogger("boq_ai")
 
 # Deterministic base confidence per strategy (refined in Sprint 11).
 EXACT_CONFIDENCE = 100.0
-ALIAS_CONFIDENCE = 90.0
 
 
 class ProductMatchingService:
@@ -210,10 +205,6 @@ class ProductMatchingService:
         if rate is not None:
             return rate, EXACT_CONFIDENCE, "exact"
 
-        rate = alias_match.find_alias(query, rates_by_code)
-        if rate is not None:
-            return rate, ALIAS_CONFIDENCE, "alias"
-
         if self._ai_enabled:
             try:
                 rate, similarity = embedding_match.find_embedding(query, rates_by_code)
@@ -262,7 +253,6 @@ class ProductMatchingService:
         extraction_index: int,
         rates,
         rates_by_code: dict,
-        created_by=None,
     ):
         rate = None
         confidence = 0.0
@@ -292,27 +282,15 @@ class ProductMatchingService:
             quantity_source=str((product or {}).get("quantity_source") or ""),
             review_required=review_required,
         )
-
-        if below_threshold:
-            PendingProduct.objects.create(
-                description=self._candidate_label(item, product),
-                suggested_product=(rate.tech_key if rate else ""),
-                confidence_score=confidence,
-                boq_item=item,
-                created_by=created_by,
-            )
         return match
 
-    def match_item(self, item, rates=None, rates_by_code=None, created_by=None):
+    def match_item(self, item, rates=None, rates_by_code=None):
         """Match all extracted products for one BOQ item."""
         if rates is None or rates_by_code is None:
             rates, rates_by_code = self._load_rates()
 
         # Idempotent reprocessing: clear prior results for this item.
         item.product_matches.all().delete()
-        PendingProduct.objects.filter(
-            boq_item=item, status=PendingProductStatus.PENDING
-        ).delete()
 
         matches = [
             self._match_candidate(
@@ -321,21 +299,18 @@ class ProductMatchingService:
                 index,
                 rates,
                 rates_by_code,
-                created_by=created_by,
             )
             for index, product in enumerate(self._product_candidates(item))
         ]
         self._split_extracted_products(item, matches)
         return matches[0] if matches else None
 
-    def match_run(self, run, created_by=None) -> int:
+    def match_run(self, run) -> int:
         """Match every item in a run. Returns the number of items processed."""
         rates, rates_by_code = self._load_rates()
         processed = 0
         for item in run.items.all():
-            self.match_item(
-                item, rates=rates, rates_by_code=rates_by_code, created_by=created_by
-            )
+            self.match_item(item, rates=rates, rates_by_code=rates_by_code)
             processed += 1
         logger.info("Run %s: matched %s items", run.pk, processed)
         return processed

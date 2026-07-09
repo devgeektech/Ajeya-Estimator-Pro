@@ -116,6 +116,13 @@ def _final_amount(row: dict):
     return _discounted_rate(row)
 
 
+def _state_control_fields(row: dict) -> dict:
+    return {
+        "state": _to_str(row.get("state")),
+        "labour_multiplier": _to_decimal(row.get("labour_multiplier"), "1"),
+    }
+
+
 # Per-sheet field extraction. Each builder receives a normalized row dict and
 # returns model field kwargs (excluding the database_version FK).
 def _rate_fields(row: dict) -> dict:
@@ -280,6 +287,7 @@ VERSIONED_SHEETS = {
     "Labour_Structure_Source": (LabourStructureSource, _labour_structure_fields),
     "TOR_Labour": (TORLabour, _tor_labour_fields),
     "TOR_Accessories": (TORAccessories, _tor_accessories_fields),
+    "State_Control_List": (StateControl, _state_control_fields),
 }
 
 REQUIRED_MODEL_FIELDS = {
@@ -289,6 +297,7 @@ REQUIRED_MODEL_FIELDS = {
     LabourStructureSource: ("tech_key",),
     TORLabour: (),
     TORAccessories: ("category", "sub_category"),
+    StateControl: ("state",),
 }
 
 
@@ -328,7 +337,6 @@ class DatabaseImportService:
             with transaction.atomic():
                 version = self._create_version()
                 self._import_versioned_sheets(version)
-                self._import_state_control()
                 self._activate(version)
             clear_database_context_cache()
             self._generate_embeddings(version)
@@ -372,20 +380,6 @@ class DatabaseImportService:
                 len(objects),
                 sheet_name,
                 skipped,
-            )
-
-    def _import_state_control(self) -> None:
-        """State control is not version-scoped; upsert by state."""
-        rows = read_rows(self.file_path, "State_Control_List")
-        for row in rows:
-            state = _to_str(row.get("state"))
-            if not state:
-                continue
-            StateControl.objects.update_or_create(
-                state=state,
-                defaults={
-                    "labour_multiplier": _to_decimal(row.get("labour_multiplier"), "1"),
-                },
             )
 
     def _generate_embeddings(self, version: DatabaseVersion) -> None:

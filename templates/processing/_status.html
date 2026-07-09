@@ -2,7 +2,7 @@
 <div id="proc-status"
      hx-get="{% url 'processing:status' run.pk %}"
      hx-swap="outerHTML"
-    {% if job.status == 'QUEUED' or job.status == 'PROCESSING' %}hx-trigger="every 2s"{% endif %}>
+    {% if job.status == 'QUEUED' or job.status == 'PROCESSING' %}hx-trigger="load, every 2s"{% endif %}>
 
     {% if job.status == 'COMPLETED' %}
     <script>setTimeout(() => window.location.reload(), 1000);</script>
@@ -13,7 +13,7 @@
             <span class="badge {% if job.status == 'COMPLETED' %}badge--green{% elif job.status == 'FAILED' %}badge--red{% elif job.status == 'PROCESSING' %}badge--orange{% elif job.status == 'QUEUED' %}badge--warn{% endif %}">
                 {{ job.get_status_display }}
             </span>
-            {% if job.status == 'FAILED' %}
+            {% if job.message %}
             <span class="proc__msg">{{ job.message }}</span>
             {% endif %}
         </div>

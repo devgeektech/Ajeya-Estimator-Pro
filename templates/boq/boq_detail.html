@@ -35,8 +35,8 @@
     </div>
 </div>
 
-{% if latest_run and latest_run.status != 'COMPLETED' %}
-<div class="panel" style="margin-bottom:24px;">
+{% if latest_run and latest_run.processing_job %}
+<div class="panel" style="margin-bottom:24px;" id="processing-panel">
     <h3 class="panel__title">Processing status</h3>
     {% include "processing/_status.html" with run=latest_run job=latest_run.processing_job %}
 </div>

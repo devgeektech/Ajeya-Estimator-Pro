@@ -32,7 +32,6 @@ urlpatterns = [
     path("review/", include("apps.review.urls")),
     path("exports/", include("apps.exports.urls")),
     path("notifications/", include("apps.notifications.urls")),
-    path("pending/", include("apps.pending_products.urls")),
     path("audit/", include("apps.audit.urls")),
     path("users/", include("apps.users.urls")),
     path("database/", include("apps.database_manager.urls")),

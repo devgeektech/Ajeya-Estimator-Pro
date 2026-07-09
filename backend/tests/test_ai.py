@@ -524,7 +524,7 @@ class AnalyzeRunTests(TestCase):
         self.assertEqual(source_row["rows"][0]["description"], "150 NB MS pipe")
         self.assertEqual(source_row["description"], "150 NB MS pipe")
         self.assertEqual(source_row["unit"], "")
-        self.assertEqual(source_row["quantity"], 0)
+        self.assertIsNone(source_row["quantity"])
         self.assertEqual(source_row["primary_excel_row_number"], 1)
         self.assertEqual(extract_boq_rows_mock.call_count, 1)
 
@@ -627,9 +627,13 @@ class AnalyzeRunTests(TestCase):
         self.assertEqual(payload["excel_row_number"], 1)
         self.assertIn("source_row", payload)
         self.assertEqual(payload["source_row"]["description"], "150 NB MS pipe")
-        self.assertEqual(payload["source_row"]["quantity"], 0)
+        self.assertIsNone(payload["source_row"]["quantity"])
+        self.assertEqual(payload["description"], "150 NB MS pipe")
         self.assertEqual(payload["extraction"]["database_products"][0]["category"], "Pipe")
         self.assertEqual(payload["extraction"]["activities"], ["installation"])
+        self.assertEqual(payload["products"][0]["category"], "Pipe")
+        self.assertNotIn("make", payload["products"][0])
+        self.assertEqual(payload["activities"], ["installation"])
 
     @mock.patch("ai.extractors.analyzer.extract_boq_rows")
     def test_analyze_run_skips_failing_item(self, extract_boq_rows_mock):
