@@ -5,10 +5,10 @@ import logging
 from pathlib import Path
 
 from django.core.files.storage import default_storage
-from pypdf import PdfReader
 
 from utils.excel import read_rows_with_metadata
 
+from .pdf_make_list_parser import parse_make_list_pdf
 from .serial_normalizer import attach_row_hierarchy, detect_serial_key
 
 logger = logging.getLogger("boq_ai")
@@ -59,37 +59,15 @@ def _parse_excel_make_list(uploaded_file, *, source_filename: str) -> dict:
 
 def _parse_pdf_make_list(uploaded_file, *, source_filename: str) -> dict:
     file_path = _resolve_path(uploaded_file)
-    reader = PdfReader(file_path)
-    rows: list[dict] = []
-    line_number = 0
-    for page_number, page in enumerate(reader.pages, start=1):
-        text = page.extract_text() or ""
-        for raw_line in text.splitlines():
-            line = raw_line.strip()
-            if not line:
-                continue
-            line_number += 1
-            rows.append(
-                {
-                    "row_id": f"p{page_number}-l{line_number}",
-                    "page": page_number,
-                    "line": line_number,
-                    "serial": "",
-                    "depth": 0,
-                    "parent_row_id": None,
-                    "row_index": line_number,
-                    "text": line,
-                    "display_values": {"text": line},
-                    "values": {"text": line},
-                }
-            )
-
+    headers, records = parse_make_list_pdf(file_path)
+    serial_key = detect_serial_key(headers)
+    rows = attach_row_hierarchy(records, serial_key=serial_key)
     return {
         "version": SCHEMA_VERSION,
         "format": "pdf",
         "source_filename": source_filename,
-        "serial_key": None,
-        "headers": [{"key": "text", "label": "Text", "index": 0}],
+        "serial_key": serial_key,
+        "headers": headers,
         "rows": rows,
         "row_count": len(rows),
     }

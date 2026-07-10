@@ -5,7 +5,6 @@ side-effect free so it can be unit tested in isolation.
 """
 from __future__ import annotations
 
-from collections.abc import Set as AbstractSet
 from datetime import date, datetime
 import re
 from pathlib import Path
@@ -132,15 +131,79 @@ def _select_header_row(non_empty_rows, header_keys: HeaderKeys | None):
     if not header_keys:
         row_number, cells = non_empty_rows[0]
         return row_number, cells, _headers_from_cells(cells)
+    scan_limit = min(len(non_empty_rows), 50)
     candidates = [
         (row_number, cells, _headers_from_cells(cells))
-        for row_number, cells in non_empty_rows[:25]
+        for row_number, cells in non_empty_rows[:scan_limit]
     ]
     best = max(candidates, key=lambda candidate: _header_score(candidate[2], header_keys))
     if _header_score(best[2], header_keys)[0] > 0:
         return best
     row_number, cells = non_empty_rows[0]
     return row_number, cells, _headers_from_cells(cells)
+
+
+def _row_has_data(display_values: dict) -> bool:
+    return any(
+        value is not None and str(value).strip() != ""
+        for value in display_values.values()
+    )
+
+
+def _read_worksheet_rows_with_metadata(
+    worksheet,
+    header_keys: HeaderKeys | None,
+    *,
+    expand_columns: bool = False,
+) -> tuple[list[dict], list[dict]]:
+    if worksheet is None:
+        return [], []
+    non_empty_rows = [
+        (row_number, cells)
+        for row_number, cells in enumerate(worksheet.iter_rows(), start=1)
+        if cells and any(cell.value is not None for cell in cells)
+    ]
+    selected = _select_header_row(non_empty_rows, header_keys)
+    if not selected:
+        return [], []
+    header_row_number, _header_cells, headers = selected
+    if expand_columns:
+        max_col = _max_data_column_index(non_empty_rows, header_row_number)
+        headers = _expand_headers_to_width(headers, max_col)
+
+    records: list[dict] = []
+    for row_number, cells in non_empty_rows:
+        if row_number <= header_row_number:
+            continue
+        values = {
+            header["key"]: cells[header["index"]].value
+            if header["index"] < len(cells) else None
+            for header in headers
+        }
+        display_values = {
+            header["key"]: _display_value(cells[header["index"]].value)
+            if header["index"] < len(cells) else None
+            for header in headers
+        }
+        if not _row_has_data(display_values):
+            continue
+        records.append(
+            {
+                "excel_row_number": row_number,
+                "values": values,
+                "display_values": display_values,
+            }
+        )
+    return headers, records
+
+
+def _sheet_selection_score(
+    headers: list[dict],
+    records: list[dict],
+    header_keys: HeaderKeys | None,
+) -> tuple[int, int, int]:
+    matches, header_count = _header_score(headers, header_keys)
+    return (matches, len(records), header_count)
 
 
 def read_rows_with_metadata(
@@ -155,48 +218,32 @@ def read_rows_with_metadata(
     Returns ``(headers, records)`` where headers are ``{key, label}`` dicts and
     records include raw ``values``, ``display_values`` and ``excel_row_number``.
     Fully empty rows are skipped, but blank cells inside captured rows are
-    preserved.
+    preserved. When ``sheet_name`` is omitted, every worksheet is scored and the
+    best match for ``header_keys`` is used.
     """
     workbook = load_workbook(filename=file_path, read_only=True, data_only=True)
     try:
-        worksheet = workbook[sheet_name] if sheet_name else workbook.active
-        if worksheet is None:
-            return [], []
-        non_empty_rows = [
-            (row_number, cells)
-            for row_number, cells in enumerate(worksheet.iter_rows(), start=1)
-            if cells and any(cell.value is not None for cell in cells)
-        ]
-        selected = _select_header_row(non_empty_rows, header_keys)
-        if not selected:
-            return [], []
-        header_row_number, header_cells, headers = selected
-        if expand_columns:
-            max_col = _max_data_column_index(non_empty_rows, header_row_number)
-            headers = _expand_headers_to_width(headers, max_col)
-
-        records: list[dict] = []
-        for row_number, cells in non_empty_rows:
-            if row_number <= header_row_number:
-                continue
-            values = {
-                header["key"]: cells[header["index"]].value
-                if header["index"] < len(cells) else None
-                for header in headers
-            }
-            display_values = {
-                header["key"]: _display_value(cells[header["index"]].value)
-                if header["index"] < len(cells) else None
-                for header in headers
-            }
-            records.append(
-                {
-                    "excel_row_number": row_number,
-                    "values": values,
-                    "display_values": display_values,
-                }
+        if sheet_name:
+            worksheet = workbook[sheet_name]
+            return _read_worksheet_rows_with_metadata(
+                worksheet,
+                header_keys,
+                expand_columns=expand_columns,
             )
-        return headers, records
+
+        best_headers: list[dict] = []
+        best_records: list[dict] = []
+        best_score = (-1, -1, -1)
+        for worksheet in workbook.worksheets:
+            headers, records = _read_worksheet_rows_with_metadata(
+                worksheet,
+                header_keys,
+                expand_columns=expand_columns,
+            )
+            score = _sheet_selection_score(headers, records, header_keys)
+            if score > best_score:
+                best_headers, best_records, best_score = headers, records, score
+        return best_headers, best_records
     finally:
         workbook.close()
 

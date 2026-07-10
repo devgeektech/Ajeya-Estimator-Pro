@@ -34,6 +34,15 @@ PostgreSQL.
 
 ## Session Log
 
+### 2026-07-10 — PDF Make List + Robust Excel Parsing
+
+Completed:
+
+- Structured PDF make-list parser (`pdf_make_list_parser.py`) with column layout
+  matching Excel output.
+- Excel reader scans all sheets and up to 50 rows for header detection; BOQ uses
+  `expand_columns` for wide sheets.
+
 ### 2026-07-10 — BOQ Normalized JSON + View Tabs
 
 Completed:

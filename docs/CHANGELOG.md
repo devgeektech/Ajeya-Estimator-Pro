@@ -2,6 +2,13 @@
 
 Meaningful product and technical changes only. Older history is in git.
 
+## 2026-07-10 — PDF Make List + Robust Excel Parsing
+
+- PDF make lists now parse into S. No. / Description / Approved Makes columns instead
+  of a single Text column; handles slash-separated makes and fused title lines.
+- Excel reader scores all worksheets (up to 50 header-scan rows) and picks the best
+  sheet for BOQ and make-list uploads; BOQ also expands spill columns.
+
 ## 2026-07-10 — BOQ Sheet Display Cells
 
 - Moved cell value lookup from Django template tags into

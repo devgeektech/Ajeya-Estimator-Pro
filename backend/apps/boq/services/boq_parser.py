@@ -46,6 +46,7 @@ def parse_boq_workbook(uploaded_file, *, source_filename: str = "") -> dict:
     headers, records = read_rows_with_metadata(
         file_path,
         header_keys=BOQ_HEADER_HINTS,
+        expand_columns=True,
     )
     serial_key = detect_serial_key(headers)
     rows = attach_row_hierarchy(records, serial_key=serial_key)
