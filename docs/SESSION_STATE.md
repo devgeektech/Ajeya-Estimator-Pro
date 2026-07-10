@@ -14,7 +14,8 @@ Compact active memory. Full spec: `docs/PRODUCT.md`. Schema: `docs/DATABASE.md`.
 ## Active Workflows
 
 **Database:** upload → validate → import → activate → embeddings (sync). Last 10
-uploads visible; no rollback.
+uploads visible for view/download; only the active upload keeps master rows in
+PostgreSQL.
 
 **BOQ:** upload workbook (+ optional make list) → stored → dashboard
 
@@ -32,6 +33,29 @@ uploads visible; no rollback.
 ```
 
 ## Session Log
+
+### 2026-07-10 — Active-Only Master Data Retention
+
+Completed:
+
+- Version history and Excel files are retained; inactive master rows are purged
+  after each import.
+- Cleaned `database_manager/models.py` (removed aliases/properties).
+
+### 2026-07-10 — Single Active Database Retention
+
+Completed:
+
+- Import now purges all previous database versions and master rows; only the
+  active upload is retained.
+
+### 2026-07-10 — BOQs List Page
+
+Completed:
+
+- BOQs list at `/boqs/` with toolbar count, `+ Upload BOQ`, and table columns
+  (Name, Owner, Status, Created, Actions).
+- Sidebar nav renamed to BOQs; upload at `/boqs/upload/`; detail view for Open.
 
 ### 2026-07-10 — Batched Embedding Generation
 

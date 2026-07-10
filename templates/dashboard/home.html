@@ -66,7 +66,10 @@
 <section class="d-panel">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
         <h3 class="d-panel__title" style="margin:0;">Recent uploads</h3>
-        <a href="{% url 'boq:upload' %}" class="btn btn--small btn--primary">Upload BOQ</a>
+        <div style="display:flex; gap:8px; align-items:center;">
+            <a href="{% url 'boq:list' %}" class="btn btn--small btn--ghost">View all</a>
+            <a href="{% url 'boq:upload' %}" class="btn btn--small btn--primary">Upload BOQ</a>
+        </div>
     </div>
     <table class="table">
         <thead>

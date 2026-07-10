@@ -2,6 +2,26 @@
 
 Meaningful product and technical changes only. Older history is in git.
 
+## 2026-07-10 — Active-Only Master Data Retention
+
+- `DatabaseVersion` history and workbook files are kept for view/download.
+- Master sheet rows in PostgreSQL are kept only for the active upload; inactive
+  versions are cleared on each import.
+- Removed snake_case aliases and property shims from `database_manager/models.py`.
+
+## 2026-07-10 — Single Active Database Retention
+
+- New master workbook uploads now delete all previous `DatabaseVersion` rows,
+  master sheet data, stored workbooks, and stale Chroma vectors.
+- Only the current active upload remains in PostgreSQL and the UI.
+
+## 2026-07-10 — BOQs List Page
+
+- Replaced sidebar "Upload BOQ" entry with a BOQs list at `/boqs/` matching the
+  dashboard table layout (count, upload button, owner/status/created columns).
+- Upload form moved to `/boqs/upload/`; successful uploads redirect to the list.
+- Added BOQ detail page for the table "Open" action.
+
 ## 2026-07-10 — Batched Embedding Generation
 
 - OpenAI embedding requests and Chroma upserts now run in batches (default 500

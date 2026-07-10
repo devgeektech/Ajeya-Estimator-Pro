@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Ajeya Estimator Pro{% endblock %}</title>
     <meta name="csrf-token" content="{{ csrf_token }}">
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=12">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=13">
     <style>
         .confirm-modal {
             position: fixed;
@@ -279,7 +279,7 @@
         </div>
         <nav class="sidebar__nav" @click="if (window.innerWidth <= 860) sidebarOpen = false">
             <a href="{% url 'dashboard:home' %}" class="nav-link">Dashboard</a>
-            <a href="{% url 'boq:upload' %}" class="nav-link">Upload BOQ</a>
+            <a href="{% url 'boq:list' %}" class="nav-link{% if request.resolver_match.namespace == 'boq' %} is-active{% endif %}">BOQs</a>
             <a href="{% url 'database:list' %}" class="nav-link">Database</a>
             <a href="{% url 'notifications:list' %}" class="nav-link">
                 Notifications{% if notifications_unread %} <span class="nav-badge">{{ notifications_unread }}</span>{% endif %}

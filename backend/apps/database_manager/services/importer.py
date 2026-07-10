@@ -16,12 +16,15 @@ from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
 
-from common.constants import DATABASE_UPLOADS_TO_RETAIN
 from common.exceptions import ImportError_
 from utils.excel import list_sheet_names, read_rows
 from ai.context import clear_database_context_cache
 
-from .activation import activate_database_version
+from .activation import (
+    activate_database_version,
+    enforce_version_retention,
+    purge_inactive_master_data,
+)
 from ..models import (
     DatabaseVersion,
     Labour_Master,
@@ -329,7 +332,8 @@ class DatabaseImportService:
                 self._activate(version)
             clear_database_context_cache()
             self._generate_embeddings(version)
-            self._enforce_retention()
+            purge_inactive_master_data(version)
+            enforce_version_retention()
         except ImportError_:
             raise
         except Exception as exc:  # pragma: no cover - defensive
@@ -388,20 +392,3 @@ class DatabaseImportService:
 
     def _activate(self, version: DatabaseVersion) -> None:
         activate_database_version(version)
-
-    def _enforce_retention(self) -> None:
-        """Keep only the most recent uploads for view/download history."""
-        from ai.embeddings.chroma_store import ChromaEmbeddingStore
-
-        versions = list(DatabaseVersion.objects.order_by("-version_number"))
-        if len(versions) <= DATABASE_UPLOADS_TO_RETAIN:
-            return
-
-        stale = versions[DATABASE_UPLOADS_TO_RETAIN:]
-        stale_ids = [v.pk for v in stale]
-        store = ChromaEmbeddingStore()
-        for version_id in stale_ids:
-            store.reset_version(version_id)
-        deleted_count = DatabaseVersion.objects.filter(pk__in=stale_ids).count()
-        DatabaseVersion.objects.filter(pk__in=stale_ids).delete()
-        logger.info("Retention: removed %s old database upload(s)", deleted_count)

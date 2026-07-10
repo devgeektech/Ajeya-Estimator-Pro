@@ -52,7 +52,8 @@ Upload workbook → Validate → Import sheets → Activate version → Generate
 - Only `Rate_Master` is required; other master sheets are optional if absent.
 - Exactly **one** active `DatabaseVersion` at a time; Chroma holds embeddings for
   the active database only.
-- Last **10** uploads remain visible for view/download; older uploads are deleted.
+- Last **10** uploads remain visible for view/download (metadata + workbook file).
+- Master sheet rows are stored in PostgreSQL only for the **active** upload.
 - No rollback — new upload replaces the active database.
 - Embeddings skip cleanly when OpenAI is not configured.
 

@@ -18,8 +18,10 @@ Schema and import rules for PostgreSQL. Update when models or migrations change.
 
 - `version_number` — monotonic display sequence
 - `is_active` — only one row may be `True` (partial unique constraint)
-- Retention: keep the **last 10** uploads for view/download; older rows deleted on import
-- **No rollback** — archived uploads are read-only (view + download workbook)
+- Retention: keep the **last 10** uploads for view/download (metadata + workbook file)
+- Master sheet rows (`Rate_Master`, `Labour_Master`, etc.) are stored in PostgreSQL
+  **only for the active** upload; inactive versions keep their workbook only
+- **No rollback** — new upload replaces the active database
 
 ---
 

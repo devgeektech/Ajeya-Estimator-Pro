@@ -1,6 +1,7 @@
 """Project-wide constants."""
 
-# Keep the last N database uploads visible for view/download (active + archived).
+# Keep the last N database uploads for view/download (metadata + workbook file).
+# Only the active upload keeps master sheet rows in PostgreSQL.
 DATABASE_UPLOADS_TO_RETAIN = 10
 
 # Master workbook sheet names (docs/DATABASE.md).

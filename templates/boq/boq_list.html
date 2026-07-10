@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}BOQs &middot; Ajeya Estimator Pro{% endblock %}
+{% block heading %}BOQs{% endblock %}
+
+{% block content %}
+<div class="toolbar">
+    <p class="toolbar__info">
+        {{ boqs|length }} BOQ{{ boqs|length|pluralize }}
+    </p>
+    <a href="{% url 'boq:upload' %}" class="btn btn--primary">+ Upload BOQ</a>
+</div>
+
+<div class="panel">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Owner</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th class="table__actions">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for boq in boqs %}
+            <tr>
+                <td style="font-weight: 500;">{{ boq.boq_name }}</td>
+                <td>{{ boq.user.full_name }}</td>
+                <td><span class="badge badge--gray">{{ boq.get_status_display }}</span></td>
+                <td>{{ boq.created_at|date:"Y-m-d H:i" }}</td>
+                <td class="table__actions">
+                    <a href="{% url 'boq:detail' boq.pk %}" class="link-action">Open</a>
+                </td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="5" class="table__empty">No BOQs uploaded yet.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

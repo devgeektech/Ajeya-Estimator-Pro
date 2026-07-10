@@ -48,6 +48,12 @@
     </table>
     
     <h3 style="margin-top: 24px;" class="panel__title">Data Statistics</h3>
+    {% if not version.is_active %}
+    <p class="panel__text" style="margin-bottom: 12px;">
+        Archived uploads keep the workbook for download. Master sheet rows are stored
+        only for the active database.
+    </p>
+    {% endif %}
     <table class="table">
         <tbody>
             <tr>

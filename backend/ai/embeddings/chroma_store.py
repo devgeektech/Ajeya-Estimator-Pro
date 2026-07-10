@@ -4,9 +4,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence, cast
 
 import chromadb
+from chromadb.api.types import PyEmbeddings
 from chromadb.config import Settings
 from django.conf import settings
 
@@ -23,10 +24,9 @@ def _to_decimal(value) -> Decimal:
 
 def selection_amount(rate: Rate_Master) -> Decimal:
     """Amount used when comparing Rate_Master rows."""
-    value = rate.final_amount_excl_gst
-    if value is not None:
-        return _to_decimal(value)
-    return _to_decimal(rate.net_material_rate)
+    if rate.Final_Amount_Excl_GST is not None:
+        return _to_decimal(rate.Final_Amount_Excl_GST)
+    return _to_decimal(rate.Net_Material_Rate or 0)
 
 
 @dataclass(frozen=True)
@@ -54,16 +54,16 @@ def rate_document_id(rate: Rate_Master) -> str:
 def rate_document(rate: Rate_Master) -> str:
     """Build structured text embedded for vector product search."""
     fields = [
-        ("Category", rate.category),
-        ("Sub Category", rate.sub_category),
-        ("Class", rate.material_class),
-        ("Size", rate.size),
-        ("Make", rate.make),
-        ("Capacity", rate.capacity),
-        ("Unit", rate.unit),
-        ("Attribute", rate.attribute),
-        ("Supplier", rate.supplier),
-        ("Tech_Key", rate.tech_key),
+        ("Category", rate.Category),
+        ("Sub Category", rate.Sub_Category),
+        ("Class", rate.Class),
+        ("Size", rate.Size),
+        ("Make", rate.Make),
+        ("Capacity", rate.Capacity),
+        ("Unit", rate.Unit),
+        ("Attribute", rate.Attribute),
+        ("Supplier", rate.Supplier),
+        ("Tech_Key", rate.Tech_Key),
     ]
     lines = []
     for label, value in fields:
@@ -78,17 +78,17 @@ def rate_metadata(rate: Rate_Master) -> dict:
     return {
         "database_version_id": rate.database_version.pk,
         "rate_master_id": rate.pk,
-        "category": rate.category or "",
-        "sub_category": rate.sub_category or "",
-        "class": rate.material_class or "",
-        "size": _scalar(rate.size),
-        "make": rate.make or "",
-        "capacity": rate.capacity or "",
-        "unit": rate.unit or "",
-        "attribute": rate.attribute or "",
-        "supplier": rate.supplier or "",
-        "tech_key": rate.tech_key or "",
-        "final_amount_excl_gst": _scalar(rate.final_amount_excl_gst),
+        "category": rate.Category or "",
+        "sub_category": rate.Sub_Category or "",
+        "class": rate.Class or "",
+        "size": _scalar(rate.Size),
+        "make": rate.Make or "",
+        "capacity": rate.Capacity or "",
+        "unit": rate.Unit or "",
+        "attribute": rate.Attribute or "",
+        "supplier": rate.Supplier or "",
+        "tech_key": rate.Tech_Key or "",
+        "final_amount_excl_gst": _scalar(rate.Final_Amount_Excl_GST),
         "selection_amount": _scalar(selection_amount(rate)),
     }
 
@@ -120,14 +120,14 @@ class ChromaEmbeddingStore:
         """Remove indexed products for one database version."""
         self.collection.delete(where={"database_version_id": int(database_version_id)})
 
-    def upsert_rate(self, rate: Rate_Master, embedding: list[float]) -> str:
+    def upsert_rate(self, rate: Rate_Master, embedding: Sequence[float]) -> str:
         """Upsert one Rate_Master row into Chroma and return its document id."""
         return self.upsert_rates([rate], [embedding])[0]
 
     def upsert_rates(
         self,
         rates: list[Rate_Master],
-        embeddings: list[list[float]],
+        embeddings: Sequence[Sequence[float]],
     ) -> list[str]:
         """Upsert many Rate_Master rows into Chroma, one vector per row."""
         if not rates:
@@ -138,7 +138,7 @@ class ChromaEmbeddingStore:
         document_ids = [rate_document_id(rate) for rate in rates]
         self.collection.upsert(
             ids=document_ids,
-            embeddings=embeddings,
+            embeddings=cast(PyEmbeddings, embeddings),
             documents=[rate_document(rate) for rate in rates],
             metadatas=[rate_metadata(rate) for rate in rates],
         )
@@ -146,14 +146,14 @@ class ChromaEmbeddingStore:
 
     def query(
         self,
-        embedding: list[float],
+        embedding: Sequence[float],
         *,
         database_version_id: int,
         top_k: int = 5,
     ) -> list[ChromaMatch]:
         """Return vector hits scoped to one database version."""
         result = self.collection.query(
-            query_embeddings=[embedding],
+            query_embeddings=cast(PyEmbeddings, [embedding]),
             n_results=top_k,
             where={"database_version_id": int(database_version_id)},
             include=["metadatas", "distances"],

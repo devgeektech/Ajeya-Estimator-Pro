@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}{{ boq.boq_name }} &middot; Ajeya Estimator Pro{% endblock %}
+{% block heading %}{{ boq.boq_name }}{% endblock %}
+
+{% block content %}
+<div class="toolbar">
+    <p class="toolbar__info">
+        <span class="badge badge--gray">{{ boq.get_status_display }}</span>
+    </p>
+    <a href="{% url 'boq:list' %}" class="btn btn--ghost">Back to BOQs</a>
+</div>
+
+<div class="panel">
+    <dl class="detail-list">
+        <div class="detail-list__row">
+            <dt>Owner</dt>
+            <dd>{{ boq.user.full_name }}</dd>
+        </div>
+        <div class="detail-list__row">
+            <dt>Created</dt>
+            <dd>{{ boq.created_at|date:"Y-m-d H:i" }}</dd>
+        </div>
+        <div class="detail-list__row">
+            <dt>BOQ workbook</dt>
+            <dd>{{ boq.uploaded_file.name|default:"—" }}</dd>
+        </div>
+        <div class="detail-list__row">
+            <dt>Make list</dt>
+            <dd>
+                {% if boq.make_list_file %}
+                {{ boq.make_list_file.name }}
+                {% else %}
+                —
+                {% endif %}
+            </dd>
+        </div>
+    </dl>
+</div>
+{% endblock %}
