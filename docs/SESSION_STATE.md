@@ -33,6 +33,18 @@ uploads visible; no rollback.
 
 ## Session Log
 
+### 2026-07-10 — Canonical Master Sheet Names
+
+Completed:
+
+- Removed workflow model aliases (`MaterialRate`, `LabourMaster`, `CategoryConfig`, etc.).
+- Updated AI context and embedding modules to use canonical sheet/model names.
+- Chroma metadata now uses `rate_master_id` (reads legacy `material_rate_id`).
+
+Next:
+
+- `createsuperuser`; import master workbook; rebuild BOQ pipeline.
+
 ### 2026-07-10 — Remove Rollback; Embedding Consolidation
 
 Completed:

@@ -88,7 +88,7 @@ class RateMasterAdmin(admin.ModelAdmin):
 
 @admin.register(Labour_Master)
 
-class LabourMasterAdmin(admin.ModelAdmin):
+class Labour_MasterAdmin(admin.ModelAdmin):
 
     list_display = (
 

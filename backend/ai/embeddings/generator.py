@@ -7,7 +7,7 @@ from django.conf import settings
 
 from ai.embeddings.chroma_store import ChromaEmbeddingStore, rate_document
 from ai.openai_client import get_client, is_configured
-from apps.database_manager.models import DatabaseVersion, MaterialRate
+from apps.database_manager.models import DatabaseVersion, Rate_Master
 from common.exceptions import AIServiceError
 
 logger = logging.getLogger("boq_ai")
@@ -60,7 +60,7 @@ def generate_embeddings_for_version(database_version_id: int) -> dict:
         )
         return {"total": 0, "generated": 0, "skipped": 0, "errors": 1}
 
-    products = MaterialRate.objects.filter(database_version=version)
+    products = Rate_Master.objects.filter(database_version=version)
     total = products.count()
     generated = skipped = errors = 0
     store = ChromaEmbeddingStore()
@@ -77,10 +77,10 @@ def generate_embeddings_for_version(database_version_id: int) -> dict:
             store.upsert_rate(product, vector)
             generated += 1
         except AIServiceError:
-            logger.exception("Embedding failed for MaterialRate row %s", product.pk)
+            logger.exception("Embedding failed for Rate_Master row %s", product.pk)
             errors += 1
         except Exception:
-            logger.exception("Chroma indexing failed for MaterialRate row %s", product.pk)
+            logger.exception("Chroma indexing failed for Rate_Master row %s", product.pk)
             errors += 1
 
     summary = {"total": total, "generated": generated, "skipped": skipped, "errors": errors}

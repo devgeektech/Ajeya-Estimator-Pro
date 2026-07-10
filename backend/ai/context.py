@@ -9,9 +9,9 @@ from django.core.cache import cache
 
 from apps.database_manager.models import (
     DatabaseVersion,
-    LabourConfig,
-    LabourMaster,
-    MaterialRate,
+    Labour_Master,
+    Rate_Master,
+    TOR_Labour,
 )
 from apps.database_manager.services.activation import get_active_database_version
 
@@ -60,7 +60,7 @@ def _unique_ordered(values) -> list[str]:
 def _category_taxonomy(version: DatabaseVersion) -> list[dict]:
     """Map each Rate_Master category to its valid sub_categories."""
     rates = (
-        MaterialRate.objects.filter(database_version=version)
+        Rate_Master.objects.filter(database_version=version)
         .exclude(Category__isnull=True)
         .exclude(Category="")
         .values_list("Category", "Sub_Category")
@@ -93,7 +93,7 @@ def _looks_like_tech_key(value: str) -> bool:
 def _database_activities(version: DatabaseVersion) -> list[str]:
     """Return human-readable labour activity names for extraction prompts."""
     labour_types = _unique_ordered(
-        LabourMaster.objects.filter(database_version=version)
+        Labour_Master.objects.filter(database_version=version)
         .exclude(Labour_Type__isnull=True)
         .exclude(Labour_Type="")
         .order_by("Labour_Type")
@@ -104,7 +104,7 @@ def _database_activities(version: DatabaseVersion) -> list[str]:
         if _is_internal_labour_type(labour_type) or _looks_like_tech_key(labour_type):
             continue
         activities.append(labour_type)
-    if LabourConfig.objects.filter(database_version=version).exists():
+    if TOR_Labour.objects.filter(database_version=version).exists():
         activities.extend(TOR_ACTIVITY_NAMES)
     return _unique_ordered(activities)
 

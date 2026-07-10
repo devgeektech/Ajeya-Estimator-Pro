@@ -564,13 +564,3 @@ class State_Control_List(models.Model):
     @property
     def labour_multiplier(self):
         return self.Labour_Multiplier
-
-
-# Workflow aliases used by database import and AI context services.
-MaterialRate = Rate_Master
-LabourMaster = Labour_Master
-CategoryConfig = TOR_Main
-LabourConfig = TOR_Labour
-AccessoriesRule = TOR_Accessories
-StateMultiplier = State_Control_List
-LabourStructureSource = Labour_Structure_Source

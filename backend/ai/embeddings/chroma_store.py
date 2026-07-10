@@ -1,4 +1,4 @@
-"""Local Chroma vector index for MaterialRate product embeddings."""
+"""Local Chroma vector index for Rate_Master product embeddings."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -10,7 +10,7 @@ import chromadb
 from chromadb.config import Settings
 from django.conf import settings
 
-from apps.database_manager.models import MaterialRate
+from apps.database_manager.models import Rate_Master
 
 
 def _to_decimal(value) -> Decimal:
@@ -21,8 +21,8 @@ def _to_decimal(value) -> Decimal:
     return Decimal(str(value))
 
 
-def selection_amount(rate: MaterialRate) -> Decimal:
-    """Amount used when comparing MaterialRate rows."""
+def selection_amount(rate: Rate_Master) -> Decimal:
+    """Amount used when comparing Rate_Master rows."""
     value = rate.final_amount_excl_gst
     if value is not None:
         return _to_decimal(value)
@@ -33,7 +33,7 @@ def selection_amount(rate: MaterialRate) -> Decimal:
 class ChromaMatch:
     """One vector-search hit resolved from Chroma metadata."""
 
-    material_rate_id: int
+    rate_master_id: int
     tech_key: str
     similarity: float
 
@@ -46,12 +46,12 @@ def _scalar(value: Any):
     return value
 
 
-def rate_document_id(rate: MaterialRate) -> str:
-    """Return the stable Chroma document id for a MaterialRate row."""
-    return f"material-rate-{rate.pk}"
+def rate_document_id(rate: Rate_Master) -> str:
+    """Return the stable Chroma document id for a Rate_Master row."""
+    return f"rate-master-{rate.pk}"
 
 
-def rate_document(rate: MaterialRate) -> str:
+def rate_document(rate: Rate_Master) -> str:
     """Build structured text embedded for vector product search."""
     fields = [
         ("Category", rate.category),
@@ -73,11 +73,11 @@ def rate_document(rate: MaterialRate) -> str:
     return "\n".join(lines)
 
 
-def rate_metadata(rate: MaterialRate) -> dict:
+def rate_metadata(rate: Rate_Master) -> dict:
     """Return Chroma-safe metadata for resolving vector hits back to PostgreSQL."""
     return {
         "database_version_id": rate.database_version.pk,
-        "material_rate_id": rate.pk,
+        "rate_master_id": rate.pk,
         "category": rate.category or "",
         "sub_category": rate.sub_category or "",
         "class": rate.material_class or "",
@@ -120,8 +120,8 @@ class ChromaEmbeddingStore:
         """Remove indexed products for one database version."""
         self.collection.delete(where={"database_version_id": int(database_version_id)})
 
-    def upsert_rate(self, rate: MaterialRate, embedding: list[float]) -> str:
-        """Upsert one MaterialRate row into Chroma and return its document id."""
+    def upsert_rate(self, rate: Rate_Master, embedding: list[float]) -> str:
+        """Upsert one Rate_Master row into Chroma and return its document id."""
         document_id = rate_document_id(rate)
         self.collection.upsert(
             ids=[document_id],
@@ -153,15 +153,15 @@ class ChromaEmbeddingStore:
         for metadata, distance in zip(metadatas, distances, strict=False):
             if not isinstance(metadata, dict):
                 continue
-            material_rate_id = metadata.get("material_rate_id") or metadata.get(
-                "rate_master_id"
+            rate_master_id = metadata.get("rate_master_id") or metadata.get(
+                "material_rate_id"
             )
-            if not material_rate_id:
+            if not rate_master_id:
                 continue
             similarity = max(0.0, 1.0 - float(distance or 0.0))
             matches.append(
                 ChromaMatch(
-                    material_rate_id=int(str(material_rate_id)),
+                    rate_master_id=int(str(rate_master_id)),
                     tech_key=str(metadata.get("tech_key") or ""),
                     similarity=similarity,
                 )

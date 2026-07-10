@@ -43,8 +43,7 @@ Imported into versioned tables (PascalCase ORM fields mirror workbook columns).
 - Blank cells → `NULL` (not empty string / zero).
 - Skip optional sheets not present in the workbook.
 - All master rows carry `database_version_id`.
-- Workflow aliases exist on models (`MaterialRate`, `LabourMaster`, etc.) plus
-  snake_case property aliases for services.
+- Model and table names match workbook sheet names exactly.
 
 **Key fields on `Rate_Master`:** `Category`, `Sub_Category`, `Class`, `Size`,
 `Make`, `Capacity`, `Unit`, `Attribute`, `Supplier`, `Tech_Key`, rate columns
@@ -90,7 +89,7 @@ After each successful import, `generate_embeddings_for_version()` in
 Category, Sub Category, Class, Size, Make, Capacity, Unit, Attribute, Supplier,
 Tech_Key
 
-**Metadata** mirrors the same fields plus `material_rate_id` and
+**Metadata** mirrors the same fields plus `rate_master_id` and
 `database_version_id` for resolving hits back to PostgreSQL.
 
 Only the **active** database has embeddings; the Chroma collection is cleared

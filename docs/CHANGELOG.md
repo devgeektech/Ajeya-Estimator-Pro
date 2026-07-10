@@ -2,6 +2,14 @@
 
 Meaningful product and technical changes only. Older history is in git.
 
+## 2026-07-10 — Canonical Master Sheet Names
+
+- Removed workflow aliases (`MaterialRate`, `LabourMaster`, `CategoryConfig`, etc.).
+- Code and docs now use only workbook-aligned names: `Rate_Master`, `Labour_Master`,
+  `TOR_Main`, `Labour_Structure_Source`, `TOR_Labour`, `TOR_Accessories`,
+  `State_Control_List`.
+- Chroma metadata key renamed to `rate_master_id`.
+
 ## 2026-07-10 — Remove Rollback; Single Active Embeddings
 
 - Removed `DatabaseRollbackService`, rollback URL/view/UI.
