@@ -17,7 +17,7 @@ Compact active memory. Full spec: `docs/PRODUCT.md`. Schema: `docs/DATABASE.md`.
 uploads visible for view/download; only the active upload keeps master rows in
 PostgreSQL.
 
-**BOQ:** upload workbook (+ optional make list) → stored → dashboard
+**BOQ:** upload workbook (+ optional make list) → parse to JSON → view tabs
 
 ## Pending
 
@@ -33,6 +33,13 @@ PostgreSQL.
 ```
 
 ## Session Log
+
+### 2026-07-10 — BOQ Normalized JSON + View Tabs
+
+Completed:
+
+- `boq_data` / `make_list_data` JSON on upload with serial-based hierarchy.
+- View page tabs (BOQ, Make List); PDF make-list support.
 
 ### 2026-07-10 — Active-Only Master Data Retention
 

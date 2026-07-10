@@ -5,12 +5,15 @@ side-effect free so it can be unit tested in isolation.
 """
 from __future__ import annotations
 
+from collections.abc import Set as AbstractSet
 from datetime import date, datetime
 import re
 from pathlib import Path
 
 import pandas as pd
 from openpyxl import load_workbook
+
+HeaderKeys = set[str] | frozenset[str]
 
 
 def read_sheets(file_path: str | Path) -> dict[str, pd.DataFrame]:
@@ -75,14 +78,55 @@ def _headers_from_cells(cells) -> list[dict]:
     return _dedupe_headers(headers)
 
 
-def _header_score(headers: list[dict], header_keys: set[str] | None) -> tuple[int, int]:
+def _key_matches_hints(key: str, header_keys: HeaderKeys | None) -> bool:
+    if not header_keys or not key:
+        return False
+    if key in header_keys:
+        return True
+    return any(hint in key for hint in header_keys)
+
+
+def _header_score(headers: list[dict], header_keys: HeaderKeys | None) -> tuple[int, int]:
     if not header_keys:
         return (0, len(headers))
-    matches = sum(1 for header in headers if header["key"] in header_keys)
+    matches = sum(1 for header in headers if _key_matches_hints(header["key"], header_keys))
     return (matches, len(headers))
 
 
-def _select_header_row(non_empty_rows, header_keys: set[str] | None):
+def _expand_headers_to_width(headers: list[dict], max_col_index: int) -> list[dict]:
+    """Add synthetic headers for data columns beyond the named header cells."""
+    if max_col_index < 0:
+        return headers
+    covered = {header["index"] for header in headers}
+    expanded = list(headers)
+    anchor = expanded[-1] if expanded else None
+    for idx in range(max_col_index + 1):
+        if idx in covered:
+            continue
+        if anchor and "approved" in anchor["key"]:
+            suffix = idx - anchor["index"]
+            label = f"{anchor['label']} {suffix}" if suffix else anchor["label"]
+            key = _normalize_header(label) or f"approved_makes_{suffix}"
+        else:
+            label = f"Column {idx + 1}"
+            key = f"column_{idx + 1}"
+        expanded.append({"key": key, "label": label, "index": idx})
+    expanded.sort(key=lambda header: header["index"])
+    return _dedupe_headers(expanded)
+
+
+def _max_data_column_index(non_empty_rows, header_row_number: int) -> int:
+    max_idx = 0
+    for row_number, cells in non_empty_rows:
+        if row_number <= header_row_number:
+            continue
+        for idx, cell in enumerate(cells):
+            if cell.value is not None and str(cell.value).strip() != "":
+                max_idx = max(max_idx, idx)
+    return max_idx
+
+
+def _select_header_row(non_empty_rows, header_keys: HeaderKeys | None):
     if not non_empty_rows:
         return None
     if not header_keys:
@@ -102,7 +146,9 @@ def _select_header_row(non_empty_rows, header_keys: set[str] | None):
 def read_rows_with_metadata(
     file_path: str | Path,
     sheet_name: str | None = None,
-    header_keys: set[str] | None = None,
+    header_keys: HeaderKeys | None = None,
+    *,
+    expand_columns: bool = False,
 ) -> tuple[list[dict], list[dict]]:
     """Read rows with original header labels and worksheet row numbers.
 
@@ -124,7 +170,10 @@ def read_rows_with_metadata(
         selected = _select_header_row(non_empty_rows, header_keys)
         if not selected:
             return [], []
-        header_row_number, _, headers = selected
+        header_row_number, header_cells, headers = selected
+        if expand_columns:
+            max_col = _max_data_column_index(non_empty_rows, header_row_number)
+            headers = _expand_headers_to_width(headers, max_col)
 
         records: list[dict] = []
         for row_number, cells in non_empty_rows:

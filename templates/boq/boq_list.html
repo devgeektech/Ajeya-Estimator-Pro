@@ -29,7 +29,7 @@
                 <td><span class="badge badge--gray">{{ boq.get_status_display }}</span></td>
                 <td>{{ boq.created_at|date:"Y-m-d H:i" }}</td>
                 <td class="table__actions">
-                    <a href="{% url 'boq:detail' boq.pk %}" class="link-action">Open</a>
+                    <a href="{% url 'boq:detail' boq.pk %}" class="btn btn--small btn--primary">View</a>
                 </td>
             </tr>
             {% empty %}

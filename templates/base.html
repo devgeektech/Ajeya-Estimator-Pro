@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Ajeya Estimator Pro{% endblock %}</title>
     <meta name="csrf-token" content="{{ csrf_token }}">
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=13">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20">
     <style>
         .confirm-modal {
             position: fixed;
@@ -79,6 +79,68 @@
         [x-cloak] { display: none !important; }
         .sidebar-backdrop { display: none; }
 
+        /* BOQ detail page */
+        .topbar-back {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 36px;
+            height: 36px;
+            flex-shrink: 0;
+            border-radius: 10px;
+            background: #2563eb;
+            color: #fff;
+            text-decoration: none !important;
+            box-shadow: 0 1px 2px rgba(37, 99, 235, .35);
+            transition: background .15s, box-shadow .15s, transform .15s;
+        }
+        .topbar-back:hover {
+            background: #1d4ed8;
+            box-shadow: 0 4px 10px rgba(37, 99, 235, .4);
+            transform: translateX(-2px);
+        }
+        .topbar-back svg { display: block; }
+        .topbar__title { text-decoration: none !important; }
+
+        .boq-tabs {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 6px;
+            width: 100%;
+            margin-bottom: 16px;
+            padding: 5px;
+            background: var(--surface-alt);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            box-shadow: inset 0 1px 2px rgba(15, 23, 42, .04);
+        }
+        .boq-tabs__btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 40px;
+            padding: 10px 18px;
+            border: none;
+            border-radius: 10px;
+            background: transparent;
+            color: var(--text);
+            font: inherit;
+            font-size: .95rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background .18s, color .18s, box-shadow .18s;
+        }
+        .boq-tabs__btn:hover {
+            color: var(--primary);
+            background: rgba(37, 99, 235, .08);
+        }
+        .boq-tabs__btn.is-active {
+            background: var(--primary);
+            color: #fff;
+            box-shadow: 0 2px 8px rgba(37, 99, 235, .28);
+        }
+        .boq-tabs__btn.is-active:hover { color: #fff; }
+
         @media (max-width: 860px) {
             .sidebar {
                 width: min(280px, 86vw) !important;
@@ -150,6 +212,25 @@
         .dark-mode .confirm-modal__dialog { background: #111827; }
         .dark-mode .auth__card { background: #111827; }
         .dark-mode .select { background: #1a2236; color: var(--text); border-color: #2d3748; }
+
+        .dark-mode .boq-tabs {
+            background: var(--surface-alt);
+            border-color: var(--border);
+            box-shadow: inset 0 1px 2px rgba(0, 0, 0, .25);
+        }
+        .dark-mode .boq-tabs__btn {
+            color: var(--text);
+        }
+        .dark-mode .boq-tabs__btn:hover {
+            color: #93c5fd;
+            background: rgba(37, 99, 235, .18);
+        }
+        .dark-mode .boq-tabs__btn.is-active {
+            background: var(--primary);
+            color: #fff;
+            box-shadow: 0 2px 10px rgba(37, 99, 235, .35);
+        }
+        .dark-mode .boq-tabs__btn.is-active:hover { color: #fff; }
 
         /* ---- Theme toggle button ---- */
         .theme-toggle {
@@ -262,6 +343,7 @@
         .sidebar__footer .btn--ghost { color: #fff; border-color: rgba(255,255,255,.2); }
         .sidebar__footer .btn--ghost:hover { background: rgba(255,255,255,.1); color: #fff; }
     </style>
+    {% block head_extra %}{% endblock %}
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <script src="https://unpkg.com/htmx.org@2.0.2"></script>
 </head>
@@ -309,6 +391,7 @@
     <div class="main">
         <header class="topbar">
             <button class="topbar__menu" @click="sidebarOpen = !sidebarOpen" aria-label="Toggle menu">&#9776;</button>
+            {% block topbar_leading %}{% endblock %}
             <h1 class="topbar__title">{% block heading %}{% endblock %}</h1>
             <button class="theme-toggle" @click="toggleTheme" :title="darkMode ? 'Switch to light mode' : 'Switch to dark mode'" aria-label="Toggle theme">
                 <svg x-show="!darkMode" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

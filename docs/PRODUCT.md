@@ -63,8 +63,15 @@ Views call the service directly (thin views).
 ### BOQ upload
 
 ```text
-Upload BOQ (+ optional make list) → BOQ record on disk → dashboard
+Upload BOQ (+ optional make list) → parse to JSON → store files + hierarchy
 ```
+
+- BOQ workbook: `.xlsx` / `.xlsm`
+- Make list: `.xlsx`, `.xlsm`, or `.pdf`
+- On upload, rows are normalized by serial number (`1`, `1.1`, `a`, `(a)`, etc.)
+  into JSON (`boq_data`, `make_list_data`) while preserving hierarchy for UI,
+  AI extraction, and future priced export.
+- View page shows **BOQ** and **Make List** tabs with indented sheet layout.
 
 Entry point: `BOQCreationService` in `apps/boq/services/boq_service.py`.
 

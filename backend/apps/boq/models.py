@@ -28,6 +28,8 @@ class BOQ(models.Model):
     make_list_file = models.FileField(
         upload_to=make_list_upload_path, blank=True, null=True
     )
+    boq_data = models.JSONField(default=dict, blank=True)
+    make_list_data = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

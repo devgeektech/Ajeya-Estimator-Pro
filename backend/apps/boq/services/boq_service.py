@@ -1,7 +1,7 @@
 """BOQ upload service.
 
-Persists the uploaded workbook and optional make list. Parsing and processing are
-handled in a later workflow rebuild.
+Persists uploaded files, normalizes workbook structure to JSON, and stores
+hierarchical rows for later AI extraction and export.
 """
 from __future__ import annotations
 
@@ -13,7 +13,15 @@ from apps.audit.services import record
 from apps.boq.models import BOQ
 from common.choices import BOQStatus
 
+from .boq_parser import parse_boq_workbook
+from .make_list_parser import parse_make_list_file
+
 logger = logging.getLogger("boq_ai")
+
+
+def upload_basename(uploaded_file) -> str:
+    name = getattr(uploaded_file, "name", None) or ""
+    return name.rsplit("/", 1)[-1]
 
 
 class BOQCreationService:
@@ -32,6 +40,12 @@ class BOQCreationService:
             uploaded_file=self.uploaded_file,
             make_list_file=self.make_list_file,
         )
+
+        boq.boq_data = self._safe_parse_boq(boq)
+        if self.make_list_file:
+            boq.make_list_data = self._safe_parse_make_list(boq)
+        boq.save(update_fields=["boq_data", "make_list_data"])
+
         logger.info(
             "BOQ uploaded: '%s' (id=%s) by %s",
             boq.boq_name,
@@ -40,3 +54,23 @@ class BOQCreationService:
         )
         record(self.user, "Uploaded BOQ", "BOQ", boq.boq_name)
         return boq
+
+    def _safe_parse_boq(self, boq: BOQ) -> dict:
+        try:
+            return parse_boq_workbook(
+                boq.uploaded_file,
+                source_filename=upload_basename(boq.uploaded_file),
+            )
+        except Exception as exc:
+            logger.exception("BOQ parse failed for id=%s", boq.pk)
+            return {"version": 1, "error": str(exc), "headers": [], "rows": []}
+
+    def _safe_parse_make_list(self, boq: BOQ) -> dict:
+        try:
+            return parse_make_list_file(
+                boq.make_list_file,
+                source_filename=upload_basename(boq.make_list_file),
+            )
+        except Exception as exc:
+            logger.exception("Make list parse failed for BOQ id=%s", boq.pk)
+            return {"version": 1, "error": str(exc), "headers": [], "rows": []}

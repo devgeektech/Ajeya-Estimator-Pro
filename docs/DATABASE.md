@@ -65,8 +65,25 @@ Imported into versioned tables (PascalCase ORM fields mirror workbook columns).
 | `boq_name` | Display name |
 | `status` | `UPLOADED` only (for now) |
 | `uploaded_file` | Original workbook |
-| `make_list_file` | Optional |
+| `make_list_file` | Optional (Excel or PDF) |
+| `boq_data` | Normalized BOQ JSON (headers + hierarchical rows) |
+| `make_list_data` | Normalized make-list JSON |
 | `created_at` | Timestamp |
+
+**`boq_data` / `make_list_data` row shape (flat list, hierarchy via fields):**
+
+| Field | Purpose |
+| --- | --- |
+| `row_id` | Stable id (`r{excel_row}`) |
+| `serial` | Raw serial text from sheet |
+| `depth` | Indent level (0 = section root) |
+| `parent_row_id` | Parent row link |
+| `excel_row_number` | Original worksheet row |
+| `display_values` | UI-safe cell values keyed by normalized header |
+| `values` | Raw parsed cell values |
+
+Serial rules: `1` → depth 0; `1.1` → child of `1`; `a` / `(a)` → child of
+current parent; `(1)` → child of serial `1`.
 
 `BOQRun`, `BOQItem`, `ProductMatch`, and related pipeline tables were dropped
 in migration `boq.0003` and `database_manager.0010`.

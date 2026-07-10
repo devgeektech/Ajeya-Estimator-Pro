@@ -12,9 +12,35 @@ from apps.accounts.models import User
 
 from .forms import BOQUploadForm
 from .models import BOQ
-from .services.boq_service import BOQCreationService
+from .services.boq_parser import parse_boq_workbook
+from .services.boq_service import BOQCreationService, upload_basename
+from .services.make_list_parser import parse_make_list_file
+from .services.serial_normalizer import structure_for_display
 
 logger = logging.getLogger("boq_ai")
+
+
+def _display_structure(boq: BOQ, *, kind: str) -> dict:
+    """Parse from the stored file when possible so the UI always reflects current rules."""
+    try:
+        if kind == "boq" and boq.uploaded_file:
+            payload = parse_boq_workbook(
+                boq.uploaded_file,
+                source_filename=upload_basename(boq.uploaded_file),
+            )
+        elif kind == "make_list" and boq.make_list_file:
+            payload = parse_make_list_file(
+                boq.make_list_file,
+                source_filename=upload_basename(boq.make_list_file),
+            )
+        else:
+            payload = boq.boq_data if kind == "boq" else boq.make_list_data
+            return structure_for_display(payload or {})
+        return structure_for_display(payload)
+    except Exception:
+        logger.exception("Failed to parse %s for BOQ id=%s", kind, boq.pk)
+        payload = boq.boq_data if kind == "boq" else boq.make_list_data
+        return structure_for_display(payload or {})
 
 
 class BOQListView(LoginRequiredMixin, ListView):
@@ -41,6 +67,17 @@ class BOQDetailView(LoginRequiredMixin, DetailView):
         if not user.is_super_admin:
             qs = qs.filter(user=user)
         return qs
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        boq = context["boq"]
+        context["boq_structure"] = _display_structure(boq, kind="boq")
+        context["make_list_structure"] = _display_structure(boq, kind="make_list")
+        context["has_make_list"] = bool(boq.make_list_file)
+        context["default_tab"] = self.request.GET.get("tab", "boq")
+        if context["default_tab"] not in {"boq", "make_list"}:
+            context["default_tab"] = "boq"
+        return context
 
 
 class BOQUploadView(LoginRequiredMixin, FormView):

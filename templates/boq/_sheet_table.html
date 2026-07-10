@@ -1,0 +1,33 @@
+{% if structure.error %}
+<div class="alert alert--error" style="margin-bottom: 16px;">
+    Could not parse this file: {{ structure.error }}
+</div>
+{% endif %}
+
+{% if structure.rows %}
+<div class="boq-sheet-wrap">
+    <table class="table boq-sheet">
+        <thead>
+            <tr>
+                {% for header in structure.headers %}
+                <th>{{ header.label }}</th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in structure.rows %}
+            <tr class="boq-sheet__row boq-sheet__row--depth-{{ row.depth|default:0 }}">
+                {% for cell in row.cells %}
+                <td class="boq-sheet__cell" style="--row-depth: {{ row.depth|default:0 }};">
+                    {{ cell }}
+                </td>
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<p class="panel__text">No rows parsed yet.</p>
+{% endif %}
+

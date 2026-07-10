@@ -1,39 +1,55 @@
-{% extends "base.html" %}
-{% block title %}{{ boq.boq_name }} &middot; Ajeya Estimator Pro{% endblock %}
-{% block heading %}{{ boq.boq_name }}{% endblock %}
-
-{% block content %}
-<div class="toolbar">
-    <p class="toolbar__info">
-        <span class="badge badge--gray">{{ boq.get_status_display }}</span>
-    </p>
-    <a href="{% url 'boq:list' %}" class="btn btn--ghost">Back to BOQs</a>
-</div>
-
-<div class="panel">
-    <dl class="detail-list">
-        <div class="detail-list__row">
-            <dt>Owner</dt>
-            <dd>{{ boq.user.full_name }}</dd>
-        </div>
-        <div class="detail-list__row">
-            <dt>Created</dt>
-            <dd>{{ boq.created_at|date:"Y-m-d H:i" }}</dd>
-        </div>
-        <div class="detail-list__row">
-            <dt>BOQ workbook</dt>
-            <dd>{{ boq.uploaded_file.name|default:"—" }}</dd>
-        </div>
-        <div class="detail-list__row">
-            <dt>Make list</dt>
-            <dd>
-                {% if boq.make_list_file %}
-                {{ boq.make_list_file.name }}
-                {% else %}
-                —
-                {% endif %}
-            </dd>
-        </div>
-    </dl>
-</div>
-{% endblock %}
+{% extends "base.html" %}
+{% block title %}{{ boq.boq_name }} &middot; Ajeya Estimator Pro{% endblock %}
+
+{% block topbar_leading %}
+<a href="{% url 'boq:list' %}" class="topbar-back" aria-label="Back to BOQs">
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <line x1="20" y1="12" x2="5" y2="12"/>
+        <polyline points="11 18 5 12 11 6"/>
+    </svg>
+</a>
+{% endblock %}
+
+{% block heading %}{{ boq.boq_name }}{% endblock %}
+
+{% block content %}
+<div class="boq-view" x-data="{ tab: '{{ default_tab }}' }">
+    <div class="boq-tabs" role="tablist">
+        <button
+            type="button"
+            class="boq-tabs__btn"
+            :class="{ 'is-active': tab === 'boq' }"
+            @click="tab = 'boq'"
+            role="tab"
+            :aria-selected="tab === 'boq'"
+        >
+            BOQ
+        </button>
+        <button
+            type="button"
+            class="boq-tabs__btn"
+            :class="{ 'is-active': tab === 'make_list' }"
+            @click="tab = 'make_list'"
+            role="tab"
+            :aria-selected="tab === 'make_list'"
+        >
+            Make List
+        </button>
+    </div>
+
+    <div class="panel">
+        <div x-show="tab === 'boq'" x-cloak role="tabpanel">
+            {% include "boq/_sheet_table.html" with structure=boq_structure %}
+        </div>
+
+        <div x-show="tab === 'make_list'" x-cloak role="tabpanel">
+            {% if has_make_list %}
+                {% include "boq/_sheet_table.html" with structure=make_list_structure %}
+            {% else %}
+                <p class="panel__text">No make list uploaded for this BOQ.</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+

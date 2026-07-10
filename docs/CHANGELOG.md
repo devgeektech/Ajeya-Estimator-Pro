@@ -2,6 +2,18 @@
 
 Meaningful product and technical changes only. Older history is in git.
 
+## 2026-07-10 — BOQ Sheet Display Cells
+
+- Moved cell value lookup from Django template tags into
+  `serial_normalizer.cell_value` / `structure_for_display`; templates render
+  pre-built `row.cells` lists.
+
+## 2026-07-10 — BOQ Normalized JSON + View Tabs
+
+- Upload parses BOQ/make list into hierarchical JSON (`boq_data`, `make_list_data`).
+- Make list supports PDF; View page has BOQ and Make List tabs with indented rows.
+- List action changed from Open link to blue View button.
+
 ## 2026-07-10 — Active-Only Master Data Retention
 
 - `DatabaseVersion` history and workbook files are kept for view/download.
