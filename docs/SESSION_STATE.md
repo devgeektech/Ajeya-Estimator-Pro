@@ -9,7 +9,7 @@ Compact active memory. Full spec: `docs/PRODUCT.md`. Schema: `docs/DATABASE.md`.
 - **Tests:** Suite removed — needs restoration
 - **Runtime:** `config.settings`, PostgreSQL, Django templates + HTMX
 - **Active apps:** accounts, users, database_manager, boq, dashboard, notifications, audit
-- **Removed:** processing, matching, costing, review, exports, make_list, `workflows/`
+- **Removed:** processing, matching, costing, review, exports, make_list, pending_products, `workflows/`, `tasks/`, `exports/`, `ai/extractors/`
 
 ## Active Workflows
 
@@ -32,6 +32,23 @@ uploads visible; no rollback.
 ```
 
 ## Session Log
+
+### 2026-07-10 — Batched Embedding Generation
+
+Completed:
+
+- Batched OpenAI embedding API calls and Chroma upserts (default 500 rows).
+- Row-wise storage unchanged: each `Rate_Master` row keeps its own vector and
+  `tech_key` metadata for search resolution.
+
+### 2026-07-10 — Remove Orphan Folders
+
+Completed:
+
+- Deleted empty removed-app shells under `backend/apps/` (costing, processing,
+  matching, review, exports, make_list, pending_products).
+- Deleted leftover `backend/workflows/`, `backend/tasks/`, `backend/exports/`,
+  and `backend/ai/extractors/` (`__pycache__` only).
 
 ### 2026-07-10 — Canonical Master Sheet Names
 

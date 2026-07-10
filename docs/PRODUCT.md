@@ -132,8 +132,8 @@ BOQ_AI/
 └── .env
 ```
 
-**Removed (2026-07-10):** `workflows/`, `tasks/`, `exports/`, and Django apps
-`processing`, `matching`, `costing`, `review`, `exports`, `make_list`.
+**Removed (2026-07-10):** `workflows/`, `tasks/`, `exports/`, `ai/extractors/`, and Django apps
+`processing`, `matching`, `costing`, `review`, `exports`, `make_list`, `pending_products`.
 
 ---
 

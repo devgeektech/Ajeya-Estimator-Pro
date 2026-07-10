@@ -2,6 +2,18 @@
 
 Meaningful product and technical changes only. Older history is in git.
 
+## 2026-07-10 — Batched Embedding Generation
+
+- OpenAI embedding requests and Chroma upserts now run in batches (default 500
+  rows) while keeping one vector + metadata record per `Rate_Master` row.
+- Upload/import remains synchronous; no Celery task added.
+
+## 2026-07-10 — Remove Orphan Folders
+
+- Deleted empty removed-app shells and stale `__pycache__` trees:
+  `costing`, `processing`, `matching`, `review`, `exports`, `make_list`,
+  `pending_products`, `workflows/`, `tasks/`, `exports/`, `ai/extractors/`.
+
 ## 2026-07-10 — Canonical Master Sheet Names
 
 - Removed workflow aliases (`MaterialRate`, `LabourMaster`, `CategoryConfig`, etc.).

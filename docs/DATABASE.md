@@ -84,6 +84,10 @@ in migration `boq.0003` and `database_manager.0010`.
 After each successful import, `generate_embeddings_for_version()` in
 `ai/embeddings/generator.py` indexes active `Rate_Master` rows into Chroma.
 
+Embeddings are generated in **batches** (default 500 rows per OpenAI request)
+but stored **row-wise**: one Chroma record per `Rate_Master` row with its own
+vector, document text, and metadata.
+
 **Embedded text fields** (structured `Label: value` lines):
 
 Category, Sub Category, Class, Size, Make, Capacity, Unit, Attribute, Supplier,

@@ -122,14 +122,27 @@ class ChromaEmbeddingStore:
 
     def upsert_rate(self, rate: Rate_Master, embedding: list[float]) -> str:
         """Upsert one Rate_Master row into Chroma and return its document id."""
-        document_id = rate_document_id(rate)
+        return self.upsert_rates([rate], [embedding])[0]
+
+    def upsert_rates(
+        self,
+        rates: list[Rate_Master],
+        embeddings: list[list[float]],
+    ) -> list[str]:
+        """Upsert many Rate_Master rows into Chroma, one vector per row."""
+        if not rates:
+            return []
+        if len(rates) != len(embeddings):
+            raise ValueError("rates and embeddings must be the same length")
+
+        document_ids = [rate_document_id(rate) for rate in rates]
         self.collection.upsert(
-            ids=[document_id],
-            embeddings=[embedding],
-            documents=[rate_document(rate)],
-            metadatas=[rate_metadata(rate)],
+            ids=document_ids,
+            embeddings=embeddings,
+            documents=[rate_document(rate) for rate in rates],
+            metadatas=[rate_metadata(rate) for rate in rates],
         )
-        return document_id
+        return document_ids
 
     def query(
         self,
