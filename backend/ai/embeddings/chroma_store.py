@@ -52,20 +52,25 @@ def rate_document_id(rate: MaterialRate) -> str:
 
 
 def rate_document(rate: MaterialRate) -> str:
-    """Build the text embedded for vector product search."""
-    parts = [
-        rate.tech_key,
-        rate.category,
-        rate.sub_category,
-        rate.material_class,
-        rate.size,
-        rate.capacity,
-        rate.make,
-        rate.supplier,
-        rate.unit,
-        rate.attribute,
+    """Build structured text embedded for vector product search."""
+    fields = [
+        ("Category", rate.category),
+        ("Sub Category", rate.sub_category),
+        ("Class", rate.material_class),
+        ("Size", rate.size),
+        ("Make", rate.make),
+        ("Capacity", rate.capacity),
+        ("Unit", rate.unit),
+        ("Attribute", rate.attribute),
+        ("Supplier", rate.supplier),
+        ("Tech_Key", rate.tech_key),
     ]
-    return " ".join(str(part).strip() for part in parts if str(part or "").strip())
+    lines = []
+    for label, value in fields:
+        text = str(value or "").strip()
+        if text:
+            lines.append(f"{label}: {text}")
+    return "\n".join(lines)
 
 
 def rate_metadata(rate: MaterialRate) -> dict:
@@ -73,10 +78,16 @@ def rate_metadata(rate: MaterialRate) -> dict:
     return {
         "database_version_id": rate.database_version.pk,
         "material_rate_id": rate.pk,
-        "tech_key": rate.tech_key,
+        "category": rate.category or "",
+        "sub_category": rate.sub_category or "",
+        "class": rate.material_class or "",
+        "size": _scalar(rate.size),
         "make": rate.make or "",
-        "supplier": rate.supplier or "",
+        "capacity": rate.capacity or "",
         "unit": rate.unit or "",
+        "attribute": rate.attribute or "",
+        "supplier": rate.supplier or "",
+        "tech_key": rate.tech_key or "",
         "final_amount_excl_gst": _scalar(rate.final_amount_excl_gst),
         "selection_amount": _scalar(selection_amount(rate)),
     }
@@ -97,6 +108,13 @@ class ChromaEmbeddingStore:
             name=self.collection_name,
             metadata={"hnsw:space": "cosine"},
         )
+
+    def reset_all(self) -> None:
+        """Remove all indexed products (active-database-only policy)."""
+        existing = self.collection.get(include=[])
+        ids = existing.get("ids") or []
+        if ids:
+            self.collection.delete(ids=ids)
 
     def reset_version(self, database_version_id: int) -> None:
         """Remove indexed products for one database version."""

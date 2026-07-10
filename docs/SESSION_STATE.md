@@ -5,21 +5,24 @@ Compact active memory. Full spec: `docs/PRODUCT.md`. Schema: `docs/DATABASE.md`.
 ## Current Status
 
 - **Phase:** BOQ pipeline rebuild (upload-only base; master DB import active)
-- **Tests:** 74 passing
+- **Migrations:** Fresh `0001_initial` per app (reset 2026-07-10); applied to local `boq_db`
+- **Tests:** Suite removed — needs restoration
 - **Runtime:** `config.settings`, PostgreSQL, Django templates + HTMX
 - **Active apps:** accounts, users, database_manager, boq, dashboard, notifications, audit
 - **Removed:** processing, matching, costing, review, exports, make_list, `workflows/`
 
 ## Active Workflows
 
-**Database:** upload → validate → import → activate → embeddings (sync, via `DatabaseImportService`)
+**Database:** upload → validate → import → activate → embeddings (sync). Last 10
+uploads visible; no rollback.
 
 **BOQ:** upload workbook (+ optional make list) → stored → dashboard
 
 ## Pending
 
 - Rebuild BOQ parse → process → match → review → export
-- Run `manage.py migrate` on envs missing `boq.0003` / `database_manager.0010`
+- Restore `backend/tests/` suite
+- Run fresh migrations on EC2 after deploy (squashed history — new DB or drop + migrate)
 
 ## Verify
 
@@ -29,6 +32,37 @@ Compact active memory. Full spec: `docs/PRODUCT.md`. Schema: `docs/DATABASE.md`.
 ```
 
 ## Session Log
+
+### 2026-07-10 — Remove Rollback; Embedding Consolidation
+
+Completed:
+
+- Removed rollback service, URL, view, and UI.
+- Retention: last 10 uploads for view/download; Chroma active-only embeddings.
+- Merged embedding modules into `ai/embeddings/generator.py`.
+- Structured embedding document + metadata for product search fields.
+
+Next:
+
+- `createsuperuser`; import master workbook; rebuild BOQ pipeline.
+
+### 2026-07-10 — Migration Reset (Fresh DB)
+
+Completed:
+
+- Deleted all prior migrations (16 files across 5 apps).
+- Regenerated single `0001_initial` per app from current models.
+- Granted PG 15+ `public` schema permissions; `migrate` applied successfully.
+- `manage.py check` passes.
+
+Pending:
+
+- `createsuperuser` on fresh local DB.
+- EC2 migration reset when deploying squashed history.
+
+Next:
+
+- Create superuser; import master workbook; restore tests.
 
 ### 2026-07-10 — Lean Docs + Remove workflows/
 

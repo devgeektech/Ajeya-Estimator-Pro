@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Database Versions &middot; BOQ_AI{% endblock %}
+{% block title %}Database Uploads &middot; BOQ_AI{% endblock %}
 {% block heading %}Database Management{% endblock %}
 
 {% block content %}
@@ -50,15 +50,6 @@
                         <a href="{% url 'database:download' v.pk %}" class="btn btn--small btn--ghost" aria-label="Download" title="Download">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                         </a>
-                        
-                        {% if v.can_rollback and user.is_super_admin or v.can_rollback and user.allow_db_access %}
-                        <form method="post" action="{% url 'database:rollback' v.pk %}" class="inline-form" style="margin: 0;" data-confirm="Are you sure you want to rollback to this version?" onsubmit="return window.BOQConfirm ? window.BOQConfirm.submit(event, this) : true;">
-                            {% csrf_token %}
-                            <button type="submit" class="btn btn--small btn--classy-red" title="Roll back to this version" style="background-color: #d9534f; color: white; border-color: #d43f3a;">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
-                            </button>
-                        </form>
-                        {% endif %}
                     </div>
                 </td>
             </tr>

@@ -1,8 +1,8 @@
-"""Master database + versioning models.
+"""Master database models.
 
 Schema mirrors the client workbook sheet columns (PascalCase field names with
-``db_column`` headers). ``database_version`` scopes every master row for import,
-rollback, and historical BOQ reproducibility.
+``db_column`` headers). ``database_version`` scopes every master row to the
+upload that imported it.
 """
 from __future__ import annotations
 

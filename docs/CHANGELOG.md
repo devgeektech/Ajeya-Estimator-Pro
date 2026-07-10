@@ -2,6 +2,23 @@
 
 Meaningful product and technical changes only. Older history is in git.
 
+## 2026-07-10 — Remove Rollback; Single Active Embeddings
+
+- Removed `DatabaseRollbackService`, rollback URL/view/UI.
+- Retention increased to last 10 uploads (view + download only).
+- Merged `generate_database_embeddings.py` into `ai/embeddings/generator.py`.
+- Structured embedding text/metadata for Category, Sub Category, Class, Size,
+  Make, Capacity, Unit, Attribute, Supplier, Tech_Key.
+- Chroma holds embeddings for the active database only.
+
+## 2026-07-10 — Squashed Migrations (Fresh DB)
+
+- Removed all prior migration files and regenerated `0001_initial` for accounts,
+  audit, boq, database_manager, and notifications from current models.
+- Documented PG 15+ `public` schema grants for new databases in `DATABASE.md`.
+- **Breaking for existing DBs:** drop and recreate, or reset migration history
+  manually — do not apply on databases with old migration rows.
+
 ## 2026-07-10 — Lean Docs + Remove workflows/
 
 - Consolidated docs: `PRODUCT.md`, `DATABASE.md`, `OPS.md` replace PRD, TRD,

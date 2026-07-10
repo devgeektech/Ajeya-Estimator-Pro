@@ -25,9 +25,13 @@ commands change.
 CREATE USER boq_user WITH PASSWORD 'localpass' CREATEDB;
 CREATE DATABASE boq_db OWNER boq_user;
 GRANT ALL PRIVILEGES ON DATABASE boq_db TO boq_user;
+\c boq_db
+GRANT ALL ON SCHEMA public TO boq_user;
+GRANT CREATE ON SCHEMA public TO boq_user;
 ```
 
-`CREATEDB` is required for the test suite.
+`CREATEDB` is required for the test suite. PostgreSQL 15+ restricts `public`
+schema creation — the `\c` block above is required before the first `migrate`.
 
 ### 2. Python environment
 

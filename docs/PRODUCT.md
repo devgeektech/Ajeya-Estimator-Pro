@@ -17,7 +17,7 @@ rebuild processing (matching, review, export) on a fresh design.
 | Feature | Status |
 | --- | --- |
 | User auth, roles, dashboard | Active |
-| Master database upload / versioning / rollback | Active |
+| Master database upload / history / embeddings | Active |
 | Product embeddings (Chroma) after DB import | Active |
 | BOQ workbook + make-list upload | Active |
 | BOQ parsing, processing, matching, review, export | Removed — rebuild pending |
@@ -50,7 +50,10 @@ Upload workbook → Validate → Import sheets → Activate version → Generate
 
 - Runs **synchronously** in the upload request (no Celery).
 - Only `Rate_Master` is required; other master sheets are optional if absent.
-- Exactly **one** active `DatabaseVersion` at a time; retain active + 2 rollback versions.
+- Exactly **one** active `DatabaseVersion` at a time; Chroma holds embeddings for
+  the active database only.
+- Last **10** uploads remain visible for view/download; older uploads are deleted.
+- No rollback — new upload replaces the active database.
 - Embeddings skip cleanly when OpenAI is not configured.
 
 Entry point: `DatabaseImportService` in `apps/database_manager/services/importer.py`.
@@ -139,7 +142,7 @@ BOQ_AI/
 | Path | Purpose |
 | --- | --- |
 | `apps/database_manager/services/importer.py` | Master DB import |
-| `apps/database_manager/services/activation.py` | Single active version |
+| `apps/database_manager/services/activation.py` | Single active upload |
 | `apps/database_manager/views.py` | DB upload UI |
 | `apps/boq/services/boq_service.py` | BOQ file persistence |
 | `ai/context.py` | Active DB taxonomy for AI prompts |

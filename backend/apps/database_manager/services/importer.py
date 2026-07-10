@@ -16,7 +16,7 @@ from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
 
-from common.constants import DATABASE_VERSIONS_TO_RETAIN
+from common.constants import DATABASE_UPLOADS_TO_RETAIN
 from common.exceptions import ImportError_
 from utils.excel import list_sheet_names, read_rows
 from ai.context import clear_database_context_cache
@@ -378,10 +378,8 @@ class DatabaseImportService:
             )
 
     def _generate_embeddings(self, version: DatabaseVersion) -> None:
-        """Generate embeddings inline for the imported Rate_Master rows."""
-        from ai.embeddings.generate_database_embeddings import (
-            generate_embeddings_for_version,
-        )
+        """Generate embeddings inline for the active Rate_Master rows."""
+        from ai.embeddings.generator import generate_embeddings_for_version
 
         summary = generate_embeddings_for_version(version.pk)
         logger.info(
@@ -392,12 +390,18 @@ class DatabaseImportService:
         activate_database_version(version)
 
     def _enforce_retention(self) -> None:
-        """Keep only the active version and two rollback versions."""
+        """Keep only the most recent uploads for view/download history."""
+        from ai.embeddings.chroma_store import ChromaEmbeddingStore
+
         versions = list(DatabaseVersion.objects.order_by("-version_number"))
-        if len(versions) <= DATABASE_VERSIONS_TO_RETAIN:
+        if len(versions) <= DATABASE_UPLOADS_TO_RETAIN:
             return
 
-        stale_ids = [v.pk for v in versions[DATABASE_VERSIONS_TO_RETAIN:]]
+        stale = versions[DATABASE_UPLOADS_TO_RETAIN:]
+        stale_ids = [v.pk for v in stale]
+        store = ChromaEmbeddingStore()
+        for version_id in stale_ids:
+            store.reset_version(version_id)
         deleted_count = DatabaseVersion.objects.filter(pk__in=stale_ids).count()
         DatabaseVersion.objects.filter(pk__in=stale_ids).delete()
-        logger.info("Retention: removed %s old database version(s)", deleted_count)
+        logger.info("Retention: removed %s old database upload(s)", deleted_count)

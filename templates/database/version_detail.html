@@ -4,7 +4,7 @@
 
 {% block content %}
 <div class="toolbar">
-    <a href="{% url 'database:list' %}" class="btn btn--ghost">&larr; Back to Versions</a>
+    <a href="{% url 'database:list' %}" class="btn btn--ghost">&larr; Back to Uploads</a>
     {% if version.file %}
     <a href="{% url 'database:download' version.pk %}" class="btn btn--primary">Download File</a>
     {% endif %}

@@ -1,4 +1,4 @@
-"""Database management views (Super Admin only, thin)."""
+"""Database management views (thin)."""
 import logging
 
 from django.contrib import messages
@@ -10,6 +10,7 @@ from django.urls import reverse_lazy
 from django.views.generic import FormView, ListView, View
 
 from apps.audit.services import record
+from common.constants import DATABASE_UPLOADS_TO_RETAIN
 from common.exceptions import BOQAIError
 from common.mixins import DatabaseAccessRequiredMixin
 from utils.files import unique_filename
@@ -26,7 +27,6 @@ from .models import (
 )
 from .services.activation import repair_duplicate_active_versions
 from .services.importer import DatabaseImportService
-from .services.rollback import DatabaseRollbackService
 
 logger = logging.getLogger("boq_ai")
 
@@ -37,24 +37,14 @@ class DatabaseVersionListView(LoginRequiredMixin, ListView):
     context_object_name = "versions"
 
     def get_queryset(self):
-        return DatabaseVersion.objects.order_by("-is_active", "-uploaded_at")
+        return DatabaseVersion.objects.order_by("-is_active", "-uploaded_at")[
+            :DATABASE_UPLOADS_TO_RETAIN
+        ]
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         repaired = repair_duplicate_active_versions()
         context["repaired_duplicate_active"] = repaired > 0
-        versions = list(context["versions"])
-        rollback_count = 0
-        for v in versions:
-            if not v.is_active:
-                if rollback_count < 2:
-                    v.can_rollback = True
-                    rollback_count += 1
-                else:
-                    v.can_rollback = False
-            else:
-                v.can_rollback = False
-        context["versions"] = versions
         return context
 
 
@@ -93,26 +83,12 @@ class DatabaseUploadView(DatabaseAccessRequiredMixin, FormView):
         return super().form_valid(form)
 
 
-class DatabaseRollbackView(DatabaseAccessRequiredMixin, View):
-    def post(self, request, pk):
-        version = get_object_or_404(DatabaseVersion, pk=pk)
-        try:
-            DatabaseRollbackService(version).run()
-            record(request.user, "database_rollback", "DatabaseVersion", version.pk)
-            messages.success(
-                request, f"Rolled back to database v{version.version_number}."
-            )
-        except BOQAIError as exc:
-            messages.error(request, str(exc))
-        return redirect("database:list")
-
-
 class DatabaseDownloadView(LoginRequiredMixin, View):
     def get(self, request, pk):
         version = get_object_or_404(DatabaseVersion, pk=pk)
         file_name = version.file.name if version.file else None
         if not version.file or not file_name or not version.file.storage.exists(file_name):
-            messages.error(request, "File not found for this version.")
+            messages.error(request, "File not found for this upload.")
             return redirect("database:list")
         response = FileResponse(
             version.file.open("rb"), as_attachment=True, filename=version.source_filename

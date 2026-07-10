@@ -1,7 +1,7 @@
 """Project-wide constants."""
 
-# Database version retention: active + two rollback versions.
-DATABASE_VERSIONS_TO_RETAIN = 3
+# Keep the last N database uploads visible for view/download (active + archived).
+DATABASE_UPLOADS_TO_RETAIN = 10
 
 # Master workbook sheet names (docs/DATABASE.md).
 REQUIRED_MASTER_SHEETS = [

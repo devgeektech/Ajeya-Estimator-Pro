@@ -12,14 +12,14 @@ Schema and import rules for PostgreSQL. Update when models or migrations change.
 
 ---
 
-## Versioning
+## Upload History
 
 `DatabaseVersion` tracks each master workbook upload.
 
-- `version_number` — monotonic integer
+- `version_number` — monotonic display sequence
 - `is_active` — only one row may be `True` (partial unique constraint)
-- Retention: keep **active + 2** prior versions; older rows are deleted on import
-- Rollback reactivates a prior version via `DatabaseRollbackService`
+- Retention: keep the **last 10** uploads for view/download; older rows deleted on import
+- **No rollback** — archived uploads are read-only (view + download workbook)
 
 ---
 
@@ -82,14 +82,33 @@ in migration `boq.0003` and `database_manager.0010`.
 
 ## Embeddings
 
-After each successful import, `generate_embeddings_for_version()` indexes active
-`Rate_Master` rows into Chroma using product/spec text fields. Rebuild by
-re-importing the master workbook or running the management command in
-`ai/embeddings/generate_database_embeddings.py`.
+After each successful import, `generate_embeddings_for_version()` in
+`ai/embeddings/generator.py` indexes active `Rate_Master` rows into Chroma.
+
+**Embedded text fields** (structured `Label: value` lines):
+
+Category, Sub Category, Class, Size, Make, Capacity, Unit, Attribute, Supplier,
+Tech_Key
+
+**Metadata** mirrors the same fields plus `material_rate_id` and
+`database_version_id` for resolving hits back to PostgreSQL.
+
+Only the **active** database has embeddings; the Chroma collection is cleared
+before each import indexes the new active rows.
 
 ---
 
 ## Migrations
+
+Fresh initial migrations (2026-07-10 reset). Each app has a single `0001_initial`:
+
+| App | Migration |
+| --- | --- |
+| `accounts` | `0001_initial` — `User` |
+| `audit` | `0001_initial` — `AuditLog` |
+| `boq` | `0001_initial` — `BOQ` |
+| `database_manager` | `0001_initial` — `DatabaseVersion` + 7 master tables |
+| `notifications` | `0001_initial` — `Notification` |
 
 Apply with:
 
@@ -98,8 +117,11 @@ cd backend
 ../.venv/bin/python manage.py migrate
 ```
 
-Notable recent migrations:
+On a **new PostgreSQL database** (especially PG 15+), grant schema access before
+the first migrate:
 
-- `database_manager.0009` — nullable master fields
-- `database_manager.0010` — prune removed pipeline app tables
-- `boq.0003` — remove `BOQRun` / `BOQItem`
+```sql
+GRANT ALL ON SCHEMA public TO boq_user;
+GRANT CREATE ON SCHEMA public TO boq_user;
+ALTER DATABASE boq_db OWNER TO boq_user;
+```
