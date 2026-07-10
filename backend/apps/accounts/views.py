@@ -1,4 +1,6 @@
 """Authentication views (thin)."""
+from typing import cast
+
 from django.contrib import messages
 from django.contrib.auth import login, logout, update_session_auth_hash
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -20,6 +22,7 @@ from .forms import (
     RegisteredEmailPasswordResetForm,
     StyledPasswordChangeForm,
 )
+from .models import User
 from .services import record_login, record_logout
 
 
@@ -35,7 +38,9 @@ class LoginView(View):
     def post(self, request):
         form = EmailLoginForm(request.POST, request=request)
         if form.is_valid():
-            user = form.get_user()
+            user = cast(User, form.get_user())
+            if user is None:
+                return render(request, self.template_name, {"form": form})
             login(request, user)
             record_login(user)
             messages.success(request, f"Welcome back, {user.full_name}.")

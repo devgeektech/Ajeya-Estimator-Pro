@@ -13,13 +13,20 @@ from django.conf import settings
 from apps.database_manager.models import MaterialRate
 
 
+def _to_decimal(value) -> Decimal:
+    if value is None:
+        return Decimal(0)
+    if isinstance(value, Decimal):
+        return value
+    return Decimal(str(value))
+
+
 def selection_amount(rate: MaterialRate) -> Decimal:
     """Amount used when comparing MaterialRate rows."""
     value = rate.final_amount_excl_gst
     if value is not None:
-        return Decimal(value)
-    net = rate.net_material_rate
-    return Decimal(net or 0)
+        return _to_decimal(value)
+    return _to_decimal(rate.net_material_rate)
 
 
 @dataclass(frozen=True)
@@ -64,7 +71,7 @@ def rate_document(rate: MaterialRate) -> str:
 def rate_metadata(rate: MaterialRate) -> dict:
     """Return Chroma-safe metadata for resolving vector hits back to PostgreSQL."""
     return {
-        "database_version_id": rate.database_version_id,
+        "database_version_id": rate.database_version.pk,
         "material_rate_id": rate.pk,
         "tech_key": rate.tech_key,
         "make": rate.make or "",
@@ -120,8 +127,10 @@ class ChromaEmbeddingStore:
             where={"database_version_id": int(database_version_id)},
             include=["metadatas", "distances"],
         )
-        metadatas = result.get("metadatas", [[]])[0] or []
-        distances = result.get("distances", [[]])[0] or []
+        metadatas_raw = result.get("metadatas") or []
+        distances_raw = result.get("distances") or []
+        metadatas = metadatas_raw[0] if metadatas_raw else []
+        distances = distances_raw[0] if distances_raw else []
         matches: list[ChromaMatch] = []
         for metadata, distance in zip(metadatas, distances, strict=False):
             if not isinstance(metadata, dict):
@@ -134,7 +143,7 @@ class ChromaEmbeddingStore:
             similarity = max(0.0, 1.0 - float(distance or 0.0))
             matches.append(
                 ChromaMatch(
-                    material_rate_id=int(material_rate_id),
+                    material_rate_id=int(str(material_rate_id)),
                     tech_key=str(metadata.get("tech_key") or ""),
                     similarity=similarity,
                 )

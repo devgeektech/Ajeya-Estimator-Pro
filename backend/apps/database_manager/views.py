@@ -15,7 +15,15 @@ from common.mixins import DatabaseAccessRequiredMixin
 from utils.files import unique_filename
 
 from .forms import DatabaseUploadForm
-from .models import DatabaseVersion
+from .models import (
+    DatabaseVersion,
+    Labour_Master,
+    Rate_Master,
+    State_Control_List,
+    TOR_Accessories,
+    TOR_Labour,
+    TOR_Main,
+)
 from .services.activation import repair_duplicate_active_versions
 from .services.importer import DatabaseImportService
 from .services.rollback import DatabaseRollbackService
@@ -102,7 +110,8 @@ class DatabaseRollbackView(DatabaseAccessRequiredMixin, View):
 class DatabaseDownloadView(LoginRequiredMixin, View):
     def get(self, request, pk):
         version = get_object_or_404(DatabaseVersion, pk=pk)
-        if not version.file or not version.file.storage.exists(version.file.name):
+        file_name = version.file.name if version.file else None
+        if not version.file or not file_name or not version.file.storage.exists(file_name):
             messages.error(request, "File not found for this version.")
             return redirect("database:list")
         response = FileResponse(
@@ -116,11 +125,15 @@ class DatabaseVersionDetailView(LoginRequiredMixin, View):
         version = get_object_or_404(DatabaseVersion, pk=pk)
         context = {
             "version": version,
-            "rates_count": version.rates.count(),
-            "labour_count": version.labour_rates.count(),
-            "tor_main_count": version.tor_main.count(),
-            "tor_labour_count": version.tor_labour.count(),
-            "tor_accessories_count": version.tor_accessories.count(),
-            "state_control_count": version.state_controls.count(),
+            "rates_count": Rate_Master.objects.filter(database_version=version).count(),
+            "labour_count": Labour_Master.objects.filter(database_version=version).count(),
+            "tor_main_count": TOR_Main.objects.filter(database_version=version).count(),
+            "tor_labour_count": TOR_Labour.objects.filter(database_version=version).count(),
+            "tor_accessories_count": TOR_Accessories.objects.filter(
+                database_version=version
+            ).count(),
+            "state_control_count": State_Control_List.objects.filter(
+                database_version=version
+            ).count(),
         }
         return render(request, "database/version_detail.html", context)

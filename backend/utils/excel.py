@@ -13,7 +13,7 @@ import pandas as pd
 from openpyxl import load_workbook
 
 
-def read_sheets(file_path: str | Path) -> dict[str, "object"]:
+def read_sheets(file_path: str | Path) -> dict[str, pd.DataFrame]:
     """Read all sheets of a workbook into a mapping of {sheet_name: DataFrame}.
 
     Returns all sheets using pandas.
@@ -114,6 +114,8 @@ def read_rows_with_metadata(
     workbook = load_workbook(filename=file_path, read_only=True, data_only=True)
     try:
         worksheet = workbook[sheet_name] if sheet_name else workbook.active
+        if worksheet is None:
+            return [], []
         non_empty_rows = [
             (row_number, cells)
             for row_number, cells in enumerate(worksheet.iter_rows(), start=1)

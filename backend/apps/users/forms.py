@@ -1,10 +1,9 @@
 """User management forms (Super Admin)."""
 from django import forms
-from django.contrib.auth import get_user_model
+from django.forms import ChoiceField
 
+from apps.accounts.models import User
 from common.choices import UserRole
-
-User = get_user_model()
 
 _INPUT = {"class": "form-control"}
 
@@ -34,13 +33,17 @@ class UserCreateForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["first_name"].required = True
-        self.fields["role"].choices = [
-            (UserRole.ADMIN, "App Admin"),
-            (UserRole.EXPERT, "BOQ Expert"),
-        ]
+        role_field = self.fields["role"]
+        if isinstance(role_field, ChoiceField):
+            role_field.choices = [
+                (UserRole.ADMIN, "App Admin"),
+                (UserRole.EXPERT, "BOQ Expert"),
+            ]
 
     def clean(self):
         cleaned = super().clean()
+        if cleaned is None:
+            return cleaned
         p1, p2 = cleaned.get("password1"), cleaned.get("password2")
         if p1 and p2 and p1 != p2:
             self.add_error("password2", "Passwords do not match.")
@@ -73,16 +76,20 @@ class UserEditForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         self.request_user = request_user
         self.fields["first_name"].required = True
-        self.fields["role"].choices = [
-            (UserRole.ADMIN, "App Admin"),
-            (UserRole.EXPERT, "BOQ Expert"),
-        ]
+        role_field = self.fields["role"]
+        if isinstance(role_field, ChoiceField):
+            role_field.choices = [
+                (UserRole.ADMIN, "App Admin"),
+                (UserRole.EXPERT, "BOQ Expert"),
+            ]
         if self.instance and self.request_user and self.instance.pk == self.request_user.pk:
             self.fields["email"].disabled = True
             self.fields["email"].help_text = "You cannot change your own email."
 
     def clean(self):
         cleaned = super().clean()
+        if cleaned is None:
+            return cleaned
         if self.instance and self.request_user and self.instance.pk == self.request_user.pk:
             cleaned["email"] = self.instance.email
             

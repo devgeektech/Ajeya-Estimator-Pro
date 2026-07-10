@@ -18,15 +18,17 @@ def generate_embedding(text: str) -> list[float]:
     Raises AIServiceError when AI is disabled so callers can skip gracefully.
     """
     client = get_client()
+    model = str(settings.OPENAI_EMBEDDING_MODEL)
+    dimensions = int(getattr(settings, "OPENAI_EMBEDDING_DIMENSIONS", 1536) or 0)
     try:
-        kwargs = {
-            "model": str(settings.OPENAI_EMBEDDING_MODEL),
-            "input": text,
-        }
-        dimensions = int(getattr(settings, "OPENAI_EMBEDDING_DIMENSIONS", 1536) or 0)
         if dimensions:
-            kwargs["dimensions"] = dimensions
-        response = client.embeddings.create(**kwargs)
+            response = client.embeddings.create(
+                model=model,
+                input=text,
+                dimensions=dimensions,
+            )
+        else:
+            response = client.embeddings.create(model=model, input=text)
         return list(response.data[0].embedding)
     except AIServiceError:
         raise

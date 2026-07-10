@@ -4,9 +4,8 @@ Thin business-logic helpers for the accounts app. Views stay thin and
 delegate here (docs/AGENTS.md - Required Architecture).
 """
 import logging
-from __future__ import annotations
-from django.contrib.auth import get_user_model
 
+from django.contrib.auth import get_user_model
 logger = logging.getLogger("boq_ai")
 
 User = get_user_model()
