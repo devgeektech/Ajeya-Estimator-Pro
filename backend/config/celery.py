@@ -1,4 +1,4 @@
-"""Celery application for BOQ_AI background processing."""
+"""Celery application for BOQ_AI."""
 import os
 
 from celery import Celery

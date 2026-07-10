@@ -7,8 +7,7 @@ understanding/extraction/validation, never pricing or supplier selection
 (docs/AGENTS.md - AI Rules).
 
 The service degrades gracefully: when no real API key is configured it reports
-``is_enabled() == False`` so callers (e.g. the processing pipeline) can skip AI
-work instead of failing.
+``is_enabled() == False`` so callers can skip AI work instead of failing.
 """
 
 from __future__ import annotations
@@ -25,6 +24,14 @@ from .openai_client import get_client, is_configured, load_prompt
 
 logger = logging.getLogger("boq_ai")
 instruction_logger = logging.getLogger("boq_ai.ai_instructions")
+
+
+def render_prompt(template: str, **context) -> str:
+    """Render a prompt without interpreting braces inside JSON context values."""
+    prompt = template
+    for key, value in context.items():
+        prompt = prompt.replace(f"{{{key}}}", str(value))
+    return prompt
 
 
 class AIService:
@@ -82,19 +89,13 @@ class AIService:
     def run_prompt(self, template_name: str, **context) -> str:
         """Load a prompt template, format it with context, and run it."""
         template = load_prompt(template_name)
-        try:
-            prompt = template.format(**context)
-        except KeyError as exc:
-            raise AIServiceError(f"Missing prompt variable: {exc}") from exc
+        prompt = render_prompt(template, **context)
         return self.complete(prompt, template_name=template_name)
 
     def run_json_prompt(self, template_name: str, **context) -> dict:
         """Run a prompt expecting a JSON object response and parse it."""
         template = load_prompt(template_name)
-        try:
-            prompt = template.format(**context)
-        except KeyError as exc:
-            raise AIServiceError(f"Missing prompt variable: {exc}") from exc
+        prompt = render_prompt(template, **context)
 
         raw = self.complete(prompt, json_mode=True, template_name=template_name)
         try:
@@ -106,11 +107,16 @@ class AIService:
         self, prompt: str, *, json_mode: bool, template_name: str
     ) -> None:
         """Log the full runtime instruction sent to the AI provider."""
+        database_context = ""
+        if "Database context:\n" in prompt:
+            _, _, database_context = prompt.partition("Database context:\n")
+            database_context = database_context.split("\n\n", 1)[0]
         payload = {
             "event": "ai_runtime_instruction",
             "model": str(self.model),
             "template_name": template_name,
             "json_mode": json_mode,
+            "database_context": database_context.strip() or None,
             "instruction_text": prompt,
         }
         instruction_logger.info(json.dumps(payload, ensure_ascii=False, default=str))

@@ -57,12 +57,6 @@ LOCAL_APPS = [
     "apps.users",
     "apps.database_manager",
     "apps.boq",
-    "apps.make_list",
-    "apps.processing",
-    "apps.matching",
-    "apps.costing",
-    "apps.review",
-    "apps.exports",
     "apps.notifications",
     "apps.audit",
 ]
@@ -187,11 +181,15 @@ OPENAI_EMBEDDING_MODEL = env("OPENAI_EMBEDDING_MODEL", default="text-embedding-3
 OPENAI_EMBEDDING_DIMENSIONS = env.int("OPENAI_EMBEDDING_DIMENSIONS", default=1536)
 OPENAI_TIMEOUT_SECONDS = env.int("OPENAI_TIMEOUT_SECONDS", default=120)
 OPENAI_MAX_RETRIES = env.int("OPENAI_MAX_RETRIES", default=1)
-AI_ROW_EXTRACTION_BATCH_SIZE = env.int("AI_ROW_EXTRACTION_BATCH_SIZE", default=10)
 
 # --- Chroma -----------------------------------------------------------------
 
-CHROMA_PATH = env("CHROMA_PATH", default=str(MEDIA_ROOT / "chroma"))
+_chroma_env = env("CHROMA_PATH", default="")
+if _chroma_env and Path(_chroma_env).is_absolute():
+    CHROMA_PATH = _chroma_env
+else:
+    # Always keep Chroma beside other uploaded media, not cwd-relative paths.
+    CHROMA_PATH = str(MEDIA_ROOT / "chroma")
 CHROMA_COLLECTION = env("CHROMA_COLLECTION", default="rate_master_products")
 
 # --- Email ------------------------------------------------------------------
@@ -259,13 +257,6 @@ LOGGING = {
             "level": "ERROR",
             "formatter": "verbose",
         },
-        "ai_extraction_file": {
-            "class": "logging.handlers.RotatingFileHandler",
-            "filename": str(LOGS_DIR / "ai_extractions.log"),
-            "maxBytes": 10 * 1024 * 1024,
-            "backupCount": 10,
-            "formatter": "verbose",
-        },
         "ai_instruction_file": {
             "class": "logging.handlers.RotatingFileHandler",
             "filename": str(LOGS_DIR / "ai_instructions.log"),
@@ -281,11 +272,6 @@ LOGGING = {
     "loggers": {
         "boq_ai": {
             "handlers": ["console", "app_file", "error_file"],
-            "level": "INFO",
-            "propagate": False,
-        },
-        "boq_ai.ai_rows": {
-            "handlers": ["ai_extraction_file", "error_file"],
             "level": "INFO",
             "propagate": False,
         },

@@ -15,9 +15,14 @@ from utils.excel import read_rows
 from apps.database_manager.models import (
     DatabaseVersion,
     LabourMaster,
-    RateMaster,
-    StateControl,
-    TORMain,
+    MaterialRate,
+    StateMultiplier,
+    CategoryConfig,
+)
+from apps.database_manager.services.activation import (
+    activate_database_version,
+    get_active_database_version,
+    repair_duplicate_active_versions,
 )
 from apps.database_manager.services.importer import DatabaseImportService
 from apps.database_manager.services.rollback import DatabaseRollbackService
@@ -49,10 +54,15 @@ REQUIRED_SHEETS = {
 }
 
 
-def build_workbook(skip_sheet: str | None = None) -> bytes:
+def build_workbook(
+    skip_sheet: str | None = None,
+    only_sheet: str | None = None,
+) -> bytes:
     wb = Workbook()
     wb.remove(wb.active)
     for sheet_name, (headers, rows) in REQUIRED_SHEETS.items():
+        if only_sheet and sheet_name != only_sheet:
+            continue
         if sheet_name == skip_sheet:
             continue
         ws = wb.create_sheet(title=sheet_name)
@@ -105,8 +115,11 @@ def build_client_database_workbook() -> bytes:
     return buffer.getvalue()
 
 
-def write_temp_workbook(skip_sheet: str | None = None) -> str:
-    data = build_workbook(skip_sheet)
+def write_temp_workbook(
+    skip_sheet: str | None = None,
+    only_sheet: str | None = None,
+) -> str:
+    data = build_workbook(skip_sheet=skip_sheet, only_sheet=only_sheet)
     tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
     tmp.write(data)
     tmp.close()
@@ -122,11 +135,20 @@ class ValidatorTests(TestCase):
         finally:
             Path(path).unlink(missing_ok=True)
 
-    def test_missing_sheet_raises(self):
-        path = write_temp_workbook(skip_sheet="Labour_Master")
+    def test_missing_required_sheet_raises(self):
+        path = write_temp_workbook(skip_sheet="Rate_Master")
         try:
             with self.assertRaises(ValidationError):
                 validate_workbook(path)
+        finally:
+            Path(path).unlink(missing_ok=True)
+
+    def test_missing_optional_sheet_passes_validation(self):
+        path = write_temp_workbook(skip_sheet="Labour_Master")
+        try:
+            sheets = validate_workbook(path)
+            self.assertIn("Rate_Master", sheets)
+            self.assertNotIn("Labour_Master", sheets)
         finally:
             Path(path).unlink(missing_ok=True)
 
@@ -158,13 +180,42 @@ class ImportServiceTests(TestCase):
         version = self._import()
         self.assertEqual(version.version_number, 1)
         self.assertTrue(version.is_active)
-        self.assertEqual(RateMaster.objects.filter(database_version=version).count(), 1)
+        self.assertEqual(MaterialRate.objects.filter(database_version=version).count(), 1)
         self.assertEqual(LabourMaster.objects.filter(database_version=version).count(), 1)
-        self.assertEqual(TORMain.objects.filter(database_version=version).count(), 1)
-        self.assertEqual(StateControl.objects.filter(database_version=version).count(), 1)
-        rate = RateMaster.objects.get(database_version=version)
+        self.assertEqual(CategoryConfig.objects.filter(database_version=version).count(), 1)
+        self.assertEqual(StateMultiplier.objects.filter(database_version=version).count(), 1)
+        rate = MaterialRate.objects.get(database_version=version)
         self.assertEqual(rate.tech_key, "P-100")
         self.assertEqual(str(rate.net_material_rate), "1200.00")
+
+    def test_import_skips_missing_optional_sheets(self):
+        path = write_temp_workbook(skip_sheet="Labour_Master")
+        try:
+            version = DatabaseImportService(path, self.admin, "partial.xlsx").run()
+        finally:
+            Path(path).unlink(missing_ok=True)
+
+        self.assertTrue(version.is_active)
+        self.assertEqual(MaterialRate.objects.filter(database_version=version).count(), 1)
+        self.assertEqual(LabourMaster.objects.filter(database_version=version).count(), 0)
+        self.assertEqual(CategoryConfig.objects.filter(database_version=version).count(), 1)
+        self.assertEqual(StateMultiplier.objects.filter(database_version=version).count(), 1)
+
+    def test_import_with_only_rate_master_sheet(self):
+        path = write_temp_workbook(
+            skip_sheet="Labour_Master",
+            only_sheet="Rate_Master",
+        )
+        try:
+            version = DatabaseImportService(path, self.admin, "rates-only.xlsx").run()
+        finally:
+            Path(path).unlink(missing_ok=True)
+
+        self.assertTrue(version.is_active)
+        self.assertEqual(MaterialRate.objects.filter(database_version=version).count(), 1)
+        self.assertEqual(LabourMaster.objects.filter(database_version=version).count(), 0)
+        self.assertEqual(CategoryConfig.objects.filter(database_version=version).count(), 0)
+        self.assertEqual(StateMultiplier.objects.filter(database_version=version).count(), 0)
 
     def test_second_import_increments_and_deactivates_previous(self):
         first = self._import()
@@ -186,14 +237,14 @@ class ImportServiceTests(TestCase):
         first = self._import()
         second = self._import()
         self.assertEqual(
-            StateControl.objects.filter(
-                database_version=first, state="Maharashtra"
+            StateMultiplier.objects.filter(
+                database_version=first, State="Maharashtra"
             ).count(),
             1,
         )
         self.assertEqual(
-            StateControl.objects.filter(
-                database_version=second, state="Maharashtra"
+            StateMultiplier.objects.filter(
+                database_version=second, State="Maharashtra"
             ).count(),
             1,
         )
@@ -207,20 +258,38 @@ class ImportServiceTests(TestCase):
         finally:
             Path(tmp.name).unlink(missing_ok=True)
 
-        rate = RateMaster.objects.get(database_version=version)
+        rate = MaterialRate.objects.get(database_version=version)
         self.assertEqual(rate.tech_key, "PIPE_MS_C_400")
         self.assertEqual(rate.supplier, "Tiger")
         self.assertEqual(str(rate.net_material_rate), "6147.12")
         self.assertEqual(str(rate.final_amount_excl_gst), "7200.00")
-        self.assertEqual(TORMain.objects.get(database_version=version).category, "PIPE")
+        self.assertEqual(CategoryConfig.objects.get(database_version=version).category, "PIPE")
         self.assertEqual(
             str(
-                StateControl.objects.get(
-                    database_version=version, state="Delhi"
+                StateMultiplier.objects.get(
+                    database_version=version, State="Delhi"
                 ).labour_multiplier
             ),
-            "1.2000",
+            "1.20",
         )
+
+
+class ActivationServiceTests(TestCase):
+    def test_activate_database_version_deactivates_previous(self):
+        first = DatabaseVersion.objects.create(
+            version_number=1, is_active=True, source_filename="a.xlsx"
+        )
+        second = DatabaseVersion.objects.create(
+            version_number=2, is_active=False, source_filename="b.xlsx"
+        )
+        activate_database_version(second)
+
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(repair_duplicate_active_versions(), 0)
+        self.assertFalse(first.is_active)
+        self.assertTrue(second.is_active)
+        self.assertEqual(get_active_database_version().pk, second.pk)
 
 
 @override_settings(OPENAI_API_KEY="placeholder-key")

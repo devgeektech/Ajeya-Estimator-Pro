@@ -4,12 +4,11 @@
 
 {% block content %}
 <style>
-/* Dashboard Specific Styles */
 .dashboard-metrics {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     gap: 16px;
-    margin-bottom: 16px;
+    margin-bottom: 24px;
 }
 .d-card {
     background: var(--surface);
@@ -19,257 +18,75 @@
     display: flex;
     align-items: center;
     gap: 12px;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-.d-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-}
-.d-card__icon {
-    width: 40px;
-    height: 40px;
-    border-radius: 10px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--surface-alt);
-    color: var(--primary);
-}
-.d-card__icon svg {
-    width: 20px;
-    height: 20px;
-    stroke-width: 2;
-}
-.d-card__content {
-    display: flex;
-    flex-direction: column;
 }
 .d-card__value {
     font-size: 1.5rem;
     font-weight: 700;
-    line-height: 1.2;
     color: var(--text);
 }
 .d-card__label {
     font-size: 0.9rem;
     color: var(--text-muted);
-    font-weight: 500;
 }
-
-/* Specific Card Colors */
-.d-card--processing .d-card__icon { background: #dbeafe; color: #2563eb; } /* Blue */
-.d-card--review .d-card__icon { background: #fef08a; color: #ca8a04; } /* Yellow */
-.d-card--approved .d-card__icon { background: #dcfce7; color: #16a34a; } /* Green */
-
-.dashboard-layout {
-    display: grid;
-    grid-template-columns: 2fr 1fr;
-    gap: 24px;
-    align-items: stretch;
-    flex: 1;
-    min-height: 0;
-}
-@media (max-width: 900px) {
-    .dashboard-layout { grid-template-columns: 1fr; }
-}
-
-.dashboard-container {
-    display: flex;
-    flex-direction: column;
-}
-@media (min-width: 901px) and (min-height: 600px) {
-    .dashboard-container {
-        height: calc(100vh - 160px);
-    }
-}
-
 .d-panel {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 12px;
     padding: 20px;
-    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    min-height: 0;
 }
 .d-panel__title {
     margin: 0 0 16px 0;
     font-size: 1.1rem;
     font-weight: 600;
-    color: var(--text);
-}
-
-/* Workflow Steps */
-.workflow-steps {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    position: relative;
-    flex: 1;
-    justify-content: space-evenly;
-}
-.workflow-steps::before {
-    content: '';
-    position: absolute;
-    top: 24px;
-    bottom: 24px;
-    left: 19px;
-    width: 2px;
-    background: var(--border);
-    z-index: 0;
-}
-.w-step {
-    display: flex;
-    gap: 16px;
-    position: relative;
-    z-index: 1;
-}
-.w-step__icon {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    background: var(--surface);
-    border: 2px solid var(--border);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-muted);
-    flex-shrink: 0;
-}
-.w-step__content {
-    padding-top: 8px;
-}
-.w-step__title {
-    font-weight: 600;
-    margin: 0 0 4px 0;
-    font-size: 0.95rem;
-}
-.w-step__desc {
-    margin: 0;
-    font-size: 0.85rem;
-    color: var(--text-muted);
-    line-height: 1.4;
-}
-.w-step--active .w-step__icon {
-    border-color: var(--primary);
-    color: var(--primary);
-    background: #eff6ff;
 }
 </style>
 
-<div class="dashboard-container">
-<section class="welcome" style="margin-bottom: 12px; flex-shrink: 0;">
+<section class="welcome" style="margin-bottom: 16px;">
     <h2 class="welcome__title" style="font-size: 1.5rem; margin-bottom: 4px;">Welcome, {{ greeting_name }}</h2>
-    <p class="welcome__text" style="color: var(--text-muted); font-size: 1rem; margin: 0;">
+    <p class="welcome__text" style="color: var(--text-muted); margin: 0;">
         {% if is_super_admin %}
-        You have full administrative access. Manage users, databases and product approvals.
+        Manage the master database and review uploaded BOQs across the team.
         {% else %}
-        Upload, process and review your BOQs. Your work is private to your account.
+        Upload BOQ workbooks for estimation. Your uploads are private to your account.
         {% endif %}
     </p>
 </section>
 
-<section class="dashboard-metrics" style="flex-shrink: 0;">
+<section class="dashboard-metrics">
     {% for metric in metrics %}
-    <div class="d-card {% if metric.label == 'Processing' %}d-card--processing{% elif metric.label == 'Under Review' %}d-card--review{% elif metric.label == 'Approved' %}d-card--approved{% endif %}">
-        <div class="d-card__icon">
-            {% if metric.label == 'Processing' %}
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-            {% elif metric.label == 'Under Review' %}
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-            {% elif metric.label == 'Approved' %}
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-            {% else %}
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-            {% endif %}
-        </div>
-        <div class="d-card__content">
-            <span class="d-card__value">{{ metric.value }}</span>
-            <span class="d-card__label">{{ metric.label }}</span>
+    <div class="d-card">
+        <div>
+            <div class="d-card__value">{{ metric.value }}</div>
+            <div class="d-card__label">{{ metric.label }}</div>
         </div>
     </div>
     {% endfor %}
 </section>
 
-<div class="dashboard-layout">
-    <section class="d-panel">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-            <h3 class="d-panel__title" style="margin: 0; font-size: 1rem;">Recent BOQs</h3>
-            <a href="{% url 'boq:list' %}" class="btn btn--small btn--ghost">View all</a>
-        </div>
-        <div style="flex: 1; overflow: hidden;">
-        <table class="table" style="margin: 0;">
-            <thead>
-                <tr>
-                    <th style="text-align: left;">Name</th>
-                    <th>Status</th>
-                    <th>Uploaded</th>
-                    <th style="text-align: right;">Action</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for boq in recent_boqs %}
-                <tr>
-                    <td style="text-align: left; font-weight: 500;">{{ boq.boq_name }}</td>
-                    <td>
-                        <span class="badge 
-                            {% if boq.status == 'approved' %}badge--green
-                            {% elif boq.status == 'processing' %}badge--blue
-                            {% elif boq.status == 'failed' %}badge--red
-                            {% elif boq.status == 'exported' %}badge--gray
-                            {% endif %}">
-                            {{ boq.get_status_display }}
-                        </span>
-                    </td>
-                    <td>{{ boq.created_at|date:"M d, H:i" }}</td>
-                    <td style="text-align: right;">
-                        <a href="{% url 'boq:detail' boq.pk %}" class="btn btn--small btn--ghost">Open</a>
-                    </td>
-                </tr>
-                {% empty %}
-                <tr><td colspan="4" class="table__empty" style="padding: 24px;">No BOQs uploaded yet.</td></tr>
-                {% endfor %}
-            </tbody>
-        </table>
-        </div>
-    </section>
-
-    <section class="d-panel">
-        <h3 class="d-panel__title">How it works</h3>
-        <div class="workflow-steps">
-            <div class="w-step w-step--active">
-                <div class="w-step__icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div>
-                <div class="w-step__content">
-                    <p class="w-step__title">1. Upload</p>
-                    <p class="w-step__desc">Upload your BOQ workbook and optional Make list.</p>
-                </div>
-            </div>
-            <div class="w-step">
-                <div class="w-step__icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
-                <div class="w-step__content">
-                    <p class="w-step__title">2. Process</p>
-                    <p class="w-step__desc">AI extraction, product matching, and cost calculation.</p>
-                </div>
-            </div>
-            <div class="w-step">
-                <div class="w-step__icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></div>
-                <div class="w-step__content">
-                    <p class="w-step__title">3. Review</p>
-                    <p class="w-step__desc">Verify AI matches and adjust selected rates row-by-row.</p>
-                </div>
-            </div>
-            <div class="w-step">
-                <div class="w-step__icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg></div>
-                <div class="w-step__content">
-                    <p class="w-step__title">4. Approve & Export</p>
-                    <p class="w-step__desc">Lock the BOQ and export internal & client files.</p>
-                </div>
-            </div>
-        </div>
-    </section>
-</div>
-</div>
+<section class="d-panel">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h3 class="d-panel__title" style="margin:0;">Recent uploads</h3>
+        <a href="{% url 'boq:upload' %}" class="btn btn--small btn--primary">Upload BOQ</a>
+    </div>
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Uploaded</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for boq in recent_boqs %}
+            <tr>
+                <td style="font-weight:500;">{{ boq.boq_name }}</td>
+                <td>{{ boq.get_status_display }}</td>
+                <td>{{ boq.created_at|date:"M d, H:i" }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="3" class="table__empty">No BOQs uploaded yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
 {% endblock %}

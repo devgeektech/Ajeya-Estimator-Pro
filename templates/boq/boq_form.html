@@ -1,13 +1,12 @@
 {% extends "base.html" %}
-{% block title %}Upload BOQ &middot; BOQ_AI{% endblock %}
+{% block title %}Upload BOQ &middot; Ajeya Estimator Pro{% endblock %}
 {% block heading %}Upload BOQ{% endblock %}
 
 {% block content %}
 <div class="panel panel--narrow">
     <p class="panel__text" style="margin-bottom:20px;">
         Upload a BOQ workbook and, optionally, its make list as Excel or PDF.
-        PDF is supported for make lists only. The original BOQ rows are captured
-        and a processing run is created.
+        Processing will be added in a later release.
     </p>
     <form method="post" enctype="multipart/form-data" novalidate>
         {% csrf_token %}
@@ -19,7 +18,7 @@
         </label>
         {% endfor %}
         <div class="form-actions">
-            <a href="{% url 'boq:list' %}" class="btn btn--ghost">Cancel</a>
+            <a href="{% url 'dashboard:home' %}" class="btn btn--ghost">Cancel</a>
             <button type="submit" class="btn btn--primary">Upload BOQ</button>
         </div>
     </form>

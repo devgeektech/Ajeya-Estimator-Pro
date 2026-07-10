@@ -4,14 +4,14 @@ import logging
 from ai.embeddings.generator import generate_embedding
 from ai.embeddings.chroma_store import ChromaEmbeddingStore, rate_document
 from ai.openai_client import is_configured
-from apps.database_manager.models import DatabaseVersion, RateMaster
+from apps.database_manager.models import DatabaseVersion, MaterialRate
 from common.exceptions import AIServiceError
 
 logger = logging.getLogger("boq_ai")
 
 
 def generate_embeddings_for_version(database_version_id: int) -> dict:
-    """Generate product embeddings for every RateMaster row in a database version."""
+    """Generate product embeddings for every MaterialRate row in a database version."""
     if not is_configured():
         logger.info(
             "Embedding generation skipped for version %s because AI is disabled.",
@@ -25,7 +25,7 @@ def generate_embeddings_for_version(database_version_id: int) -> dict:
         logger.error("DatabaseVersion %s not found for embedding generation", database_version_id)
         return {"total": 0, "generated": 0, "skipped": 0, "errors": 1}
 
-    products = RateMaster.objects.filter(database_version=version)
+    products = MaterialRate.objects.filter(database_version=version)
     total = products.count()
     generated = skipped = errors = 0
     store = ChromaEmbeddingStore()
@@ -42,10 +42,10 @@ def generate_embeddings_for_version(database_version_id: int) -> dict:
             store.upsert_rate(product, vector)
             generated += 1
         except AIServiceError:
-            logger.exception("Embedding failed for RateMaster row %s", product.pk)
+            logger.exception("Embedding failed for MaterialRate row %s", product.pk)
             errors += 1
         except Exception:
-            logger.exception("Chroma indexing failed for RateMaster row %s", product.pk)
+            logger.exception("Chroma indexing failed for MaterialRate row %s", product.pk)
             errors += 1
 
     summary = {"total": total, "generated": generated, "skipped": skipped, "errors": errors}

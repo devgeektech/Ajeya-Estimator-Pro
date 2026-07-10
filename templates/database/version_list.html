@@ -3,6 +3,12 @@
 {% block heading %}Database Management{% endblock %}
 
 {% block content %}
+{% if repaired_duplicate_active %}
+<p class="muted" style="margin: 0 0 16px;">
+    Multiple active databases were detected and repaired automatically. Only the
+    highest version number remains active.
+</p>
+{% endif %}
 {% if user.is_super_admin or user.allow_db_access %}
 <div class="toolbar" style="justify-content: flex-end;">
     <a href="{% url 'database:upload' %}" class="btn btn--primary">+ Upload database</a>

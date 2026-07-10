@@ -13,10 +13,11 @@ from apps.audit.services import record
 from common.exceptions import BOQAIError
 from common.mixins import DatabaseAccessRequiredMixin
 from utils.files import unique_filename
-from workflows.database_import import import_database
 
 from .forms import DatabaseUploadForm
 from .models import DatabaseVersion
+from .services.activation import repair_duplicate_active_versions
+from .services.importer import DatabaseImportService
 from .services.rollback import DatabaseRollbackService
 
 logger = logging.getLogger("boq_ai")
@@ -32,6 +33,8 @@ class DatabaseVersionListView(LoginRequiredMixin, ListView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        repaired = repair_duplicate_active_versions()
+        context["repaired_duplicate_active"] = repaired > 0
         versions = list(context["versions"])
         rollback_count = 0
         for v in versions:
@@ -62,9 +65,13 @@ class DatabaseUploadView(DatabaseAccessRequiredMixin, FormView):
         file_path = storage.path(stored_name)
 
         try:
-            import_database(
-                file_path, self.request.user.pk, upload.name, name, stored_name
-            )
+            DatabaseImportService(
+                file_path=file_path,
+                uploaded_by=self.request.user,
+                source_filename=upload.name,
+                version_name=name,
+                stored_name=stored_name,
+            ).run()
             record(self.request.user, "database_import", "Workbook", upload.name)
             messages.success(self.request, "Database imported and activated.")
         except BOQAIError as exc:

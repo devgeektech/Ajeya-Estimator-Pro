@@ -1,7 +1,6 @@
 """Authentication models.
 
-Defines the email-based custom User and roles (docs/PRD.md - User Roles,
-docs/DATABASE_ARCHITECTURE.md - User).
+Defines the email-based custom User and roles (docs/PRODUCT.md).
 """
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.db import models

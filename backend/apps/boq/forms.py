@@ -20,16 +20,25 @@ def _validate_make_list(f):
 class BOQUploadForm(forms.Form):
     boq_name = forms.CharField(
         max_length=255,
-        widget=forms.TextInput(attrs={"class": "form-control", "placeholder": "e.g. Tower-A Fire Fighting"}),
+        widget=forms.TextInput(
+            attrs={
+                "class": "form-control",
+                "placeholder": "e.g. Tower-A Fire Fighting",
+            }
+        ),
     )
     uploaded_file = forms.FileField(
         label="BOQ workbook (.xlsx or .xlsm)",
-        widget=forms.ClearableFileInput(attrs={"class": "form-control", "accept": ".xlsx,.xlsm"}),
+        widget=forms.ClearableFileInput(
+            attrs={"class": "form-control", "accept": ".xlsx,.xlsm"}
+        ),
     )
     make_list_file = forms.FileField(
         label="Make list (.xlsx, .xlsm, or .pdf, optional)",
         required=False,
-        widget=forms.ClearableFileInput(attrs={"class": "form-control", "accept": ".xlsx,.xlsm,.pdf"}),
+        widget=forms.ClearableFileInput(
+            attrs={"class": "form-control", "accept": ".xlsx,.xlsm,.pdf"}
+        ),
     )
 
     def clean_uploaded_file(self):
@@ -37,15 +46,3 @@ class BOQUploadForm(forms.Form):
 
     def clean_make_list_file(self):
         return _validate_make_list(self.cleaned_data.get("make_list_file"))
-
-
-class MakeListUploadForm(forms.Form):
-    make_list_file = forms.FileField(
-        label="Make list (.xlsx, .xlsm, or .pdf)",
-        widget=forms.ClearableFileInput(
-            attrs={"class": "form-control", "accept": ".xlsx,.xlsm,.pdf"}
-        ),
-    )
-
-    def clean_make_list_file(self):
-        return _validate_make_list(self.cleaned_data["make_list_file"])

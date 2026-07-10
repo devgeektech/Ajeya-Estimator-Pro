@@ -279,8 +279,7 @@
         </div>
         <nav class="sidebar__nav" @click="if (window.innerWidth <= 860) sidebarOpen = false">
             <a href="{% url 'dashboard:home' %}" class="nav-link">Dashboard</a>
-            <a href="{% url 'boq:list' %}" class="nav-link">BOQs</a>
-            <a href="{% url 'processing:list' %}" class="nav-link">Processing</a>
+            <a href="{% url 'boq:upload' %}" class="nav-link">Upload BOQ</a>
             <a href="{% url 'database:list' %}" class="nav-link">Database</a>
             <a href="{% url 'notifications:list' %}" class="nav-link">
                 Notifications{% if notifications_unread %} <span class="nav-badge">{{ notifications_unread }}</span>{% endif %}

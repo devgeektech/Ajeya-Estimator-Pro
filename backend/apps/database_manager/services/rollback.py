@@ -2,7 +2,7 @@
 
 Restores a previously imported DatabaseVersion as the active version. The
 retention policy keeps the active version plus two previous versions
-(docs/DATABASE_ARCHITECTURE.md - Retention Policy), so only retained versions
+(docs/DATABASE.md - retention policy), so only retained versions
 can be rolled back to.
 """
 
@@ -12,10 +12,10 @@ import logging
 
 from django.db import transaction
 
-from ai.context import clear_database_context_cache
 from common.exceptions import BOQAIError
 
 from ..models import DatabaseVersion
+from .activation import activate_database_version
 
 logger = logging.getLogger("boq_ai")
 
@@ -29,12 +29,7 @@ class DatabaseRollbackService:
             raise BOQAIError("That database version is already active.")
 
         with transaction.atomic():
-            DatabaseVersion.objects.exclude(pk=self.target_version.pk).update(
-                is_active=False
-            )
-            self.target_version.is_active = True
-            self.target_version.save(update_fields=["is_active"])
+            activate_database_version(self.target_version)
 
-        clear_database_context_cache()
         logger.info("Database rolled back to v%s", self.target_version.version_number)
         return self.target_version

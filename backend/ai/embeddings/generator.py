@@ -1,9 +1,4 @@
-"""Embedding generation (Phase 5).
-
-Generates embeddings for products and product aliases only
-(docs/DATABASE_ARCHITECTURE.md - Embedding Strategy). Used by vector matching
-to find candidate products when exact/alias matching fails.
-"""
+"""Embedding generation for master database products."""
 from __future__ import annotations
 
 import logging
@@ -20,8 +15,7 @@ logger = logging.getLogger("boq_ai")
 def generate_embedding(text: str) -> list[float]:
     """Return the embedding vector for ``text``.
 
-    Raises AIServiceError when AI is disabled (placeholder key) so callers can
-    skip vector matching gracefully.
+    Raises AIServiceError when AI is disabled so callers can skip gracefully.
     """
     client = get_client()
     try:

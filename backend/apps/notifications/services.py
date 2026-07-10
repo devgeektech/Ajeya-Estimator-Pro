@@ -1,9 +1,4 @@
-"""Notification service (Phase 11, Sprint 20).
-
-Creates and queries user notifications for key events: processing completion /
-failure, ready-for-review and export completion (docs/PRD.md - Notifications).
-Kept defensive so notification failures never break core flows.
-"""
+"""Notification service — create and query in-app user notifications."""
 from __future__ import annotations
 
 import logging

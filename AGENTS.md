@@ -30,17 +30,14 @@ Documentation does not follow code.
 
 # Required Reading Order
 
-Before performing any development work, agents must read:
+Before development, read:
 
-1. PRD.md
-2. TRD.md
-3. ARCHITECTURE.md
-4. DATABASE_ARCHITECTURE.md
-5. PROJECT_STRUCTURE.md
-6. SESSION_STATE.md
-7. CURRENT TASK
+1. `docs/PRODUCT.md` — scope, architecture, code structure, rules
+2. `docs/DATABASE.md` — schema and import rules (when touching models)
+3. `docs/SESSION_STATE.md` — current session status and recent work
+4. `docs/OPS.md` — only when changing deploy or run commands
 
-No development shall begin without reviewing these documents.
+Update `docs/PRODUCT.md` when product scope or structure changes.
 
 ---
 
@@ -48,14 +45,12 @@ No development shall begin without reviewing these documents.
 
 Priority:
 
-1. PRD.md
-2. TRD.md
-3. ARCHITECTURE.md
-4. DATABASE_ARCHITECTURE.md
-5. SESSION_STATE.md
-6. Existing Code
+1. `docs/PRODUCT.md`
+2. `docs/DATABASE.md` (for schema)
+3. `docs/SESSION_STATE.md`
+4. Existing code
 
-If code conflicts with documentation, documentation wins.
+If code conflicts with documentation, update documentation in the same session.
 
 ---
 
@@ -271,99 +266,40 @@ AI:
 ai/
 ```
 
-Tasks:
-
-```text id="mmpq6g"
-tasks/
-```
-
-Workflows:
-
-```text id="cv5w7d"
-workflows/
-```
-
 ---
 
 # Documentation Rules
 
-Any significant change must update:
+Active docs (keep lean — extend, do not duplicate):
 
-* SESSION_STATE.md
-* CHANGELOG.md
+| Document | Update when |
+| --- | --- |
+| `docs/SESSION_STATE.md` | Every development session |
+| `docs/CHANGELOG.md` | Every meaningful change |
+| `docs/PRODUCT.md` | Scope, structure, or architecture changes |
+| `docs/DATABASE.md` | Models, migrations, import rules |
+| `docs/OPS.md` | Run/deploy commands or infrastructure |
 
-Architecture changes require:
+### SESSION_STATE entry format
 
-* TRD update.
-* Architecture update.
+```markdown
+### YYYY-MM-DD — Brief Title
 
-Database changes require:
+Completed: ...
+Pending: ...
+Issues: ...
+Next: ...
+```
 
-* DATABASE_ARCHITECTURE update.
-
----
-
-# Documentation Update Instructions
-
-Every document has a specific purpose. Follow these rules to keep them current.
-
-## When to Update Each Document
-
-| Document | Update When | What to Write |
-| --- | --- | --- |
-| `SESSION_STATE.md` | After every development session | Completed work, pending items, issues, next tasks, test counts |
-| `CHANGELOG.md` | After every meaningful change | Plain-English list of what changed and why |
-| `ARCHITECTURE.md` | When system boundaries or layers change | Updated diagrams, layer responsibilities |
-| `DATABASE_ARCHITECTURE.md` | When models or migrations are added/changed | Updated schema tables, relationship descriptions |
-| `TRD.md` | When a major technical decision changes | Revised technical requirements or constraints |
-| `PRD.md` | When business rules change (human decision only) | Updated feature descriptions or workflow rules |
-| `PROJECT_STRUCTURE.md` | When files/folders are added or removed | Updated directory listings and responsibilities |
-| `RUN.md` | When server commands or infrastructure changes | Updated runbook steps |
-| `DEPLOY.md` | When the deployment process changes | Updated deployment checklist |
-
-## How to Update SESSION_STATE.md
-
-At the end of every session, add a new entry under `# Session Log` in this format:
+### CHANGELOG entry format
 
 ```markdown
 ## YYYY-MM-DD — Brief Title
 
-Completed:
-
-* What was built or fixed.
-* What was tested.
-* Current test count if it changed.
-
-Pending:
-
-* Unfinished items.
-
-Issues:
-
-* Any known problems or blockers.
-
-Next:
-
-* Planned next tasks.
+- What changed and why.
 ```
 
-## How to Update CHANGELOG.md
-
-Add a new entry at the top of the file under `# Changelog` in this format:
-
-```markdown
-## YYYY-MM-DD — Brief Title
-
-- Short bullet describing what changed and why.
-- Another bullet for a different change.
-```
-
-## Golden Rule for Documentation
-
-If you change code but do not update the relevant documents, the documentation
-is now wrong. Wrong documentation misleads future agents and developers.
-
-Always update documentation in the same session as the code change.
+Always update docs in the same session as code changes.
 
 ---
 
@@ -566,21 +502,14 @@ AI implements.
 
 # Existing Documentation
 
-All foundation documents are complete:
-
-| Document              | Status   |
-| --------------------- | -------- |
-| PRD.md                | Complete |
-| TRD.md                | Complete |
-| ARCHITECTURE.md       | Complete |
-| DATABASE_ARCHITECTURE | Complete |
-| PROJECT_STRUCTURE.md  | Complete |
-| AGENTS.md             | Complete |
-| SESSION_STATE.md      | Updated each session |
-| CHANGELOG.md          | Maintained each sprint |
-| DEVELOPMENT_ROADMAP.md| Complete — all 24 sprints delivered |
-| RUN.md                | Complete |
-| DEPLOY.md             | Complete |
+| Document | Purpose |
+| --- | --- |
+| `docs/PRODUCT.md` | Product scope, architecture, code structure, dev rules |
+| `docs/DATABASE.md` | Schema, import, versioning |
+| `docs/OPS.md` | Local setup, tests, EC2 deploy |
+| `docs/SESSION_STATE.md` | Active session memory |
+| `docs/CHANGELOG.md` | Change history (compact) |
+| `AGENTS.md` | Agent operating instructions |
 
 # Runtime Direction
 
@@ -599,10 +528,5 @@ BOQ_AI currently uses a single EC2 runtime:
 
 # Golden Rule
 
-The documentation is the product specification.
-
-The code is the implementation.
-
-If documentation and code disagree, the documentation must be updated first before code changes are made.
-
-No development shall violate documented architecture, workflows, or business rules.
+Keep `docs/PRODUCT.md` aligned with the codebase. Update it when scope or
+structure changes. Do not violate documented architecture or business rules.

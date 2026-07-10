@@ -1,8 +1,7 @@
 """Audit models.
 
-Records significant user actions for auditability
-(docs/DATABASE_ARCHITECTURE.md - Audit Tables, docs/PRD.md - Security
-Requirements). Secrets and passwords are never logged.
+Records significant user actions for auditability (docs/DATABASE.md).
+Secrets and passwords are never logged.
 """
 from django.conf import settings
 from django.db import models
