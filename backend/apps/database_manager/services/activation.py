@@ -13,12 +13,6 @@ from ..models import MASTER_DATA_MODELS, DatabaseVersion
 logger = logging.getLogger("boq_ai")
 
 
-def _clear_database_context_cache() -> None:
-    from ai.context import clear_database_context_cache
-
-    clear_database_context_cache()
-
-
 def purge_inactive_master_data(active: DatabaseVersion) -> int:
     """Remove PostgreSQL master rows for every version except the active one.
 
@@ -81,7 +75,6 @@ def activate_database_version(version: DatabaseVersion) -> DatabaseVersion:
         if not version.is_active:
             version.is_active = True
             version.save(update_fields=["is_active"])
-    _clear_database_context_cache()
     logger.info("Activated database v%s", version.version_number)
     return version
 
@@ -99,7 +92,6 @@ def repair_duplicate_active_versions() -> int:
     keep = active_versions[0]
     stale_ids = [version.pk for version in active_versions[1:]]
     deactivated = DatabaseVersion.objects.filter(pk__in=stale_ids).update(is_active=False)
-    _clear_database_context_cache()
     logger.warning(
         "Repaired %s duplicate active database version(s); kept v%s active",
         deactivated,

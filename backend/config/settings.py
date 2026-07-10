@@ -176,7 +176,7 @@ CELERY_TASK_ALWAYS_EAGER = env.bool("CELERY_TASK_ALWAYS_EAGER", default=False)
 # --- OpenAI -----------------------------------------------------------------
 
 OPENAI_API_KEY = env.str("OPENAI_API_KEY", default="")
-OPENAI_MODEL = env.str("OPENAI_MODEL", default="gpt-5-mini")
+OPENAI_MODEL = env.str("OPENAI_MODEL", default="gpt-4o-mini")
 OPENAI_EMBEDDING_MODEL = env.str("OPENAI_EMBEDDING_MODEL", default="text-embedding-3-small")
 OPENAI_EMBEDDING_DIMENSIONS = env.int("OPENAI_EMBEDDING_DIMENSIONS", default=1536)
 OPENAI_EMBEDDING_BATCH_SIZE = env.int("OPENAI_EMBEDDING_BATCH_SIZE", default=500)
@@ -258,13 +258,6 @@ LOGGING = {
             "level": "ERROR",
             "formatter": "verbose",
         },
-        "ai_instruction_file": {
-            "class": "logging.handlers.RotatingFileHandler",
-            "filename": str(LOGS_DIR / "ai_instructions.log"),
-            "maxBytes": 10 * 1024 * 1024,
-            "backupCount": 10,
-            "formatter": "verbose",
-        },
     },
     "root": {
         "handlers": ["console", "app_file"],
@@ -273,11 +266,6 @@ LOGGING = {
     "loggers": {
         "boq_ai": {
             "handlers": ["console", "app_file", "error_file"],
-            "level": "INFO",
-            "propagate": False,
-        },
-        "boq_ai.ai_instructions": {
-            "handlers": ["ai_instruction_file", "error_file"],
             "level": "INFO",
             "propagate": False,
         },

@@ -128,7 +128,7 @@ BOQ_AI/
 │   │   ├── dashboard/
 │   │   ├── notifications/
 │   │   └── audit/
-│   ├── ai/               # service, context, embeddings, prompts/
+│   ├── ai/               # OpenAI client + Chroma embeddings
 │   ├── common/           # choices, constants, exceptions, middleware, mixins
 │   ├── utils/            # excel, text, files
 │   └── tests/
@@ -153,7 +153,7 @@ BOQ_AI/
 | `apps/database_manager/services/activation.py` | Single active upload |
 | `apps/database_manager/views.py` | DB upload UI |
 | `apps/boq/services/boq_service.py` | BOQ file persistence |
-| `ai/context.py` | Active DB taxonomy for AI prompts |
+| `ai/openai_client.py` | OpenAI client + API key check |
 | `ai/embeddings/` | Chroma product index |
 | `config/settings.py` | Single settings module |
 
@@ -183,6 +183,6 @@ BOQ_AI/
 
 - Settings: `config.settings` (PostgreSQL only in production).
 - Local `.env` at project root; production `/srv/boq_ai/.env`.
-- OpenAI default chat model: `gpt-5-mini` (no custom temperature on GPT-5/o-series).
+- OpenAI default chat model: `gpt-4o-mini` (temperature 0 for deterministic extraction).
 - Embeddings: `text-embedding-3-small` → Chroma at `media/chroma`.
 - See `docs/OPS.md` for setup and deployment commands.

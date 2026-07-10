@@ -18,7 +18,6 @@ from django.db import transaction
 
 from common.exceptions import ImportError_
 from utils.excel import list_sheet_names, read_rows
-from ai.context import clear_database_context_cache
 
 from .activation import (
     activate_database_version,
@@ -330,7 +329,6 @@ class DatabaseImportService:
                 version = self._create_version()
                 self._import_versioned_sheets(version)
                 self._activate(version)
-            clear_database_context_cache()
             self._generate_embeddings(version)
             purge_inactive_master_data(version)
             enforce_version_retention()

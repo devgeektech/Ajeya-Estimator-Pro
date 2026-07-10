@@ -34,6 +34,13 @@ PostgreSQL.
 
 ## Session Log
 
+### 2026-07-10 — Remove Unused AI Code
+
+Completed:
+
+- Deleted unused `ai/service.py`, `ai/context.py`, and `ai/prompts/test_json.txt`.
+- Trimmed dead Chroma `query` API and AI instruction logging config.
+
 ### 2026-07-10 — PDF Make List + Robust Excel Parsing
 
 Completed:

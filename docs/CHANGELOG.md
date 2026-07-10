@@ -2,6 +2,16 @@
 
 Meaningful product and technical changes only. Older history is in git.
 
+## 2026-07-10 — Remove Unused AI Code
+
+- Deleted unused `ai/service.py`, `ai/context.py`, and `ai/prompts/test_json.txt`.
+- Trimmed dead `load_prompt`, Chroma `query`, and AI instruction logging config.
+
+## 2026-07-10 — Default Chat Model → gpt-4o-mini
+
+- Switched default `OPENAI_MODEL` from `gpt-5-mini` to `gpt-4o-mini` for lower-cost,
+  low-latency BOQ extraction. Embeddings unchanged (`text-embedding-3-small`).
+
 ## 2026-07-10 — PDF Make List + Robust Excel Parsing
 
 - PDF make lists now parse into S. No. / Description / Approved Makes columns instead

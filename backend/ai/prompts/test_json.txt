@@ -1,7 +1,0 @@
-Return JSON only.
-
-Context:
-{database_context}
-
-Rows:
-{rows_json}

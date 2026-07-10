@@ -1,7 +1,6 @@
 """Local Chroma vector index for Rate_Master product embeddings."""
 from __future__ import annotations
 
-from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Sequence, cast
@@ -27,15 +26,6 @@ def selection_amount(rate: Rate_Master) -> Decimal:
     if rate.Final_Amount_Excl_GST is not None:
         return _to_decimal(rate.Final_Amount_Excl_GST)
     return _to_decimal(rate.Net_Material_Rate or 0)
-
-
-@dataclass(frozen=True)
-class ChromaMatch:
-    """One vector-search hit resolved from Chroma metadata."""
-
-    rate_master_id: int
-    tech_key: str
-    similarity: float
 
 
 def _scalar(value: Any):
@@ -143,40 +133,3 @@ class ChromaEmbeddingStore:
             metadatas=[rate_metadata(rate) for rate in rates],
         )
         return document_ids
-
-    def query(
-        self,
-        embedding: Sequence[float],
-        *,
-        database_version_id: int,
-        top_k: int = 5,
-    ) -> list[ChromaMatch]:
-        """Return vector hits scoped to one database version."""
-        result = self.collection.query(
-            query_embeddings=cast(PyEmbeddings, [embedding]),
-            n_results=top_k,
-            where={"database_version_id": int(database_version_id)},
-            include=["metadatas", "distances"],
-        )
-        metadatas_raw = result.get("metadatas") or []
-        distances_raw = result.get("distances") or []
-        metadatas = metadatas_raw[0] if metadatas_raw else []
-        distances = distances_raw[0] if distances_raw else []
-        matches: list[ChromaMatch] = []
-        for metadata, distance in zip(metadatas, distances, strict=False):
-            if not isinstance(metadata, dict):
-                continue
-            rate_master_id = metadata.get("rate_master_id") or metadata.get(
-                "material_rate_id"
-            )
-            if not rate_master_id:
-                continue
-            similarity = max(0.0, 1.0 - float(distance or 0.0))
-            matches.append(
-                ChromaMatch(
-                    rate_master_id=int(str(rate_master_id)),
-                    tech_key=str(metadata.get("tech_key") or ""),
-                    similarity=similarity,
-                )
-            )
-        return matches
