@@ -17,6 +17,7 @@ from apps.boq.services.boq_analysis_store import (
 )
 from apps.boq.services.boq_extraction_service import BOQExtractionService
 from apps.boq.services.boq_extract_service import load_extract_data
+from apps.boq.services.boq_row_grouping_service import full_description_for_row
 from apps.boq.services.make_list_constraint_service import MakeListConstraintService, walk_rows_tree
 from apps.boq.services.product_matching_service import ProductMatchingService
 from apps.boq.services.serial_normalizer import structure_for_analysis
@@ -32,6 +33,9 @@ PHASE_MATCHED = "matched"
 
 
 def _row_description(boq_data: dict, row_id: str) -> str:
+    full_text = full_description_for_row(boq_data, row_id)
+    if full_text:
+        return full_text
     tree = boq_data.get("rows_tree") or []
     for node in walk_rows_tree(tree):
         if node.get("row_id") != row_id:

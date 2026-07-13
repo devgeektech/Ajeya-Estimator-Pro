@@ -8,6 +8,7 @@ from typing import Any
 
 from django.conf import settings
 
+from ai.instruction_log import log_instruction
 from ai.openai_client import get_client, is_configured
 from common.exceptions import AIServiceError
 
@@ -64,6 +65,12 @@ class AIService:
         try:
             response = client.chat.completions.create(**kwargs)
             content = response.choices[0].message.content or ""
+            log_instruction(
+                template_name=template_name,
+                model=str(self.model),
+                prompt=prompt,
+                response=content,
+            )
             logger.info(
                 "AI completion ok (model=%s, template=%s, chars=%s)",
                 self.model,
@@ -74,6 +81,12 @@ class AIService:
         except AIServiceError:
             raise
         except Exception as exc:  # noqa: BLE001
+            log_instruction(
+                template_name=template_name,
+                model=str(self.model),
+                prompt=prompt,
+                error=str(exc),
+            )
             logger.exception("AI completion failed")
             raise AIServiceError(f"AI request failed: {exc}") from exc
 

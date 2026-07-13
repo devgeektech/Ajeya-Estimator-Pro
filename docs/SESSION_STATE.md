@@ -34,6 +34,12 @@ run analysis → session confirmations → export Excel
 
 ## Session Log
 
+### 2026-07-13 — AI Instruction Logging
+
+Completed:
+
+- `ai/instruction_log.py` appends each AI exchange to `logs/instructions.log`.
+
 ### 2026-07-13 — Multi-Product Rows + Match Results JSON
 
 Completed:

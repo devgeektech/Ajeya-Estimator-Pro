@@ -9,6 +9,7 @@ from django.db import transaction
 
 from apps.boq.models import BOQ
 from apps.boq.services.boq_analysis_store import save_boq_analysis_json
+from apps.boq.services.extraction_attribute_fields import COMMON_ATTRIBUTE_KEYS
 from apps.boq.services.make_list_constraint_service import MakeListConstraintService, _normalize_make
 from common.choices import BOQStatus
 from common.exceptions import BOQAIError, ValidationError
@@ -190,24 +191,35 @@ class BOQExtractionEditService:
         *,
         row_id: str,
         selected_make: str,
+        custom_make: str = "",
         make_list_data: dict | None,
         boq_description: str,
+        category: str = "",
+        sub_category: str = "",
     ) -> dict[str, Any]:
         boq = self._get_boq()
         self._ensure_editable(boq)
 
-        normalized_make = _normalize_make(selected_make)
-        if not normalized_make:
-            raise ValidationError("Select a make from the approved list.")
-
         make_list_service = MakeListConstraintService(make_list_data)
-        match = make_list_service.match_for_description(boq_description)
-        if not match:
-            raise ValidationError("No make-list line matches this BOQ row.")
+        options = make_list_service.make_options_for_product(
+            category=category,
+            sub_category=sub_category,
+            description=boq_description,
+        )
+        allowed = list(options.get("make_options") or [])
 
-        approved = [_normalize_make(make) for make in match.get("approved_makes") or []]
-        if normalized_make not in approved:
-            raise ValidationError("Selected make is not in the approved make list.")
+        if selected_make == "__custom__":
+            normalized_make = _normalize_make(custom_make)
+            if not normalized_make:
+                raise ValidationError("Enter a custom make.")
+            is_custom = True
+        else:
+            normalized_make = _normalize_make(selected_make)
+            if not normalized_make:
+                raise ValidationError("Select a make from the list or choose Other.")
+            is_custom = bool(allowed) and normalized_make not in allowed
+            if allowed and not is_custom and normalized_make not in allowed:
+                raise ValidationError("Selected make is not available for this category.")
 
         analysis = dict(boq.analysis_data or {})
         rows = list(analysis.get("rows") or [])
@@ -216,15 +228,34 @@ class BOQExtractionEditService:
             raise ValidationError(f"Unknown BOQ row: {row_id}")
 
         row["make_list"] = {
-            "material": match.get("material"),
-            "approved_makes": approved,
+            "material": options.get("material") or options.get("category_material") or "",
+            "approved_makes": allowed,
             "selected_make": normalized_make,
-            "match_score": match.get("match_score"),
+            "custom_make": normalized_make if is_custom else "",
+            "custom_make_flag": is_custom,
+            "match_score": options.get("match_score"),
+            "category_material": options.get("category_material") or "",
         }
         analysis["rows"] = rows
         analysis["phase"] = PHASE_EXTRACTED
         self._persist(boq, analysis)
         return row["make_list"]
+
+    def parse_attributes_from_form(self, post_data) -> dict[str, str]:
+        attrs: dict[str, str] = {}
+        for key in COMMON_ATTRIBUTE_KEYS:
+            value = (post_data.get(f"attr_{key}") or "").strip()
+            if value:
+                attrs[key] = value
+
+        extra_keys = post_data.getlist("extra_attr_key")
+        extra_values = post_data.getlist("extra_attr_value")
+        for raw_key, raw_value in zip(extra_keys, extra_values, strict=False):
+            key = re.sub(r"\s+", "_", str(raw_key or "").strip().lower())
+            value = str(raw_value or "").strip()
+            if key and value:
+                attrs[key] = value
+        return _normalize_attributes(attrs)
 
     def parse_attributes_json(self, raw: str) -> dict[str, str]:
         text = (raw or "").strip()

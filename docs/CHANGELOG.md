@@ -2,6 +2,17 @@
 
 Meaningful product and technical changes only. Older history is in git.
 
+## 2026-07-13 — Analysis UX: Full Text, Lineage, Simple Attributes
+
+- Analysis rows show full BOQ text (no truncation) and group serial `1` with all
+  child lineage rows; make dropdown uses category-based make-list options plus
+  custom make; attributes use simple fields instead of JSON.
+
+## 2026-07-13 — AI Instruction Logging
+
+- All AI calls (chat completions and embeddings) append full instructions and
+  responses to `logs/instructions.log` only.
+
 ## 2026-07-13 — Multi-Product Rows + Match Results JSON
 
 - Analysis tab supports multiple products per BOQ row with add/remove controls.

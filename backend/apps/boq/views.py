@@ -210,6 +210,9 @@ class BOQExtractionEditView(LoginRequiredMixin, View):
                 messages.success(request, "Product removed from this row.")
             elif action == "update_make":
                 selected_make = (request.POST.get("selected_make") or "").strip()
+                custom_make = (request.POST.get("custom_make") or "").strip()
+                category = (request.POST.get("category") or "").strip()
+                sub_category = (request.POST.get("sub_category") or "").strip()
                 try:
                     boq_payload, make_list_payload = load_extract_data(boq)
                 except Exception:
@@ -220,8 +223,11 @@ class BOQExtractionEditView(LoginRequiredMixin, View):
                 editor.update_row_make(
                     row_id=row_id,
                     selected_make=selected_make,
+                    custom_make=custom_make,
                     make_list_data=make_list_payload,
                     boq_description=description,
+                    category=category,
+                    sub_category=sub_category,
                 )
                 messages.success(request, "Make selection saved for this row.")
             else:
@@ -246,9 +252,10 @@ class BOQExtractionEditView(LoginRequiredMixin, View):
                         "quantity_unit",
                     )
                 }
-                attributes = editor.parse_attributes_json(request.POST.get("attributes_json") or "{}")
+                attributes = editor.parse_attributes_from_form(request.POST)
+                product_row_id = (request.POST.get("product_row_id") or row_id).strip()
                 editor.update_product(
-                    row_id=row_id,
+                    row_id=product_row_id,
                     product_index=product_index,
                     fields=fields,
                     attributes=attributes,

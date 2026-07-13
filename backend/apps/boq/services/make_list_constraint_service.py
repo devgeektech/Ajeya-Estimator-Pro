@@ -125,6 +125,46 @@ class MakeListConstraintService:
             "match_score": round(best_score, 2),
         }
 
+    def make_options_for_product(
+        self,
+        *,
+        category: str = "",
+        sub_category: str = "",
+        description: str = "",
+    ) -> dict[str, Any]:
+        """Return make-list options for a product category and BOQ description."""
+        matched = self.match_for_description(description)
+        category_tokens = _token_set(" ".join(part for part in (category, sub_category) if part))
+        scored_entries: list[tuple[float, dict[str, Any]]] = []
+
+        for entry in self._entries:
+            overlap = category_tokens & entry["tokens"] if category_tokens else set()
+            score = len(overlap) / max(len(category_tokens), 1) if category_tokens else 0.0
+            if score > 0:
+                scored_entries.append((score, entry))
+
+        scored_entries.sort(key=lambda item: item[0], reverse=True)
+        category_entry = scored_entries[0][1] if scored_entries else None
+
+        make_options: list[str] = []
+        for make in (matched or {}).get("approved_makes") or []:
+            if make not in make_options:
+                make_options.append(make)
+        if category_entry:
+            for make in category_entry.get("approved_makes_list") or []:
+                if make not in make_options:
+                    make_options.append(make)
+
+        material = (matched or {}).get("material") or (category_entry or {}).get("description") or ""
+        return {
+            "matched": bool(matched),
+            "material": material,
+            "approved_makes": make_options,
+            "make_options": make_options,
+            "match_score": (matched or {}).get("match_score"),
+            "category_material": (category_entry or {}).get("description") or "",
+        }
+
     @staticmethod
     def make_is_allowed(make_value: str | None, approved_makes: list[str] | None) -> bool:
         if not approved_makes:

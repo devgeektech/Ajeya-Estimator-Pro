@@ -7,6 +7,7 @@ from typing import cast
 from django.conf import settings
 
 from ai.embeddings.chroma_store import ChromaEmbeddingStore, rate_document
+from ai.instruction_log import log_instruction
 from ai.openai_client import get_client, is_configured
 from apps.database_manager.models import DatabaseVersion, Rate_Master
 from common.exceptions import AIServiceError
@@ -52,10 +53,30 @@ def generate_embeddings(texts: list[str]) -> list[list[float]]:
             ordered[item.index] = list(item.embedding)
         if any(vector is None for vector in ordered):
             raise AIServiceError("Embedding response missing one or more vectors.")
+        instruction_text = "\n\n---\n\n".join(
+            f"[{index + 1}] {text}" for index, text in enumerate(texts)
+        )
+        log_instruction(
+            template_name="embedding",
+            model=model,
+            prompt=instruction_text,
+            response=f"generated_vectors={len(texts)}",
+            metadata={"batch_size": len(texts)},
+        )
         return cast(list[list[float]], ordered)
     except AIServiceError:
         raise
     except Exception as exc:  # noqa: BLE001 - normalise provider errors
+        instruction_text = "\n\n---\n\n".join(
+            f"[{index + 1}] {text}" for index, text in enumerate(texts)
+        )
+        log_instruction(
+            template_name="embedding",
+            model=model,
+            prompt=instruction_text,
+            error=str(exc),
+            metadata={"batch_size": len(texts)},
+        )
         logger.exception("Embedding generation failed")
         raise AIServiceError(f"Embedding request failed: {exc}") from exc
 

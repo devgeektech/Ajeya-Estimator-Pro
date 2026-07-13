@@ -22,7 +22,9 @@
         <header class="extraction-line__header">
             <div class="extraction-line__title">
                 <span class="extraction-line__serial">{{ line.serial|default:"—" }}</span>
-                <strong>{{ line.description|truncatechars:160 }}</strong>
+                {% if line.lineage_count > 1 %}
+                    <span class="badge badge--dark">{{ line.lineage_count }} lines grouped</span>
+                {% endif %}
             </div>
             <div class="extraction-line__meta">
                 {% if line.qty %}<span>Qty: {{ line.qty }}{% if line.unit %} {{ line.unit }}{% endif %}</span>{% endif %}
@@ -35,39 +37,79 @@
             </div>
         </header>
 
+        <div class="extraction-line__description">
+            <p class="extraction-line__description-text">{{ line.description }}</p>
+            {% if line.lineage_count > 1 %}
+            <details class="extraction-lineage">
+                <summary>View {{ line.lineage_count }} grouped lines</summary>
+                <ul class="extraction-lineage__list">
+                    {% for part in line.lineage_parts %}
+                    <li>
+                        <span class="extraction-lineage__serial">{{ part.serial|default:"—" }}</span>
+                        {{ part.description }}
+                    </li>
+                    {% endfor %}
+                </ul>
+            </details>
+            {% endif %}
+        </div>
+
         {% if line.make_list.has_make_list and line.status != 'skipped' %}
         <section class="extraction-make-list">
-            {% if line.make_list.matched %}
+            {% if line.make_list.material or line.make_list.category_material %}
                 <div class="extraction-make-list__match">
-                    <span class="extraction-make-list__label">Make list match</span>
-                    <span>{{ line.make_list.material }}</span>
-                    {% if line.make_list.match_score %}
-                        <span class="extraction-make-list__score">({{ line.make_list.match_score }} overlap)</span>
+                    <span class="extraction-make-list__label">Make list</span>
+                    {% if line.make_list.material %}
+                        <span>{{ line.make_list.material }}</span>
+                    {% endif %}
+                    {% if line.make_list.category_material and line.make_list.category_material != line.make_list.material %}
+                        <span class="extraction-make-list__score">Category: {{ line.make_list.category_material }}</span>
                     {% endif %}
                 </div>
-                {% if can_edit_extraction %}
-                <form method="post" action="{% url 'boq:extraction_edit' boq.pk %}" class="extraction-make-form">
-                    {% csrf_token %}
-                    <input type="hidden" name="action" value="update_make">
-                    <input type="hidden" name="row_id" value="{{ line.row_id }}">
-                    <label class="extraction-field">
-                        <span class="extraction-field__label">Preferred make</span>
-                        <select name="selected_make" class="extraction-input" required>
-                            <option value="">Select make…</option>
-                            {% for make in line.make_list.approved_makes %}
-                            <option value="{{ make }}" {% if line.make_list.selected_make == make %}selected{% endif %}>{{ make }}</option>
-                            {% endfor %}
-                        </select>
-                    </label>
-                    <button type="submit" class="btn btn--small btn--boq-match">Save make</button>
-                </form>
-                {% elif line.make_list.selected_make %}
-                <p class="extraction-make-list__selected">Selected make: <strong>{{ line.make_list.selected_make }}</strong></p>
-                {% else %}
-                <p class="extraction-make-list__hint">Approved makes: {{ line.make_list.approved_makes|join:", " }}</p>
-                {% endif %}
-            {% else %}
-                <p class="extraction-make-list__hint extraction-make-list__hint--muted">No make-list line matched this BOQ description.</p>
+            {% endif %}
+            {% if can_edit_extraction %}
+            <form
+                method="post"
+                action="{% url 'boq:extraction_edit' boq.pk %}"
+                class="extraction-make-form"
+                x-data="{ makeChoice: '{% if line.make_list.is_custom_make %}__custom__{% else %}{{ line.make_list.selected_make|default:'' }}{% endif %}', showCustom: {{ line.make_list.is_custom_make|yesno:'true,false' }} }"
+            >
+                {% csrf_token %}
+                <input type="hidden" name="action" value="update_make">
+                <input type="hidden" name="row_id" value="{{ line.row_id }}">
+                <input type="hidden" name="category" value="{{ line.primary_category }}">
+                <input type="hidden" name="sub_category" value="{{ line.primary_sub_category }}">
+                <label class="extraction-field">
+                    <span class="extraction-field__label">Preferred make</span>
+                    <select
+                        name="selected_make"
+                        class="extraction-input"
+                        x-model="makeChoice"
+                        @change="showCustom = (makeChoice === '__custom__')"
+                    >
+                        <option value="">Select make…</option>
+                        {% for make in line.make_list.make_options %}
+                        <option value="{{ make }}" {% if line.make_list.selected_make == make and not line.make_list.is_custom_make %}selected{% endif %}>{{ make }}</option>
+                        {% endfor %}
+                        <option value="__custom__" {% if line.make_list.is_custom_make %}selected{% endif %}>Other (type below)</option>
+                    </select>
+                </label>
+                <label class="extraction-field" x-show="showCustom" x-cloak>
+                    <span class="extraction-field__label">Custom make</span>
+                    <input
+                        type="text"
+                        name="custom_make"
+                        class="extraction-input"
+                        value="{{ line.make_list.custom_make }}"
+                        placeholder="Enter make name"
+                    >
+                </label>
+                <button type="submit" class="btn btn--small btn--boq-match">Save make</button>
+            </form>
+            {% elif line.make_list.selected_make %}
+            <p class="extraction-make-list__selected">Selected make: <strong>{{ line.make_list.selected_make }}</strong></p>
+            {% elif line.make_list.make_options %}
+            <p class="extraction-make-list__hint">Available makes: {{ line.make_list.make_options|join:", " }}</p>
             {% endif %}
         </section>
         {% endif %}
@@ -114,7 +156,7 @@
                 <form method="post" action="{% url 'boq:extraction_edit' boq.pk %}" class="extraction-inline-form" onsubmit="return confirm('Remove this product from the row?');">
                     {% csrf_token %}
                     <input type="hidden" name="action" value="remove_product">
-                    <input type="hidden" name="row_id" value="{{ line.row_id }}">
+                    <input type="hidden" name="row_id" value="{{ product.source_row_id }}">
                     <input type="hidden" name="product_index" value="{{ product.product_index }}">
                     <button type="submit" class="btn btn--small btn--danger">Remove</button>
                 </form>
@@ -127,6 +169,7 @@
                 {% csrf_token %}
                 <input type="hidden" name="action" value="update_product">
                 <input type="hidden" name="row_id" value="{{ line.row_id }}">
+                <input type="hidden" name="product_row_id" value="{{ product.source_row_id }}">
                 <input type="hidden" name="product_index" value="{{ product.product_index }}">
 
                 <div class="extraction-field-grid">
@@ -144,16 +187,36 @@
                     {% endfor %}
                 </div>
 
-                <label class="extraction-field extraction-field--full">
-                    <span class="extraction-field__label">Attributes (JSON)</span>
-                    <textarea
-                        name="attributes_json"
-                        class="extraction-input extraction-input--textarea"
-                        rows="3"
-                        placeholder='{"is": "1239", "mounting": "wall"}'
-                    >{{ product.attributes_json_text }}</textarea>
-                    <span class="extraction-field__hint">Technical specs as key-value pairs, e.g. IS number, mounting, material.</span>
-                </label>
+                <div class="extraction-attributes-block">
+                    <span class="extraction-section-label">Specifications</span>
+                    <div class="extraction-field-grid">
+                        {% for attr in product.attributes.common %}
+                        <label class="extraction-field">
+                            <span class="extraction-field__label">{{ attr.label }}</span>
+                            <input
+                                type="text"
+                                name="attr_{{ attr.key }}"
+                                value="{{ attr.value }}"
+                                class="extraction-input"
+                                placeholder="Optional"
+                            >
+                        </label>
+                        {% endfor %}
+                    </div>
+                    <div class="extraction-extra-attrs">
+                        <span class="extraction-field__label">Other details</span>
+                        {% for extra in product.attributes.extra %}
+                        <div class="extraction-extra-attr-row">
+                            <input type="text" name="extra_attr_key" value="{{ extra.key }}" class="extraction-input" placeholder="Name">
+                            <input type="text" name="extra_attr_value" value="{{ extra.value }}" class="extraction-input" placeholder="Value">
+                        </div>
+                        {% endfor %}
+                        <div class="extraction-extra-attr-row">
+                            <input type="text" name="extra_attr_key" value="" class="extraction-input" placeholder="Name">
+                            <input type="text" name="extra_attr_value" value="" class="extraction-input" placeholder="Value">
+                        </div>
+                    </div>
+                </div>
 
                 <div class="extraction-product-form__actions">
                     <button type="submit" class="btn btn--small btn--boq-analyse">Save product</button>
@@ -168,16 +231,19 @@
                 </div>
                 {% endfor %}
             </dl>
-            {% if product.attributes %}
             <div class="extraction-attributes-readonly">
-                <span class="extraction-section-label">Attributes</span>
+                <span class="extraction-section-label">Specifications</span>
                 <ul class="extraction-list">
-                    {% for attr in product.attributes %}
-                    <li><code>{{ attr.key }}</code>: {{ attr.value }}</li>
+                    {% for attr in product.attributes.common %}
+                        {% if attr.value %}
+                        <li>{{ attr.label }}: {{ attr.value }}</li>
+                        {% endif %}
+                    {% endfor %}
+                    {% for extra in product.attributes.extra %}
+                        <li>{{ extra.key }}: {{ extra.value }}</li>
                     {% endfor %}
                 </ul>
             </div>
-            {% endif %}
             {% endif %}
         </section>
         {% empty %}

@@ -188,6 +188,7 @@ OPENAI_EMBEDDING_DIMENSIONS = env.int("OPENAI_EMBEDDING_DIMENSIONS", default=153
 OPENAI_EMBEDDING_BATCH_SIZE = env.int("OPENAI_EMBEDDING_BATCH_SIZE", default=500)
 OPENAI_TIMEOUT_SECONDS = env.int("OPENAI_TIMEOUT_SECONDS", default=120)
 OPENAI_MAX_RETRIES = env.int("OPENAI_MAX_RETRIES", default=1)
+AI_INSTRUCTION_LOGGING = env.bool("AI_INSTRUCTION_LOGGING", default=True)
 
 # --- Chroma -----------------------------------------------------------------
 
@@ -264,6 +265,13 @@ LOGGING = {
             "level": "ERROR",
             "formatter": "verbose",
         },
+        "instruction_file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": str(LOGS_DIR / "instructions.log"),
+            "maxBytes": 10 * 1024 * 1024,
+            "backupCount": 5,
+            "formatter": "verbose",
+        },
     },
     "root": {
         "handlers": ["console", "app_file"],
@@ -272,6 +280,11 @@ LOGGING = {
     "loggers": {
         "boq_ai": {
             "handlers": ["console", "app_file", "error_file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "boq_ai.instructions": {
+            "handlers": ["console", "instruction_file"],
             "level": "INFO",
             "propagate": False,
         },

@@ -445,6 +445,61 @@
             font-weight: 600;
         }
 
+        .extraction-line__title {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .extraction-line__description {
+            margin-bottom: 10px;
+        }
+
+        .extraction-line__description-text {
+            margin: 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+            line-height: 1.5;
+            font-size: .92rem;
+        }
+
+        .extraction-lineage {
+            margin-top: 8px;
+            font-size: .85rem;
+        }
+
+        .extraction-lineage__list {
+            margin: 8px 0 0;
+            padding-left: 18px;
+        }
+
+        .extraction-lineage__serial {
+            display: inline-block;
+            min-width: 2rem;
+            color: var(--text-muted);
+            margin-right: 6px;
+        }
+
+        .extraction-attributes-block {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px dashed var(--border);
+        }
+
+        .extraction-extra-attrs {
+            margin-top: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .extraction-extra-attr-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
         .extraction-list {
             margin: 6px 0 0;
             padding-left: 18px;
