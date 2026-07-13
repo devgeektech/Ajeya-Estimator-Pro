@@ -6,7 +6,7 @@ export are being rebuilt.
 
 ## Stack
 
-Django · PostgreSQL · HTMX · Celery/Redis (reserved) · OpenAI + Chroma (optional)
+Django · PostgreSQL · HTMX · Celery/Redis · OpenAI + Chroma (optional)
 
 ## Docs
 
@@ -28,6 +28,42 @@ cd backend && ../.venv/bin/python manage.py migrate
 ../.venv/bin/python manage.py createsuperuser
 ../.venv/bin/python manage.py runserver
 ```
+
+### BOQ analysis (Celery + Redis)
+
+BOQ analysis runs in the background via Celery. **Production** (`DEBUG=False`):
+Redis and a Celery worker must be running; set `CELERY_TASK_ALWAYS_EAGER=False`.
+
+**Local dev without Redis** — set `CELERY_TASK_ALWAYS_EAGER=True` or `DEBUG=True`
+(analysis runs inline in the web process).
+
+**Local dev with async worker** — three terminals:
+
+```powershell
+# 1 — Django
+cd backend
+..\.venv\Scripts\python.exe manage.py runserver
+
+# 2 — Redis (WSL or native install)
+redis-server
+# or: .\scripts\run_redis.ps1
+
+# 3 — Celery worker
+.\scripts\run_celery_worker.ps1
+# or: cd backend && ..\.venv\Scripts\python.exe -m celery -A config worker --loglevel=info --pool=solo
+```
+
+Verify readiness:
+
+```powershell
+cd backend
+..\.venv\Scripts\python.exe manage.py check_celery
+```
+
+Linux / macOS: use `scripts/run_celery_worker.sh` instead of the `.ps1` script.
+
+The BOQ detail page polls `/boqs/<id>/status/` while analysis is running and reloads
+when complete.
 
 Tests: `../.venv/bin/python manage.py test tests`
 

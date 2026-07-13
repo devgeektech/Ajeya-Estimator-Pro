@@ -22,14 +22,14 @@
             </tr>
         </thead>
         <tbody>
-            {% for boq in boqs %}
+            {% for item in boq_items %}
             <tr>
-                <td style="font-weight: 500;">{{ boq.boq_name }}</td>
-                <td>{{ boq.user.full_name }}</td>
-                <td><span class="badge badge--gray">{{ boq.get_status_display }}</span></td>
-                <td>{{ boq.created_at|date:"Y-m-d H:i" }}</td>
+                <td style="font-weight: 500;">{{ item.boq.boq_name }}</td>
+                <td>{{ item.boq.user.full_name }}</td>
+                <td><span class="badge {{ item.status_display.badge }}">{{ item.status_display.label }}</span></td>
+                <td>{{ item.boq.created_at|date:"Y-m-d H:i" }}</td>
                 <td class="table__actions">
-                    <a href="{% url 'boq:detail' boq.pk %}" class="btn btn--small btn--primary">View</a>
+                    <a href="{% url 'boq:detail' item.boq.pk %}?tab={{ item.detail_tab }}" class="btn btn--small btn--primary">View</a>
                 </td>
             </tr>
             {% empty %}

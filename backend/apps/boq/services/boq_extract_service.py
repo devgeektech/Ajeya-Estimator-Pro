@@ -86,3 +86,21 @@ def refresh_all_extract(boq: BOQ) -> tuple[dict, dict]:
         make_list_data=make_list_payload or None,
     )
     return boq_payload, make_list_payload
+
+
+def load_extract_data(boq: BOQ, *, refresh: bool = False) -> tuple[dict, dict]:
+    """Return BOQ / make-list JSON from PostgreSQL; parse files only when needed."""
+    if refresh:
+        return refresh_all_extract(boq)
+
+    boq_payload = boq.boq_data or {}
+    make_list_payload = (boq.make_list_data or {}) if boq.make_list_file else {}
+
+    if not boq_payload.get("rows") and boq.uploaded_file:
+        logger.info("BOQ id=%s missing extract JSON; parsing workbook once", boq.pk)
+        boq_payload = refresh_boq_extract(boq)
+    if boq.make_list_file and not make_list_payload.get("rows"):
+        logger.info("BOQ id=%s missing make-list JSON; parsing file once", boq.pk)
+        make_list_payload = refresh_make_list_extract(boq)
+
+    return boq_payload, make_list_payload

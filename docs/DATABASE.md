@@ -53,7 +53,12 @@ Imported into versioned tables (PascalCase ORM fields mirror workbook columns).
 
 **`Tech_Key`:** indexed, links to `Labour_Master`; not globally unique.
 
----
+**Labour charge columns on `Labour_Master`:** `Labour_Rate_Per_unit`, `Testing_Labour_Value`,
+`Scaffolding_Labour_Value`, `Consumables_Labour_Value`, `Painting_Labour_Value`,
+`Labour_Buffer_Value`, `Total_Labour_per_Unit`, `Labour_Multiplier`,
+`Total_Labour_per_unit_with_labour_Multipler`. BOQ analysis reads these by `Tech_Key`
+(size match when multiple rows exist); effective per-unit labour prefers the total-with-multiplier
+column, then total per unit, then base labour rate.
 
 ## BOQ Tables (current)
 
@@ -63,11 +68,12 @@ Imported into versioned tables (PascalCase ORM fields mirror workbook columns).
 | --- | --- |
 | `user` | Owner |
 | `boq_name` | Display name; **unique** (case-insensitive) — maps to `media/extract_json/{boq_name}/` |
-| `status` | `UPLOADED` only (for now) |
+| `status` | `UPLOADED`, `PROCESSING`, `EXTRACTED`, `MATCHING`, `PROCESSED`, `ANALYSIS_FAILED` |
 | `uploaded_file` | Original workbook |
 | `make_list_file` | Optional (Excel or PDF) |
 | `boq_data` | Normalized BOQ JSON (headers + hierarchical rows) |
 | `make_list_data` | Normalized make-list JSON |
+| `analysis_data` | AI extraction + matching + rate/labour enrichment (schema v2) |
 | `created_at` | Timestamp |
 
 **`boq_data` / `make_list_data` row shape (flat list, hierarchy via fields):**

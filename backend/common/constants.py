@@ -22,3 +22,6 @@ MASTER_SHEETS = REQUIRED_MASTER_SHEETS + OPTIONAL_MASTER_SHEETS
 
 # Embedding dimension for OpenAI text-embedding-3-small.
 EMBEDDING_DIMENSION = 1536
+
+# Below this score (0-100), no product is auto-selected (pending item).
+MATCH_CONFIDENCE_THRESHOLD = 30

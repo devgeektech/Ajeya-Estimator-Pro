@@ -13,6 +13,9 @@ _INTEGER_SERIAL = re.compile(r"^\d+$")
 _ALPHA_SERIAL = re.compile(r"^[a-zA-Z]$")
 _PAREN_ALPHA = re.compile(r"^\(([a-zA-Z])\)$")
 _PAREN_NUM = re.compile(r"^\((\d+)\)$")
+_DESC_ALPHA = re.compile(r"^\(?([a-zA-Z])\)?[\).:\-]\s*")
+
+DESCRIPTION_KEYS = ("description", "desc", "particulars", "item_description")
 
 SERIAL_HEADER_HINTS = frozenset(
     {
@@ -77,7 +80,7 @@ def analysis_fields(row: dict) -> dict[str, Any]:
 
 
 def _analysis_node(row: dict) -> dict[str, Any]:
-    return {
+    node = {
         "row_id": row.get("row_id"),
         "serial": row.get("serial", ""),
         "depth": row.get("depth", 0),
@@ -85,6 +88,9 @@ def _analysis_node(row: dict) -> dict[str, Any]:
         "fields": analysis_fields(row),
         "children": [],
     }
+    if row.get("approved_makes_list") is not None:
+        node["approved_makes_list"] = row.get("approved_makes_list") or []
+    return node
 
 
 def nest_rows_hierarchy(flat_rows: list[dict]) -> list[dict]:
@@ -136,10 +142,44 @@ def detect_serial_key(headers: list[dict]) -> str | None:
     return None
 
 
+def _infer_serial_from_description(record: dict) -> str:
+    """Infer alpha serial markers such as ``a)`` from the description column."""
+    for key in DESCRIPTION_KEYS:
+        text = str(cell_value(record, key) or "").strip()
+        if not text:
+            continue
+        match = _DESC_ALPHA.match(text)
+        if match:
+            return match.group(1).lower()
+    return ""
+
+
+def _is_structural_serial(serial_key: str) -> bool:
+    """Return True for top-level section serials like ``1`` or ``1.1``."""
+    return bool(_INTEGER_SERIAL.match(serial_key) or _DECIMAL_SERIAL.match(serial_key))
+
+
+def _structural_parent(stack: list[dict]) -> dict | None:
+    """Return the nearest integer/decimal parent for continuation or alpha rows."""
+    for item in reversed(stack):
+        if _is_structural_serial(item["serial_key"]):
+            return item
+    return None
+
+
+def _child_of_structural_parent(stack: list[dict]) -> tuple[int, str | None]:
+    parent = _structural_parent(stack)
+    if not parent:
+        return 0, None
+    return parent["depth"] + 1, parent["serial_key"]
+
+
 def _serial_depth_and_parent_key(serial: str, stack: list[dict]) -> tuple[int, str | None]:
     """Return hierarchy depth and parent serial key for one row."""
     if not serial:
-        return 0, stack[-1]["serial_key"] if stack else None
+        if not stack:
+            return 0, None
+        return _child_of_structural_parent(stack)
 
     decimal_match = _DECIMAL_SERIAL.match(serial)
     if decimal_match:
@@ -163,11 +203,10 @@ def _serial_depth_and_parent_key(serial: str, stack: list[dict]) -> tuple[int, s
     if _ALPHA_SERIAL.match(alpha):
         if not stack:
             return 0, None
-        parent = stack[-1]
-        return parent["depth"] + 1, parent["serial_key"]
+        return _child_of_structural_parent(stack)
 
     if stack:
-        return stack[-1]["depth"] + 1, stack[-1]["serial_key"]
+        return _child_of_structural_parent(stack)
     return 0, None
 
 
@@ -185,6 +224,8 @@ def attach_row_hierarchy(
         serial = ""
         if serial_key:
             serial = normalize_serial_text(cell_value(record, serial_key))
+        if not serial:
+            serial = _infer_serial_from_description(record)
 
         depth, parent_serial_key = _serial_depth_and_parent_key(serial, stack)
         row_id = f"r{record.get('excel_row_number', index)}"

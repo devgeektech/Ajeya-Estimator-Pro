@@ -7,13 +7,14 @@ from pathlib import Path
 from django.core.files.storage import default_storage
 
 from utils.excel import read_rows_with_metadata
+from utils.make_list_splits import attach_approved_makes_list
 
 from .pdf_make_list_parser import parse_make_list_pdf
 from .serial_normalizer import attach_row_hierarchy, detect_serial_key, structure_for_analysis
 
 logger = logging.getLogger("boq_ai")
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 MAKE_LIST_HEADER_HINTS = frozenset(
     {
@@ -45,7 +46,9 @@ def _parse_excel_make_list(uploaded_file, *, source_filename: str) -> dict:
         expand_columns=True,
     )
     serial_key = detect_serial_key(headers)
-    rows = attach_row_hierarchy(records, serial_key=serial_key)
+    rows = attach_approved_makes_list(
+        attach_row_hierarchy(records, serial_key=serial_key)
+    )
     return structure_for_analysis(
         {
             "version": SCHEMA_VERSION,
@@ -63,7 +66,9 @@ def _parse_pdf_make_list(uploaded_file, *, source_filename: str) -> dict:
     file_path = _resolve_path(uploaded_file)
     headers, records = parse_make_list_pdf(file_path)
     serial_key = detect_serial_key(headers)
-    rows = attach_row_hierarchy(records, serial_key=serial_key)
+    rows = attach_approved_makes_list(
+        attach_row_hierarchy(records, serial_key=serial_key)
+    )
     return structure_for_analysis(
         {
             "version": SCHEMA_VERSION,

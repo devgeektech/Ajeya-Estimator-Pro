@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}{{ boq.boq_name }} — Match Results &middot; Ajeya Estimator Pro{% endblock %}
+
+{% block topbar_leading %}
+<a href="{% url 'boq:detail' boq.pk %}?tab=analysis" class="topbar-back" aria-label="Back to BOQ">
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <line x1="20" y1="12" x2="5" y2="12"/>
+        <polyline points="11 18 5 12 11 6"/>
+    </svg>
+</a>
+{% endblock %}
+
+{% block heading %}{{ boq.boq_name }} — Match Results{% endblock %}
+
+{% block content %}
+<div
+    class="boq-view"
+    x-data="{
+        matching: {{ is_processing|yesno:'true,false' }},
+        statusUrl: '{% url 'boq:status' boq.pk %}?expect=match',
+        pollTimer: null,
+        startPolling() {
+            if (!this.matching) return;
+            const poll = () => {
+                fetch(this.statusUrl, { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
+                    .then((response) => response.json())
+                    .then((data) => {
+                        if (data.ready) {
+                            window.location.reload();
+                            return;
+                        }
+                        this.pollTimer = setTimeout(poll, 3000);
+                    })
+                    .catch(() => {
+                        this.pollTimer = setTimeout(poll, 5000);
+                    });
+            };
+            poll();
+        }
+    }"
+    x-init="startPolling()"
+>
+    <div class="boq-detail-header">
+        <div class="boq-detail-actions">
+            {% if boq.status == "PROCESSING" %}
+                <span class="badge badge--blue">Matching in progress…</span>
+            {% elif boq.status == "PROCESSED" %}
+                <span class="badge badge--green">Matched</span>
+            {% elif boq.status == "ANALYSIS_FAILED" %}
+                <span class="badge badge--red">Matching failed</span>
+            {% endif %}
+
+            {% if can_export %}
+                <a href="{% url 'boq:export' boq.pk %}" class="btn btn--ghost btn--small">Export Excel</a>
+            {% endif %}
+
+            <a href="{% url 'boq:detail' boq.pk %}?tab=analysis" class="btn btn--ghost btn--small">Back to BOQ</a>
+        </div>
+    </div>
+
+    {% if analysis_stats %}
+        <p class="panel__text panel__text--muted">
+            Matched {{ analysis_stats.products_matched|default:0 }} / {{ analysis_stats.products_total }} products
+            ({{ analysis_stats.products_pending }} pending).
+        </p>
+    {% endif %}
+
+    <div class="panel">
+        <div x-show="matching" x-cloak class="analysis-loading-panel">
+            <div class="analysis-loading-panel__header">
+                <span class="analysis-loading-panel__dot"></span>
+                <div>
+                    <strong>Matching products…</strong>
+                    <p>Comparing extracted products against the master database and fetching labour charges.</p>
+                </div>
+            </div>
+        </div>
+        <div x-show="!matching">
+            {% include "boq/_analysis_table.html" with analysis_display=analysis_display boq=boq %}
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -73,14 +73,61 @@ cd backend
 ../.venv/bin/python manage.py test tests --no-input
 ```
 
-### 5. Redis / Celery (optional locally)
+### 5. Redis / Celery (BOQ analysis)
 
-Redis is configured for future background jobs. On Windows, run Redis in WSL.
-Celery worker (when needed):
+BOQ analysis uses Celery. In production (`DEBUG=False`), Redis and the Celery worker
+are required. Check readiness:
 
 ```bash
 cd backend
-../.venv/bin/python -m celery -A config worker --loglevel=info --pool=solo
+../.venv/bin/python manage.py check_celery
+```
+
+**Option A — inline analysis (no Redis/worker):**
+
+```env
+DEBUG=True
+CELERY_TASK_ALWAYS_EAGER=True
+```
+
+**Option B — async analysis (matches production):**
+
+Terminal 1 — Django:
+
+```bash
+cd backend
+../.venv/bin/python manage.py runserver
+```
+
+Terminal 2 — Redis:
+
+```bash
+redis-server
+```
+
+On Windows without native Redis, use WSL: `wsl redis-server` or `scripts/run_redis.ps1`.
+
+Terminal 3 — Celery worker:
+
+```bash
+./scripts/run_celery_worker.sh
+```
+
+Windows:
+
+```powershell
+.\scripts\run_celery_worker.ps1
+```
+
+The BOQ detail page polls `GET /boqs/<id>/status/` while status is `PROCESSING` and
+reloads when analysis completes or fails.
+
+Production `.env` on EC2:
+
+```env
+DEBUG=False
+CELERY_TASK_ALWAYS_EAGER=False
+REDIS_URL=redis://localhost:6379/0
 ```
 
 ---

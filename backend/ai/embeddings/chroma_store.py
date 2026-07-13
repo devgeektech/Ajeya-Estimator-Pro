@@ -41,6 +41,29 @@ def rate_document_id(rate: Rate_Master) -> str:
     return f"rate-master-{rate.pk}"
 
 
+def resolve_rate_master_id(document_id: str, metadata: dict[str, Any] | None = None) -> int | None:
+    """Resolve PostgreSQL Rate_Master pk from a Chroma hit id/metadata."""
+    if metadata:
+        raw_id = metadata.get("rate_master_id")
+        if raw_id is not None:
+            try:
+                return int(raw_id)
+            except (TypeError, ValueError):
+                pass
+
+    if document_id.startswith("rate-master-"):
+        suffix = document_id.removeprefix("rate-master-")
+        try:
+            return int(suffix)
+        except ValueError:
+            return None
+
+    try:
+        return int(document_id)
+    except ValueError:
+        return None
+
+
 def rate_document(rate: Rate_Master) -> str:
     """Build structured text embedded for vector product search."""
     fields = [
@@ -109,6 +132,49 @@ class ChromaEmbeddingStore:
     def reset_version(self, database_version_id: int) -> None:
         """Remove indexed products for one database version."""
         self.collection.delete(where={"database_version_id": int(database_version_id)})
+
+    def query_similar(
+        self,
+        query_embedding: list[float],
+        *,
+        limit: int = 20,
+        database_version_id: int | None = None,
+    ) -> list[dict]:
+        """Return nearest Rate_Master rows by embedding distance."""
+        where_filter: Any = (
+            {"database_version_id": int(database_version_id)}
+            if database_version_id is not None
+            else None
+        )
+        result = self.collection.query(
+            query_embeddings=[query_embedding],
+            n_results=max(1, limit),
+            where=cast(Any, where_filter),
+            include=["metadatas", "distances", "documents"],
+        )
+        ids = (result.get("ids") or [[]])[0]
+        metadatas = (result.get("metadatas") or [[]])[0]
+        distances = (result.get("distances") or [[]])[0]
+        documents = (result.get("documents") or [[]])[0]
+
+        hits: list[dict] = []
+        for index, rate_id in enumerate(ids):
+            metadata = metadatas[index] if index < len(metadatas) else {}
+            distance = distances[index] if index < len(distances) else 1.0
+            document = documents[index] if index < len(documents) else ""
+            rate_master_id = resolve_rate_master_id(str(rate_id), dict(metadata or {}))
+            if rate_master_id is None:
+                continue
+            hits.append(
+                {
+                    "rate_master_id": rate_master_id,
+                    "distance": float(distance),
+                    "similarity": max(0.0, 1.0 - float(distance)),
+                    "metadata": metadata or {},
+                    "document": document or "",
+                }
+            )
+        return hits
 
     def upsert_rate(self, rate: Rate_Master, embedding: Sequence[float]) -> str:
         """Upsert one Rate_Master row into Chroma and return its document id."""

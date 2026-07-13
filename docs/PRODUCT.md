@@ -20,7 +20,7 @@ rebuild processing (matching, review, export) on a fresh design.
 | Master database upload / history / embeddings | Active |
 | Product embeddings (Chroma) after DB import | Active |
 | BOQ workbook + make-list upload | Active |
-| BOQ parsing, processing, matching, review, export | Removed — rebuild pending |
+| BOQ parsing, processing, matching, review, export | Phase 1–2 active (analysis, review, export); pending-products flow pending |
 
 **Planned BOQ pipeline (not implemented):** parse workbook → AI extraction →
 product matching → rate/labour retrieval → expert review → Excel export.
@@ -79,15 +79,110 @@ Upload BOQ (+ optional make list) → parse to JSON → store files + hierarchy
 
 Entry point: `BOQCreationService` in `apps/boq/services/boq_service.py`.
 
----
+### BOQ analysis — two-step workflow
+
+```text
+Step 1 — Analyse:  rows_tree → AI extraction → extracted products/activities (detail page)
+Step 2 — Match:    extracted products → DB matching → rates/labour (match results page)
+```
+
+**Step 1 — Analyse** (BOQ detail → **Analysis** tab):
+
+- Button: **Analyse** → `POST /boqs/<id>/extract/` via `dispatch_boq_extraction`
+- Celery task: `boq.process_extraction`
+- Status: `PROCESSING` → `EXTRACTED`
+- Shows extracted products and activities in upload row order (no DB matching yet)
+- **Interactive review:** users can edit extracted product fields (category, size,
+  capacity, attributes, etc.) and select a preferred make from the make list when
+  a make-list line matches the BOQ description. Saves via
+  `POST /boqs/<id>/extraction/edit/` (`BOQExtractionEditService`). Missing fields
+  are highlighted; edits persist in `analysis_data` before **Match** runs.
+
+**Step 2 — Match** (BOQ detail → **Match** button → new page):
+
+- Button: **Match** → `POST /boqs/<id>/match/` → redirect to `/boqs/<id>/match-results/`
+- Celery task: `boq.process_matching`
+- Status: `PROCESSING` → `PROCESSED`
+- Match results page: rates, labour, confirm, export
+
+Poll `GET /boqs/<id>/status/?expect=extract|match` while `PROCESSING`.
+
+**Output:** `media/extract_json/{boq_name}/boq_analysis.json` plus `BOQ.analysis_data`
+JSONField (`phase`: `extracted` | `matched`). After matching, a dedicated
+`boq_match_results.json` in the same folder stores full `product_matches` snapshots
+(candidates, scores, rate/labour enrichment) for internal tracking even when the
+live analysis is edited before re-match.
+
+**Services:**
+
+| Service | Role |
+| --- | --- |
+| `BOQExtractionService` | AI multi-product extraction from `rows_tree` |
+| `ProductMatchingService` | Chroma recall + structured `Rate_Master` scoring |
+| `MakeListConstraintService` | Map BOQ lines to `approved_makes_list`; hard Make filter |
+| `BOQAnalysisService` | Orchestrator |
+| `utils/attribute_parser.py` | Parse/normalize dynamic `Attribute` key-value text |
+
+**Input:** `boq_data.json` → `rows_tree` (`fields` per row).
+
+**Decisions (2026-07-13):**
+
+| Topic | Decision |
+| --- | --- |
+| Products per BOQ row | **Multiple** — one row may yield several extracted products |
+| Make list constraint | **Hard filter** when a make-list material maps to the row |
+| Section rows | **Skip matching** (context only) when depth 0 / no qty |
+| Attribute keys | **Learn aliases from DB** over time; normalize `Attribute` text in code |
+| Matching | **Structured product match** on `Rate_Master` columns + attributes, not vector/text alone |
+
+**Make list:** slash-separated makes (`TATA/JINDAL/SURYA`) are split into
+`approved_makes_list` on each row at parse time.
+
+**Matching layer (three passes):**
+
+1. **Retrieval** — Chroma narrows candidates from description (recall).
+2. **Structured scoring** — rank by Category, Sub_Category, Class, Size, Unit, Make,
+   and parsed Attribute key-value overlap (precision).
+3. **Make list filter** — drop candidates whose `Make` is not in `approved_makes_list`
+   when the row maps to a make-list material.
+
+Confidence &lt; 30% → pending product, no auto selection. AI extracts only; services
+match and filter.
+
+### BOQ analysis phase 2 — enrichment, confirmation, export
+
+```text
+matched products → rate + labour lookup → line output → session confirm → Excel export
+```
+
+**After phase 1 matching:**
+
+1. `RateDetailRetrievalService` — read precomputed `Rate_Master` values for selected product.
+2. `LabourDetailRetrievalService` — link labour via `Tech_Key` (size-aware when possible).
+3. `BOQLineOutputService` — qty × per-unit material/labour from master DB (no formula
+   recalculation).
+4. `BOQAnalysisDisplayService` — shapes rows for the **Analysis** tab.
+
+**Expert confirmation (session only):**
+
+- Any logged-in user with access to the BOQ can **Confirm** lines on the Analysis tab.
+- Confirmations are stored in the **user session only** — not written to PostgreSQL.
+- Pending lines require picking a candidate product before confirm; matched lines confirm the auto-selection.
+- Re-running analysis does not clear session confirmations (user may undo per line).
+
+**Labour charges:** `LabourDetailRetrievalService` links `Rate_Master.Tech_Key` → `Labour_Master`
+rows (size-aware when multiple rows share a key). Per-unit labour uses precomputed workbook columns:
+`Total_Labour_per_unit_with_labour_Multipler` → `Total_Labour_per_Unit` → `Labour_Rate_Per_unit`.
+Component breakdown (testing, scaffolding, consumables, painting, buffer) is exposed for export.
+
+**Export:** `BOQExportService` → Excel download; applies session confirmations when present.
 
 ## Business Rules (stable)
 
 - **No recalculation** of client workbook formulas — read precomputed values from
   `Rate_Master` / `Labour_Master` when the pipeline returns.
-- **Human review** required before final export (when rebuilt).
-- **Confidence below 30%** → no auto product selection; pending product flow
-  (when rebuilt).
+- **Session confirmation** on the Analysis tab before export (not stored in PostgreSQL).
+- **Confidence below 30%** → no auto product selection; user must pick a candidate and confirm.
 - **AI** may understand descriptions, extract products/activities, validate matches.
   AI must **not** calculate costs, profits, select suppliers, or set pricing.
 - Do **not** use deprecated `match_key` / `source_key` for matching or imports.
@@ -113,8 +208,8 @@ Browser → Django (templates + HTMX) → Services → PostgreSQL
 | Shared Django | `backend/common/` | Choices, exceptions, middleware, mixins |
 | Helpers | `backend/utils/` | Excel, text, files — no Django models |
 
-Celery + Redis are configured for future background jobs; no BOQ tasks are
-registered today.
+Celery + Redis are configured; BOQ analysis runs via `apps/boq/tasks.py`
+(`process_boq_analysis_task`).
 
 ---
 
@@ -157,6 +252,10 @@ BOQ_AI/
 | `apps/database_manager/services/activation.py` | Single active upload |
 | `apps/database_manager/views.py` | DB upload UI |
 | `apps/boq/services/boq_service.py` | BOQ file persistence |
+| `apps/boq/services/boq_analysis_service.py` | Analysis orchestrator |
+| `apps/boq/services/rate_detail_retrieval_service.py` | Rate_Master snapshot by id |
+| `apps/boq/services/labour_detail_retrieval_service.py` | Labour_Master by Tech_Key |
+| `apps/boq/services/boq_export_service.py` | Excel export |
 | `ai/openai_client.py` | OpenAI client + API key check |
 | `ai/embeddings/` | Chroma product index |
 | `config/settings.py` | Single settings module |

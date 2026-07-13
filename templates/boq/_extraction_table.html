@@ -1,0 +1,191 @@
+{% if not extraction_display.has_extraction %}
+<p class="panel__text">No extracted products yet. Click <strong>Analyse</strong> to extract products and activities from this BOQ.</p>
+{% else %}
+<div class="analysis-summary">
+    <p class="panel__text panel__text--muted">
+        {{ extraction_display.product_count }} product(s) and
+        {{ extraction_display.activity_count }} activity line(s) extracted.
+        {% if extraction_display.missing_field_count %}
+            <span class="extraction-missing-summary">{{ extraction_display.missing_field_count }} field(s) need review.</span>
+        {% endif %}
+        {% if can_edit_extraction %}
+            Fill missing values below, then click <strong>Match</strong> when ready.
+        {% elif can_match %}
+            Click <strong>Match</strong> to compare against the master database.
+        {% endif %}
+    </p>
+</div>
+
+<div class="extraction-lines">
+    {% for line in extraction_display.lines %}
+    <article class="extraction-line extraction-line--{{ line.status }}">
+        <header class="extraction-line__header">
+            <div class="extraction-line__title">
+                <span class="extraction-line__serial">{{ line.serial|default:"—" }}</span>
+                <strong>{{ line.description|truncatechars:160 }}</strong>
+            </div>
+            <div class="extraction-line__meta">
+                {% if line.qty %}<span>Qty: {{ line.qty }}{% if line.unit %} {{ line.unit }}{% endif %}</span>{% endif %}
+                {% if line.product_count > 1 %}
+                    <span class="badge badge--dark">{{ line.product_count }} products</span>
+                {% endif %}
+                {% if line.status == 'skipped' %}
+                    <span class="badge badge--gray">section</span>
+                {% endif %}
+            </div>
+        </header>
+
+        {% if line.make_list.has_make_list and line.status != 'skipped' %}
+        <section class="extraction-make-list">
+            {% if line.make_list.matched %}
+                <div class="extraction-make-list__match">
+                    <span class="extraction-make-list__label">Make list match</span>
+                    <span>{{ line.make_list.material }}</span>
+                    {% if line.make_list.match_score %}
+                        <span class="extraction-make-list__score">({{ line.make_list.match_score }} overlap)</span>
+                    {% endif %}
+                </div>
+                {% if can_edit_extraction %}
+                <form method="post" action="{% url 'boq:extraction_edit' boq.pk %}" class="extraction-make-form">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="update_make">
+                    <input type="hidden" name="row_id" value="{{ line.row_id }}">
+                    <label class="extraction-field">
+                        <span class="extraction-field__label">Preferred make</span>
+                        <select name="selected_make" class="extraction-input" required>
+                            <option value="">Select make…</option>
+                            {% for make in line.make_list.approved_makes %}
+                            <option value="{{ make }}" {% if line.make_list.selected_make == make %}selected{% endif %}>{{ make }}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                    <button type="submit" class="btn btn--small btn--boq-match">Save make</button>
+                </form>
+                {% elif line.make_list.selected_make %}
+                <p class="extraction-make-list__selected">Selected make: <strong>{{ line.make_list.selected_make }}</strong></p>
+                {% else %}
+                <p class="extraction-make-list__hint">Approved makes: {{ line.make_list.approved_makes|join:", " }}</p>
+                {% endif %}
+            {% else %}
+                <p class="extraction-make-list__hint extraction-make-list__hint--muted">No make-list line matched this BOQ description.</p>
+            {% endif %}
+        </section>
+        {% endif %}
+
+        {% if line.activities %}
+        <section class="extraction-activities">
+            <span class="extraction-section-label">Activities</span>
+            <ul class="extraction-list">
+                {% for activity in line.activities %}
+                <li>{{ activity }}</li>
+                {% endfor %}
+            </ul>
+        </section>
+        {% endif %}
+
+        {% if can_edit_extraction and line.status != 'skipped' %}
+        <div class="extraction-line__actions">
+            <form method="post" action="{% url 'boq:extraction_edit' boq.pk %}" class="extraction-inline-form">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="add_product">
+                <input type="hidden" name="row_id" value="{{ line.row_id }}">
+                <button type="submit" class="btn btn--small btn--ghost">+ Add product</button>
+            </form>
+            {% if line.product_count > 1 %}
+            <span class="extraction-line__hint">This row has multiple products — remove any extras below.</span>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {% for product in line.products %}
+        <section class="extraction-product-card">
+            <div class="extraction-product-card__head">
+                <h4 class="extraction-product-card__title">
+                    {{ product.display_label }}
+                    {% if product.is_user_added %}<span class="badge badge--gray">manual</span>{% endif %}
+                </h4>
+                <div class="extraction-product-card__badges">
+                {% if product.missing_count %}
+                    <span class="badge badge--yellow">{{ product.missing_count }} missing</span>
+                {% else %}
+                    <span class="badge badge--green">complete</span>
+                {% endif %}
+                {% if can_edit_extraction %}
+                <form method="post" action="{% url 'boq:extraction_edit' boq.pk %}" class="extraction-inline-form" onsubmit="return confirm('Remove this product from the row?');">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="remove_product">
+                    <input type="hidden" name="row_id" value="{{ line.row_id }}">
+                    <input type="hidden" name="product_index" value="{{ product.product_index }}">
+                    <button type="submit" class="btn btn--small btn--danger">Remove</button>
+                </form>
+                {% endif %}
+                </div>
+            </div>
+
+            {% if can_edit_extraction %}
+            <form method="post" action="{% url 'boq:extraction_edit' boq.pk %}" class="extraction-product-form">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="update_product">
+                <input type="hidden" name="row_id" value="{{ line.row_id }}">
+                <input type="hidden" name="product_index" value="{{ product.product_index }}">
+
+                <div class="extraction-field-grid">
+                    {% for field in product.fields %}
+                    <label class="extraction-field {% if field.missing %}extraction-field--missing{% endif %}">
+                        <span class="extraction-field__label">{{ field.label }}{% if field.missing %} *{% endif %}</span>
+                        <input
+                            type="text"
+                            name="{{ field.key }}"
+                            value="{{ field.value }}"
+                            class="extraction-input"
+                            placeholder="{% if field.missing %}Required for matching{% else %}Optional{% endif %}"
+                        >
+                    </label>
+                    {% endfor %}
+                </div>
+
+                <label class="extraction-field extraction-field--full">
+                    <span class="extraction-field__label">Attributes (JSON)</span>
+                    <textarea
+                        name="attributes_json"
+                        class="extraction-input extraction-input--textarea"
+                        rows="3"
+                        placeholder='{"is": "1239", "mounting": "wall"}'
+                    >{{ product.attributes_json_text }}</textarea>
+                    <span class="extraction-field__hint">Technical specs as key-value pairs, e.g. IS number, mounting, material.</span>
+                </label>
+
+                <div class="extraction-product-form__actions">
+                    <button type="submit" class="btn btn--small btn--boq-analyse">Save product</button>
+                </div>
+            </form>
+            {% else %}
+            <dl class="extraction-readonly-grid">
+                {% for field in product.fields %}
+                <div class="extraction-readonly-item {% if field.missing %}extraction-field--missing{% endif %}">
+                    <dt>{{ field.label }}</dt>
+                    <dd>{{ field.value|default:"—" }}</dd>
+                </div>
+                {% endfor %}
+            </dl>
+            {% if product.attributes %}
+            <div class="extraction-attributes-readonly">
+                <span class="extraction-section-label">Attributes</span>
+                <ul class="extraction-list">
+                    {% for attr in product.attributes %}
+                    <li><code>{{ attr.key }}</code>: {{ attr.value }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+            {% endif %}
+        </section>
+        {% empty %}
+            {% if line.status != 'skipped' %}
+            <p class="extraction-line__empty">No products extracted for this row.</p>
+            {% endif %}
+        {% endfor %}
+    </article>
+    {% endfor %}
+</div>
+{% endif %}

@@ -10,3 +10,8 @@ class UserRole(models.TextChoices):
 
 class BOQStatus(models.TextChoices):
     UPLOADED = "UPLOADED", "Uploaded"
+    PROCESSING = "PROCESSING", "Processing"
+    EXTRACTED = "EXTRACTED", "Extracted"
+    MATCHING = "MATCHING", "Matching"
+    PROCESSED = "PROCESSED", "Processed"
+    ANALYSIS_FAILED = "ANALYSIS_FAILED", "Analysis Failed"
