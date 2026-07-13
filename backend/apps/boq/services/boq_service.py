@@ -14,14 +14,11 @@ from apps.boq.models import BOQ
 from common.choices import BOQStatus
 
 from .boq_parser import parse_boq_workbook
+from .boq_extract_service import persist_extract_json
+from .boq_files import upload_basename
 from .make_list_parser import parse_make_list_file
 
 logger = logging.getLogger("boq_ai")
-
-
-def upload_basename(uploaded_file) -> str:
-    name = getattr(uploaded_file, "name", None) or ""
-    return name.rsplit("/", 1)[-1]
 
 
 class BOQCreationService:
@@ -45,6 +42,12 @@ class BOQCreationService:
         if self.make_list_file:
             boq.make_list_data = self._safe_parse_make_list(boq)
         boq.save(update_fields=["boq_data", "make_list_data"])
+        persist_extract_json(
+            boq,
+            boq_data=boq.boq_data,
+            make_list_data=boq.make_list_data or None,
+            update_database=False,
+        )
 
         logger.info(
             "BOQ uploaded: '%s' (id=%s) by %s",

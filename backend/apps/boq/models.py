@@ -4,6 +4,7 @@ Stores uploaded BOQ workbooks (and optional make lists) for future processing.
 """
 from django.conf import settings
 from django.db import models
+from django.db.models.functions import Lower
 
 from common.choices import BOQStatus
 
@@ -36,6 +37,12 @@ class BOQ(models.Model):
         ordering = ["-created_at"]
         verbose_name = "BOQ"
         verbose_name_plural = "BOQs"
+        constraints = [
+            models.UniqueConstraint(
+                Lower("boq_name"),
+                name="boq_unique_name_ci",
+            )
+        ]
 
     def __str__(self) -> str:
         return self.boq_name

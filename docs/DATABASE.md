@@ -62,7 +62,7 @@ Imported into versioned tables (PascalCase ORM fields mirror workbook columns).
 | Field | Notes |
 | --- | --- |
 | `user` | Owner |
-| `boq_name` | Display name |
+| `boq_name` | Display name; **unique** (case-insensitive) — maps to `media/extract_json/{boq_name}/` |
 | `status` | `UPLOADED` only (for now) |
 | `uploaded_file` | Original workbook |
 | `make_list_file` | Optional (Excel or PDF) |
@@ -81,6 +81,10 @@ Imported into versioned tables (PascalCase ORM fields mirror workbook columns).
 | `excel_row_number` | Original worksheet row |
 | `display_values` | UI-safe cell values keyed by normalized header |
 | `values` | Raw parsed cell values |
+
+**`rows_tree`** (nested, for AI extraction): each node has `fields`
+(cleaned `display_values`), `children`, plus `row_id`, `serial`, `depth`.
+Use `rows_tree` for product/activity extraction; keep flat `rows` for UI/review.
 
 Serial rules: `1` → depth 0; `1.1` → child of `1`; `a` / `(a)` → child of
 current parent; `(1)` → child of serial `1`.

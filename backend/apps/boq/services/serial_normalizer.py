@@ -68,6 +68,60 @@ def structure_for_display(structure: dict) -> dict:
     return {**structure, "rows": rows}
 
 
+def analysis_fields(row: dict) -> dict[str, Any]:
+    """Return clean cell values for AI / analysis (prefers ``display_values``)."""
+    display_values = row.get("display_values") or {}
+    if display_values:
+        return dict(display_values)
+    return dict(row.get("values") or {})
+
+
+def _analysis_node(row: dict) -> dict[str, Any]:
+    return {
+        "row_id": row.get("row_id"),
+        "serial": row.get("serial", ""),
+        "depth": row.get("depth", 0),
+        "excel_row_number": row.get("excel_row_number"),
+        "fields": analysis_fields(row),
+        "children": [],
+    }
+
+
+def nest_rows_hierarchy(flat_rows: list[dict]) -> list[dict]:
+    """Build a nested tree from flat rows using ``parent_row_id`` links."""
+    nodes: dict[str, dict] = {}
+    roots: list[dict] = []
+
+    for row in flat_rows:
+        row_id = row.get("row_id")
+        if not row_id:
+            continue
+        nodes[row_id] = _analysis_node(row)
+
+    for row in flat_rows:
+        row_id = row.get("row_id")
+        if not row_id or row_id not in nodes:
+            continue
+        parent_id = row.get("parent_row_id")
+        if parent_id and parent_id in nodes:
+            nodes[parent_id]["children"].append(nodes[row_id])
+        else:
+            roots.append(nodes[row_id])
+
+    return roots
+
+
+def structure_for_analysis(structure: dict) -> dict:
+    """Return payload with nested ``rows_tree`` for AI extraction workflows."""
+    if not structure:
+        return {}
+    flat_rows = structure.get("rows") or []
+    return {
+        **structure,
+        "rows_tree": nest_rows_hierarchy(flat_rows),
+    }
+
+
 def detect_serial_key(headers: list[dict]) -> str | None:
     for header in headers:
         key = header.get("key", "")

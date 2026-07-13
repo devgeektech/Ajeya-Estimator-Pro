@@ -6,6 +6,14 @@ from typing import Any
 
 from pypdf import PdfReader
 
+from utils.text_boundary import (
+    looks_like_make_token,
+    peel_boundary_segment,
+    peel_fused_segment_boundary,
+    peel_trailing_make_word,
+    word_count,
+)
+
 _SERIAL_LINE = re.compile(r"^(\d+)\.?\s+(.+)$")
 _TITLE_MARKERS = re.compile(
     r"(?:list\s+of\s+acceptable|system\s*:-|acceptable\s+make\s+of\s+materials)",
@@ -17,15 +25,9 @@ _HEADER_LINE = re.compile(
 )
 
 
-def _looks_like_make_token(token: str) -> bool:
-    token = token.strip()
-    if not token or len(token) > 40:
-        return False
-    letters = [char for char in token if char.isalpha()]
-    if not letters:
-        return False
-    upper_ratio = sum(char.isupper() for char in letters) / len(letters)
-    return upper_ratio >= 0.6 or token.isupper()
+def _split_without_slashes(text: str) -> tuple[str, list[str]]:
+    description, makes = peel_boundary_segment(text.strip(), allow_long_segment=True)
+    return description, makes
 
 
 def _strip_fused_title_suffix(line: str) -> str:
@@ -69,35 +71,45 @@ def parse_make_list_pdf_line(line: str) -> tuple[str, str, list[str]] | None:
         return serial, "", []
 
     if "/" not in rest:
-        return serial, rest, []
+        description, makes = _split_without_slashes(rest)
+        return serial, description, makes
 
     segments = [segment.strip() for segment in rest.split("/") if segment.strip()]
     if len(segments) == 1:
-        first_segment = segments[0]
-        words = first_segment.rsplit(None, 1)
-        if len(words) == 2 and _looks_like_make_token(words[1]):
-            return serial, words[0].strip(), [words[1].strip()]
-        return serial, first_segment, []
+        description, makes = _split_without_slashes(segments[0])
+        return serial, description, makes
 
     makes: list[str] = []
-    description_end = len(segments)
+    split_index = len(segments)
 
     for index in range(len(segments) - 1, -1, -1):
         segment = segments[index]
-        if _looks_like_make_token(segment):
+        if index > 0 and looks_like_make_token(segment):
             makes.insert(0, segment)
-            description_end = index
+            split_index = index
             continue
-        words = segment.rsplit(None, 1)
-        if len(words) == 2 and _looks_like_make_token(words[1]):
-            makes.insert(0, words[1].strip())
-            segments[index] = words[0].strip()
-            description_end = index + 1
+        if index > 0:
+            if word_count(segment) == 2:
+                peeled_description, peeled_makes = peel_fused_segment_boundary(segment)
+                if peeled_makes:
+                    makes = peeled_makes + makes
+                    segments[index] = peeled_description
+            split_index = index + 1
+            break
+        split_index = 1
         break
 
-    description = " / ".join(
-        segment for segment in segments[:description_end] if segment
-    ).strip()
+    description_parts = [segment for segment in segments[:split_index] if segment]
+    if description_parts and makes:
+        allow_long_segment = len(description_parts) == 1
+        peeled_description, peeled_makes = peel_boundary_segment(
+            description_parts[-1],
+            allow_long_segment=allow_long_segment,
+        )
+        description_parts[-1] = peeled_description
+        makes = peeled_makes + makes
+
+    description = " / ".join(part for part in description_parts if part).strip()
     return serial, description, makes
 
 

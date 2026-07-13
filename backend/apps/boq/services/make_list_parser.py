@@ -9,7 +9,7 @@ from django.core.files.storage import default_storage
 from utils.excel import read_rows_with_metadata
 
 from .pdf_make_list_parser import parse_make_list_pdf
-from .serial_normalizer import attach_row_hierarchy, detect_serial_key
+from .serial_normalizer import attach_row_hierarchy, detect_serial_key, structure_for_analysis
 
 logger = logging.getLogger("boq_ai")
 
@@ -46,15 +46,17 @@ def _parse_excel_make_list(uploaded_file, *, source_filename: str) -> dict:
     )
     serial_key = detect_serial_key(headers)
     rows = attach_row_hierarchy(records, serial_key=serial_key)
-    return {
-        "version": SCHEMA_VERSION,
-        "format": "excel",
-        "source_filename": source_filename,
-        "serial_key": serial_key,
-        "headers": headers,
-        "rows": rows,
-        "row_count": len(rows),
-    }
+    return structure_for_analysis(
+        {
+            "version": SCHEMA_VERSION,
+            "format": "excel",
+            "source_filename": source_filename,
+            "serial_key": serial_key,
+            "headers": headers,
+            "rows": rows,
+            "row_count": len(rows),
+        }
+    )
 
 
 def _parse_pdf_make_list(uploaded_file, *, source_filename: str) -> dict:
@@ -62,15 +64,17 @@ def _parse_pdf_make_list(uploaded_file, *, source_filename: str) -> dict:
     headers, records = parse_make_list_pdf(file_path)
     serial_key = detect_serial_key(headers)
     rows = attach_row_hierarchy(records, serial_key=serial_key)
-    return {
-        "version": SCHEMA_VERSION,
-        "format": "pdf",
-        "source_filename": source_filename,
-        "serial_key": serial_key,
-        "headers": headers,
-        "rows": rows,
-        "row_count": len(rows),
-    }
+    return structure_for_analysis(
+        {
+            "version": SCHEMA_VERSION,
+            "format": "pdf",
+            "source_filename": source_filename,
+            "serial_key": serial_key,
+            "headers": headers,
+            "rows": rows,
+            "row_count": len(rows),
+        }
+    )
 
 
 def parse_make_list_file(uploaded_file, *, source_filename: str = "") -> dict:

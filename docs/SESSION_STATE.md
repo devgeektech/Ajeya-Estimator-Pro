@@ -41,6 +41,28 @@ Completed:
 - Deleted unused `ai/service.py`, `ai/context.py`, and `ai/prompts/test_json.txt`.
 - Trimmed dead Chroma `query` API and AI instruction logging config.
 
+### 2026-07-13 — Unique BOQ Names
+
+Completed:
+
+- Case-insensitive unique constraint on `boq_name`; upload form rejects duplicates.
+
+### 2026-07-13 — Dynamic PDF Parsing + extract_json Storage
+
+Completed:
+
+- Dynamic make/description splitting via `utils/text_boundary.py` (no hardcoded
+  material word lists).
+- `media/extract_json/{boq_name}/boq_data.json` and `make_list_data.json` written
+  on upload and refreshed on View.
+
+### 2026-07-13 — Make List PDF Description Fix
+
+Completed:
+
+- Fixed PDF make-list parsing where description text was merged into Approved Makes
+  (empty Description column in UI for rows like "M.S Pipes TATA/...").
+
 ### 2026-07-10 — PDF Make List + Robust Excel Parsing
 
 Completed:

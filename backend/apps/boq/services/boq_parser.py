@@ -8,7 +8,7 @@ from django.core.files.storage import default_storage
 
 from utils.excel import read_rows_with_metadata
 
-from .serial_normalizer import attach_row_hierarchy, detect_serial_key
+from .serial_normalizer import attach_row_hierarchy, detect_serial_key, structure_for_analysis
 
 logger = logging.getLogger("boq_ai")
 
@@ -51,15 +51,17 @@ def parse_boq_workbook(uploaded_file, *, source_filename: str = "") -> dict:
     serial_key = detect_serial_key(headers)
     rows = attach_row_hierarchy(records, serial_key=serial_key)
 
-    payload = {
-        "version": SCHEMA_VERSION,
-        "format": "excel",
-        "source_filename": source_filename or Path(str(uploaded_file)).name,
-        "serial_key": serial_key,
-        "headers": headers,
-        "rows": rows,
-        "row_count": len(rows),
-    }
+    payload = structure_for_analysis(
+        {
+            "version": SCHEMA_VERSION,
+            "format": "excel",
+            "source_filename": source_filename or Path(str(uploaded_file)).name,
+            "serial_key": serial_key,
+            "headers": headers,
+            "rows": rows,
+            "row_count": len(rows),
+        }
+    )
     logger.info(
         "Parsed BOQ workbook '%s': %s rows (serial key: %s)",
         payload["source_filename"],

@@ -7,6 +7,28 @@ Meaningful product and technical changes only. Older history is in git.
 - Deleted unused `ai/service.py`, `ai/context.py`, and `ai/prompts/test_json.txt`.
 - Trimmed dead `load_prompt`, Chroma `query`, and AI instruction logging config.
 
+## 2026-07-13 — Nested rows_tree for AI Extraction
+
+- Extract JSON now includes `rows_tree`: nested hierarchy with `fields` (from
+  `display_values`) and `children` for AI product/activity extraction.
+
+## 2026-07-13 — Unique BOQ Names
+
+- BOQ names are unique (case-insensitive) at upload and in PostgreSQL, preventing
+  duplicate `media/extract_json/{boq_name}/` folders.
+
+## 2026-07-13 — Dynamic PDF Parsing + extract_json Storage
+
+- Replaced hardcoded material word lists in PDF make-list parsing with dynamic
+  text-boundary heuristics (`utils/text_boundary.py`).
+- Normalized BOQ/make-list JSON is persisted under `media/extract_json/{boq_name}/`
+  on upload and refreshed when the View page is opened.
+
+## 2026-07-13 — Make List PDF Description Fix
+
+- PDF parser no longer treats fused description+make text as a brand-only column;
+  Description cells render correctly for slash-separated make-list PDF rows.
+
 ## 2026-07-10 — Default Chat Model → gpt-4o-mini
 
 - Switched default `OPENAI_MODEL` from `gpt-5-mini` to `gpt-4o-mini` for lower-cost,

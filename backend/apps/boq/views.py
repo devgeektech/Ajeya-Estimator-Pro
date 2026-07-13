@@ -12,35 +12,24 @@ from apps.accounts.models import User
 
 from .forms import BOQUploadForm
 from .models import BOQ
-from .services.boq_parser import parse_boq_workbook
-from .services.boq_service import BOQCreationService, upload_basename
-from .services.make_list_parser import parse_make_list_file
+from .services.boq_extract_service import refresh_all_extract
+from .services.boq_service import BOQCreationService
 from .services.serial_normalizer import structure_for_display
 
 logger = logging.getLogger("boq_ai")
 
 
-def _display_structure(boq: BOQ, *, kind: str) -> dict:
-    """Parse from the stored file when possible so the UI always reflects current rules."""
+def _structures_for_display(boq: BOQ) -> tuple[dict, dict]:
+    """Re-parse files once, sync extract JSON, and shape both tab payloads."""
     try:
-        if kind == "boq" and boq.uploaded_file:
-            payload = parse_boq_workbook(
-                boq.uploaded_file,
-                source_filename=upload_basename(boq.uploaded_file),
-            )
-        elif kind == "make_list" and boq.make_list_file:
-            payload = parse_make_list_file(
-                boq.make_list_file,
-                source_filename=upload_basename(boq.make_list_file),
-            )
-        else:
-            payload = boq.boq_data if kind == "boq" else boq.make_list_data
-            return structure_for_display(payload or {})
-        return structure_for_display(payload)
+        boq_payload, make_list_payload = refresh_all_extract(boq)
     except Exception:
-        logger.exception("Failed to parse %s for BOQ id=%s", kind, boq.pk)
-        payload = boq.boq_data if kind == "boq" else boq.make_list_data
-        return structure_for_display(payload or {})
+        logger.exception("Failed to refresh extract JSON for BOQ id=%s", boq.pk)
+        boq_payload = boq.boq_data or {}
+        make_list_payload = boq.make_list_data or {}
+    if not boq.make_list_file:
+        make_list_payload = {}
+    return structure_for_display(boq_payload), structure_for_display(make_list_payload)
 
 
 class BOQListView(LoginRequiredMixin, ListView):
@@ -71,8 +60,9 @@ class BOQDetailView(LoginRequiredMixin, DetailView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         boq = context["boq"]
-        context["boq_structure"] = _display_structure(boq, kind="boq")
-        context["make_list_structure"] = _display_structure(boq, kind="make_list")
+        boq_structure, make_list_structure = _structures_for_display(boq)
+        context["boq_structure"] = boq_structure
+        context["make_list_structure"] = make_list_structure
         context["has_make_list"] = bool(boq.make_list_file)
         context["default_tab"] = self.request.GET.get("tab", "boq")
         if context["default_tab"] not in {"boq", "make_list"}:

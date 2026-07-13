@@ -68,9 +68,13 @@ Upload BOQ (+ optional make list) → parse to JSON → store files + hierarchy
 
 - BOQ workbook: `.xlsx` / `.xlsm`
 - Make list: `.xlsx`, `.xlsm`, or `.pdf`
+- **BOQ name must be unique** (case-insensitive) so each upload gets its own
+  `media/extract_json/{boq_name}/` folder.
 - On upload, rows are normalized by serial number (`1`, `1.1`, `a`, `(a)`, etc.)
   into JSON (`boq_data`, `make_list_data`) while preserving hierarchy for UI,
   AI extraction, and future priced export.
+- Normalized JSON is also written to `media/extract_json/{boq_name}/` as
+  `boq_data.json` and `make_list_data.json` for downstream AI analysis.
 - View page shows **BOQ** and **Make List** tabs with indented sheet layout.
 
 Entry point: `BOQCreationService` in `apps/boq/services/boq_service.py`.
