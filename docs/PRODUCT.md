@@ -117,7 +117,7 @@ live analysis is edited before re-match.
 
 | Service | Role |
 | --- | --- |
-| `BOQExtractionService` | AI multi-product extraction from `rows_tree` |
+| `BOQExtractionService` | AI multi-product extraction from grouped anchor rows (full lineage text) |
 | `ProductMatchingService` | Chroma recall + structured `Rate_Master` scoring |
 | `MakeListConstraintService` | Map BOQ lines to `approved_makes_list`; hard Make filter |
 | `BOQAnalysisService` | Orchestrator |
@@ -175,7 +175,9 @@ rows (size-aware when multiple rows share a key). Per-unit labour uses precomput
 `Total_Labour_per_unit_with_labour_Multipler` → `Total_Labour_per_Unit` → `Labour_Rate_Per_unit`.
 Component breakdown (testing, scaffolding, consumables, painting, buffer) is exposed for export.
 
-**Export:** `BOQExportService` → Excel download; applies session confirmations when present.
+**Export:** `BOQExportService` → Excel download with two sheets: **BOQ**
+(original upload layout with rate/amount filled) and **Charge Breakdown**
+(detailed material/labour lines). Applies session confirmations when present.
 
 ## Business Rules (stable)
 

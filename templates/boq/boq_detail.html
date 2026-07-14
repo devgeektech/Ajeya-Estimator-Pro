@@ -161,7 +161,26 @@
         </div>
     </div>
 
-    <div class="panel">
+    {% if extraction_display.has_extraction %}
+    <p
+        class="analysis-summary-line panel__text panel__text--muted"
+        x-show="tab === 'analysis' && !analysing"
+        x-cloak
+    >
+        {{ extraction_display.product_count }} product(s) and
+        {{ extraction_display.activity_count }} activity line(s) extracted.
+        {% if extraction_display.missing_field_count %}
+            <span class="extraction-missing-summary">{{ extraction_display.missing_field_count }} field(s) need review.</span>
+        {% endif %}
+        {% if can_edit_extraction %}
+            Fill missing values below, then click <strong>Match</strong> when ready.
+        {% elif can_match %}
+            Click <strong>Match</strong> to compare against the master database.
+        {% endif %}
+    </p>
+    {% endif %}
+
+    <div class="panel" :class="{ 'panel--analysis-flat': tab === 'analysis' }">
         <div x-show="tab === 'boq'" x-cloak role="tabpanel">
             {% include "boq/_sheet_table.html" with structure=boq_structure %}
         </div>
@@ -174,13 +193,7 @@
             {% endif %}
         </div>
 
-        <div x-show="tab === 'analysis'" x-cloak role="tabpanel">
-            {% if extraction_stats and extraction_display.has_extraction %}
-                <p class="panel__text panel__text--muted">
-                    {{ extraction_stats.products_total|default:0 }} product(s) extracted
-                    from {{ extraction_stats.rows_total|default:0 }} rows.
-                </p>
-            {% endif %}
+        <div x-show="tab === 'analysis'" x-cloak role="tabpanel" class="analysis-tab-canvas">
             <div x-show="analysing" x-cloak class="analysis-loading-panel">
                 <div class="analysis-loading-panel__header">
                     <span class="analysis-loading-panel__dot"></span>

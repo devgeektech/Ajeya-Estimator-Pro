@@ -9,6 +9,8 @@ from .boq_parser import parse_boq_workbook
 from .boq_files import upload_basename
 from .extract_json_store import save_extract_json_for_boq
 from .make_list_parser import parse_make_list_file
+from apps.boq.services.serial_normalizer import structure_for_analysis
+from utils.make_list_splits import attach_approved_makes_list
 
 logger = logging.getLogger("boq_ai")
 
@@ -88,6 +90,38 @@ def refresh_all_extract(boq: BOQ) -> tuple[dict, dict]:
     return boq_payload, make_list_payload
 
 
+def _normalize_make_list_payload(payload: dict | None) -> dict:
+    """Ensure stored make-list JSON has approved makes and rows_tree."""
+    if not payload:
+        return {}
+
+    rows = list(payload.get("rows") or [])
+    if not rows:
+        return payload
+
+    needs_attach = False
+    for row in rows:
+        source = row.get("display_values") or row.get("values") or {}
+        if source.get("makes") or source.get("make") or any(
+            str(key).startswith("approved_makes") for key in source
+        ):
+            if not row.get("approved_makes_list"):
+                needs_attach = True
+                break
+
+    normalized = dict(payload)
+    if needs_attach:
+        normalized["rows"] = attach_approved_makes_list(rows)
+
+    if not normalized.get("rows_tree"):
+        normalized = structure_for_analysis(normalized)
+    elif needs_attach:
+        # rows changed; rebuild tree so approved makes are visible to matching.
+        normalized = structure_for_analysis({**normalized, "rows": normalized["rows"]})
+
+    return normalized
+
+
 def load_extract_data(boq: BOQ, *, refresh: bool = False) -> tuple[dict, dict]:
     """Return BOQ / make-list JSON from PostgreSQL; parse files only when needed."""
     if refresh:
@@ -102,5 +136,17 @@ def load_extract_data(boq: BOQ, *, refresh: bool = False) -> tuple[dict, dict]:
     if boq.make_list_file and not make_list_payload.get("rows"):
         logger.info("BOQ id=%s missing make-list JSON; parsing file once", boq.pk)
         make_list_payload = refresh_make_list_extract(boq)
+
+    make_list_payload = _normalize_make_list_payload(make_list_payload)
+    if boq.make_list_file and make_list_payload.get("rows"):
+        stored_rows = (boq.make_list_data or {}).get("rows") or []
+        stored_empty = stored_rows and all(not row.get("approved_makes_list") for row in stored_rows)
+        source_has_makes = any(
+            (row.get("display_values") or row.get("values") or {}).get("makes")
+            or (row.get("display_values") or row.get("values") or {}).get("make")
+            for row in make_list_payload.get("rows") or []
+        )
+        if stored_empty and source_has_makes and make_list_payload != (boq.make_list_data or {}):
+            persist_extract_json(boq, make_list_data=make_list_payload)
 
     return boq_payload, make_list_payload

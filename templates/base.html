@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Ajeya Estimator Pro{% endblock %}</title>
     <meta name="csrf-token" content="{{ csrf_token }}">
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=22">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=23">
     <style>
         .confirm-modal {
             position: fixed;
@@ -263,6 +263,25 @@
             box-shadow: none;
         }
 
+        .analysis-summary-line {
+            margin: 0 0 12px;
+        }
+
+        .panel.panel--analysis-flat {
+            padding: 0;
+            border: 0;
+            border-radius: 0;
+            background: transparent;
+            box-shadow: none;
+        }
+
+        .analysis-tab-canvas {
+            background: var(--canvas-bg, #e8edf3);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 14px;
+        }
+
         .extraction-lines {
             display: flex;
             flex-direction: column;
@@ -274,6 +293,7 @@
             border-radius: 10px;
             padding: 14px;
             background: var(--surface);
+            box-shadow: var(--shadow);
         }
 
         .extraction-line__header {
@@ -324,9 +344,32 @@
 
         .extraction-make-form {
             display: flex;
-            flex-wrap: wrap;
+            flex-direction: column;
             gap: 10px;
-            align-items: flex-end;
+        }
+
+        .extraction-make-form__row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .extraction-make-form__label {
+            color: var(--text);
+            font-size: .9rem;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .extraction-make-form__select {
+            min-width: 180px;
+            max-width: 320px;
+            flex: 0 1 280px;
+        }
+
+        .extraction-make-form__custom {
+            max-width: 320px;
         }
 
         .extraction-product-card__head {
@@ -380,7 +423,86 @@
         }
 
         .extraction-field--full {
-            margin-top: 10px;
+            grid-column: 1 / -1;
+        }
+
+        .extraction-input--wrap {
+            min-height: 4.5rem;
+            line-height: 1.45;
+            white-space: pre-wrap;
+            word-break: break-word;
+            font-family: inherit;
+        }
+
+        .extraction-readonly-item--full {
+            grid-column: 1 / -1;
+        }
+
+        .extraction-readonly-item__wrap {
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .extraction-extra-attr-list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .extraction-extra-attr-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 6px 10px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--chip-bg, #f8fafc);
+            color: var(--text);
+            font-size: .85rem;
+        }
+
+        .extraction-extra-attr-item__text {
+            flex: 1;
+            word-break: break-word;
+        }
+
+        .extraction-extra-attr-item__remove {
+            border: none;
+            background: transparent;
+            color: var(--text-muted);
+            font-size: 1.1rem;
+            line-height: 1;
+            cursor: pointer;
+            padding: 0 4px;
+        }
+
+        .extraction-extra-attr-item__remove:hover {
+            color: #dc2626;
+        }
+
+        .extraction-extra-attr-add {
+            display: grid;
+            grid-template-columns: 1fr 1fr auto;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .extraction-save-hint {
+            font-size: .8rem;
+            align-self: center;
+        }
+
+        .extraction-save-hint--ok {
+            color: #15803d;
+            font-weight: 600;
+        }
+
+        .extraction-save-hint--error {
+            color: #dc2626;
         }
 
         .extraction-field__label {
@@ -400,7 +522,8 @@
 
         .extraction-field--missing .extraction-input {
             border-color: #f59e0b;
-            background: #fffbeb;
+            background: var(--input-missing-bg, #fffbeb);
+            color: var(--text);
         }
 
         .extraction-input {
@@ -410,7 +533,8 @@
             border-radius: 6px;
             font: inherit;
             font-size: .85rem;
-            background: #fff;
+            background: var(--input-bg, #fff);
+            color: var(--text);
         }
 
         .extraction-input--textarea {
@@ -420,6 +544,10 @@
 
         .extraction-product-form__actions {
             margin-top: 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
         }
 
         .extraction-readonly-grid {
@@ -464,8 +592,25 @@
             font-size: .92rem;
         }
 
+        .extraction-line__description-text--preview {
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 2;
+            overflow: hidden;
+            white-space: normal;
+        }
+
+        .extraction-line__ellipsis {
+            margin: 6px 0 0;
+            color: var(--text-muted);
+            letter-spacing: .2em;
+            font-size: 1rem;
+            line-height: 1;
+            text-align: center;
+        }
+
         .extraction-lineage {
-            margin-top: 8px;
+            margin-top: 6px;
             font-size: .85rem;
         }
 
@@ -552,6 +697,7 @@
     <style>
         /* ---- Dark mode overrides ---- */
         .dark-mode { color-scheme: dark; }
+        .dark-mode,
         .dark-mode body {
             --bg: #0a0f1e;
             --surface: #111827;
@@ -560,6 +706,14 @@
             --text: #e2e8f0;
             --text-muted: #94a3b8;
             --shadow: 0 1px 3px rgba(0,0,0,.4), 0 1px 2px rgba(0,0,0,.3);
+            --input-bg: #1a2236;
+            --input-missing-bg: rgba(245, 158, 11, 0.14);
+            --chip-bg: #1a2236;
+            --canvas-bg: #0c1222;
+        }
+        .dark-mode body {
+            background: var(--surface-alt);
+            color: var(--text);
         }
         .dark-mode .topbar {
             background: #111827;
@@ -598,6 +752,89 @@
             box-shadow: 0 2px 10px rgba(37, 99, 235, .35);
         }
         .dark-mode .boq-tabs__btn.is-active:hover { color: #fff; }
+
+        .dark-mode .extraction-line,
+        .dark-mode .extraction-product-card {
+            background: var(--surface);
+            border-color: var(--border);
+            color: var(--text);
+        }
+
+        .dark-mode .extraction-product-card__title,
+        .dark-mode .extraction-line__description-text,
+        .dark-mode .extraction-readonly-item dd {
+            color: var(--text);
+        }
+
+        .dark-mode .extraction-field__label {
+            color: #cbd5e1;
+        }
+
+        .dark-mode .extraction-field--missing .extraction-field__label {
+            color: #fbbf24;
+        }
+
+        .dark-mode .extraction-input,
+        .dark-mode .extraction-input--textarea,
+        .dark-mode .extraction-make-form__select {
+            background: var(--input-bg);
+            color: var(--text);
+            border-color: var(--border);
+        }
+
+        .dark-mode .extraction-input::placeholder {
+            color: #64748b;
+            opacity: 1;
+        }
+
+        .dark-mode .extraction-field--missing .extraction-input {
+            background: var(--input-missing-bg);
+            border-color: #d97706;
+            color: var(--text);
+        }
+
+        .dark-mode .extraction-extra-attr-item {
+            background: var(--chip-bg);
+            border-color: var(--border);
+            color: var(--text);
+        }
+
+        .dark-mode .extraction-missing-summary {
+            color: #fbbf24;
+        }
+
+        .dark-mode .extraction-save-hint--ok {
+            color: #86efac;
+        }
+
+        .dark-mode .badge--yellow {
+            background: rgba(245, 158, 11, 0.22);
+            color: #fcd34d;
+        }
+
+        .dark-mode .badge--green {
+            background: rgba(34, 197, 94, 0.2);
+            color: #86efac;
+        }
+
+        .dark-mode .badge--gray {
+            background: #334155;
+            color: #cbd5e1;
+        }
+
+        .dark-mode .panel {
+            background: var(--surface);
+            border-color: var(--border);
+        }
+
+        .dark-mode .analysis-summary-line {
+            color: var(--text-muted);
+        }
+
+        .dark-mode .analysis-tab-canvas {
+            background: var(--canvas-bg);
+            border-color: var(--border);
+        }
 
         /* ---- Theme toggle button ---- */
         .theme-toggle {

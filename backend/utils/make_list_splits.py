@@ -6,6 +6,13 @@ from typing import Any
 
 _MAKE_SPLIT_PATTERN = re.compile(r"\s*/\s*")
 
+_MAKE_COLUMN_KEYS = (
+    "approved_makes",
+    "approved_make",
+    "makes",
+    "make",
+)
+
 
 def split_make_token(value: Any) -> list[str]:
     """Split one cell value into make tokens (e.g. ``TATA/JINDAL/SURYA``)."""
@@ -17,15 +24,22 @@ def split_make_token(value: Any) -> list[str]:
     return [part.strip() for part in _MAKE_SPLIT_PATTERN.split(text) if part.strip()]
 
 
+def _make_column_keys(source: dict[str, Any]) -> list[str]:
+    keys: list[str] = []
+    for key in sorted(source):
+        key_text = str(key).strip().lower()
+        if key_text in _MAKE_COLUMN_KEYS or key_text.startswith("approved_makes"):
+            keys.append(key)
+    return keys
+
+
 def collect_approved_makes(row: dict) -> list[str]:
     """Collect de-duplicated approved makes from all make columns on one row."""
     source = row.get("display_values") or row.get("values") or {}
     makes: list[str] = []
     seen: set[str] = set()
 
-    for key in sorted(source):
-        if not str(key).startswith("approved_makes"):
-            continue
+    for key in _make_column_keys(source):
         for token in split_make_token(source.get(key)):
             fold = token.casefold()
             if fold in seen:

@@ -10,6 +10,7 @@ _DESCRIPTION_KEYS = (
     "particulars",
     "item",
     "material",
+    "materials",
     "name",
 )
 
@@ -71,6 +72,15 @@ class MakeListConstraintService:
     @property
     def has_constraints(self) -> bool:
         return bool(self._entries)
+
+    def all_approved_makes(self) -> list[str]:
+        """Return every approved make from the indexed make list."""
+        makes: list[str] = []
+        for entry in self._entries:
+            for make in entry.get("approved_makes_list") or []:
+                if make not in makes:
+                    makes.append(make)
+        return makes
 
     def approved_makes_for_description(self, description: str) -> list[str] | None:
         """Return approved makes when a make-list line matches the BOQ description."""

@@ -1,6 +1,7 @@
 """Shape extracted products/activities for the BOQ detail Analysis tab."""
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from apps.boq.models import BOQ
@@ -83,6 +84,7 @@ def _shape_product(
         "is_user_added": (product.get("source") or "").lower() == "user",
         "fields": fields,
         "attributes": attribute_fields,
+        "extra_attrs_json": json.dumps(attribute_fields.get("extra") or []),
         "missing_count": missing_count,
         "summary": _product_summary(product),
         "raw": product,
@@ -120,6 +122,7 @@ def _shape_make_list(
     make_list_service: MakeListConstraintService,
     category: str = "",
     sub_category: str = "",
+    has_make_list_file: bool = False,
 ) -> dict[str, Any]:
     options_data = make_list_service.make_options_for_product(
         category=category,
@@ -128,6 +131,8 @@ def _shape_make_list(
     )
     stored_data = stored or {}
     make_options = list(options_data.get("make_options") or [])
+    if not make_options:
+        make_options = make_list_service.all_approved_makes()
     for make in stored_data.get("approved_makes") or []:
         if make not in make_options:
             make_options.append(make)
@@ -137,7 +142,7 @@ def _shape_make_list(
         selected and selected not in make_options
     )
     return {
-        "has_make_list": make_list_service.has_constraints,
+        "has_make_list": has_make_list_file and bool(make_list_service.has_constraints or make_options),
         "matched": bool(options_data.get("matched") or stored_data),
         "material": stored_data.get("material") or options_data.get("material") or "",
         "category_material": options_data.get("category_material") or "",
@@ -154,31 +159,64 @@ def _merge_lineage_analysis(
     lineage_ids: list[str],
     analysis_by_row: dict[str, dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[str], dict[str, Any]]:
-    products: list[dict[str, Any]] = []
-    activities: list[str] = []
-    anchor_analysis: dict[str, Any] = {}
+    anchor_id = str(lineage_ids[0]) if lineage_ids else ""
+    anchor_analysis = analysis_by_row.get(anchor_id, {})
 
+    products: list[dict[str, Any]] = []
+    seen: set[str] = set()
     for row_id in lineage_ids:
-        analysis_row = analysis_by_row.get(row_id, {})
-        if not anchor_analysis and analysis_row:
-            anchor_analysis = analysis_row
+        analysis_row = analysis_by_row.get(str(row_id), {})
+        for product in analysis_row.get("products") or []:
+            dedupe_key = "|".join(
+                [
+                    str(product.get("description_hint") or ""),
+                    str(product.get("category") or ""),
+                    str(product.get("sub_category") or ""),
+                    str(product.get("product_index") or ""),
+                ]
+            )
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            products.append({**product, "source_row_id": str(row_id)})
+
+    for index, product in enumerate(products):
+        product["product_index"] = index
+
+    activities: list[str] = []
+    for row_id in lineage_ids:
+        analysis_row = analysis_by_row.get(str(row_id), {})
         for activity in analysis_row.get("activities") or []:
             if activity not in activities:
                 activities.append(activity)
-        for product in analysis_row.get("products") or []:
-            products.append({**product, "source_row_id": row_id})
 
-    if not anchor_analysis and lineage_ids:
-        anchor_analysis = analysis_by_row.get(lineage_ids[0], {})
+    if not activities:
+        activities = list(anchor_analysis.get("activities") or [])
 
     return products, activities, anchor_analysis
+
+
+def build_product_save_feedback(product: dict[str, Any]) -> dict[str, Any]:
+    """Return UI feedback fields after saving a product."""
+    shaped = _shape_product(
+        product,
+        display_number=int(product.get("product_index") or 0) + 1,
+        total=1,
+        source_row_id=str(product.get("source_row_id") or ""),
+    )
+    return {
+        "missing_count": shaped["missing_count"],
+        "summary": shaped["summary"],
+        "is_complete": shaped["missing_count"] == 0,
+    }
 
 
 class BOQExtractionDisplayService:
     """Build upload-order rows showing AI-extracted products and activities."""
 
-    def __init__(self, boq: BOQ, make_list_data: dict | None = None):
+    def __init__(self, boq: BOQ, make_list_data: dict | None = None, *, has_make_list_file: bool = False):
         self.boq = boq
+        self.has_make_list_file = has_make_list_file
         self.make_list_service = MakeListConstraintService(make_list_data)
 
     def build(self) -> dict[str, Any]:
@@ -230,7 +268,8 @@ class BOQExtractionDisplayService:
                     "row_id": row_id,
                     "serial": group.get("serial", ""),
                     "depth": group.get("depth", 0),
-                    "description": group.get("full_description") or group.get("description") or "",
+                    "description": group.get("description") or "",
+                    "full_description": group.get("full_description") or group.get("description") or "",
                     "lineage_parts": group.get("lineage_parts") or [],
                     "lineage_count": group.get("lineage_count") or 1,
                     "primary_category": category,
@@ -247,6 +286,7 @@ class BOQExtractionDisplayService:
                         make_list_service=self.make_list_service,
                         category=category,
                         sub_category=sub_category,
+                        has_make_list_file=self.has_make_list_file,
                     ),
                 }
             )
@@ -259,6 +299,6 @@ class BOQExtractionDisplayService:
             "product_count": product_count,
             "activity_count": activity_count,
             "missing_field_count": missing_field_count,
-            "has_make_list": self.make_list_service.has_constraints,
+            "has_make_list": self.has_make_list_file and self.make_list_service.has_constraints,
             "lines": lines,
         }

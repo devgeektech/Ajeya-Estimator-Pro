@@ -24,7 +24,10 @@ from .services.boq_export_service import BOQExportService
 from .services.boq_extract_service import load_extract_data
 from .services.boq_analysis_service import _row_description
 from .services.boq_extraction_edit_service import BOQExtractionEditService
-from .services.boq_extraction_display_service import BOQExtractionDisplayService
+from .services.boq_extraction_display_service import (
+    BOQExtractionDisplayService,
+    build_product_save_feedback,
+)
 from .services.boq_service import BOQCreationService
 from .services.boq_status_display_service import (
     build_boq_status_display,
@@ -61,6 +64,21 @@ def _boq_queryset_for_user(user: User):
 
 def _detail_tab_url(pk: int, tab: str) -> str:
     return reverse("boq:detail", kwargs={"pk": pk}) + f"?tab={tab}"
+
+
+def _extraction_edit_is_ajax(request) -> bool:
+    return (
+        request.headers.get("X-Requested-With") == "XMLHttpRequest"
+        or request.POST.get("ajax") == "1"
+    )
+
+
+def _extraction_edit_json_ok(message: str, **payload):
+    return JsonResponse({"ok": True, "message": message, **payload})
+
+
+def _extraction_edit_json_error(message: str, status: int = 400):
+    return JsonResponse({"ok": False, "message": message}, status=status)
 
 
 def _job_is_running(boq: BOQ) -> bool:
@@ -144,6 +162,7 @@ class BOQDetailView(LoginRequiredMixin, DetailView):
         context["extraction_display"] = BOQExtractionDisplayService(
             boq,
             make_list_payload,
+            has_make_list_file=bool(boq.make_list_file),
         ).build()
         context["analysis_display"] = BOQAnalysisDisplayService(boq, confirmations).build()
         return context
@@ -189,25 +208,41 @@ class BOQExtractionEditView(LoginRequiredMixin, View):
         user = cast(User, request.user)
         boq = get_object_or_404(_boq_queryset_for_user(user), pk=pk)
         redirect_url = _detail_tab_url(boq.pk, "analysis")
+        ajax = _extraction_edit_is_ajax(request)
         action = (request.POST.get("action") or "update_product").strip().lower()
         row_id = (request.POST.get("row_id") or "").strip()
         if not row_id:
-            messages.error(request, "Missing BOQ row.")
+            message = "Missing BOQ row."
+            if ajax:
+                return _extraction_edit_json_error(message)
+            messages.error(request, message)
             return HttpResponseRedirect(redirect_url)
 
         editor = BOQExtractionEditService(boq.pk)
         try:
             if action == "add_product":
-                editor.add_product(row_id=row_id)
-                messages.success(request, "Blank product added. Fill in the details and save.")
+                product = editor.add_product(row_id=row_id)
+                message = "Blank product added."
+                if ajax:
+                    return _extraction_edit_json_ok(
+                        message,
+                        product_index=int(product.get("product_index") or 0),
+                    )
+                messages.success(request, message)
             elif action == "remove_product":
                 try:
                     product_index = int(request.POST.get("product_index") or "0")
                 except ValueError:
-                    messages.error(request, "Invalid product index.")
+                    message = "Invalid product index."
+                    if ajax:
+                        return _extraction_edit_json_error(message)
+                    messages.error(request, message)
                     return HttpResponseRedirect(redirect_url)
                 editor.remove_product(row_id=row_id, product_index=product_index)
-                messages.success(request, "Product removed from this row.")
+                message = "Product removed from this row."
+                if ajax:
+                    return _extraction_edit_json_ok(message)
+                messages.success(request, message)
             elif action == "update_make":
                 selected_make = (request.POST.get("selected_make") or "").strip()
                 custom_make = (request.POST.get("custom_make") or "").strip()
@@ -220,7 +255,7 @@ class BOQExtractionEditView(LoginRequiredMixin, View):
                     make_list_payload = boq.make_list_data or {}
                 boq_data = structure_for_analysis(boq_payload)
                 description = _row_description(boq_data, row_id)
-                editor.update_row_make(
+                make_list = editor.update_row_make(
                     row_id=row_id,
                     selected_make=selected_make,
                     custom_make=custom_make,
@@ -229,12 +264,21 @@ class BOQExtractionEditView(LoginRequiredMixin, View):
                     category=category,
                     sub_category=sub_category,
                 )
-                messages.success(request, "Make selection saved for this row.")
+                message = "Make saved."
+                if ajax:
+                    return _extraction_edit_json_ok(
+                        message,
+                        selected_make=make_list.get("selected_make") or "",
+                    )
+                messages.success(request, message)
             else:
                 try:
                     product_index = int(request.POST.get("product_index") or "0")
                 except ValueError:
-                    messages.error(request, "Invalid product index.")
+                    message = "Invalid product index."
+                    if ajax:
+                        return _extraction_edit_json_error(message)
+                    messages.error(request, message)
                     return HttpResponseRedirect(redirect_url)
 
                 fields = {
@@ -254,18 +298,29 @@ class BOQExtractionEditView(LoginRequiredMixin, View):
                 }
                 attributes = editor.parse_attributes_from_form(request.POST)
                 product_row_id = (request.POST.get("product_row_id") or row_id).strip()
-                editor.update_product(
+                updated = editor.update_product(
                     row_id=product_row_id,
                     product_index=product_index,
                     fields=fields,
                     attributes=attributes,
                 )
-                messages.success(request, "Product details saved.")
+                message = "Product saved."
+                if ajax:
+                    return _extraction_edit_json_ok(
+                        message,
+                        product=build_product_save_feedback(updated),
+                    )
+                messages.success(request, message)
         except ValidationError as exc:
+            if ajax:
+                return _extraction_edit_json_error(str(exc))
             messages.error(request, str(exc))
         except Exception:
             logger.exception("BOQ extraction edit failed for id=%s", boq.pk)
-            messages.error(request, "Failed to save product changes.")
+            message = "Failed to save product changes."
+            if ajax:
+                return _extraction_edit_json_error(message, status=500)
+            messages.error(request, message)
 
         return HttpResponseRedirect(redirect_url)
 

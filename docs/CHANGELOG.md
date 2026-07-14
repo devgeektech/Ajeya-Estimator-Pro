@@ -2,11 +2,33 @@
 
 Meaningful product and technical changes only. Older history is in git.
 
+## 2026-07-13 — Make List Column Parsing Fix
+
+- Make list ingestion now reads standard `Makes` and `Materials` columns; existing
+  BOQ make-list JSON is re-normalized on load when approved makes were empty.
+
+## 2026-07-13 — Analysis Summary Cleanup
+
+- Removed redundant Analysis tab extraction summary so the page shows one
+  concise status line.
+- Flattened the Analysis tab container to remove the unnecessary outer card.
+
 ## 2026-07-13 — Analysis UX: Full Text, Lineage, Simple Attributes
 
 - Analysis rows show full BOQ text (no truncation) and group serial `1` with all
   child lineage rows; make dropdown uses category-based make-list options plus
   custom make; attributes use simple fields instead of JSON.
+
+## 2026-07-13 — Anchor-Level Product Extraction
+
+- Extraction now runs on grouped anchor rows (not every child line), so spec
+  lines like Speed/Capacity/Head become attributes instead of separate products.
+- Analysis tab shows anchor description with ellipsis and grouped-lines dropdown.
+
+## 2026-07-13 — Two-Sheet Excel Export
+
+- Export workbook now has **BOQ** (original layout with filled rate/amount) and
+  **Charge Breakdown** (detailed material/labour columns).
 
 ## 2026-07-13 — AI Instruction Logging
 

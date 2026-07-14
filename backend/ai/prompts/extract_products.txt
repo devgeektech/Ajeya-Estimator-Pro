@@ -2,14 +2,18 @@ You extract products and activities from BOQ line items for a fire-protection / 
 
 Rules:
 - Return valid JSON only.
-- One BOQ row may contain MULTIPLE products. Split compound descriptions into separate products.
+- Each input row is a **grouped BOQ line**: a main line plus continuation lines (specs, sub-items).
+- Extract **purchasable products/equipment only** (pumps, pipes, valves, panels, fittings, etc.).
+- Do **NOT** create a product for specification-only lines such as Speed (rpm), Capacity, Head, Pressure, Flow, Power, Voltage, or similar label:value rows. Put those values in **attributes** on the product they belong to.
+- Lettered or numbered sub-items like (A), (B), (C) or "Main Fire Pump For Hydrant" are usually separate products when they name distinct equipment.
+- Always return the anchor **row_id** from the input (never a lineage_lines row_id).
+- One grouped line may contain MULTIPLE products. Return each with its own product_index (0, 1, 2, ...).
 - Map each product to database vocabulary when possible: category, sub_category, class, size, unit, make_hint, capacity.
-- Put technical specs in attributes as lowercase snake_case keys (examples: is, mounting, outlet_type, material, type, pressure_rating).
-- When one BOQ row describes multiple purchasable products, return each as a separate product with its own product_index (0, 1, 2, ...).
-- Use description_hint on each product to capture the phrase from the BOQ row that product came from.
+- Put technical specs in attributes as lowercase snake_case keys (examples: speed, capacity, head, is, mounting, outlet_type, material, type, pressure_rating).
+- Use description_hint for the product name phrase from the BOQ (not a spec label like "Speed (rpm)").
 - Extract IS / standard numbers into attributes.is when present.
 - activities: labour/installation activities mentioned or implied (from provided activity list when possible).
-- skip_matching=true for section headers, blank lines, or rows with no purchasable product.
+- skip_matching=true only when the entire group is a section header or has no purchasable product.
 - Do not calculate prices or choose suppliers.
 
 Database context (categories, sub_categories, attribute_keys, activities):
@@ -24,17 +28,17 @@ Respond with:
       "products": [
         {
           "product_index": 0,
-          "description_hint": "MS pipe 80mm",
-          "category": "PIPE",
-          "sub_category": "MS",
-          "class": "C",
-          "size": 80,
-          "unit": "mm",
+          "description_hint": "Main Fire Pump For Hydrant",
+          "category": "PUMP",
+          "sub_category": "FIRE",
+          "class": null,
+          "size": null,
+          "unit": null,
           "make_hint": null,
-          "capacity": null,
-          "attributes": {"is": "3589"},
-          "quantity": 120,
-          "quantity_unit": "m",
+          "capacity": "2280 lpm",
+          "attributes": {"speed": "2900", "head": "70 Mtr"},
+          "quantity": 1,
+          "quantity_unit": "Each",
           "extraction_confidence": 0.0
         }
       ],
@@ -43,5 +47,5 @@ Respond with:
   ]
 }
 
-BOQ rows to analyze:
+BOQ grouped lines to analyze:
 {{ROWS_PAYLOAD}}

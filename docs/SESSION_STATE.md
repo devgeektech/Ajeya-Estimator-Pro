@@ -34,6 +34,49 @@ run analysis → session confirmations → export Excel
 
 ## Session Log
 
+### 2026-07-13 — Make List Column Parsing Fix
+
+Completed:
+
+- Make list parser now reads `Makes` / `Materials` columns (not only
+  `approved_makes*`); stale BOQ make-list JSON is normalized on load.
+
+### 2026-07-13 — Analysis Summary Cleanup
+
+Completed:
+
+- Removed duplicate Analysis tab summary; top of page now shows one extraction
+  summary line.
+- Removed the redundant outer panel styling from the Analysis tab while keeping
+  individual product-group cards.
+
+### 2026-07-13 — Analysis Tab Inline Editing
+
+Completed:
+
+- Product description uses wrapped textarea; make auto-saves on selection.
+- Specifications use + Add for other details without page reload.
+- Save product uses AJAX and preserves scroll position.
+
+### 2026-07-13 — Anchor-Level Product Extraction
+
+Completed:
+
+- Grouped anchor extraction + spec-line filter; Analysis UI shows short
+  description with ellipsis and grouped-lines dropdown.
+- Display merges products from all grouped lineage rows (fixes anchor/child mismatch).
+- Extraction consolidates AI products onto anchor row_id.
+
+Pending:
+
+- Re-run **Analyse** on existing BOQs to refresh extraction results.
+
+### 2026-07-13 — Two-Sheet Excel Export
+
+Completed:
+
+- `BOQExportService` writes **BOQ** + **Charge Breakdown** sheets on export.
+
 ### 2026-07-13 — AI Instruction Logging
 
 Completed:

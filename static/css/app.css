@@ -5,6 +5,10 @@
     --border: #e2e8f0;
     --text: #1e293b;
     --text-muted: #64748b;
+    --input-bg: #ffffff;
+    --input-missing-bg: #fffbeb;
+    --chip-bg: #f8fafc;
+    --canvas-bg: #e8edf3;
     --primary: #2563eb;
     --primary-dark: #1d4ed8;
     --green: #16a34a;
@@ -18,6 +22,10 @@
 }
 
 * { box-sizing: border-box; }
+
+html {
+    font-size: 90%;
+}
 
 body {
     margin: 0;
