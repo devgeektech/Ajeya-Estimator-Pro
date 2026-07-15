@@ -71,7 +71,7 @@
                 <span class="badge {{ status_display.badge }}">{{ status_display.label }}</span>
             </div>
             <div class="boq-detail-toolbar__actions">
-                {% if can_analyse %}
+                {% if can_analyse and not extraction_display.has_extraction %}
                     <form method="post" action="{% url 'boq:extract' boq.pk %}" @submit.prevent="analysing = true; analysisEnabled = true; tab = 'analysis'; setTimeout(() => $el.submit(), 100)">
                         {% csrf_token %}
                         <button
@@ -80,9 +80,7 @@
                             :class="{ 'btn--analysis-loading': analysing }"
                             :disabled="analysing"
                         >
-                            <span x-show="!analysing">
-                                {% if extraction_display.has_extraction %}Re-analyse BOQ{% else %}Analyse BOQ{% endif %}
-                            </span>
+                            <span x-show="!analysing">Analyse BOQ</span>
                             <span x-show="analysing" x-cloak>Analysing...</span>
                         </button>
                     </form>
@@ -90,7 +88,7 @@
                     <button type="button" class="btn btn--small btn--analysis-loading" disabled>Analysing...</button>
                 {% endif %}
 
-                {% if can_match %}
+                {% if can_match and boq.status != "PROCESSED" %}
                     <form method="post" action="{% url 'boq:match' boq.pk %}" @submit.prevent="matching = true; matchResultsEnabled = true; tab = 'match_results'; setTimeout(() => $el.submit(), 100)">
                         {% csrf_token %}
                         <button
@@ -99,7 +97,7 @@
                             :class="{ 'btn--matching-loading': matching }"
                             :disabled="matching"
                         >
-                            <span x-show="!matching">{% if boq.status == "PROCESSED" %}Re-match{% else %}Match{% endif %}</span>
+                            <span x-show="!matching">Match</span>
                             <span x-show="matching" x-cloak>Matching...</span>
                         </button>
                     </form>
@@ -219,7 +217,7 @@
                 </div>
             </div>
             <div x-show="!analysing">
-                {% include "boq/_extraction_table.html" with extraction_display=extraction_display can_match=can_match can_edit_extraction=can_edit_extraction boq=boq %}
+                {% include "boq/_extraction_table.html" with extraction_display=extraction_display can_edit_extraction=can_edit_extraction boq=boq %}
             </div>
         </div>
 
@@ -240,7 +238,7 @@
                 </div>
             </div>
             <div x-show="!matching">
-                {% include "boq/_analysis_table.html" with analysis_display=analysis_display boq=boq %}
+                {% include "boq/_analysis_table.html" with analysis_display=analysis_display boq=boq can_rematch=can_rematch %}
             </div>
         </div>
     </div>

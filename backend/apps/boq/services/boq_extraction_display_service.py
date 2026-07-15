@@ -21,7 +21,8 @@ _PRODUCT_FIELDS: tuple[tuple[str, str], ...] = (
     ("quantity_unit", "Qty unit"),
 )
 
-_OPTIONAL_MISSING_FIELDS = {"description_hint", "quantity", "quantity_unit"}
+# All product property fields are optional — products differ in which apply.
+_REQUIRED_FIELDS: frozenset[str] = frozenset()
 
 
 def _is_blank(value: Any) -> bool:
@@ -45,7 +46,7 @@ def _shape_attribute_fields(attributes: dict[str, Any]) -> dict[str, Any]:
     extra = [
         {"key": key, "value": value}
         for key, value in sorted(attrs.items())
-        if key not in COMMON_ATTRIBUTE_KEYS
+        if key not in COMMON_ATTRIBUTE_KEYS and not _is_blank(value)
     ]
     return {"common": common, "extra": extra}
 
@@ -61,7 +62,7 @@ def _shape_product(
     missing_count = 0
     for key, label in _PRODUCT_FIELDS:
         value = product.get(key)
-        missing = _is_blank(value) and key not in _OPTIONAL_MISSING_FIELDS
+        missing = _is_blank(value) and key in _REQUIRED_FIELDS
         if missing:
             missing_count += 1
         fields.append(
@@ -138,8 +139,12 @@ def _shape_make_list(
             make_options.append(make)
 
     selected = stored_data.get("selected_make") or ""
-    is_custom = bool(stored_data.get("custom_make")) or (
-        selected and selected not in make_options
+    prefer_lowest = bool(stored_data.get("prefer_lowest_price")) or (
+        MakeListConstraintService.is_lowest_make_selection(selected)
+    )
+    is_custom = (not prefer_lowest) and (
+        bool(stored_data.get("custom_make"))
+        or (selected and selected not in make_options)
     )
     return {
         "has_make_list": has_make_list_file and bool(make_list_service.has_constraints or make_options),
@@ -151,6 +156,8 @@ def _shape_make_list(
         "selected_make": selected,
         "custom_make": stored_data.get("custom_make") or (selected if is_custom else ""),
         "is_custom_make": is_custom,
+        "is_lowest_make": prefer_lowest,
+        "prefer_lowest_price": prefer_lowest,
         "match_score": stored_data.get("match_score") or options_data.get("match_score"),
     }
 

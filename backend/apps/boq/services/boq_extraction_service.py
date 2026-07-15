@@ -14,6 +14,7 @@ from apps.boq.services.boq_row_grouping_service import (
     anchor_qty_unit,
     grouped_anchor_rows,
     is_anchor_row,
+    resolve_anchor_row_id,
 )
 from apps.boq.services.serial_normalizer import analysis_fields
 
@@ -22,11 +23,47 @@ logger = logging.getLogger("boq_ai")
 _QTY_KEYS = ("qty", "quantity", "qnty", "nos")
 _BATCH_SIZE = 4
 
-_SPEC_LABEL_PATTERN = re.compile(
-    r"^(speed|capacity|head|pressure|flow|power|voltage|rpm|efficiency|"
-    r"dimension|size|weight|model|type)\b",
+_SPEC_KEYWORDS = frozenset(
+    {
+        "speed",
+        "capacity",
+        "head",
+        "pressure",
+        "flow",
+        "power",
+        "voltage",
+        "rpm",
+        "efficiency",
+        "dimension",
+        "size",
+        "weight",
+        "model",
+        "type",
+    }
+)
+
+# Spec labels only: "Speed", "Speed (rpm)", "Pressure: 10 bar" — not "Pressure switch".
+_SPEC_LABEL_ONLY = re.compile(
+    r"^(?P<label>speed|capacity|head|pressure|flow|power|voltage|rpm|efficiency|"
+    r"dimension|size|weight|model|type)"
+    r"(?:\s*\([^)]*\))?"
+    r"(?:\s*:.*)?$",
     re.IGNORECASE,
 )
+
+
+def _is_spec_only_product(product: dict[str, Any]) -> bool:
+    """Drop spec-label rows the model may still return as products."""
+    hint = str(product.get("description_hint") or "").strip()
+    if not hint:
+        return False
+    if _SPEC_LABEL_ONLY.fullmatch(hint):
+        return True
+    if ":" in hint:
+        label = hint.split(":", 1)[0].strip().lower()
+        if label in _SPEC_KEYWORDS:
+            return True
+    return False
 
 
 def _has_quantity(fields: dict[str, Any]) -> bool:
@@ -67,23 +104,24 @@ def should_skip_anchor_group(group: dict[str, Any], *, lineage_has_qty: bool) ->
     return False
 
 
-def _is_spec_only_product(product: dict[str, Any]) -> bool:
-    """Drop spec-label rows the model may still return as products."""
-    hint = str(product.get("description_hint") or "").strip()
-    if not hint:
-        return False
-    if _SPEC_LABEL_PATTERN.match(hint):
-        return True
-    if ":" in hint and len(hint.split()) <= 4:
-        return True
-    return False
-
-
 def _filter_spec_products(products: list[dict[str, Any]]) -> list[dict[str, Any]]:
     filtered = [product for product in products if not _is_spec_only_product(product)]
+    cleaned: list[dict[str, Any]] = []
     for index, product in enumerate(filtered):
+        product = dict(product)
         product["product_index"] = index
-    return filtered
+        attrs = product.get("attributes")
+        if isinstance(attrs, dict):
+            product["attributes"] = {
+                str(key): value
+                for key, value in attrs.items()
+                if value is not None and str(value).strip() != ""
+            }
+        for key in ("category", "sub_category", "class", "size", "unit", "capacity", "make_hint"):
+            if key in product and product.get(key) is not None and str(product.get(key)).strip() == "":
+                product[key] = None
+        cleaned.append(product)
+    return cleaned
 
 
 def _consolidate_to_anchors(
@@ -280,6 +318,88 @@ class BOQExtractionService:
             "row_count": len(flat_rows),
             "extracted_row_count": len(extracted_rows),
             "rows": extracted_rows,
+        }
+
+    def extract_anchor(self, row_id: str) -> dict[str, Any]:
+        """Extract products/activities for one anchor group (and its lineage stubs)."""
+        if not self.ai.is_enabled():
+            raise AIServiceError("OPENAI_API_KEY is not configured.")
+
+        flat_rows = self.boq_data.get("rows") or []
+        if not any(str(row.get("row_id")) == str(row_id) for row in flat_rows):
+            raise AIServiceError(f"Unknown BOQ row: {row_id}")
+
+        anchor_id = resolve_anchor_row_id(self.boq_data, str(row_id))
+        groups = _build_anchor_groups(self.boq_data)
+        group = next((item for item in groups if str(item.get("row_id")) == anchor_id), None)
+        if group is None:
+            raise AIServiceError(f"Unknown BOQ anchor row: {anchor_id}")
+
+        lineage_ids = [str(item) for item in (group.get("lineage_ids") or [anchor_id])]
+        if should_skip_anchor_group(group, lineage_has_qty=bool(group.get("lineage_has_qty"))):
+            rows = [
+                {
+                    "row_id": lineage_ids[0],
+                    "skip_matching": True,
+                    "products": [],
+                    "activities": [],
+                    "skip_reason": "section_or_empty_row",
+                },
+                *[
+                    {
+                        "row_id": child_id,
+                        "skip_matching": True,
+                        "products": [],
+                        "activities": [],
+                        "skip_reason": "lineage_child_row",
+                    }
+                    for child_id in lineage_ids[1:]
+                ],
+            ]
+            return {
+                "schema_version": 1,
+                "anchor_row_id": anchor_id,
+                "lineage_ids": lineage_ids,
+                "rows": rows,
+            }
+
+        extracted_by_id: dict[str, dict[str, Any]] = {}
+        for row in self._extract_batch([group]):
+            extracted_row_id = row.get("row_id")
+            if extracted_row_id:
+                extracted_by_id[str(extracted_row_id)] = row
+        _consolidate_to_anchors([group], extracted_by_id)
+
+        rows = []
+        for lineage_id in lineage_ids:
+            if lineage_id == anchor_id:
+                rows.append(
+                    extracted_by_id.get(
+                        anchor_id,
+                        {
+                            "row_id": anchor_id,
+                            "skip_matching": True,
+                            "products": [],
+                            "activities": [],
+                            "skip_reason": "ai_missing_row",
+                        },
+                    )
+                )
+            else:
+                rows.append(
+                    {
+                        "row_id": lineage_id,
+                        "skip_matching": True,
+                        "products": [],
+                        "activities": [],
+                        "skip_reason": "lineage_child_row",
+                    }
+                )
+        return {
+            "schema_version": 1,
+            "anchor_row_id": anchor_id,
+            "lineage_ids": lineage_ids,
+            "rows": rows,
         }
 
     def _extract_batch(self, groups: list[dict[str, Any]]) -> list[dict[str, Any]]:

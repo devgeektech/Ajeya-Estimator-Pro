@@ -3,9 +3,19 @@ from __future__ import annotations
 
 import json
 
-from apps.database_manager.models import Labour_Master, Rate_Master
+from apps.database_manager.models import Rate_Master
 from apps.database_manager.services.activation import get_active_database_version
 from utils.attribute_parser import learn_aliases_from_attributes, parse_attributes
+
+# Work activities for extraction — not Labour_Master.Labour_Type (ITEM_BASED / SIZE_BASED).
+_DEFAULT_ACTIVITIES = [
+    "Installation",
+    "Testing",
+    "Commissioning",
+    "Fixing",
+    "Fabrication",
+    "Supply and installation",
+]
 
 
 def build_database_context() -> str:
@@ -18,7 +28,7 @@ def build_database_context() -> str:
                 "categories": [],
                 "sub_categories": [],
                 "attribute_keys": [],
-                "activities": [],
+                "activities": list(_DEFAULT_ACTIVITIES),
             },
             ensure_ascii=False,
         )
@@ -44,14 +54,6 @@ def build_database_context() -> str:
         learn_aliases_from_attributes(parsed, aliases)
         attribute_keys.update(parsed.keys())
 
-    activities = list(
-        Labour_Master.objects.filter(database_version=version)
-        .exclude(Labour_Type__isnull=True)
-        .exclude(Labour_Type="")
-        .values_list("Labour_Type", flat=True)
-        .distinct()[:50]
-    )
-
     payload = {
         "category_taxonomy": [
             {"category": category, "sub_categories": sorted(subs)}
@@ -60,6 +62,6 @@ def build_database_context() -> str:
         "categories": sorted(taxonomy.keys()),
         "sub_categories": sorted({sub for subs in taxonomy.values() for sub in subs}),
         "attribute_keys": sorted(attribute_keys),
-        "activities": activities,
+        "activities": list(_DEFAULT_ACTIVITIES),
     }
     return json.dumps(payload, ensure_ascii=False)

@@ -10,7 +10,12 @@ from django.db import transaction
 from apps.boq.models import BOQ
 from apps.boq.services.boq_analysis_store import save_boq_analysis_json
 from apps.boq.services.extraction_attribute_fields import COMMON_ATTRIBUTE_KEYS
-from apps.boq.services.make_list_constraint_service import MakeListConstraintService, _normalize_make
+from apps.boq.services.make_list_constraint_service import (
+    LOWEST_MAKE_STORED,
+    LOWEST_MAKE_VALUE,
+    MakeListConstraintService,
+    _normalize_make,
+)
 from common.choices import BOQStatus
 from common.exceptions import BOQAIError, ValidationError
 
@@ -213,6 +218,13 @@ class BOQExtractionEditService:
             if not normalized_make:
                 raise ValidationError("Enter a custom make.")
             is_custom = True
+            prefer_lowest = False
+        elif selected_make == LOWEST_MAKE_VALUE or MakeListConstraintService.is_lowest_make_selection(
+            selected_make
+        ):
+            normalized_make = LOWEST_MAKE_STORED
+            is_custom = False
+            prefer_lowest = True
         else:
             normalized_make = _normalize_make(selected_make)
             if not normalized_make:
@@ -220,6 +232,7 @@ class BOQExtractionEditService:
             is_custom = bool(allowed) and normalized_make not in allowed
             if allowed and not is_custom and normalized_make not in allowed:
                 raise ValidationError("Selected make is not available for this category.")
+            prefer_lowest = False
 
         analysis = dict(boq.analysis_data or {})
         rows = list(analysis.get("rows") or [])
@@ -233,6 +246,7 @@ class BOQExtractionEditService:
             "selected_make": normalized_make,
             "custom_make": normalized_make if is_custom else "",
             "custom_make_flag": is_custom,
+            "prefer_lowest_price": prefer_lowest,
             "match_score": options.get("match_score"),
             "category_material": options.get("category_material") or "",
         }

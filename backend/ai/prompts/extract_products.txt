@@ -3,16 +3,35 @@ You extract products and activities from BOQ line items for a fire-protection / 
 Rules:
 - Return valid JSON only.
 - Each input row is a **grouped BOQ line**: a main line plus continuation lines (specs, sub-items).
-- Extract **purchasable products/equipment only** (pumps, pipes, valves, panels, fittings, etc.).
-- Do **NOT** create a product for specification-only lines such as Speed (rpm), Capacity, Head, Pressure, Flow, Power, Voltage, or similar label:value rows. Put those values in **attributes** on the product they belong to.
-- Lettered or numbered sub-items like (A), (B), (C) or "Main Fire Pump For Hydrant" are usually separate products when they name distinct equipment.
+- Extract **purchasable products/equipment only** (pumps, pipes, valves, panels, fittings, switches, etc.).
+- Do **NOT** create a product for specification-only lines such as Speed (rpm), Capacity, Head,
+  Pressure, Flow, Power, Voltage, or similar label:value rows. Put those values in **attributes**
+  on the product they belong to. Product names that start with those words (e.g. "Pressure switch",
+  "Flow switch") ARE products — keep them.
+- Lettered or numbered sub-items like (A), (B), (C) or "Main Fire Pump For Hydrant" are usually
+  separate products when they name distinct equipment.
 - Always return the anchor **row_id** from the input (never a lineage_lines row_id).
 - One grouped line may contain MULTIPLE products. Return each with its own product_index (0, 1, 2, ...).
-- Map each product to database vocabulary when possible: category, sub_category, class, size, unit, make_hint, capacity.
-- Put technical specs in attributes as lowercase snake_case keys (examples: speed, capacity, head, is, mounting, outlet_type, material, type, pressure_rating).
-- Use description_hint for the product name phrase from the BOQ (not a spec label like "Speed (rpm)").
+
+Field discipline (important — be rigid and evidence-based):
+- Fill a field ONLY when the BOQ text clearly supports it. Prefer null over guessing.
+- Never invent class, size, unit, capacity, make_hint, or attributes that are not stated or strongly implied.
+- Different products have different properties (pipe → size/class; pump → capacity/head/speed; valve → size/type).
+  Leave irrelevant fields null.
+- Prefer database vocabulary for category and sub_category when the product type is clear.
+- description_hint: concise product name phrase from the BOQ (required when a product exists).
+- size: nominal size when stated (mm, NB, inch); else null.
+- capacity: flow/power capacity when stated (lpm, gpm, kW); else null.
+- class: only when class/grade/schedule is explicit; else null.
+- unit / quantity / quantity_unit: from BOQ qty/unit when available; else null.
+- make_hint: only if a make/brand is mentioned in the line; else null.
+- attributes: only evidenced specs as lowercase snake_case keys
+  (examples: speed, head, is, mounting, outlet_type, material, type, pressure_rating).
+  Omit keys with unknown/null values — do not include empty attributes.
 - Extract IS / standard numbers into attributes.is when present.
-- activities: labour/installation activities mentioned or implied (from provided activity list when possible).
+- activities: labour/installation work mentioned or implied for the group
+  (choose from the provided activity list when possible — e.g. Installation,
+  Testing, Commissioning). Do NOT use Labour_Type codes like ITEM_BASED.
 - skip_matching=true only when the entire group is a section header or has no purchasable product.
 - Do not calculate prices or choose suppliers.
 
@@ -33,7 +52,7 @@ Respond with:
           "sub_category": "FIRE",
           "class": null,
           "size": null,
-          "unit": null,
+          "unit": "Each",
           "make_hint": null,
           "capacity": "2280 lpm",
           "attributes": {"speed": "2900", "head": "70 Mtr"},

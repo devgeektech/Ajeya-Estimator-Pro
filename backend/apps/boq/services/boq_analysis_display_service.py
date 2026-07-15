@@ -60,6 +60,10 @@ class BOQAnalysisDisplayService:
                 continue
 
             analysis_row = analysis_by_row.get(row_id, {})
+            # Lineage children are consolidated onto anchors — hide empty stubs.
+            if analysis_row.get("skip_reason") == "lineage_child_row":
+                continue
+
             fields = analysis_fields(boq_row)
             serial = boq_row.get("serial", "")
             depth = boq_row.get("depth", 0)

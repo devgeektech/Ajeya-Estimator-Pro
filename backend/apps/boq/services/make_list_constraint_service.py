@@ -4,6 +4,10 @@ from __future__ import annotations
 import re
 from typing import Any, Iterable
 
+LOWEST_MAKE_VALUE = "__lowest__"
+LOWEST_MAKE_LABEL = "Lowest price"
+LOWEST_MAKE_STORED = "LOWEST PRICE"
+
 _DESCRIPTION_KEYS = (
     "description",
     "item_description",
@@ -173,6 +177,16 @@ class MakeListConstraintService:
             "make_options": make_options,
             "match_score": (matched or {}).get("match_score"),
             "category_material": (category_entry or {}).get("description") or "",
+        }
+
+    @staticmethod
+    def is_lowest_make_selection(value: str | None) -> bool:
+        text = _normalize_make(str(value or ""))
+        return text in {
+            _normalize_make(LOWEST_MAKE_VALUE),
+            _normalize_make(LOWEST_MAKE_STORED),
+            "LOWEST MAKE",
+            "LOWEST PRICE",
         }
 
     @staticmethod

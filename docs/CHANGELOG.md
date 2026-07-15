@@ -2,6 +2,34 @@
 
 Meaningful product and technical changes only. Older history is in git.
 
+## 2026-07-14 — Analysis Product Actions Layout
+
+- **+ Add product** sits next to **Save product**; extra attrs labeled
+  **Additional Attributes** with **+ Add attribute**.
+
+## 2026-07-14 — Optional Product Fields + Filled-Only Matching
+
+- Product fields (class, size, capacity, unit, etc.) are all optional.
+- Match/search sends only filled properties; null/blank values are omitted.
+- Extraction prompt is stricter: fill only evidenced fields; prefer null over guesses.
+
+## 2026-07-14 — Match Results Icons + Extraction Fixes
+
+- Compact icon actions on Match Results; hide lineage child stubs from the table.
+- Spec-label filter only drops true label rows (keeps Pressure/Flow switch products).
+- AI activity list uses installation work verbs instead of Labour_Type codes.
+
+## 2026-07-14 — Per-Row Re-analyse / Re-match
+
+- Analysis tab: per-row **Re-analyse**.
+- Match Results tab: per-row **Re-match** only after Match has completed.
+- Top toolbar keeps first-time Analyse/Match only; full-BOQ Re-analyse/Re-match removed.
+
+## 2026-07-14 — Preferred Make Lowest Price Option
+
+- Preferred make dropdown includes **Lowest price**; Match then picks the cheapest
+  Rate_Master among allowed makes (`Final_Amount_Excl_GST`).
+
 ## 2026-07-13 — Make List Column Parsing Fix
 
 - Make list ingestion now reads standard `Makes` and `Materials` columns; existing

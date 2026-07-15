@@ -22,7 +22,7 @@ from .services.boq_analysis_dispatch import dispatch_boq_extraction, dispatch_bo
 from .services.boq_confirmation_service import BOQConfirmationService
 from .services.boq_export_service import BOQExportService
 from .services.boq_extract_service import load_extract_data
-from .services.boq_analysis_service import _row_description
+from .services.boq_analysis_service import BOQAnalysisService, _row_description
 from .services.boq_extraction_edit_service import BOQExtractionEditService
 from .services.boq_extraction_display_service import (
     BOQExtractionDisplayService,
@@ -151,6 +151,12 @@ class BOQDetailView(LoginRequiredMixin, DetailView):
             and not _job_is_running(boq)
         )
         context["can_export"] = boq.status == BOQStatus.PROCESSED and bool(boq.analysis_data)
+        # Per-row Re-match only after a full Match has completed (Match Results tab).
+        context["can_rematch"] = (
+            boq.status == BOQStatus.PROCESSED
+            and bool((boq.analysis_data or {}).get("rows"))
+            and not _job_is_running(boq)
+        )
         context["can_edit_extraction"] = boq.status in {
             BOQStatus.EXTRACTED,
             BOQStatus.PROCESSED,
@@ -199,6 +205,102 @@ class BOQExtractView(LoginRequiredMixin, View):
             messages.error(request, "Failed to start extraction.")
 
         return HttpResponseRedirect(_detail_tab_url(boq.pk, "analysis"))
+
+
+class BOQRowExtractView(LoginRequiredMixin, View):
+    """Re-analyse a single BOQ anchor group."""
+
+    def post(self, request, pk: int, row_id: str):
+        user = cast(User, request.user)
+        boq = get_object_or_404(_boq_queryset_for_user(user), pk=pk)
+        redirect_url = _detail_tab_url(boq.pk, "analysis")
+        ajax = _extraction_edit_is_ajax(request)
+        row_id = (row_id or request.POST.get("row_id") or "").strip()
+
+        if _job_is_running(boq):
+            message = "Wait for the current job to finish."
+            if ajax:
+                return _extraction_edit_json_error(message)
+            messages.info(request, message)
+            return HttpResponseRedirect(redirect_url)
+
+        if not row_id:
+            message = "Missing BOQ row."
+            if ajax:
+                return _extraction_edit_json_error(message)
+            messages.error(request, message)
+            return HttpResponseRedirect(redirect_url)
+
+        clear_exported_in_session(boq.pk, request.session)
+        try:
+            BOQAnalysisService(boq.pk).re_extract_row(row_id)
+            message = "Row re-analysed."
+            if ajax:
+                return _extraction_edit_json_ok(message, row_id=row_id)
+            messages.success(request, message)
+        except ValidationError as exc:
+            if ajax:
+                return _extraction_edit_json_error(str(exc))
+            messages.error(request, str(exc))
+        except (AIServiceError, BOQAIError) as exc:
+            if ajax:
+                return _extraction_edit_json_error(str(exc))
+            messages.error(request, str(exc))
+        except Exception:
+            logger.exception("BOQ row extract failed for id=%s row=%s", boq.pk, row_id)
+            message = "Failed to re-analyse this row."
+            if ajax:
+                return _extraction_edit_json_error(message, status=500)
+            messages.error(request, message)
+        return HttpResponseRedirect(redirect_url)
+
+
+class BOQRowMatchView(LoginRequiredMixin, View):
+    """Re-match a single BOQ anchor group."""
+
+    def post(self, request, pk: int, row_id: str):
+        user = cast(User, request.user)
+        boq = get_object_or_404(_boq_queryset_for_user(user), pk=pk)
+        redirect_url = _detail_tab_url(boq.pk, "match_results")
+        ajax = _extraction_edit_is_ajax(request)
+        row_id = (row_id or request.POST.get("row_id") or "").strip()
+
+        if _job_is_running(boq):
+            message = "Wait for the current job to finish."
+            if ajax:
+                return _extraction_edit_json_error(message)
+            messages.info(request, message)
+            return HttpResponseRedirect(redirect_url)
+
+        if not row_id:
+            message = "Missing BOQ row."
+            if ajax:
+                return _extraction_edit_json_error(message)
+            messages.error(request, message)
+            return HttpResponseRedirect(redirect_url)
+
+        clear_exported_in_session(boq.pk, request.session)
+        try:
+            BOQAnalysisService(boq.pk).re_match_row(row_id)
+            message = "Row re-matched."
+            if ajax:
+                return _extraction_edit_json_ok(message, row_id=row_id)
+            messages.success(request, message)
+        except ValidationError as exc:
+            if ajax:
+                return _extraction_edit_json_error(str(exc))
+            messages.error(request, str(exc))
+        except (AIServiceError, BOQAIError) as exc:
+            if ajax:
+                return _extraction_edit_json_error(str(exc))
+            messages.error(request, str(exc))
+        except Exception:
+            logger.exception("BOQ row match failed for id=%s row=%s", boq.pk, row_id)
+            message = "Failed to re-match this row."
+            if ajax:
+                return _extraction_edit_json_error(message, status=500)
+            messages.error(request, message)
+        return HttpResponseRedirect(redirect_url)
 
 
 class BOQExtractionEditView(LoginRequiredMixin, View):

@@ -88,24 +88,35 @@ Step 2 — Match:    extracted products → DB matching → rates/labour (match 
 
 **Step 1 — Analyse** (BOQ detail → **Analysis** tab):
 
-- Button: **Analyse** → `POST /boqs/<id>/extract/` via `dispatch_boq_extraction`
-- Celery task: `boq.process_extraction`
+- Button: **Analyse BOQ** (toolbar, first run only) → `POST /boqs/<id>/extract/`
+  via `dispatch_boq_extraction`. Full-BOQ re-analyse is not offered in the toolbar;
+  use per-row **Re-analyse**.
+- Per-row: **Re-analyse** (Analysis tab) → `POST /boqs/<id>/rows/<row_id>/extract/`
+  (`BOQAnalysisService.re_extract_row`) refreshes one anchor group only
+- Celery task: `boq.process_extraction` (full BOQ only)
 - Status: `PROCESSING` → `EXTRACTED`
 - Shows extracted products and activities in upload row order (no DB matching yet)
-- **Interactive review:** users can edit extracted product fields (category, size,
-  capacity, attributes, etc.) and select a preferred make from the make list when
-  a make-list line matches the BOQ description. Saves via
-  `POST /boqs/<id>/extraction/edit/` (`BOQExtractionEditService`). Missing fields
-  are highlighted; edits persist in `analysis_data` before **Match** runs.
+- **Interactive review:** all product fields (class, size, capacity, unit, etc.) are
+  optional — products differ in which properties apply. Users can edit filled fields
+  and select a preferred make from the make list when a make-list line matches the
+  BOQ description. Saves via `POST /boqs/<id>/extraction/edit/`
+  (`BOQExtractionEditService`). Edits persist in `analysis_data` before **Match** runs.
 
-**Step 2 — Match** (BOQ detail → **Match** button → new page):
+**Step 2 — Match** (BOQ detail → **Match** button → Match Results tab):
 
-- Button: **Match** → `POST /boqs/<id>/match/` → redirect to `/boqs/<id>/match-results/`
-- Celery task: `boq.process_matching`
-- Status: `PROCESSING` → `PROCESSED`
+- Button: **Match** (toolbar, first run after Analyse only) → `POST /boqs/<id>/match/`
+  → Match Results tab. Full-BOQ re-match is not offered in the toolbar; use per-row
+  **Re-match**.
+- Per-row: **Re-match** (Match Results tab only, after status is `PROCESSED`) →
+  `POST /boqs/<id>/rows/<row_id>/match/` (`BOQAnalysisService.re_match_row`)
+- Matching / DB search uses **only filled product properties** (null/blank fields and
+  empty attributes are omitted from Chroma query text, structured scoring, and SQL
+  fallback filters).
+- Celery task: `boq.process_matching` (full BOQ only)
+- Status: `MATCHING` → `PROCESSED`
 - Match results page: rates, labour, confirm, export
 
-Poll `GET /boqs/<id>/status/?expect=extract|match` while `PROCESSING`.
+Poll `GET /boqs/<id>/status/?expect=extract|match` while `PROCESSING` / `MATCHING`.
 
 **Output:** `media/extract_json/{boq_name}/boq_analysis.json` plus `BOQ.analysis_data`
 JSONField (`phase`: `extracted` | `matched`). After matching, a dedicated

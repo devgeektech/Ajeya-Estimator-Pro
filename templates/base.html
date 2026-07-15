@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Ajeya Estimator Pro{% endblock %}</title>
     <meta name="csrf-token" content="{{ csrf_token }}">
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=23">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=26">
     <style>
         .confirm-modal {
             position: fixed;
@@ -148,13 +148,60 @@
         }
 
         .btn--boq-match {
-            background: #dc2626;
-            border-color: #b91c1c;
+            background: #b91c1c;
+            border-color: #991b1b;
             color: #fff;
         }
         .btn--boq-match:hover {
-            background: #b91c1c;
+            background: #991b1b;
             color: #fff;
+        }
+
+        .analysis-action-icons {
+            display: inline-flex;
+            flex-direction: row;
+            flex-wrap: nowrap;
+            align-items: center;
+            justify-content: center;
+            gap: 3px;
+        }
+        .btn.analysis-action-btn {
+            padding: 2px 7px !important;
+            font-size: .62rem !important;
+            line-height: 1.2 !important;
+            min-height: 0 !important;
+            height: 22px !important;
+            border-radius: 4px !important;
+            font-weight: 600 !important;
+            white-space: nowrap !important;
+            border-width: 1px !important;
+            border-style: solid !important;
+        }
+        .btn.analysis-action-btn--confirm {
+            background: #2563eb !important;
+            border-color: #1d4ed8 !important;
+            color: #fff !important;
+        }
+        .btn.analysis-action-btn--confirm:hover {
+            background: #1d4ed8 !important;
+            color: #fff !important;
+        }
+        .btn.analysis-action-btn--rematch {
+            background: #b91c1c !important;
+            border-color: #991b1b !important;
+            color: #fff !important;
+        }
+        .btn.analysis-action-btn--rematch:hover {
+            background: #991b1b !important;
+            color: #fff !important;
+        }
+        .btn.analysis-action-btn--ghost {
+            background: var(--surface) !important;
+            border-color: var(--border) !important;
+            color: var(--text) !important;
+        }
+        .btn.analysis-action-btn--ghost:hover {
+            background: var(--surface-alt) !important;
         }
 
         .btn--boq-export {
@@ -314,6 +361,18 @@
         .extraction-line__meta {
             color: var(--text-muted);
             font-size: .85rem;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+            justify-content: flex-end;
+        }
+
+        .extraction-line__row-actions {
+            display: inline-flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            align-items: center;
         }
 
         .extraction-make-list,
@@ -339,7 +398,7 @@
             font-weight: 700;
             text-transform: uppercase;
             letter-spacing: .04em;
-            color: var(--text-muted);
+            color: var(--text);
         }
 
         .extraction-make-form {
@@ -377,7 +436,25 @@
             justify-content: space-between;
             align-items: center;
             gap: 10px;
-            margin-bottom: 10px;
+            margin: 0 0 12px;
+            padding: 8px 12px;
+            border-radius: 8px;
+            background: var(--surface-alt, #f1f5f9);
+            border: 1px solid var(--border);
+        }
+
+        .extraction-product-card__remove {
+            flex-shrink: 0;
+        }
+
+        .btn--xsmall {
+            padding: 2px 8px !important;
+            font-size: .68rem !important;
+            line-height: 1.2 !important;
+            min-height: 0 !important;
+            height: 24px !important;
+            border-radius: 4px !important;
+            font-weight: 600;
         }
 
         .extraction-product-card__badges {
@@ -427,11 +504,14 @@
         }
 
         .extraction-input--wrap {
-            min-height: 4.5rem;
+            min-height: 2.2rem;
+            max-height: 7.5rem;
             line-height: 1.45;
             white-space: pre-wrap;
             word-break: break-word;
             font-family: inherit;
+            resize: none;
+            overflow-y: auto;
         }
 
         .extraction-readonly-item--full {
@@ -508,12 +588,12 @@
         .extraction-field__label {
             font-size: .75rem;
             font-weight: 600;
-            color: var(--text-muted);
+            color: var(--text);
         }
 
         .extraction-field__hint {
             font-size: .75rem;
-            color: var(--text-muted);
+            color: var(--text);
         }
 
         .extraction-field--missing .extraction-field__label {
@@ -560,7 +640,8 @@
         .extraction-readonly-item dt {
             font-size: .72rem;
             text-transform: uppercase;
-            color: var(--text-muted);
+            color: var(--text);
+            font-weight: 600;
         }
 
         .extraction-readonly-item dd {
@@ -759,6 +840,10 @@
             border-color: var(--border);
             color: var(--text);
         }
+        .dark-mode .extraction-product-card__head {
+            background: rgba(148, 163, 184, .12);
+            border-color: var(--border);
+        }
 
         .dark-mode .extraction-product-card__title,
         .dark-mode .extraction-line__description-text,
@@ -766,8 +851,10 @@
             color: var(--text);
         }
 
-        .dark-mode .extraction-field__label {
-            color: #cbd5e1;
+        .dark-mode .extraction-field__label,
+        .dark-mode .extraction-section-label,
+        .dark-mode .extraction-readonly-item dt {
+            color: #e2e8f0;
         }
 
         .dark-mode .extraction-field--missing .extraction-field__label {

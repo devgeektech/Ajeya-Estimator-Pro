@@ -34,6 +34,44 @@ run analysis → session confirmations → export Excel
 
 ## Session Log
 
+### 2026-07-14 — Analysis Product Actions Layout
+
+Completed:
+
+- Moved **+ Add product** beside **Save product**; renamed Other details to
+  **Additional Attributes** with **+ Add attribute**.
+
+### 2026-07-14 — Optional Product Fields + Filled-Only Matching
+
+Completed:
+
+- Class, size, capacity, unit, and related product fields are optional in Analysis UI.
+- Matching uses only filled properties for Chroma query, structured score, and SQL
+  fallback (null/blank omitted).
+- Extraction prompt tightened for evidence-based fields and correct products.
+
+### 2026-07-14 — Match Results Icons + Extraction Fixes
+
+Completed:
+
+- Match Results: compact icon Confirm / Re-match; hide lineage stub rows.
+- Spec filter no longer drops products like "Pressure switch" / "Flow switch".
+- Extraction activities use work verbs (Installation, Testing, …), not Labour_Type.
+
+### 2026-07-14 — Per-Row Re-analyse / Re-match
+
+Completed:
+
+- Top toolbar no longer shows full-BOQ Re-analyse / Re-match; use per-row actions.
+  First-time **Analyse BOQ** and **Match** remain when needed.
+
+### 2026-07-14 — Preferred Make Lowest Price Option
+
+Completed:
+
+- Added Preferred make **Lowest price** option; matching selects cheapest Rate_Master
+  among approved makes.
+
 ### 2026-07-13 — Make List Column Parsing Fix
 
 Completed:

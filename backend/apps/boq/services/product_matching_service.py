@@ -5,7 +5,7 @@ import logging
 import re
 from typing import Any
 
-from ai.embeddings.chroma_store import ChromaEmbeddingStore, rate_document
+from ai.embeddings.chroma_store import ChromaEmbeddingStore, rate_document, selection_amount
 from ai.embeddings.generator import generate_embedding
 from apps.database_manager.models import Rate_Master
 from common.constants import MATCH_CONFIDENCE_THRESHOLD
@@ -33,6 +33,14 @@ def _normalize_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip().lower())
 
 
+def _is_filled(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    return True
+
+
 def _size_value(value: Any) -> float | None:
     if value in (None, ""):
         return None
@@ -47,7 +55,7 @@ def _text_match_score(left: Any, right: Any) -> float:
     left_text = _normalize_text(left)
     right_text = _normalize_text(right)
     if not left_text:
-        return 1.0
+        return 0.0
     if not right_text:
         return 0.0
     if left_text == right_text:
@@ -61,7 +69,7 @@ def _size_match_score(left: Any, right: Any) -> float:
     left_size = _size_value(left)
     right_size = _size_value(right)
     if left_size is None:
-        return 1.0
+        return 0.0
     if right_size is None:
         return 0.0
     if abs(left_size - right_size) <= 0.01:
@@ -72,31 +80,54 @@ def _size_match_score(left: Any, right: Any) -> float:
 
 
 def structured_match_score(extracted: dict[str, Any], rate: Rate_Master) -> tuple[float, dict[str, Any]]:
-    """Return 0-100 structured score and per-field breakdown."""
+    """Return 0-100 structured score using only filled extracted properties."""
     extracted_attrs = {
         str(key): str(value)
         for key, value in (extracted.get("attributes") or {}).items()
+        if _is_filled(value)
     }
     rate_attrs = parse_attributes(rate.Attribute)
 
-    breakdown: dict[str, Any] = {
-        "category": _text_match_score(extracted.get("category"), rate.Category) * _TEXT_WEIGHTS["category"],
-        "sub_category": _text_match_score(extracted.get("sub_category"), rate.Sub_Category)
-        * _TEXT_WEIGHTS["sub_category"],
-        "class": _text_match_score(extracted.get("class"), rate.Class) * _TEXT_WEIGHTS["class"],
-        "size": _size_match_score(extracted.get("size"), rate.Size) * _TEXT_WEIGHTS["size"],
-        "unit": _text_match_score(extracted.get("unit"), rate.Unit) * _TEXT_WEIGHTS["unit"],
-        "capacity": _text_match_score(extracted.get("capacity"), rate.Capacity)
-        * _TEXT_WEIGHTS["capacity"],
-    }
-    attr_ratio, attr_scores = attribute_overlap_score(extracted_attrs, rate_attrs)
-    breakdown["attributes"] = attr_ratio * _TEXT_WEIGHTS["attributes"]
-    total = sum(breakdown.values())
-    breakdown["attribute_details"] = attr_scores
+    field_checks: list[tuple[str, Any, Any, Any]] = [
+        ("category", extracted.get("category"), rate.Category, _text_match_score),
+        ("sub_category", extracted.get("sub_category"), rate.Sub_Category, _text_match_score),
+        ("class", extracted.get("class"), rate.Class, _text_match_score),
+        ("size", extracted.get("size"), rate.Size, _size_match_score),
+        ("unit", extracted.get("unit"), rate.Unit, _text_match_score),
+        ("capacity", extracted.get("capacity"), rate.Capacity, _text_match_score),
+    ]
+
+    breakdown: dict[str, Any] = {}
+    weighted_score = 0.0
+    weight_total = 0.0
+
+    for name, left, right, scorer in field_checks:
+        if not _is_filled(left):
+            continue
+        weight = _TEXT_WEIGHTS[name]
+        points = scorer(left, right) * weight
+        breakdown[name] = points
+        weighted_score += points
+        weight_total += weight
+
+    if extracted_attrs:
+        attr_ratio, attr_scores = attribute_overlap_score(extracted_attrs, rate_attrs)
+        weight = _TEXT_WEIGHTS["attributes"]
+        breakdown["attributes"] = attr_ratio * weight
+        breakdown["attribute_details"] = attr_scores
+        weighted_score += attr_ratio * weight
+        weight_total += weight
+
+    if weight_total <= 0:
+        return 0.0, breakdown
+
+    # Renormalize so products with fewer filled properties stay on a 0-100 scale.
+    total = (weighted_score / weight_total) * 100.0
     return total, breakdown
 
 
 def build_match_query_text(extracted: dict[str, Any]) -> str:
+    """Build Chroma query text from filled properties only (skip null/blank)."""
     parts = [
         extracted.get("description_hint"),
         extracted.get("category"),
@@ -109,8 +140,10 @@ def build_match_query_text(extracted: dict[str, Any]) -> str:
     ]
     attrs = extracted.get("attributes") or {}
     for key, value in attrs.items():
+        if not _is_filled(value):
+            continue
         parts.append(f"{key}={value}")
-    return " ".join(str(part) for part in parts if part not in (None, ""))
+    return " ".join(str(part).strip() for part in parts if _is_filled(part))
 
 
 class ProductMatchingService:
@@ -125,6 +158,7 @@ class ProductMatchingService:
         extracted: dict[str, Any],
         *,
         approved_makes: list[str] | None = None,
+        prefer_lowest_price: bool = False,
         chroma_limit: int = 25,
     ) -> dict[str, Any]:
         query_text = build_match_query_text(extracted)
@@ -159,6 +193,7 @@ class ProductMatchingService:
                     "chroma_similarity": round(chroma_score, 2),
                     "structured_score": round(structured, 2),
                     "score_breakdown": breakdown,
+                    "selection_amount": float(selection_amount(rate)),
                     "rate": rate,
                 }
             )
@@ -174,7 +209,17 @@ class ProductMatchingService:
             ]
             candidates = filtered
 
-        candidates.sort(key=lambda item: item["confidence"], reverse=True)
+        if prefer_lowest_price and candidates:
+            # Prefer cheapest approved-make candidate; confidence is tie-breaker.
+            candidates.sort(
+                key=lambda item: (
+                    float(item.get("selection_amount") or 0.0),
+                    -float(item.get("confidence") or 0.0),
+                )
+            )
+        else:
+            candidates.sort(key=lambda item: item["confidence"], reverse=True)
+
         best = candidates[0] if candidates else None
         confidence = best["confidence"] if best else 0.0
 
@@ -183,6 +228,7 @@ class ProductMatchingService:
             "confidence": confidence,
             "threshold": MATCH_CONFIDENCE_THRESHOLD,
             "approved_makes_applied": bool(approved_makes),
+            "prefer_lowest_price": prefer_lowest_price,
             "candidates": [
                 {
                     "rate_master_id": item["rate_master_id"],
@@ -192,6 +238,7 @@ class ProductMatchingService:
                     "confidence": item["confidence"],
                     "chroma_similarity": item["chroma_similarity"],
                     "structured_score": item["structured_score"],
+                    "selection_amount": item.get("selection_amount"),
                 }
                 for item in candidates[:5]
             ],
@@ -202,6 +249,7 @@ class ProductMatchingService:
                 "tech_key": best["tech_key"],
                 "make": best["make"],
                 "supplier": best["supplier"],
+                "selection_amount": best.get("selection_amount"),
             }
         return result
 
@@ -216,12 +264,19 @@ class ProductMatchingService:
 
     def _sql_fallback_candidates(self, extracted: dict[str, Any]) -> list[dict[str, Any]]:
         queryset = Rate_Master.objects.filter(database_version_id=self.database_version_id)
+        # Apply filters only for filled properties — never constrain on null/blank.
         category = extracted.get("category")
-        if category:
+        if _is_filled(category):
             queryset = queryset.filter(Category__iexact=str(category).strip())
         sub_category = extracted.get("sub_category")
-        if sub_category:
+        if _is_filled(sub_category):
             queryset = queryset.filter(Sub_Category__iexact=str(sub_category).strip())
+        product_class = extracted.get("class")
+        if _is_filled(product_class):
+            queryset = queryset.filter(Class__iexact=str(product_class).strip())
+        size = extracted.get("size")
+        if _is_filled(size):
+            queryset = queryset.filter(Size__icontains=str(size).strip())
 
         candidates: list[dict[str, Any]] = []
         for rate in queryset[:50]:
@@ -236,6 +291,7 @@ class ProductMatchingService:
                     "chroma_similarity": 0.0,
                     "structured_score": round(structured, 2),
                     "score_breakdown": breakdown,
+                    "selection_amount": float(selection_amount(rate)),
                     "rate": rate,
                 }
             )

@@ -12,22 +12,22 @@
     </p>
 </div>
 
-<div class="boq-sheet-wrap">
-    <table class="table boq-sheet analysis-table">
+<div class="boq-sheet-wrap boq-sheet-wrap--fit">
+    <table class="table boq-sheet analysis-table analysis-table--compact">
         <thead>
             <tr>
-                <th>S.No</th>
-                <th>Description</th>
-                <th>Qty</th>
-                <th>Status</th>
-                <th>Confidence</th>
+                <th class="analysis-col-sno">S.No</th>
+                <th class="analysis-col-desc">Description</th>
+                <th class="analysis-col-qty">Qty</th>
+                <th class="analysis-col-status">Status</th>
+                <th class="analysis-col-conf">Conf.</th>
                 <th>Category</th>
                 <th>Make</th>
                 <th>Tech Key</th>
-                <th>Material Rate</th>
-                <th>Labour Rate</th>
-                <th>Total</th>
-                <th>Confirm</th>
+                <th class="analysis-col-num">Material</th>
+                <th class="analysis-col-num">Labour</th>
+                <th class="analysis-col-num">Total</th>
+                <th class="analysis-col-actions">Actions</th>
             </tr>
         </thead>
         <tbody>
@@ -36,56 +36,53 @@
                     {% for product in line.products %}
                     <tr class="boq-sheet__row boq-sheet__row--depth-{{ line.depth|default:0 }} analysis-row analysis-row--{{ product.status }}">
                         <td>{{ line.serial }}</td>
-                        <td class="boq-sheet__cell" style="--row-depth: {{ line.depth|default:0 }};">
-                            {{ line.description|truncatechars:120 }}
+                        <td class="boq-sheet__cell analysis-col-desc" style="--row-depth: {{ line.depth|default:0 }};" title="{{ line.description }}">
+                            {{ line.description|truncatechars:80 }}
                         </td>
-                        <td>{{ line.qty }}</td>
-                        <td>
+                        <td class="analysis-col-qty">{{ line.qty }}</td>
+                        <td class="analysis-col-status">
                             <span class="badge {% if product.is_confirmed %}badge--green{% elif product.status == 'matched' %}badge--blue{% else %}badge--yellow{% endif %}">
-                                {% if product.is_confirmed %}confirmed{% else %}{{ product.status }}{% endif %}
+                                {% if product.is_confirmed %}ok{% else %}{{ product.status }}{% endif %}
                             </span>
                         </td>
-                        <td>{{ product.confidence|floatformat:1 }}%</td>
+                        <td class="analysis-col-conf">{{ product.confidence|floatformat:0 }}%</td>
                         <td>{% if product.selected %}{{ product.selected.category }}{% else %}{{ product.extracted_category|default:"—" }}{% endif %}</td>
                         <td>{% if product.selected %}{{ product.selected.make|default:"—" }}{% else %}—{% endif %}</td>
-                        <td>{% if product.selected %}{{ product.selected.tech_key|default:"—" }}{% else %}—{% endif %}</td>
-                        <td>{{ product.line_output.material_rate|default:"—" }}</td>
-                        <td>{{ product.line_output.labour_rate|default:"—" }}</td>
-                        <td>{{ product.line_output.total_amount|default:"—" }}</td>
-                        <td>
-                            <form method="post" action="{% url 'boq:confirm' boq.pk %}" class="analysis-review-form">
-                                {% csrf_token %}
-                                <input type="hidden" name="line_key" value="{{ product.line_key }}">
-                                {% if product.candidates and product.status == 'pending' %}
-                                <select name="rate_master_id" class="input input--small" aria-label="Select product" required>
-                                    <option value="">— select —</option>
-                                    {% for candidate in product.candidates %}
-                                    <option value="{{ candidate.rate_master_id }}"
-                                        {% if product.confirmed_rate_master_id == candidate.rate_master_id %}selected{% endif %}>
-                                        {{ candidate.make|default:"?" }} / {{ candidate.tech_key }} ({{ candidate.confidence }}%)
-                                    </option>
-                                    {% endfor %}
-                                </select>
+                        <td class="analysis-col-tech" title="{% if product.selected %}{{ product.selected.tech_key }}{% endif %}">{% if product.selected %}{{ product.selected.tech_key|default:"—"|truncatechars:14 }}{% else %}—{% endif %}</td>
+                        <td class="analysis-col-num">{{ product.line_output.material_rate|default:"—" }}</td>
+                        <td class="analysis-col-num">{{ product.line_output.labour_rate|default:"—" }}</td>
+                        <td class="analysis-col-num">{{ product.line_output.total_amount|default:"—" }}</td>
+                        <td class="analysis-col-actions">
+                            <div class="analysis-action-icons">
+                                <form method="post" action="{% url 'boq:confirm' boq.pk %}" class="analysis-review-form">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="line_key" value="{{ product.line_key }}">
+                                    {% if product.is_confirmed %}
+                                    <button type="submit" name="action" value="unconfirm" class="btn analysis-action-btn analysis-action-btn--ghost" title="Undo confirm">Undo</button>
+                                    {% else %}
+                                    <button type="submit" name="action" value="confirm" class="btn analysis-action-btn analysis-action-btn--confirm" title="Confirm">Confirm</button>
+                                    {% endif %}
+                                </form>
+                                {% if can_rematch and forloop.first %}
+                                <form method="post" action="{% url 'boq:row_match' boq.pk line.row_id %}" class="analysis-review-form">
+                                    {% csrf_token %}
+                                    <button type="submit" class="btn analysis-action-btn analysis-action-btn--rematch" title="Re-match this row">Re-match</button>
+                                </form>
                                 {% endif %}
-                                {% if product.is_confirmed %}
-                                <button type="submit" name="action" value="unconfirm" class="btn btn--small btn--ghost">Undo</button>
-                                {% else %}
-                                <button type="submit" name="action" value="confirm" class="btn btn--small btn--primary">Confirm</button>
-                                {% endif %}
-                            </form>
+                            </div>
                         </td>
                     </tr>
                     {% endfor %}
                 {% else %}
                     <tr class="boq-sheet__row boq-sheet__row--depth-{{ line.depth|default:0 }} analysis-row analysis-row--{{ line.status }}">
                         <td>{{ line.serial }}</td>
-                        <td class="boq-sheet__cell" style="--row-depth: {{ line.depth|default:0 }};">
-                            {{ line.description|truncatechars:120 }}
+                        <td class="boq-sheet__cell analysis-col-desc" style="--row-depth: {{ line.depth|default:0 }};" title="{{ line.description }}">
+                            {{ line.description|truncatechars:80 }}
                         </td>
-                        <td>{{ line.qty|default:"" }}</td>
-                        <td>
+                        <td class="analysis-col-qty">{{ line.qty|default:"" }}</td>
+                        <td class="analysis-col-status">
                             {% if line.status == 'skipped' %}
-                                <span class="badge badge--gray">skipped</span>
+                                <span class="badge badge--gray">skip</span>
                             {% else %}
                                 <span class="badge badge--gray">—</span>
                             {% endif %}

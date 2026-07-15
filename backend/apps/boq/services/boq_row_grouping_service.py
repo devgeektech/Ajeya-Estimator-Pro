@@ -40,6 +40,24 @@ def is_anchor_row(row: dict[str, Any]) -> bool:
     return not row.get("parent_row_id")
 
 
+def resolve_anchor_row_id(boq_data: dict[str, Any], row_id: str) -> str:
+    """Return the anchor row_id for a lineage node (or the id itself if already an anchor)."""
+    rows = boq_data.get("rows") or []
+    index = _row_index(rows)
+    current_id = str(row_id)
+    row = index.get(current_id)
+    if not row:
+        return current_id
+    while row.get("parent_row_id"):
+        parent_id = str(row.get("parent_row_id"))
+        parent = index.get(parent_id)
+        if not parent:
+            break
+        current_id = parent_id
+        row = parent
+    return current_id
+
+
 def lineage_ids_for_anchor(anchor_row_id: str, rows: list[dict[str, Any]]) -> list[str]:
     children = _children_map(rows)
     return [anchor_row_id, *_collect_descendant_ids(anchor_row_id, children)]
