@@ -42,6 +42,35 @@ def normalize_serial_text(value: Any) -> str:
     return text
 
 
+def _fix_float_serial_truncation(serial: str, last_serial: str) -> str:
+    """Fix Excel truncating '2.10' to float 2.1 by using the previous serial context."""
+    if not serial or not last_serial:
+        return serial
+    
+    try:
+        serial_float = float(serial)
+    except ValueError:
+        return serial
+        
+    match_last = re.compile(r"^(\d+)\.(\d+)$").match(last_serial)
+    if not match_last:
+        return serial
+        
+    prefix = match_last.group(1)
+    last_num = int(match_last.group(2))
+    
+    for offset in range(1, 10):
+        expected = f"{prefix}.{last_num + offset}"
+        try:
+            if serial_float == float(expected):
+                return expected
+        except ValueError:
+            pass
+            
+    return serial
+
+
+
 def cell_value(row: dict, key: str) -> Any:
     """Return the UI cell value, preferring display_values over raw values."""
     display_values = row.get("display_values") or {}
@@ -219,11 +248,21 @@ def attach_row_hierarchy(
     serial_lookup: dict[str, str] = {}
     stack: list[dict] = []
     normalized_rows: list[dict] = []
+    
+    last_structural_serial = ""
 
     for index, record in enumerate(records, start=1):
         serial = ""
         if serial_key:
             serial = normalize_serial_text(cell_value(record, serial_key))
+            fixed_serial = _fix_float_serial_truncation(serial, last_structural_serial)
+            if fixed_serial != serial:
+                serial = fixed_serial
+                if "display_values" in record and serial_key in record["display_values"]:
+                    record["display_values"][serial_key] = serial
+                if "values" in record and serial_key in record["values"]:
+                    record["values"][serial_key] = serial
+            
         if not serial:
             serial = _infer_serial_from_description(record)
 
@@ -247,5 +286,8 @@ def attach_row_hierarchy(
         if serial:
             serial_lookup[serial] = row_id
             stack.append({"depth": depth, "serial_key": serial, "row_id": row_id})
+            
+        if _is_structural_serial(serial):
+            last_structural_serial = serial
 
     return normalized_rows

@@ -142,6 +142,8 @@ def _shape_make_list(
     prefer_lowest = bool(stored_data.get("prefer_lowest_price")) or (
         MakeListConstraintService.is_lowest_make_selection(selected)
     )
+    if not make_list_service.has_constraints and not selected:
+        prefer_lowest = True
     is_custom = (not prefer_lowest) and (
         bool(stored_data.get("custom_make"))
         or (selected and selected not in make_options)

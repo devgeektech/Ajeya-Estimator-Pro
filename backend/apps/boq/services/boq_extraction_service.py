@@ -15,6 +15,7 @@ from apps.boq.services.boq_row_grouping_service import (
     grouped_anchor_rows,
     is_anchor_row,
     resolve_anchor_row_id,
+    has_quantity,
 )
 from apps.boq.services.serial_normalizer import analysis_fields
 
@@ -66,24 +67,11 @@ def _is_spec_only_product(product: dict[str, Any]) -> bool:
     return False
 
 
-def _has_quantity(fields: dict[str, Any]) -> bool:
-    for key in _QTY_KEYS:
-        value = fields.get(key)
-        if value in (None, ""):
-            continue
-        if isinstance(value, (int, float)) and value != 0:
-            return True
-        text = str(value).strip()
-        if text and text not in {"0", "0.0"}:
-            return re.search(r"\d", text) is not None
-    return False
-
-
 def _lineage_has_quantity(rows: list[dict[str, Any]], lineage_ids: list[str]) -> bool:
     index = {str(row.get("row_id")): row for row in rows if row.get("row_id")}
     for row_id in lineage_ids:
         row = index.get(str(row_id))
-        if row and _has_quantity(analysis_fields(row)):
+        if row and has_quantity(analysis_fields(row)):
             return True
     return False
 
@@ -95,7 +83,7 @@ def should_skip_anchor_group(group: dict[str, Any], *, lineage_has_qty: bool) ->
         return True
 
     anchor_fields = group.get("anchor_fields") or {}
-    if _has_quantity(anchor_fields) or lineage_has_qty:
+    if has_quantity(anchor_fields) or lineage_has_qty:
         return False
 
     if int(group.get("depth") or 0) == 0:
@@ -129,6 +117,8 @@ def _consolidate_to_anchors(
     extracted_by_id: dict[str, dict[str, Any]],
 ) -> None:
     """Move products returned on lineage child row_ids onto the anchor row."""
+    anchor_ids = {str(g.get("row_id")) for g in anchor_groups if g.get("row_id")}
+    
     for group in anchor_groups:
         anchor_id = str(group.get("row_id") or "")
         if not anchor_id:
@@ -160,6 +150,8 @@ def _consolidate_to_anchors(
 
         for row_id in lineage_ids:
             if row_id == anchor_id:
+                continue
+            if row_id in anchor_ids:
                 continue
             extracted_by_id[row_id] = {
                 "row_id": row_id,

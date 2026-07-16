@@ -389,6 +389,9 @@ class BOQAnalysisService:
         prefer_lowest_price = bool(row_make_list.get("prefer_lowest_price")) or (
             MakeListConstraintService.is_lowest_make_selection(selected_make)
         )
+        if not make_list_service.has_constraints and not selected_make:
+            prefer_lowest_price = True
+            
         approved_makes = make_list_service.approved_makes_for_description(description)
         stored_options = list(row_make_list.get("approved_makes") or [])
         if prefer_lowest_price:
