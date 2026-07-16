@@ -19,6 +19,7 @@ from apps.boq.services.boq_extraction_service import BOQExtractionService
 from apps.boq.services.boq_extract_service import load_extract_data
 from apps.boq.services.boq_row_grouping_service import full_description_for_row, resolve_anchor_row_id
 from apps.boq.services.make_list_constraint_service import MakeListConstraintService, walk_rows_tree
+from apps.boq.services.product_attribute_enrichment_service import ProductAttributeEnrichmentService
 from apps.boq.services.product_matching_service import ProductMatchingService
 from apps.boq.services.serial_normalizer import structure_for_analysis
 from apps.database_manager.services.activation import get_active_database_version
@@ -139,7 +140,7 @@ class BOQAnalysisService:
         self.boq_id = boq_id
 
     def run_extraction(self) -> dict[str, Any]:
-        """AI-only step: extract products and activities from BOQ rows."""
+        """Extract products/activities, then enrich attributes from Rate_Master."""
         boq = self._get_boq()
         self._set_status(boq, BOQStatus.PROCESSING)
         try:
@@ -158,6 +159,8 @@ class BOQAnalysisService:
                 if not row:
                     continue
                 extracted_rows.append({**row, "product_matches": []})
+
+            extracted_rows = self._enrich_extracted_attributes(extracted_rows)
 
             analysis_payload = {
                 "schema_version": 2,
@@ -217,6 +220,7 @@ class BOQAnalysisService:
                     replacement["make_list"] = make_list
                 replacements.append(replacement)
 
+            replacements = self._enrich_extracted_attributes(replacements)
             updated_rows = _replace_rows(list(existing.get("rows") or []), replacements)
             analysis_payload = {
                 **existing,
@@ -421,6 +425,20 @@ class BOQAnalysisService:
                 }
             )
         return {**row, "product_matches": product_matches}
+
+    @staticmethod
+    def _enrich_extracted_attributes(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Attach DB attribute schemas and fill confidence after AI extraction."""
+        active_version = get_active_database_version()
+        if active_version is None:
+            logger.warning("Attribute enrichment skipped: no active master database")
+            return rows
+        try:
+            enricher = ProductAttributeEnrichmentService(active_version.pk)
+            return enricher.enrich_rows(rows)
+        except Exception:
+            logger.exception("Attribute enrichment failed; keeping AI-extracted attributes")
+            return rows
 
     def _get_boq(self) -> BOQ:
         try:

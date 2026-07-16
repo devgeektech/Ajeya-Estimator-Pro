@@ -82,7 +82,7 @@ Entry point: `BOQCreationService` in `apps/boq/services/boq_service.py`.
 ### BOQ analysis — two-step workflow
 
 ```text
-Step 1 — Analyse:  rows_tree → AI extraction → extracted products/activities (detail page)
+Step 1 — Analyse:  rows_tree → AI extraction → DB attribute enrichment (detail page)
 Step 2 — Match:    extracted products → DB matching → rates/labour (match results page)
 ```
 
@@ -95,7 +95,12 @@ Step 2 — Match:    extracted products → DB matching → rates/labour (match 
   (`BOQAnalysisService.re_extract_row`) refreshes one anchor group only
 - Celery task: `boq.process_extraction` (full BOQ only)
 - Status: `PROCESSING` → `EXTRACTED`
-- Shows extracted products and activities in upload row order (no DB matching yet)
+- Flow per product: AI extract → search active `Rate_Master` → take that product's
+  `Attribute` keys as the UI schema → fill matching extracted values → score
+  attribute fill confidence
+- Attributes on the Analysis tab are **dynamic** (DB schema keys), not a fixed field
+  list. Extra unmatched extracted keys remain under **Additional Attributes**.
+- Attribute confidence badge colors: &gt;90 green, &gt;80 yellow, &gt;70 orange, else red
 - **Interactive review:** all product fields (class, size, capacity, unit, etc.) are
   optional — products differ in which properties apply. Users can edit filled fields
   and select a preferred make from the make list when a make-list line matches the
@@ -129,6 +134,7 @@ live analysis is edited before re-match.
 | Service | Role |
 | --- | --- |
 | `BOQExtractionService` | AI multi-product extraction from grouped anchor rows (full lineage text) |
+| `ProductAttributeEnrichmentService` | After extract: DB search → dynamic attribute schema + fill confidence |
 | `ProductMatchingService` | Chroma recall + structured `Rate_Master` scoring |
 | `MakeListConstraintService` | Map BOQ lines to `approved_makes_list`; hard Make filter |
 | `BOQAnalysisService` | Orchestrator |
@@ -146,8 +152,12 @@ live analysis is edited before re-match.
 | Attribute keys | **Learn aliases from DB** over time; normalize `Attribute` text in code |
 | Matching | **Structured product match** on `Rate_Master` columns + attributes, not vector/text alone |
 
-**Make list:** slash-separated makes (`TATA/JINDAL/SURYA`) are split into
-`approved_makes_list` on each row at parse time.
+**Make list:** column roles are inferred from headers **and** cell content (not a
+fixed name list). Material/description may be labeled Material, Description,
+Item, etc.; makes may be Make, Name, Make/Manufacturers Name, Brand, etc.
+Approved makes are split on `/`, `,`, `;`, or `|` into `approved_makes_list`
+(spaces inside a token are kept, e.g. `ESS ESS`). Resolved roles are stored as
+`column_roles` and rebuilt on load when missing.
 
 **Matching layer (three passes):**
 

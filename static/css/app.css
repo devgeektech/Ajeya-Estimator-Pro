@@ -646,6 +646,8 @@ body {
 .table { width: 100%; border-collapse: collapse; }
 .table th, .table td { text-align: center; padding: 12px 14px; border-bottom: 1px solid var(--border); font-size: .9rem; }
 .table th { color: #000 !important; font-weight: 800 !important; text-transform: uppercase; font-size: .75rem; letter-spacing: .04em; }
+.table tbody tr:nth-child(odd) td { background-color: #ffffff; }
+.table tbody tr:nth-child(even) td { background-color: #e2e8f0; }
 .table__actions { text-align: center; white-space: nowrap; }
 .table__actions > * { margin-left: 6px; }
 .table__empty { text-align: center; color: var(--text-muted); padding: 32px; }

@@ -88,15 +88,32 @@
                 productRowId: '{{ product.source_row_id }}',
                 productIndex: {{ product.product_index }},
                 missingCount: {{ product.missing_count }},
+                attributeConfidence: {{ product.attribute_confidence|default:0 }},
+                attributeSchema: {{ product.attribute_schema_json }},
                 extraAttrs: {{ product.extra_attrs_json }}
             })"
             {% endif %}
         >
             <div class="extraction-product-card__head">
-                <h4 class="extraction-product-card__title">
-                    {{ product.display_label }}
-                    {% if product.is_user_added %}<span class="badge badge--gray">manual</span>{% endif %}
-                </h4>
+                <div class="extraction-product-card__badges">
+                    <h4 class="extraction-product-card__title">
+                        {{ product.display_label }}
+                        {% if product.is_user_added %}<span class="badge badge--gray">manual</span>{% endif %}
+                    </h4>
+                    {% if can_edit_extraction %}
+                    <span
+                        class="badge extraction-confidence-badge"
+                        title="Attribute fill confidence"
+                        :class="'badge--' + attributeConfidenceBand"
+                        x-text="Math.round(attributeConfidence) + '%'"
+                    >{{ product.attribute_confidence|floatformat:0 }}%</span>
+                    {% else %}
+                    <span
+                        class="badge extraction-confidence-badge badge--{{ product.attribute_confidence_band }}"
+                        title="Attribute fill confidence"
+                    >{{ product.attribute_confidence|floatformat:0 }}%</span>
+                    {% endif %}
+                </div>
                 {% if can_edit_extraction %}
                 <button
                     type="button"
@@ -181,10 +198,19 @@
                 </div>
 
                 <div class="extraction-attributes-block">
-                    <span class="extraction-section-label">Attributes</span>
+                    <div class="extraction-attributes-block__head">
+                        <span class="extraction-section-label">Attributes</span>
+                        <span class="extraction-attributes-block__hint">
+                            {% if product.attributes.source == 'database' %}
+                            From matched database product
+                            {% else %}
+                            From extraction
+                            {% endif %}
+                        </span>
+                    </div>
                     <div class="extraction-field-grid">
-                        {% for attr in product.attributes.common %}
-                        <label class="extraction-field">
+                        {% for attr in product.attributes.fields %}
+                        <label class="extraction-field{% if not attr.filled %} extraction-field--missing{% endif %}">
                             <span class="extraction-field__label">{{ attr.label }}</span>
                             <input
                                 type="text"
@@ -192,8 +218,11 @@
                                 value="{{ attr.value }}"
                                 class="extraction-input"
                                 placeholder="Optional"
+                                @input="recalcAttributeConfidence()"
                             >
                         </label>
+                        {% empty %}
+                        <p class="extraction-line__empty">No database attributes for this product yet.</p>
                         {% endfor %}
                     </div>
                     <div class="extraction-extra-attrs">
@@ -246,9 +275,18 @@
                 {% endfor %}
             </dl>
             <div class="extraction-attributes-readonly">
-                <span class="extraction-section-label">Attributes</span>
+                <div class="extraction-attributes-block__head">
+                    <span class="extraction-section-label">Attributes</span>
+                    <span class="extraction-attributes-block__hint">
+                        {% if product.attributes.source == 'database' %}
+                        From matched database product
+                        {% else %}
+                        From extraction
+                        {% endif %}
+                    </span>
+                </div>
                 <ul class="extraction-list">
-                    {% for attr in product.attributes.common %}
+                    {% for attr in product.attributes.fields %}
                         {% if attr.value %}
                         <li>{{ attr.label }}: {{ attr.value }}</li>
                         {% endif %}
@@ -356,12 +394,21 @@ document.addEventListener('alpine:init', () => {
         productRowId: config.productRowId,
         productIndex: config.productIndex,
         missingCount: config.missingCount,
+        attributeConfidence: Number(config.attributeConfidence || 0),
+        attributeSchema: Array.isArray(config.attributeSchema) ? config.attributeSchema : [],
         extraAttrs: Array.isArray(config.extraAttrs) ? config.extraAttrs : [],
         newKey: '',
         newValue: '',
         saving: false,
         saved: false,
         saveError: '',
+        get attributeConfidenceBand() {
+            const score = Number(this.attributeConfidence || 0);
+            if (score > 90) return 'green';
+            if (score > 80) return 'yellow';
+            if (score > 70) return 'orange';
+            return 'red';
+        },
         addExtra() {
             const key = (this.newKey || '').trim();
             const value = (this.newValue || '').trim();
@@ -371,9 +418,26 @@ document.addEventListener('alpine:init', () => {
             this.extraAttrs.push({ key, value });
             this.newKey = '';
             this.newValue = '';
+            this.recalcAttributeConfidence();
         },
         removeExtra(index) {
             this.extraAttrs.splice(index, 1);
+            this.recalcAttributeConfidence();
+        },
+        recalcAttributeConfidence() {
+            const form = this.$el.querySelector('form') || this.$el.closest('form') || this.$root;
+            const schema = this.attributeSchema;
+            if (!schema.length) {
+                return;
+            }
+            let found = 0;
+            schema.forEach((key) => {
+                const input = form.querySelector(`[name="attr_${key}"]`);
+                if (input && String(input.value || '').trim()) {
+                    found += 1;
+                }
+            });
+            this.attributeConfidence = Math.round((100 * found) / schema.length);
         },
         async saveProduct(event) {
             if (this.saving) {
@@ -407,7 +471,11 @@ document.addEventListener('alpine:init', () => {
                 }
                 if (data.product) {
                     this.missingCount = data.product.missing_count || 0;
+                    if (data.product.attribute_confidence != null) {
+                        this.attributeConfidence = Number(data.product.attribute_confidence || 0);
+                    }
                 }
+                this.recalcAttributeConfidence();
                 this.saved = true;
                 setTimeout(() => { this.saved = false; }, 2000);
             } catch (error) {

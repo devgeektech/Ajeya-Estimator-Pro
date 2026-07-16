@@ -9,13 +9,13 @@ from django.db import transaction
 
 from apps.boq.models import BOQ
 from apps.boq.services.boq_analysis_store import save_boq_analysis_json
-from apps.boq.services.extraction_attribute_fields import COMMON_ATTRIBUTE_KEYS
 from apps.boq.services.make_list_constraint_service import (
     LOWEST_MAKE_STORED,
     LOWEST_MAKE_VALUE,
     MakeListConstraintService,
     _normalize_make,
 )
+from apps.boq.services.product_attribute_enrichment_service import compute_attribute_confidence
 from common.choices import BOQStatus
 from common.exceptions import BOQAIError, ValidationError
 
@@ -85,6 +85,9 @@ def _blank_product(product_index: int) -> dict[str, Any]:
         "make_hint": None,
         "capacity": None,
         "attributes": {},
+        "attribute_schema": [],
+        "attribute_confidence": 0.0,
+        "attribute_source": "extracted",
         "quantity": None,
         "quantity_unit": None,
         "extraction_confidence": 0.0,
@@ -135,6 +138,18 @@ class BOQExtractionEditService:
 
         if attributes is not None:
             updated["attributes"] = _normalize_attributes(attributes)
+            schema_keys = [
+                str(key)
+                for key in (updated.get("attribute_schema") or [])
+                if str(key).strip()
+            ]
+            if not schema_keys:
+                schema_keys = sorted(updated["attributes"].keys())
+                updated["attribute_schema"] = schema_keys
+            updated["attribute_confidence"] = compute_attribute_confidence(
+                schema_keys,
+                updated["attributes"],
+            )
 
         position = self._product_position(products, product_index)
         if position is None:
@@ -257,10 +272,16 @@ class BOQExtractionEditService:
 
     def parse_attributes_from_form(self, post_data) -> dict[str, str]:
         attrs: dict[str, str] = {}
-        for key in COMMON_ATTRIBUTE_KEYS:
-            value = (post_data.get(f"attr_{key}") or "").strip()
+        for key in post_data.keys():
+            key_text = str(key or "")
+            if not key_text.startswith("attr_"):
+                continue
+            attr_key = key_text[5:].strip().lower()
+            if not attr_key:
+                continue
+            value = (post_data.get(key_text) or "").strip()
             if value:
-                attrs[key] = value
+                attrs[attr_key] = value
 
         extra_keys = post_data.getlist("extra_attr_key")
         extra_values = post_data.getlist("extra_attr_value")

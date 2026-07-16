@@ -24,10 +24,17 @@ MAKE_LIST_HEADER_HINTS = frozenset(
         "serial",
         "description",
         "desc",
+        "particulars",
         "approved_makes",
         "make",
+        "makes",
+        "name",
+        "manufacturer",
+        "brand",
         "material",
+        "materials",
         "category",
+        "item",
     }
 )
 
@@ -46,8 +53,9 @@ def _parse_excel_make_list(uploaded_file, *, source_filename: str) -> dict:
         expand_columns=True,
     )
     serial_key = detect_serial_key(headers)
-    rows = attach_approved_makes_list(
-        attach_row_hierarchy(records, serial_key=serial_key)
+    rows, column_roles = attach_approved_makes_list(
+        attach_row_hierarchy(records, serial_key=serial_key),
+        headers=headers,
     )
     return structure_for_analysis(
         {
@@ -56,6 +64,7 @@ def _parse_excel_make_list(uploaded_file, *, source_filename: str) -> dict:
             "source_filename": source_filename,
             "serial_key": serial_key,
             "headers": headers,
+            "column_roles": column_roles,
             "rows": rows,
             "row_count": len(rows),
         }
@@ -66,8 +75,9 @@ def _parse_pdf_make_list(uploaded_file, *, source_filename: str) -> dict:
     file_path = _resolve_path(uploaded_file)
     headers, records = parse_make_list_pdf(file_path)
     serial_key = detect_serial_key(headers)
-    rows = attach_approved_makes_list(
-        attach_row_hierarchy(records, serial_key=serial_key)
+    rows, column_roles = attach_approved_makes_list(
+        attach_row_hierarchy(records, serial_key=serial_key),
+        headers=headers,
     )
     return structure_for_analysis(
         {
@@ -76,6 +86,7 @@ def _parse_pdf_make_list(uploaded_file, *, source_filename: str) -> dict:
             "source_filename": source_filename,
             "serial_key": serial_key,
             "headers": headers,
+            "column_roles": column_roles,
             "rows": rows,
             "row_count": len(rows),
         }

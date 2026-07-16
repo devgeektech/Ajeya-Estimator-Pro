@@ -34,6 +34,41 @@ run analysis → session confirmations → export Excel
 
 ## Session Log
 
+### 2026-07-16 — Heuristic Make-List Column Roles
+
+Completed: Make-list columns are resolved from header + cell-content scores so
+unknown labels (Material/Description/Item vs Make/Name/Manufacturer) still map
+correctly; `column_roles` stored on make_list_data.
+Pending: —
+Issues: —
+Next: —
+
+### 2026-07-16 — Make List Column + Separator Parsing
+
+Completed: Recognized `Make/Manufacturers Name` (and similar) columns; split
+makes on `/`, `,`, `;`, `|` into `approved_makes_list`; re-normalize stale empty
+lists on BOQ load.
+Pending: —
+Issues: —
+Next: Open BOQ detail so DB make_list_data persists the fix if still empty.
+
+### 2026-07-16 — Dynamic Analyse Attributes + Confidence
+
+Completed: Analyse now searches Rate_Master after AI extract, drives attribute
+fields from the matched product's Attribute keys, fills extracted values, and
+shows attribute-fill confidence with green/yellow/orange/red bands.
+Pending: Re-run Analyse on an existing BOQ to refresh attribute schemas.
+Issues: —
+Next: Verify Analyse UI on a real BOQ with active master DB.
+
+### 2026-07-16 — Fix is_anchor_row Type Annotation
+
+Completed: Typed `children_map` as `dict[str, list[str]] | None` so the default
+`None` is valid for basedpyright.
+Pending: —
+Issues: —
+Next: —
+
 ### 2026-07-14 — Analysis Product Actions Layout
 
 Completed:

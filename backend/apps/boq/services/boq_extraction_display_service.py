@@ -6,8 +6,13 @@ from typing import Any
 
 from apps.boq.models import BOQ
 from apps.boq.services.boq_row_grouping_service import grouped_anchor_rows
-from apps.boq.services.extraction_attribute_fields import COMMON_ATTRIBUTE_FIELDS, COMMON_ATTRIBUTE_KEYS
+from apps.boq.services.extraction_attribute_fields import COMMON_ATTRIBUTE_LABELS
 from apps.boq.services.make_list_constraint_service import MakeListConstraintService
+from apps.boq.services.product_attribute_enrichment_service import (
+    compute_attribute_confidence,
+    confidence_band,
+    humanize_attribute_key,
+)
 
 _PRODUCT_FIELDS: tuple[tuple[str, str], ...] = (
     ("description_hint", "Product description"),
@@ -33,22 +38,46 @@ def _is_blank(value: Any) -> bool:
     return False
 
 
-def _shape_attribute_fields(attributes: dict[str, Any]) -> dict[str, Any]:
-    attrs = attributes or {}
-    common = [
+def _attribute_label(key: str) -> str:
+    return COMMON_ATTRIBUTE_LABELS.get(key) or humanize_attribute_key(key)
+
+
+def _shape_attribute_fields(product: dict[str, Any]) -> dict[str, Any]:
+    attrs = dict(product.get("attributes") or {})
+    schema_keys = [
+        str(key)
+        for key in (product.get("attribute_schema") or [])
+        if str(key).strip()
+    ]
+    if not schema_keys:
+        schema_keys = sorted(str(key) for key in attrs if not _is_blank(attrs.get(key)))
+
+    schema_set = set(schema_keys)
+    fields = [
         {
             "key": key,
-            "label": label,
+            "label": _attribute_label(key),
             "value": attrs.get(key, "") or "",
+            "filled": not _is_blank(attrs.get(key)),
         }
-        for key, label in COMMON_ATTRIBUTE_FIELDS
+        for key in schema_keys
     ]
     extra = [
         {"key": key, "value": value}
         for key, value in sorted(attrs.items())
-        if key not in COMMON_ATTRIBUTE_KEYS and not _is_blank(value)
+        if key not in schema_set and not _is_blank(value)
     ]
-    return {"common": common, "extra": extra}
+    confidence = product.get("attribute_confidence")
+    if confidence is None:
+        confidence = compute_attribute_confidence(schema_keys, attrs)
+    confidence = float(confidence or 0.0)
+    return {
+        "fields": fields,
+        "extra": extra,
+        "confidence": confidence,
+        "confidence_band": confidence_band(confidence),
+        "source": product.get("attribute_source") or ("database" if schema_keys else "extracted"),
+    }
 
 
 def _shape_product(
@@ -74,8 +103,7 @@ def _shape_product(
             }
         )
 
-    attributes = product.get("attributes") or {}
-    attribute_fields = _shape_attribute_fields(attributes)
+    attribute_fields = _shape_attribute_fields(product)
 
     return {
         "product_index": int(product.get("product_index") or 0),
@@ -86,6 +114,11 @@ def _shape_product(
         "fields": fields,
         "attributes": attribute_fields,
         "extra_attrs_json": json.dumps(attribute_fields.get("extra") or []),
+        "attribute_schema_json": json.dumps(
+            [field["key"] for field in attribute_fields.get("fields") or []]
+        ),
+        "attribute_confidence": attribute_fields["confidence"],
+        "attribute_confidence_band": attribute_fields["confidence_band"],
         "missing_count": missing_count,
         "summary": _product_summary(product),
         "raw": product,
@@ -217,6 +250,8 @@ def build_product_save_feedback(product: dict[str, Any]) -> dict[str, Any]:
         "missing_count": shaped["missing_count"],
         "summary": shaped["summary"],
         "is_complete": shaped["missing_count"] == 0,
+        "attribute_confidence": shaped["attribute_confidence"],
+        "attribute_confidence_band": shaped["attribute_confidence_band"],
     }
 
 

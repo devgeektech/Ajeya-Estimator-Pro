@@ -58,7 +58,7 @@ def _collect_descendant_ids(row_id: str, children: dict[str, list[str]], index: 
     return ordered
 
 
-def is_anchor_row(row: dict[str, Any], children_map: dict[str, list[str]] = None) -> bool:
+def is_anchor_row(row: dict[str, Any], children_map: dict[str, list[str]] | None = None) -> bool:
     if not row.get("parent_row_id"):
         return True
     serial = row.get("serial") or ""

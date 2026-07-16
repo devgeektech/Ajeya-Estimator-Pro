@@ -15,7 +15,6 @@ _DESCRIPTION_KEYS = (
     "item",
     "material",
     "materials",
-    "name",
 )
 
 
@@ -32,12 +31,28 @@ def _token_set(text: str) -> set[str]:
     return {token for token in _normalize_text(text).split() if len(token) > 2}
 
 
-def _description_from_fields(fields: dict[str, Any]) -> str:
-    for key in _DESCRIPTION_KEYS:
+def _description_from_fields(
+    fields: dict[str, Any],
+    *,
+    material_keys: list[str] | None = None,
+    make_keys: list[str] | None = None,
+) -> str:
+    make_key_set = {str(key) for key in (make_keys or [])}
+    for key in material_keys or []:
+        if key in make_key_set:
+            continue
         value = fields.get(key)
         if value not in (None, ""):
             return str(value).strip()
-    for value in fields.values():
+    for key in _DESCRIPTION_KEYS:
+        if key in make_key_set:
+            continue
+        value = fields.get(key)
+        if value not in (None, ""):
+            return str(value).strip()
+    for key, value in fields.items():
+        if key in make_key_set:
+            continue
         if isinstance(value, str) and len(value.strip()) > 8:
             return value.strip()
     return ""
@@ -59,10 +74,17 @@ class MakeListConstraintService:
         self._entries: list[dict[str, Any]] = []
         if not make_list_data:
             return
+        roles = make_list_data.get("column_roles") or {}
+        material_keys = list(roles.get("material_keys") or [])
+        make_keys = list(roles.get("make_keys") or [])
         tree = make_list_data.get("rows_tree") or []
         for node in walk_rows_tree(tree):
             fields = node.get("fields") or {}
-            description = _description_from_fields(fields)
+            description = _description_from_fields(
+                fields,
+                material_keys=material_keys,
+                make_keys=make_keys,
+            )
             approved = node.get("approved_makes_list") or []
             if description and approved:
                 self._entries.append(

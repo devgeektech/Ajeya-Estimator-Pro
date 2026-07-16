@@ -1,6 +1,7 @@
-"""Shared attribute field definitions for extraction UI."""
+"""Shared attribute field helpers for extraction UI."""
 from __future__ import annotations
 
+# Legacy static keys kept only for reading older saved forms / analysis payloads.
 COMMON_ATTRIBUTE_FIELDS: tuple[tuple[str, str], ...] = (
     ("is", "IS Standard"),
     ("mounting", "Mounting"),
@@ -13,3 +14,5 @@ COMMON_ATTRIBUTE_FIELDS: tuple[tuple[str, str], ...] = (
 )
 
 COMMON_ATTRIBUTE_KEYS = {key for key, _label in COMMON_ATTRIBUTE_FIELDS}
+
+COMMON_ATTRIBUTE_LABELS = {key: label for key, label in COMMON_ATTRIBUTE_FIELDS}

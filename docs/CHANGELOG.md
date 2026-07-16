@@ -2,6 +2,31 @@
 
 Meaningful product and technical changes only. Older history is in git.
 
+## 2026-07-16 — Heuristic Make-List Column Roles
+
+- Make vs material columns inferred from headers + cell content (not fixed names).
+- Supports unknown labels like Description/Name, Material/Make Manufacturers, Item/Make.
+- Stores `column_roles` on make-list JSON; constraint matching prefers material keys.
+
+## 2026-07-16 — Make List Column + Separator Parsing
+
+- Make-list parser recognizes `Make/Manufacturers Name` and similar columns.
+- Splits approved makes on `/`, `,`, `;`, `|` (keeps spaced names like `ESS ESS`).
+- Empty `approved_makes_list` on stored BOQs is rebuilt on load when make cells exist.
+
+## 2026-07-16 — Dynamic Analyse Attributes + Confidence
+
+- Analyse enriches each extracted product from the best Rate_Master hit: DB
+  Attribute keys become the UI schema; extracted values fill matching keys.
+- Attribute confidence = filled schema keys / total schema keys (0–100).
+- Confidence badge colors: >90 green, >80 yellow, >70 orange, else red.
+- Static common attribute grid removed in favor of dynamic DB-driven fields.
+
+## 2026-07-16 — Fix is_anchor_row Optional Param Type
+
+- `is_anchor_row(..., children_map=None)` annotated as
+  `dict[str, list[str]] | None` to clear basedpyright `reportArgumentType`.
+
 ## 2026-07-14 — Analysis Product Actions Layout
 
 - **+ Add product** sits next to **Save product**; extra attrs labeled

@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Ajeya Estimator Pro{% endblock %}</title>
     <meta name="csrf-token" content="{{ csrf_token }}">
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=27">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=28">
     <style>
         .confirm-modal {
             position: fixed;
@@ -69,6 +69,10 @@
         .table th.table__actions, .table td.table__actions, .table__empty {
             text-align: center;
         }
+
+        /* White / grey zebra rows (same as Analysis cards) */
+        .table tbody tr:nth-child(odd) td { background-color: #ffffff; }
+        .table tbody tr:nth-child(even) td { background-color: #e2e8f0; }
 
         .field__required {
             color: var(--red, #dc2626);
@@ -715,6 +719,25 @@
             border-top: 1px dashed var(--border);
         }
 
+        .extraction-attributes-block__head {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+
+        .extraction-attributes-block__hint {
+            font-size: .75rem;
+            color: var(--text-muted);
+        }
+
+        .extraction-confidence-badge {
+            font-variant-numeric: tabular-nums;
+            min-width: 3.2rem;
+            text-align: center;
+        }
+
         .extraction-extra-attrs {
             margin-top: 8px;
             display: flex;
@@ -798,6 +821,8 @@
             background: var(--surface-alt);
             color: var(--text);
         }
+        .dark-mode .table tbody tr:nth-child(odd) td { background-color: #111827; }
+        .dark-mode .table tbody tr:nth-child(even) td { background-color: #334155; }
         .dark-mode .topbar {
             background: #111827;
             border-color: #2d3748;
