@@ -245,7 +245,7 @@ class BOQExtractionDisplayService:
         for group in grouped_anchor_rows(boq_data):
             row_id = group["row_id"]
             products, activities, analysis_row = _merge_lineage_analysis(
-                group["lineage_ids"],
+                group["group_ids"],
                 analysis_by_row,
             )
             product_total = len(products)

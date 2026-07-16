@@ -13,6 +13,42 @@
 {% block heading %}{{ boq.boq_name }}{% endblock %}
 
 {% block content %}
+<style>
+    .boq-detail-header {
+        position: sticky !important;
+        top: 63px !important;
+        z-index: 20 !important;
+        background: var(--surface-alt) !important;
+        padding-top: 16px !important;
+        padding-bottom: 8px !important;
+    }
+    .dark-mode .boq-detail-header {
+        background: var(--surface-alt) !important;
+    }
+    /* Distinct alternating card colors - Light Mode */
+    .extraction-line:nth-child(odd) {
+        background-color: #ffffff !important;
+    }
+    .extraction-line:nth-child(even) {
+        background-color: #e2e8f0 !important; /* Slate-200 for very clear distinction */
+    }
+    
+    /* Distinct alternating card colors - Dark Mode */
+    .dark-mode .extraction-line:nth-child(odd) {
+        background-color: #111827 !important; /* Slate-900 */
+    }
+    .dark-mode .extraction-line:nth-child(even) {
+        background-color: #334155 !important; /* Slate-700 (Canvas is Slate-800) */
+    }
+    
+    /* Ensure nested elements are transparent so the card background shows through */
+    .extraction-product-card {
+        background-color: transparent !important;
+    }
+    .dark-mode .extraction-product-card {
+        background-color: transparent !important;
+    }
+</style>
 <div
     class="boq-view"
     x-data="{
@@ -24,10 +60,20 @@
         extractStatusUrl: '{% url 'boq:status' boq.pk %}?expect=extract',
         matchStatusUrl: '{% url 'boq:status' boq.pk %}?expect=match',
         pollTimer: null,
+        scrollPositions: {},
         selectTab(name) {
             if (name === 'analysis' && !this.analysisEnabled) return;
             if (name === 'match_results' && !this.matchResultsEnabled) return;
+            
+            // Save current scroll position
+            this.scrollPositions[this.tab] = window.scrollY;
+            
             this.tab = name;
+            
+            // Restore new tab's scroll position after DOM updates
+            this.$nextTick(() => {
+                window.scrollTo(0, this.scrollPositions[name] || 0);
+            });
         },
         startPolling() {
             const pollExtract = () => {
@@ -35,7 +81,7 @@
                     .then((response) => response.json())
                     .then((data) => {
                         if (data.ready) {
-                            window.location.assign('{% url 'boq:detail' boq.pk %}?tab=analysis');
+                            window.location.href = '{% url "boq:detail" boq.pk %}?tab=analysis&_t=' + Date.now();
                             return;
                         }
                         this.pollTimer = setTimeout(pollExtract, 3000);
@@ -47,7 +93,7 @@
                     .then((response) => response.json())
                     .then((data) => {
                         if (data.ready) {
-                            window.location.assign('{% url 'boq:detail' boq.pk %}?tab=match_results');
+                            window.location.href = '{% url "boq:detail" boq.pk %}?tab=match_results&_t=' + Date.now();
                             return;
                         }
                         this.pollTimer = setTimeout(pollMatch, 3000);

@@ -179,6 +179,7 @@ def grouped_anchor_rows(boq_data: dict[str, Any]) -> list[dict[str, Any]]:
         if not row_id or not is_anchor_row(row, children):
             continue
         lineage_ids = lineage_ids_for_anchor(row_id, rows)
+        descendants = _collect_descendant_ids(row_id, children, index)
         qty, unit = anchor_qty_unit(index, row_id)
         grouped.append(
             {
@@ -186,6 +187,7 @@ def grouped_anchor_rows(boq_data: dict[str, Any]) -> list[dict[str, Any]]:
                 "serial": row.get("serial", ""),
                 "depth": row.get("depth", 0),
                 "lineage_ids": lineage_ids,
+                "group_ids": [row_id, *descendants],
                 "lineage_count": len(lineage_ids),
                 "description": row_description(row),
                 "full_description": combine_row_descriptions(index, lineage_ids),

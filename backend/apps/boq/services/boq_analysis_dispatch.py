@@ -81,19 +81,11 @@ def _dispatch_boq_job(
         )
 
     if not worker_is_available():
-        if settings.DEBUG:
-            logger.warning(
-                "No Celery worker detected in DEBUG; running BOQ %s synchronously",
-                job_label,
-            )
-            runner(boq_id)
-            return AnalysisDispatchResult(mode="sync")
-        return AnalysisDispatchResult(
-            mode="failed",
-            message=(
-                "No Celery worker is running. Start the worker in a separate terminal "
-                "(see README / docs/OPS.md)."
-            ),
+        # The 'threads' pool on Windows does not support control commands, 
+        # so worker_is_available() will incorrectly return False.
+        # We will log a warning but still attempt to queue the task.
+        logger.warning(
+            "No Celery worker detected (or thread pool in use). Queueing anyway."
         )
 
     BOQ.objects.filter(pk=boq_id).update(status=pending_status)
@@ -130,6 +122,9 @@ def broker_is_available() -> bool:
 
 def worker_is_available() -> bool:
     """Return True when at least one Celery worker responds to ping."""
+    if getattr(settings, "CELERY_SKIP_WORKER_CHECK", False):
+        return True
+        
     try:
         inspector = celery_app.control.inspect(timeout=1.0)
         stats = inspector.stats() if inspector else None

@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Ajeya Estimator Pro{% endblock %}</title>
     <meta name="csrf-token" content="{{ csrf_token }}">
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=26">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=27">
     <style>
         .confirm-modal {
             position: fixed;
@@ -323,10 +323,8 @@
         }
 
         .analysis-tab-canvas {
-            background: var(--canvas-bg, #e8edf3);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 14px;
+            /* Removed canvas styling so the cards can stretch full width */
+            padding: 0;
         }
 
         .extraction-lines {
@@ -341,6 +339,10 @@
             padding: 14px;
             background: var(--surface);
             box-shadow: var(--shadow);
+        }
+
+        .extraction-line:nth-child(even) {
+            background: var(--surface-alt);
         }
 
         .extraction-line__header {
@@ -919,8 +921,7 @@
         }
 
         .dark-mode .analysis-tab-canvas {
-            background: var(--canvas-bg);
-            border-color: var(--border);
+            /* Transparent canvas */
         }
 
         /* ---- Theme toggle button ---- */
