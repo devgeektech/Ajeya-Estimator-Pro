@@ -2,6 +2,212 @@
 
 Meaningful product and technical changes only. Older history is in git.
 
+## 2026-07-20 — Compact BOQ Detail Tab Bar
+
+- Tabs sit at the top with minimal padding; status, tab summary, and actions share
+  one row below the tabs. On Analysis: status badge, product/activity summary, and
+  Match button aligned on the right.
+
+## 2026-07-20 — Analysis Scroll Performance + Match UI
+
+- Reduced Analysis tab scroll lag: `content-visibility` on lines, removed textarea
+  auto-resize and input transitions, dropped scroll listener (scroll restore via
+  sessionStorage on reload only).
+- Database match shows inline summary next to heading; Make and Tech key removed
+  from the product card.
+- Additional Attributes use horizontal chips (content-width) like Activities.
+
+## 2026-07-20 — Horizontal Activities Row
+
+- Activities show inline: highlighted **Activities** heading, chips in a row, and
+  **+** to add (with remove on each chip when editing).
+
+## 2026-07-20 — Product Tab Action Row
+
+- Tabs labeled Product 1 / Product 2; Add, Re-analyse, and Remove sit on one
+  horizontal row. Removed the duplicate Product title + confidence header.
+
+## 2026-07-20 — Compact Analysis Product Cards
+
+- Tightened Analysis card padding/gaps, clamped description to one line, and
+  made the attributes block scroll inside the card so one product fits on screen.
+
+## 2026-07-20 — Product Tabs on Analysis Cards
+
+- Multiple products on a BOQ line use numbered tabs (1, 2, 3…) instead of a
+  stacked list; + Add product sits beside the tab numbers.
+
+## 2026-07-20 — Analysis Card Actions Cleanup
+
+- Removed Save product button (autosave remains).
+- Moved + Add product next to the product card number (last card title).
+
+## 2026-07-20 — Silent Re-analyse + Scroll Restore
+
+- Re-analyse swaps the updated row HTML in place (no full page reload); scroll
+  position is preserved.
+- Analysis (and other detail tabs) restore scroll from sessionStorage after
+  browser reload / refresh.
+
+## 2026-07-20 — Material Maps to Class
+
+- Extraction puts material/construction into product ``class`` (Rate_Master
+  ``Class``: MS, SS, CI, …), not Additional Attributes.
+- Misplaced ``attributes.material`` is promoted into ``class`` on display/save/
+  rematch; common abbreviations normalized (mild steel→MS, etc.).
+
+## 2026-07-20 — Product Unit vs BOQ Quantity UOM
+
+- Product ``unit`` maps to Rate_Master ``Unit`` (mm, cm, NB, …), not BOQ qty UOM.
+- BOQ row Each/Nos/Mtr fills ``quantity`` / ``quantity_unit`` only.
+- Extraction prompt and backfill updated; qty UOMs misplaced in ``unit`` are
+  moved to ``quantity_unit`` and measurement unit is derived from size when
+  present (e.g. ``63mm`` → unit ``mm``).
+
+## 2026-07-17 — Category-Wise Make on Make & Vendor
+
+- Category makes panel lists each analysed product category with approved makes
+  from the make list.
+- **Apply to category** sets that make on every product in the category and loads
+  rates via exact Rate_Master match + Tech_Key.
+
+## 2026-07-17 — Make & Vendor Selection Tab
+
+- New **Make & Vendor** tab after Analysis for make/supplier selection.
+- ``MakeVendorSelectionService`` combines analysis product fields with the chosen
+  make/supplier, exact-matches ``Rate_Master``, and loads rates via ``Tech_Key``.
+- AJAX ``POST /boqs/<id>/make-vendor/`` persists ``vendor_selection`` on each product.
+
+## 2026-07-17 — Confidence ≥80% Green
+
+- Confidence color bands: ≥80 green, >70 yellow, >50 orange, else red.
+
+## 2026-07-17 — Flatten Nested AI Attributes in UI
+
+- Coerce nested/stringified attribute payloads so Additional Attributes show
+  ``material: thermo plastic…`` instead of ``attributes: {'material': …}``.
+- Applied in display, extraction cleanup, AI mapping, enrichment, and save.
+
+## 2026-07-17 — Unit Field After Capacity
+
+- Product card shows Unit after Capacity again.
+- Extraction backfills ``unit`` / ``quantity`` / ``quantity_unit`` from the BOQ
+  row UOM when the model leaves them blank.
+
+## 2026-07-17 — Auto Status Refresh + Product Autosave
+
+- Analyse/Match start via AJAX; detail status badge polls and reloads when done.
+- BOQ list status column polls in-progress jobs and updates without manual refresh.
+- Product card autosaves typed fields/attributes; Re-analyse persists first then
+  rematches and reloads so confidence reflects filled values.
+
+## 2026-07-17 — Product Card UI Cleanup
+
+- Removed Unit and Preferred make fields from the Analysis product card.
+- Additional Attributes exclude keys already shown in the product grid or DB
+  attribute schema (fixes duplicate size/description/material entries).
+- Re-analyse button moved next to Remove on each product card.
+
+## 2026-07-17 — Project Timestamps Use IST
+
+- App ISO timestamps (instruction log, match results, confirmations) and
+  ``json_safe`` datetimes now use Asia/Kolkata via ``utils.timestamps``.
+- Application / error / instruction file logging ``asctime`` uses IST
+  (``common.logging_formatters.LocalTimeFormatter``), not host-local or UTC.
+- DB still stores UTC with ``USE_TZ=True``; UI already rendered in ``TIME_ZONE``.
+
+## 2026-07-17 — Fix Analyse Decimal JSON Error
+
+- ``db_candidates`` now stores Rate_Master ``Size`` as JSON-safe strings (was
+  Decimal, broke ``analysis_data`` save during Analyse).
+- All ``analysis_data`` writes pass through ``utils.json_safe`` before PostgreSQL
+  JSONField save.
+- Register ``DjangoJSONEncoder`` with psycopg3 JSON dumps so Decimal never
+  crashes Analyse persistence.
+
+## 2026-07-17 — BOQ Upload Keep Files on Name Error
+
+- Duplicate BOQ name validation no longer clears selected workbook/make-list files
+  (AJAX submit + name check). Change the name and retry without re-selecting files.
+
+## 2026-07-17 — Make List → Category Mapping
+
+- Map make-list free-text descriptions onto Rate_Master categories (heuristic + AI).
+- Store ``category_mappings`` on make-list JSON; show Mapped Category on Make List tab.
+- Preferred-make dropdown and Match filter use category-mapped approved makes.
+
+## 2026-07-17 — DB-Only Product Match + Attribute Rematch
+
+- Stopped forced top-candidate attach; Tech_Key / ``db_product_id`` only when
+  blended confidence ≥ 30%.
+- Provisional / unmatched statuses expose Attribute schema gaps for expert fill.
+- Per-row Re-analyse rematches existing products with filled attributes
+  (``rematch_row``); no invented catalog products.
+- Analysis UI shows match status, missing attributes, and top DB candidates.
+
+## 2026-07-16 — Make List Parser: Only Real Make Sheet
+
+- Sheet scoring prefers ``MAKE LIST`` / make columns; no longer picks huge rate sheets.
+- Payload slimmed to S.No + Description + Approved Makes; junk header rows dropped.
+- Polluted stored make-list JSON re-parses from the uploaded file on page load
+  (multi-sheet / rate-header detection, not only header/row counts).
+- Make List UI prefers MAKE LIST sheet rows when legacy mixed-sheet JSON remains.
+
+## 2026-07-16 — Make List Tab Columns Fix
+
+- Make-list Excel parse uses the single best sheet (no multi-sheet merge).
+- Make List UI shows only S.No, Description/Material, Approved Makes.
+- Stricter make-column detection excludes rate/qty/unit/dia noise columns.
+
+## 2026-07-16 — Map Uses Rate_Master.id (Not a rate_master_id Column)
+
+- Clarified AI map payload: candidate `id` = Django `Rate_Master.id` PK.
+  There is no `rate_master_id` column on Rate_Master; that name was only a JSON alias.
+- `PRODUCTS_PAYLOAD` is built at runtime in `ProductAIMappingService._run_ai_batches`.
+
+## 2026-07-16 — Extract Category Free-Text; Categories-Only DB Context
+
+- Extract prompt always fills category + sub_category from BOQ meaning; subcategory
+  may be free-text (not limited to DB lists). Map step reconciles to Rate_Master.
+- `build_database_context` sends categories + attribute_keys + activities only
+  (no huge subcategory dump). `rate_master_id` documented as Rate_Master PK.
+
+## 2026-07-16 — BOQ Hierarchy + Analyse Pipeline Hardening
+
+- Upload hierarchy: Operating Temp / roman lines nest under lettered products;
+  `1.1 Cont` treated as sibling serial; indent fallback; duplicate serial parents
+  use nearest prior; multi-sheet BOQ merge with `sheets` metadata.
+- Empty BOQ/make-list parses fail the upload instead of storing empty JSON.
+- PDF make-list parser merges wrapped continuation lines into the prior item.
+- Analyse anchors use `children_map`; extract prompt requires every evidenced
+  product; attribute values normalize MS/DI/CI/GI/SS abbreviations.
+
+## 2026-07-16 — AI Product + Attribute Mapping on Analyse
+
+- New AI mapping layer after extract: candidate recall → AI selects Rate_Master
+  product and maps extracted attributes onto DB Attribute keys.
+- Analysis page shows matched DB product summary, blended confidence, DB schema
+  fields (filled/empty), and AI-only Additional Attributes.
+
+## 2026-07-16 — Backfill DB Attribute Schema on Analysis
+
+- Attribute enrichment prefers SQL Rate_Master lookup (Chroma fallback).
+- Analysis page backfills missing `attribute_schema` so DB Attribute keys appear
+  (empty when AI did not find them); AI-only keys stay under Additional Attributes.
+
+## 2026-07-16 — DB Schema Attributes + AI Additional Attributes
+
+- Analysis Attributes grid always shows matched Rate_Master Attribute keys
+  (filled when AI found a value, empty when not).
+- AI-only keys render under Additional Attributes.
+
+## 2026-07-16 — Fix Analysis Confidence + Row Mapping + Extraction
+
+- Attribute confidence scored only against DB Attribute schema (0 when none).
+- Quantity detection includes Total/Ground/Basement columns.
+- Lettered priced lines (a/b/c…) are extractable anchors; Re-analyse resolves to
+  the nearest real anchor; product consolidate uses group_ids (not ancestors).
+
 ## 2026-07-16 — Heuristic Make-List Column Roles
 
 - Make vs material columns inferred from headers + cell content (not fixed names).

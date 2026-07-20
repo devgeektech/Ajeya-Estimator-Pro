@@ -58,9 +58,18 @@ _MATCHING_STATUSES = {
 def build_boq_tab_access(boq: BOQ) -> dict[str, bool]:
     """Which detail tabs the user may open for the current BOQ state."""
     status = boq.status
+    has_rows = bool((boq.analysis_data or {}).get("rows"))
     return {
-        "analysis": status in _ANALYSIS_STATUSES
-        or bool((boq.analysis_data or {}).get("rows")),
+        "analysis": status in _ANALYSIS_STATUSES or has_rows,
+        # Make & Vendor is available once Analyse has produced products.
+        "make_vendor": has_rows
+        and status
+        in {
+            BOQStatus.EXTRACTED,
+            BOQStatus.PROCESSED,
+            BOQStatus.ANALYSIS_FAILED,
+            BOQStatus.MATCHING,
+        },
         "match_results": status in _MATCHING_STATUSES,
     }
 
@@ -78,10 +87,17 @@ def resolve_detail_tab(boq: BOQ, session, requested_tab: str | None) -> str:
     """Pick a valid tab, falling back when the request targets a locked tab."""
     access = build_boq_tab_access(boq)
     tab = (requested_tab or "").strip() or default_detail_tab_for_boq(boq, session)
-    if tab not in {"boq", "make_list", "analysis", "match_results"}:
+    if tab not in {"boq", "make_list", "analysis", "make_vendor", "match_results"}:
         tab = default_detail_tab_for_boq(boq, session)
     if tab == "analysis" and not access["analysis"]:
         tab = "boq"
-    elif tab == "match_results" and not access["match_results"]:
+    elif tab == "make_vendor" and not access["make_vendor"]:
         tab = "analysis" if access["analysis"] else "boq"
+    elif tab == "match_results" and not access["match_results"]:
+        if access["make_vendor"]:
+            tab = "make_vendor"
+        elif access["analysis"]:
+            tab = "analysis"
+        else:
+            tab = "boq"
     return tab

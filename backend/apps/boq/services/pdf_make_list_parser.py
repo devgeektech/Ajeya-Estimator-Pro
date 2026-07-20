@@ -23,6 +23,8 @@ _HEADER_LINE = re.compile(
     r"s\.?\s*no\.?.*description.*(?:approved\s*)?makes?",
     re.IGNORECASE,
 )
+# Soft start of a new numbered item (used when deciding continuation vs new row).
+_SOFT_SERIAL_START = re.compile(r"^\d+\.?\s+\S")
 
 
 def _split_without_slashes(text: str) -> tuple[str, list[str]]:
@@ -160,6 +162,48 @@ def _record_from_parsed(
     }
 
 
+def _merge_continuation_into_last(
+    parsed_rows: list[tuple[int, int, str, str, list[str]]],
+    *,
+    page_number: int,
+    continuation: str,
+) -> bool:
+    """Append wrapped PDF text onto the previous row's description or makes."""
+    if not parsed_rows or not continuation.strip():
+        return False
+    line_number, prev_page, serial, description, makes = parsed_rows[-1]
+    text = continuation.strip()
+
+    # Trailing make tokens on wrap lines (e.g. " / TYCO / HD").
+    if text.startswith("/") or (makes and looks_like_make_token(text.split("/")[0].strip())):
+        extra_parts = [part.strip() for part in text.strip("/ ").split("/") if part.strip()]
+        for part in extra_parts:
+            if looks_like_make_token(part) or word_count(part) <= 3:
+                makes = [*makes, part]
+            else:
+                description = f"{description} {part}".strip()
+        parsed_rows[-1] = (line_number, prev_page or page_number, serial, description, makes)
+        return True
+
+    # Plain wrapped description (no new serial).
+    if not _SOFT_SERIAL_START.match(text):
+        peeled_description, peeled_makes = peel_boundary_segment(
+            text,
+            allow_long_segment=True,
+        )
+        if peeled_makes:
+            description = f"{description} {peeled_description}".strip()
+            makes = [*makes, *peeled_makes]
+        else:
+            remainder, trailing_makes = peel_trailing_make_word(text)
+            description = f"{description} {remainder}".strip()
+            if trailing_makes:
+                makes = [*makes, *trailing_makes]
+        parsed_rows[-1] = (line_number, prev_page or page_number, serial, description, makes)
+        return True
+    return False
+
+
 def parse_make_list_pdf(file_path: str) -> tuple[list[dict], list[dict]]:
     """Return ``(headers, records)`` for a make-list PDF."""
     reader = PdfReader(file_path)
@@ -173,11 +217,17 @@ def parse_make_list_pdf(file_path: str) -> tuple[list[dict], list[dict]]:
             if not line or is_pdf_title_line(line) or is_pdf_header_line(line):
                 continue
             parsed = parse_make_list_pdf_line(line)
-            if not parsed:
+            if parsed:
+                serial, description, makes = parsed
+                line_number += 1
+                parsed_rows.append((line_number, page_number, serial, description, makes))
                 continue
-            serial, description, makes = parsed
-            line_number += 1
-            parsed_rows.append((line_number, page_number, serial, description, makes))
+            # Wrapped continuation of the previous numbered item.
+            _merge_continuation_into_last(
+                parsed_rows,
+                page_number=page_number,
+                continuation=line,
+            )
 
     max_makes = max((len(makes) for *_, makes in parsed_rows), default=1)
     headers = _make_list_headers(max_makes)

@@ -7,6 +7,7 @@ from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.http import HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404
+from django.template.loader import render_to_string
 from django.urls import reverse
 from django.views import View
 from django.views.generic import DetailView, FormView, ListView
@@ -28,6 +29,7 @@ from .services.boq_extraction_display_service import (
     BOQExtractionDisplayService,
     build_product_save_feedback,
 )
+from .services.make_vendor_selection_service import MakeVendorSelectionService
 from .services.boq_service import BOQCreationService
 from .services.boq_status_display_service import (
     build_boq_status_display,
@@ -37,7 +39,11 @@ from .services.boq_status_display_service import (
     mark_exported_in_session,
     resolve_detail_tab,
 )
-from .services.serial_normalizer import structure_for_analysis, structure_for_display
+from .services.serial_normalizer import (
+    structure_for_analysis,
+    structure_for_display,
+    structure_for_make_list_display,
+)
 
 logger = logging.getLogger("boq_ai")
 
@@ -52,7 +58,7 @@ def _structures_for_display(boq: BOQ) -> tuple[dict, dict]:
         make_list_payload = boq.make_list_data or {}
     if not boq.make_list_file:
         make_list_payload = {}
-    return structure_for_display(boq_payload), structure_for_display(make_list_payload)
+    return structure_for_display(boq_payload), structure_for_make_list_display(make_list_payload)
 
 
 def _boq_queryset_for_user(user: User):
@@ -73,6 +79,12 @@ def _extraction_edit_is_ajax(request) -> bool:
     )
 
 
+def _request_wants_json(request) -> bool:
+    return _extraction_edit_is_ajax(request) or "application/json" in (
+        request.headers.get("Accept") or ""
+    )
+
+
 def _extraction_edit_json_ok(message: str, **payload):
     return JsonResponse({"ok": True, "message": message, **payload})
 
@@ -81,8 +93,76 @@ def _extraction_edit_json_error(message: str, status: int = 400):
     return JsonResponse({"ok": False, "message": message}, status=status)
 
 
+def _load_make_list_payload(boq: BOQ) -> dict:
+    try:
+        _, make_list_payload = load_extract_data(boq)
+    except Exception:
+        make_list_payload = boq.make_list_data or {}
+    if make_list_payload is None:
+        make_list_payload = {}
+    return make_list_payload
+
+
+def _can_edit_extraction(boq: BOQ) -> bool:
+    return (
+        boq.status
+        in {
+            BOQStatus.EXTRACTED,
+            BOQStatus.PROCESSED,
+            BOQStatus.ANALYSIS_FAILED,
+        }
+        and not _job_is_running(boq)
+        and bool((boq.analysis_data or {}).get("rows"))
+    )
+
+
+def _render_extraction_line_html(request, boq: BOQ, row_id: str) -> str:
+    """Render one Analysis tab row after rematch for silent DOM swap."""
+    boq.refresh_from_db(fields=["analysis_data", "status", "make_list_data"])
+    make_list_payload = _load_make_list_payload(boq)
+    display = BOQExtractionDisplayService(
+        boq,
+        make_list_payload,
+        has_make_list_file=bool(boq.make_list_file),
+    ).build()
+    line = next(
+        (item for item in display.get("lines") or [] if str(item.get("row_id")) == str(row_id)),
+        None,
+    )
+    if line is None:
+        return ""
+    return render_to_string(
+        "boq/_extraction_line.html",
+        {
+            "boq": boq,
+            "line": line,
+            "can_edit_extraction": _can_edit_extraction(boq),
+        },
+        request=request,
+    )
+
+
 def _job_is_running(boq: BOQ) -> bool:
     return boq.status in {BOQStatus.PROCESSING, BOQStatus.MATCHING}
+
+
+def _status_payload(boq: BOQ, session, *, expect: str = "extract") -> dict:
+    """JSON fields for polling Analyse / Match completion."""
+    expect_key = (expect or "extract").strip().lower()
+    if expect_key == "match":
+        ready = boq.status in {BOQStatus.PROCESSED, BOQStatus.ANALYSIS_FAILED}
+    else:
+        ready = boq.status in {BOQStatus.EXTRACTED, BOQStatus.ANALYSIS_FAILED}
+    display = build_boq_status_display(boq, session)
+    return {
+        "status": boq.status,
+        "ready": ready,
+        "failed": boq.status == BOQStatus.ANALYSIS_FAILED,
+        "expect": expect_key,
+        "label": display["label"],
+        "badge": display["badge"],
+        "polling": boq.status in {BOQStatus.PROCESSING, BOQStatus.MATCHING},
+    }
 
 
 class BOQListView(LoginRequiredMixin, ListView):
@@ -102,6 +182,8 @@ class BOQListView(LoginRequiredMixin, ListView):
                 "boq": boq,
                 "status_display": build_boq_status_display(boq, session),
                 "detail_tab": default_detail_tab_for_boq(boq, session),
+                "needs_status_poll": boq.status
+                in {BOQStatus.PROCESSING, BOQStatus.MATCHING},
             }
             for boq in context["boqs"]
         ]
@@ -165,12 +247,29 @@ class BOQDetailView(LoginRequiredMixin, DetailView):
         context["status_display"] = build_boq_status_display(boq, self.request.session)
         context["extraction_stats"] = (boq.analysis_data or {}).get("stats")
         context["analysis_stats"] = (boq.analysis_data or {}).get("stats")
+
+        # Attach Rate_Master Attribute schemas for products analysed before enrichment.
+        if (boq.analysis_data or {}).get("rows") and not _job_is_running(boq):
+            try:
+                if BOQAnalysisService(boq.pk).ensure_attribute_enrichment():
+                    boq.refresh_from_db(fields=["analysis_data"])
+            except Exception:
+                logger.exception("Attribute enrichment backfill failed for BOQ id=%s", boq.pk)
+
         context["extraction_display"] = BOQExtractionDisplayService(
             boq,
             make_list_payload,
             has_make_list_file=bool(boq.make_list_file),
         ).build()
         context["analysis_display"] = BOQAnalysisDisplayService(boq, confirmations).build()
+        try:
+            context["make_vendor_display"] = MakeVendorSelectionService(
+                boq.pk,
+                make_list_payload,
+            ).build_display()
+        except Exception:
+            logger.exception("Failed to build Make & Vendor display for BOQ id=%s", boq.pk)
+            context["make_vendor_display"] = {"has_products": False, "lines": [], "stats": {}}
         return context
 
 
@@ -180,31 +279,81 @@ class BOQExtractView(LoginRequiredMixin, View):
     def post(self, request, pk: int):
         user = cast(User, request.user)
         boq = get_object_or_404(_boq_queryset_for_user(user), pk=pk)
+        wants_json = _request_wants_json(request)
+        redirect_url = _detail_tab_url(boq.pk, "analysis")
 
         if _job_is_running(boq):
-            messages.info(request, "A job is already running for this BOQ.")
-            return HttpResponseRedirect(_detail_tab_url(boq.pk, "analysis"))
+            message = "A job is already running for this BOQ."
+            if wants_json:
+                boq.refresh_from_db(fields=["status"])
+                return JsonResponse(
+                    {
+                        "ok": True,
+                        "message": message,
+                        "mode": "async",
+                        **_status_payload(boq, request.session, expect="extract"),
+                    }
+                )
+            messages.info(request, message)
+            return HttpResponseRedirect(redirect_url)
 
         clear_exported_in_session(boq.pk, request.session)
 
         try:
             result = dispatch_boq_extraction(boq.pk)
+            boq.refresh_from_db(fields=["status"])
             if result.mode == "failed":
-                messages.error(request, result.message or "Could not start extraction.")
+                message = result.message or "Could not start extraction."
+                if wants_json:
+                    return JsonResponse(
+                        {
+                            "ok": False,
+                            "message": message,
+                            "mode": result.mode,
+                            **_status_payload(boq, request.session, expect="extract"),
+                        },
+                        status=400,
+                    )
+                messages.error(request, message)
             elif result.mode == "sync":
-                messages.success(request, f"Products extracted for '{boq.boq_name}'.")
+                message = f"Products extracted for '{boq.boq_name}'."
+                if wants_json:
+                    return JsonResponse(
+                        {
+                            "ok": True,
+                            "message": message,
+                            "mode": result.mode,
+                            **_status_payload(boq, request.session, expect="extract"),
+                        }
+                    )
+                messages.success(request, message)
             else:
-                messages.info(
-                    request,
-                    f"Extraction started for '{boq.boq_name}'. Results will appear when complete.",
+                message = (
+                    f"Extraction started for '{boq.boq_name}'. "
+                    "Results will appear when complete."
                 )
+                if wants_json:
+                    return JsonResponse(
+                        {
+                            "ok": True,
+                            "message": message,
+                            "mode": result.mode,
+                            **_status_payload(boq, request.session, expect="extract"),
+                        }
+                    )
+                messages.info(request, message)
         except (AIServiceError, BOQAIError) as exc:
+            if wants_json:
+                return JsonResponse({"ok": False, "message": str(exc)}, status=400)
             messages.error(request, str(exc))
         except Exception:
             logger.exception("Failed to start BOQ extraction for id=%s", boq.pk)
-            messages.error(request, "Failed to start extraction.")
+            message = "Failed to start extraction."
+            if wants_json:
+                return JsonResponse({"ok": False, "message": message}, status=500)
+            messages.error(request, message)
 
-        return HttpResponseRedirect(_detail_tab_url(boq.pk, "analysis"))
+        return HttpResponseRedirect(redirect_url)
 
 
 class BOQRowExtractView(LoginRequiredMixin, View):
@@ -233,10 +382,15 @@ class BOQRowExtractView(LoginRequiredMixin, View):
 
         clear_exported_in_session(boq.pk, request.session)
         try:
-            BOQAnalysisService(boq.pk).re_extract_row(row_id)
-            message = "Row re-analysed."
+            BOQAnalysisService(boq.pk).rematch_row(row_id)
+            message = "Row re-analysed against the database."
             if ajax:
-                return _extraction_edit_json_ok(message, row_id=row_id)
+                line_html = _render_extraction_line_html(request, boq, row_id)
+                return _extraction_edit_json_ok(
+                    message,
+                    row_id=row_id,
+                    line_html=line_html,
+                )
             messages.success(request, message)
         except ValidationError as exc:
             if ajax:
@@ -345,6 +499,22 @@ class BOQExtractionEditView(LoginRequiredMixin, View):
                 if ajax:
                     return _extraction_edit_json_ok(message)
                 messages.success(request, message)
+            elif action == "add_activity":
+                activity = (request.POST.get("activity") or "").strip()
+                editor.add_activity(row_id=row_id, activity=activity)
+                message = "Activity added."
+                if ajax:
+                    line_html = _render_extraction_line_html(request, boq, row_id)
+                    return _extraction_edit_json_ok(message, row_id=row_id, line_html=line_html)
+                messages.success(request, message)
+            elif action == "remove_activity":
+                activity = (request.POST.get("activity") or "").strip()
+                editor.remove_activity(row_id=row_id, activity=activity)
+                message = "Activity removed."
+                if ajax:
+                    line_html = _render_extraction_line_html(request, boq, row_id)
+                    return _extraction_edit_json_ok(message, row_id=row_id, line_html=line_html)
+                messages.success(request, message)
             elif action == "update_make":
                 selected_make = (request.POST.get("selected_make") or "").strip()
                 custom_make = (request.POST.get("custom_make") or "").strip()
@@ -427,42 +597,189 @@ class BOQExtractionEditView(LoginRequiredMixin, View):
         return HttpResponseRedirect(redirect_url)
 
 
+class BOQMakeVendorSelectView(LoginRequiredMixin, View):
+    """Save make/supplier (product or category) and exact-match Rate_Master + rates."""
+
+    def post(self, request, pk: int):
+        user = cast(User, request.user)
+        boq = get_object_or_404(_boq_queryset_for_user(user), pk=pk)
+        redirect_url = _detail_tab_url(boq.pk, "make_vendor")
+        ajax = _extraction_edit_is_ajax(request)
+        action = (request.POST.get("action") or "select_product").strip().lower()
+
+        try:
+            _, make_list_payload = load_extract_data(boq)
+        except Exception:
+            make_list_payload = boq.make_list_data or {}
+        if not boq.make_list_file:
+            make_list_payload = {}
+
+        service = MakeVendorSelectionService(boq.pk, make_list_payload)
+
+        try:
+            if action == "apply_category":
+                category = (request.POST.get("category") or "").strip()
+                make = (request.POST.get("make") or "").strip()
+                supplier = (request.POST.get("supplier") or "").strip()
+                find_rates = (request.POST.get("find_rates") or "1").strip() != "0"
+                result = service.apply_category_make(
+                    category=category,
+                    make=make,
+                    supplier=supplier,
+                    find_rates=find_rates,
+                )
+                message = (
+                    f"Applied {result['make']} to {result['updated_count']} product(s) "
+                    f"in {result['category']} "
+                    f"({result['matched_count']} matched with rates)."
+                )
+                if ajax:
+                    return _extraction_edit_json_ok(message, selection=result, reload=True)
+                messages.success(request, message)
+                return HttpResponseRedirect(redirect_url)
+
+            row_id = (request.POST.get("row_id") or "").strip()
+            make = (request.POST.get("make") or "").strip()
+            supplier = (request.POST.get("supplier") or "").strip()
+            try:
+                product_index = int(request.POST.get("product_index") or "0")
+            except ValueError:
+                message = "Invalid product index."
+                if ajax:
+                    return _extraction_edit_json_error(message)
+                messages.error(request, message)
+                return HttpResponseRedirect(redirect_url)
+
+            if not row_id:
+                message = "Missing BOQ row."
+                if ajax:
+                    return _extraction_edit_json_error(message)
+                messages.error(request, message)
+                return HttpResponseRedirect(redirect_url)
+
+            result = service.select_and_match(
+                row_id=row_id,
+                product_index=product_index,
+                make=make,
+                supplier=supplier,
+            )
+            message = (
+                "Exact product matched and rates loaded."
+                if result.get("status") == "matched"
+                else "Selection saved — review the closest database match."
+            )
+            if ajax:
+                return _extraction_edit_json_ok(
+                    message,
+                    row_id=row_id,
+                    product_index=product_index,
+                    selection=result,
+                )
+            messages.success(request, message)
+        except ValidationError as exc:
+            if ajax:
+                return _extraction_edit_json_error(str(exc))
+            messages.error(request, str(exc))
+        except Exception:
+            logger.exception("Make/vendor selection failed for BOQ id=%s", boq.pk)
+            message = "Failed to match make/supplier against the database."
+            if ajax:
+                return _extraction_edit_json_error(message, status=500)
+            messages.error(request, message)
+
+        return HttpResponseRedirect(redirect_url)
+
+
 class BOQMatchView(LoginRequiredMixin, View):
     """Match extracted products against the master database."""
 
     def post(self, request, pk: int):
         user = cast(User, request.user)
         boq = get_object_or_404(_boq_queryset_for_user(user), pk=pk)
+        wants_json = _request_wants_json(request)
+        analysis_url = _detail_tab_url(boq.pk, "analysis")
+        match_url = _detail_tab_url(boq.pk, "match_results")
 
         if _job_is_running(boq):
-            messages.info(request, "A job is already running for this BOQ.")
-            return HttpResponseRedirect(_detail_tab_url(boq.pk, "match_results"))
+            message = "A job is already running for this BOQ."
+            if wants_json:
+                boq.refresh_from_db(fields=["status"])
+                return JsonResponse(
+                    {
+                        "ok": True,
+                        "message": message,
+                        "mode": "async",
+                        **_status_payload(boq, request.session, expect="match"),
+                    }
+                )
+            messages.info(request, message)
+            return HttpResponseRedirect(match_url)
 
         if not (boq.analysis_data or {}).get("rows"):
-            messages.error(request, "Run Analyse first to extract products.")
-            return HttpResponseRedirect(_detail_tab_url(boq.pk, "analysis"))
+            message = "Run Analyse first to extract products."
+            if wants_json:
+                return JsonResponse({"ok": False, "message": message}, status=400)
+            messages.error(request, message)
+            return HttpResponseRedirect(analysis_url)
 
         try:
             result = dispatch_boq_matching(boq.pk)
+            boq.refresh_from_db(fields=["status"])
             if result.mode == "failed":
-                messages.error(request, result.message or "Could not start matching.")
-                return HttpResponseRedirect(_detail_tab_url(boq.pk, "analysis"))
+                message = result.message or "Could not start matching."
+                if wants_json:
+                    return JsonResponse(
+                        {
+                            "ok": False,
+                            "message": message,
+                            "mode": result.mode,
+                            **_status_payload(boq, request.session, expect="match"),
+                        },
+                        status=400,
+                    )
+                messages.error(request, message)
+                return HttpResponseRedirect(analysis_url)
             if result.mode == "sync":
-                messages.success(request, f"Matching completed for '{boq.boq_name}'.")
+                message = f"Matching completed for '{boq.boq_name}'."
+                if wants_json:
+                    return JsonResponse(
+                        {
+                            "ok": True,
+                            "message": message,
+                            "mode": result.mode,
+                            **_status_payload(boq, request.session, expect="match"),
+                        }
+                    )
+                messages.success(request, message)
             else:
-                messages.info(
-                    request,
-                    f"Matching started for '{boq.boq_name}'. Results will appear when complete.",
+                message = (
+                    f"Matching started for '{boq.boq_name}'. "
+                    "Results will appear when complete."
                 )
+                if wants_json:
+                    return JsonResponse(
+                        {
+                            "ok": True,
+                            "message": message,
+                            "mode": result.mode,
+                            **_status_payload(boq, request.session, expect="match"),
+                        }
+                    )
+                messages.info(request, message)
         except (AIServiceError, BOQAIError) as exc:
+            if wants_json:
+                return JsonResponse({"ok": False, "message": str(exc)}, status=400)
             messages.error(request, str(exc))
-            return HttpResponseRedirect(_detail_tab_url(boq.pk, "analysis"))
+            return HttpResponseRedirect(analysis_url)
         except Exception:
             logger.exception("Failed to start BOQ matching for id=%s", boq.pk)
-            messages.error(request, "Failed to start matching.")
-            return HttpResponseRedirect(_detail_tab_url(boq.pk, "analysis"))
+            message = "Failed to start matching."
+            if wants_json:
+                return JsonResponse({"ok": False, "message": message}, status=500)
+            messages.error(request, message)
+            return HttpResponseRedirect(analysis_url)
 
-        return HttpResponseRedirect(_detail_tab_url(boq.pk, "match_results"))
+        return HttpResponseRedirect(match_url)
 
 
 class BOQMatchResultsView(LoginRequiredMixin, View):
@@ -486,21 +803,8 @@ class BOQAnalysisStatusView(LoginRequiredMixin, View):
         if not user.is_super_admin:
             qs = qs.filter(user=user)
         boq = get_object_or_404(qs, pk=pk)
-
         expect = (request.GET.get("expect") or "extract").strip().lower()
-        if expect == "match":
-            ready = boq.status in {BOQStatus.PROCESSED, BOQStatus.ANALYSIS_FAILED}
-        else:
-            ready = boq.status in {BOQStatus.EXTRACTED, BOQStatus.ANALYSIS_FAILED}
-
-        return JsonResponse(
-            {
-                "status": boq.status,
-                "ready": ready,
-                "failed": boq.status == BOQStatus.ANALYSIS_FAILED,
-                "expect": expect,
-            }
-        )
+        return JsonResponse(_status_payload(boq, request.session, expect=expect))
 
 
 class BOQConfirmView(LoginRequiredMixin, View):
@@ -571,6 +875,19 @@ class BOQUploadView(LoginRequiredMixin, FormView):
     form_class = BOQUploadForm
     template_name = "boq/boq_form.html"
 
+    def _wants_json(self) -> bool:
+        """True for AJAX upload / name-check style requests (no full page reload)."""
+        if self.request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return True
+        accept = (self.request.headers.get("Accept") or "").lower()
+        return "application/json" in accept
+
+    def post(self, request, *args, **kwargs):
+        form = self.get_form()
+        if form.is_valid():
+            return self.form_valid(form)
+        return self.form_invalid(form)
+
     def form_valid(self, form):
         try:
             BOQCreationService(
@@ -581,17 +898,59 @@ class BOQUploadView(LoginRequiredMixin, FormView):
             ).run()
         except Exception as exc:  # pragma: no cover - defensive
             logger.exception("BOQ upload failed")
-            messages.error(self.request, f"Upload failed: {exc}")
+            form.add_error(None, f"Upload failed: {exc}")
+            if not self._wants_json():
+                messages.error(self.request, f"Upload failed: {exc}")
             return self.form_invalid(form)
 
         messages.success(
             self.request,
             f"BOQ '{form.cleaned_data['boq_name']}' uploaded successfully.",
         )
+        if self._wants_json():
+            return JsonResponse({"ok": True, "redirect": self.get_success_url()})
         return super().form_valid(form)
+
+    def form_invalid(self, form):
+        """Keep selected files in the browser by returning JSON errors (no reload)."""
+        if self._wants_json():
+            errors = {
+                field: [str(error) for error in error_list]
+                for field, error_list in form.errors.items()
+            }
+            first_message = next(
+                (msg for msgs in errors.values() for msg in msgs),
+                "Please fix the errors below.",
+            )
+            return JsonResponse(
+                {"ok": False, "errors": errors, "message": first_message},
+                status=400,
+            )
+        return super().form_invalid(form)
 
     def get_success_url(self):
         return reverse("boq:list")
+
+
+class BOQNameCheckView(LoginRequiredMixin, View):
+    """JSON check: whether a BOQ name is available (case-insensitive)."""
+
+    def get(self, request):
+        name = (request.GET.get("boq_name") or "").strip()
+        if not name:
+            return JsonResponse(
+                {"available": False, "message": "BOQ name is required."},
+                status=400,
+            )
+        taken = BOQ.objects.filter(boq_name__iexact=name).exists()
+        if taken:
+            return JsonResponse(
+                {
+                    "available": False,
+                    "message": "A BOQ with this name already exists. Choose a different name.",
+                }
+            )
+        return JsonResponse({"available": True, "message": "Name is available."})
 
 
 # Backward-compatible alias.

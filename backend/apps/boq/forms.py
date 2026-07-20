@@ -27,20 +27,20 @@ class BOQUploadForm(forms.Form):
             attrs={
                 "class": "form-control",
                 "placeholder": "e.g. Tower-A Fire Fighting",
+                "autocomplete": "off",
             }
         ),
-        help_text="Each BOQ needs a unique name. It is used for the extract JSON folder.",
     )
     uploaded_file = forms.FileField(
         label="BOQ workbook (.xlsx or .xlsm)",
-        widget=forms.ClearableFileInput(
+        widget=forms.FileInput(
             attrs={"class": "form-control", "accept": ".xlsx,.xlsm"}
         ),
     )
     make_list_file = forms.FileField(
         label="Make list (.xlsx, .xlsm, or .pdf, optional)",
         required=False,
-        widget=forms.ClearableFileInput(
+        widget=forms.FileInput(
             attrs={"class": "form-control", "accept": ".xlsx,.xlsm,.pdf"}
         ),
     )

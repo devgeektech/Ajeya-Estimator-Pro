@@ -23,10 +23,26 @@
         </thead>
         <tbody>
             {% for item in boq_items %}
-            <tr>
+            <tr
+                {% if item.needs_status_poll %}
+                x-data="boqListStatus({
+                    statusUrl: '{% url 'boq:status' item.boq.pk %}',
+                    label: '{{ item.status_display.label|escapejs }}',
+                    badge: '{{ item.status_display.badge|escapejs }}',
+                    expect: '{% if item.boq.status == 'MATCHING' %}match{% else %}extract{% endif %}'
+                })"
+                x-init="start()"
+                {% endif %}
+            >
                 <td style="font-weight: 500;">{{ item.boq.boq_name }}</td>
                 <td>{{ item.boq.user.full_name }}</td>
-                <td><span class="badge {{ item.status_display.badge }}">{{ item.status_display.label }}</span></td>
+                <td>
+                    {% if item.needs_status_poll %}
+                    <span class="badge" :class="badge" x-text="label">{{ item.status_display.label }}</span>
+                    {% else %}
+                    <span class="badge {{ item.status_display.badge }}">{{ item.status_display.label }}</span>
+                    {% endif %}
+                </td>
                 <td>{{ item.boq.created_at|date:"Y-m-d H:i" }}</td>
                 <td class="table__actions">
                     <a href="{% url 'boq:detail' item.boq.pk %}?tab={{ item.detail_tab }}" class="btn btn--small btn--primary">View</a>
@@ -40,4 +56,37 @@
         </tbody>
     </table>
 </div>
+
+<script>
+document.addEventListener('alpine:init', () => {
+    Alpine.data('boqListStatus', (config) => ({
+        statusUrl: config.statusUrl + (config.statusUrl.includes('?') ? '&' : '?') + 'expect=' + (config.expect || 'extract'),
+        label: config.label,
+        badge: config.badge,
+        timer: null,
+        start() {
+            this.poll();
+        },
+        poll() {
+            fetch(this.statusUrl, {
+                headers: { 'Accept': 'application/json' },
+                credentials: 'same-origin',
+            })
+                .then((response) => response.json())
+                .then((data) => {
+                    if (data.label) this.label = data.label;
+                    if (data.badge) this.badge = data.badge;
+                    if (data.polling) {
+                        this.timer = setTimeout(() => this.poll(), 2500);
+                        return;
+                    }
+                    // Job finished — keep final label; optional soft refresh of View tab later.
+                })
+                .catch(() => {
+                    this.timer = setTimeout(() => this.poll(), 5000);
+                });
+        },
+    }));
+});
+</script>
 {% endblock %}

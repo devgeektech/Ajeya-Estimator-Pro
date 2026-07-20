@@ -1,0 +1,283 @@
+{% if not make_vendor_display.has_products %}
+<p class="panel__text">No analysed products yet. Run <strong>Analyse</strong> first, then select make and supplier here.</p>
+{% else %}
+<div class="make-vendor-summary panel__text panel__text--muted">
+    {{ make_vendor_display.stats.matched_count|default:0 }} / {{ make_vendor_display.stats.product_count|default:0 }}
+    products matched with rates.
+    Set an approved make <strong>per category</strong> to apply it to every product in that category, or adjust make/supplier per product below.
+</div>
+
+{% if make_vendor_display.categories %}
+<section class="make-vendor-categories" id="make-vendor-categories">
+    <div class="make-vendor-categories__head">
+        <h3 class="make-vendor-categories__title">Category makes</h3>
+        <p class="panel__text panel__text--muted">
+            Choose an approved make for each category (from the make list). Apply updates all products in that category and loads rates.
+        </p>
+    </div>
+    <div class="make-vendor-category-list">
+        {% for item in make_vendor_display.categories %}
+        <div
+            class="make-vendor-category-row"
+            x-data="makeVendorCategoryForm({
+                url: '{% url 'boq:make_vendor_select' boq.pk %}',
+                category: '{{ item.category|escapejs }}',
+                make: '{{ item.selected_make|default:''|escapejs }}'
+            })"
+        >
+            <div class="make-vendor-category-row__meta">
+                <strong>{{ item.category }}</strong>
+                <span class="badge badge--gray">{{ item.product_count }} product{{ item.product_count|pluralize }}</span>
+            </div>
+            <label class="extraction-field">
+                <span class="extraction-field__label">Approved make</span>
+                <select class="extraction-input" x-model="make">
+                    <option value="">Select make…</option>
+                    {% for option in item.make_options %}
+                    <option value="{{ option }}" {% if option == item.selected_make %}selected{% endif %}>{{ option }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <div class="make-vendor-category-row__actions">
+                <button
+                    type="button"
+                    class="btn btn--small btn--boq-analyse"
+                    :disabled="saving || !make"
+                    @click="applyCategory()"
+                >
+                    <span x-show="!saving">Apply to category</span>
+                    <span x-show="saving" x-cloak>Applying…</span>
+                </button>
+                <span class="extraction-save-hint extraction-save-hint--error" x-show="error" x-text="error" x-cloak></span>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+
+<div class="make-vendor-lines" id="make-vendor-lines">
+    <h3 class="make-vendor-categories__title">Products</h3>
+    {% for line in make_vendor_display.lines %}
+    <article class="make-vendor-line" id="make-vendor-{{ line.row_id }}">
+        <header class="make-vendor-line__header">
+            <div class="make-vendor-line__title">
+                <span class="make-vendor-line__serial">{{ line.serial|default:"—" }}</span>
+                {% if line.qty %}<span>Qty: {{ line.qty }}{% if line.unit %} {{ line.unit }}{% endif %}</span>{% endif %}
+            </div>
+            <p class="make-vendor-line__description">{{ line.description }}</p>
+        </header>
+
+        {% for product in line.products %}
+        <section
+            class="make-vendor-card"
+            x-data="makeVendorForm({
+                url: '{% url 'boq:make_vendor_select' boq.pk %}',
+                rowId: '{{ line.row_id }}',
+                productIndex: {{ product.product_index }},
+                make: '{{ product.selected_make|default:''|escapejs }}',
+                supplier: '{{ product.selected_supplier|default:''|escapejs }}',
+                status: '{{ product.match_status|default:'not_searched'|escapejs }}',
+                confidence: {{ product.confidence|default:'null' }},
+                techKey: '{{ product.tech_key|default:''|escapejs }}',
+                matchedSummary: '{{ product.matched_summary|default:''|escapejs }}',
+                notes: '{{ product.notes|default:''|escapejs }}',
+                materialRate: '{{ product.line_output.material_rate|default:''|escapejs }}',
+                labourRate: '{{ product.line_output.labour_rate|default:''|escapejs }}',
+                totalAmount: '{{ product.line_output.total_amount|default:''|escapejs }}'
+            })"
+        >
+            <div class="make-vendor-card__head">
+                <h4 class="make-vendor-card__title">{{ product.summary }}</h4>
+                <span
+                    class="badge"
+                    :class="{
+                        'badge--green': status === 'matched',
+                        'badge--yellow': status === 'pending',
+                        'badge--red': status === 'unmatched',
+                        'badge--gray': status === 'not_searched'
+                    }"
+                    x-text="statusLabel"
+                >{{ product.match_status }}</span>
+            </div>
+
+            <dl class="make-vendor-readonly">
+                {% if product.category %}<div><dt>Category</dt><dd>{{ product.category }}</dd></div>{% endif %}
+                {% if product.sub_category %}<div><dt>Sub-category</dt><dd>{{ product.sub_category }}</dd></div>{% endif %}
+                {% if product.class %}<div><dt>Class</dt><dd>{{ product.class }}</dd></div>{% endif %}
+                {% if product.size %}<div><dt>Size</dt><dd>{{ product.size }}</dd></div>{% endif %}
+                {% if product.unit %}<div><dt>Unit</dt><dd>{{ product.unit }}</dd></div>{% endif %}
+                {% if product.capacity %}<div><dt>Capacity</dt><dd>{{ product.capacity }}</dd></div>{% endif %}
+            </dl>
+
+            <div class="make-vendor-fields">
+                <label class="extraction-field">
+                    <span class="extraction-field__label">Make</span>
+                    <select class="extraction-input" x-model="make">
+                        <option value="">Select make…</option>
+                        {% for option in product.make_options %}
+                        <option value="{{ option }}" {% if option == product.selected_make %}selected{% endif %}>{{ option }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label class="extraction-field">
+                    <span class="extraction-field__label">Supplier</span>
+                    <select class="extraction-input" x-model="supplier">
+                        <option value="">Select supplier…</option>
+                        {% for option in product.supplier_options %}
+                        <option value="{{ option }}" {% if option == product.selected_supplier %}selected{% endif %}>{{ option }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <div class="make-vendor-fields__actions">
+                    <button
+                        type="button"
+                        class="btn btn--small btn--boq-analyse"
+                        :disabled="saving || (!make && !supplier)"
+                        @click="findRates()"
+                    >
+                        <span x-show="!saving">Find rates</span>
+                        <span x-show="saving" x-cloak>Searching…</span>
+                    </button>
+                    <span class="extraction-save-hint extraction-save-hint--error" x-show="error" x-text="error" x-cloak></span>
+                </div>
+            </div>
+
+            <div class="make-vendor-result" x-show="status !== 'not_searched'" x-cloak>
+                <div class="make-vendor-result__meta">
+                    <p x-show="matchedSummary" x-text="'Matched: ' + matchedSummary"></p>
+                    <p x-show="techKey" x-text="'Tech key: ' + techKey"></p>
+                    <p x-show="confidence != null" x-text="'Confidence: ' + Math.round(confidence) + '%'"></p>
+                    <p class="make-vendor-result__notes" x-show="notes" x-text="notes"></p>
+                </div>
+                <div class="make-vendor-rates">
+                    <div><span>Material</span><strong x-text="materialRate || '—'"></strong></div>
+                    <div><span>Labour</span><strong x-text="labourRate || '—'"></strong></div>
+                    <div><span>Total</span><strong x-text="totalAmount || '—'"></strong></div>
+                </div>
+            </div>
+        </section>
+        {% endfor %}
+    </article>
+    {% empty %}
+    <p class="panel__text">No product lines available for make/vendor selection.</p>
+    {% endfor %}
+</div>
+
+<script>
+document.addEventListener('alpine:init', () => {
+    const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+
+    Alpine.data('makeVendorCategoryForm', (config) => ({
+        url: config.url,
+        category: config.category,
+        make: config.make || '',
+        saving: false,
+        error: '',
+        async applyCategory() {
+            if (this.saving || !this.make) return;
+            this.saving = true;
+            this.error = '';
+            try {
+                const body = new FormData();
+                body.append('ajax', '1');
+                body.append('action', 'apply_category');
+                body.append('category', this.category);
+                body.append('make', this.make);
+                body.append('find_rates', '1');
+                const response = await fetch(this.url, {
+                    method: 'POST',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-CSRFToken': csrfToken(),
+                        'Accept': 'application/json',
+                    },
+                    credentials: 'same-origin',
+                    body,
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || !data.ok) {
+                    throw new Error(data.message || 'Failed to apply category make.');
+                }
+                window.location.assign(
+                    '{% url "boq:detail" boq.pk %}?tab=make_vendor&_t=' + Date.now()
+                );
+            } catch (error) {
+                this.error = error.message || 'Failed to apply category make.';
+                this.saving = false;
+            }
+        },
+    }));
+
+    Alpine.data('makeVendorForm', (config) => ({
+        url: config.url,
+        rowId: config.rowId,
+        productIndex: config.productIndex,
+        make: config.make || '',
+        supplier: config.supplier || '',
+        status: config.status || 'not_searched',
+        confidence: config.confidence,
+        techKey: config.techKey || '',
+        matchedSummary: config.matchedSummary || '',
+        notes: config.notes || '',
+        materialRate: config.materialRate || '',
+        labourRate: config.labourRate || '',
+        totalAmount: config.totalAmount || '',
+        saving: false,
+        error: '',
+        get statusLabel() {
+            if (this.status === 'matched') return 'Matched';
+            if (this.status === 'pending') return 'Review';
+            if (this.status === 'unmatched') return 'No match';
+            return 'Select make';
+        },
+        async findRates() {
+            if (this.saving) return;
+            if (!this.make && !this.supplier) {
+                this.error = 'Select a make or supplier.';
+                return;
+            }
+            this.saving = true;
+            this.error = '';
+            try {
+                const body = new FormData();
+                body.append('ajax', '1');
+                body.append('action', 'select_product');
+                body.append('row_id', this.rowId);
+                body.append('product_index', String(this.productIndex));
+                body.append('make', this.make);
+                body.append('supplier', this.supplier);
+                const response = await fetch(this.url, {
+                    method: 'POST',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-CSRFToken': csrfToken(),
+                        'Accept': 'application/json',
+                    },
+                    credentials: 'same-origin',
+                    body,
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || !data.ok) {
+                    throw new Error(data.message || 'Search failed.');
+                }
+                const selection = data.selection || {};
+                this.status = selection.status || 'unmatched';
+                this.confidence = selection.confidence;
+                this.techKey = selection.tech_key || '';
+                this.matchedSummary = selection.summary || '';
+                this.notes = selection.notes || '';
+                const line = selection.line_output || {};
+                this.materialRate = line.material_rate || '';
+                this.labourRate = line.labour_rate || '';
+                this.totalAmount = line.total_amount || '';
+            } catch (error) {
+                this.error = error.message || 'Search failed.';
+            } finally {
+                this.saving = false;
+            }
+        },
+    }));
+});
+</script>
+{% endif %}

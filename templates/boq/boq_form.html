@@ -6,21 +6,204 @@
 <div class="panel panel--narrow">
     <p class="panel__text" style="margin-bottom:20px;">
         Upload a BOQ workbook and, optionally, its make list as Excel or PDF.
-        Processing will be added in a later release.
     </p>
-    <form method="post" enctype="multipart/form-data" novalidate>
+    <form
+        id="boq-upload-form"
+        method="post"
+        action="{% url 'boq:upload' %}"
+        enctype="multipart/form-data"
+        novalidate
+        data-check-name-url="{% url 'boq:check_name' %}"
+    >
         {% csrf_token %}
-        {% for field in form %}
-        <label class="field">
-            <span class="field__label">{{ field.label }}{% if field.field.required %}<span class="field__required" aria-hidden="true">*</span>{% endif %}</span>
-            {{ field }}
-            {% for error in field.errors %}<span class="field__error">{{ error }}</span>{% endfor %}
+        <div id="boq-upload-form-error" class="field__error" hidden style="margin-bottom:12px;"></div>
+
+        <label class="field" data-field="boq_name">
+            <span class="field__label">{{ form.boq_name.label }}<span class="field__required" aria-hidden="true">*</span></span>
+            {{ form.boq_name }}
+            <span class="field__error" data-error-for="boq_name"></span>
         </label>
-        {% endfor %}
+
+        <label class="field" data-field="uploaded_file">
+            <span class="field__label">{{ form.uploaded_file.label }}<span class="field__required" aria-hidden="true">*</span></span>
+            {{ form.uploaded_file }}
+            <span class="field__file-name" data-file-name-for="uploaded_file" aria-live="polite"></span>
+            <span class="field__error" data-error-for="uploaded_file"></span>
+        </label>
+
+        <label class="field" data-field="make_list_file">
+            <span class="field__label">{{ form.make_list_file.label }}</span>
+            {{ form.make_list_file }}
+            <span class="field__file-name" data-file-name-for="make_list_file" aria-live="polite"></span>
+            <span class="field__error" data-error-for="make_list_file"></span>
+        </label>
+
         <div class="form-actions">
             <a href="{% url 'boq:list' %}" class="btn btn--ghost">Cancel</a>
-            <button type="submit" class="btn btn--primary">Upload BOQ</button>
+            {# type=button avoids native form submit (which reloads and clears file inputs) #}
+            <button type="button" class="btn btn--primary" id="boq-upload-submit">Upload BOQ</button>
         </div>
     </form>
 </div>
+<style>
+    .field__file-name {
+        display: block;
+        margin-top: 4px;
+        font-size: .8rem;
+        color: var(--text-muted);
+    }
+</style>
+<script>
+(function () {
+    const form = document.getElementById('boq-upload-form');
+    const submitBtn = document.getElementById('boq-upload-submit');
+    if (!form || !submitBtn) return;
+
+    const formError = document.getElementById('boq-upload-form-error');
+    const checkNameUrl = form.dataset.checkNameUrl;
+    const nameInput = form.querySelector('[name="boq_name"]');
+
+    function clearErrors() {
+        form.querySelectorAll('[data-error-for]').forEach((el) => { el.textContent = ''; });
+        if (formError) {
+            formError.hidden = true;
+            formError.textContent = '';
+        }
+    }
+
+    function showErrors(errors, message) {
+        clearErrors();
+        const map = errors || {};
+        Object.keys(map).forEach((field) => {
+            const msgs = map[field] || [];
+            if (!msgs.length) return;
+            if (field === '__all__') {
+                if (formError) {
+                    formError.hidden = false;
+                    formError.textContent = msgs.join(' ');
+                }
+                return;
+            }
+            const slot = form.querySelector('[data-error-for="' + field + '"]');
+            if (slot) slot.textContent = msgs.join(' ');
+        });
+        if (message && formError && formError.hidden) {
+            const hasFieldError = Object.keys(map).some(
+                (k) => k !== '__all__' && (map[k] || []).length
+            );
+            if (!hasFieldError) {
+                formError.hidden = false;
+                formError.textContent = message;
+            }
+        }
+    }
+
+    function syncFileName(input) {
+        const slot = form.querySelector('[data-file-name-for="' + input.name + '"]');
+        if (!slot) return;
+        const file = input.files && input.files[0];
+        slot.textContent = file ? ('Selected: ' + file.name) : '';
+    }
+
+    form.querySelectorAll('input[type="file"]').forEach((input) => {
+        syncFileName(input);
+        input.addEventListener('change', () => syncFileName(input));
+    });
+
+    // Block Enter-key native submit (would reload and clear files).
+    form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        submitBtn.click();
+    });
+
+    async function checkNameAvailable() {
+        if (!nameInput || !checkNameUrl) return true;
+        const name = (nameInput.value || '').trim();
+        if (!name) return true;
+        try {
+            const response = await fetch(
+                checkNameUrl + '?boq_name=' + encodeURIComponent(name),
+                {
+                    headers: {
+                        'Accept': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                    credentials: 'same-origin',
+                }
+            );
+            const data = await response.json();
+            const slot = form.querySelector('[data-error-for="boq_name"]');
+            if (!data.available) {
+                if (slot) slot.textContent = data.message || 'Name already exists.';
+                return false;
+            }
+            if (slot) slot.textContent = '';
+            return true;
+        } catch (_err) {
+            return true;
+        }
+    }
+
+    if (nameInput) {
+        nameInput.addEventListener('blur', () => { checkNameAvailable(); });
+    }
+
+    submitBtn.addEventListener('click', async () => {
+        clearErrors();
+
+        const nameOk = await checkNameAvailable();
+        if (!nameOk) {
+            if (nameInput) nameInput.focus();
+            return;
+        }
+
+        submitBtn.disabled = true;
+        const previousLabel = submitBtn.textContent;
+        submitBtn.textContent = 'Uploading…';
+
+        try {
+            const response = await fetch(form.getAttribute('action') || '{% url "boq:upload" %}', {
+                method: 'POST',
+                body: new FormData(form),
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Accept': 'application/json',
+                },
+                credentials: 'same-origin',
+            });
+
+            const contentType = response.headers.get('content-type') || '';
+            let data = {};
+            if (contentType.includes('application/json')) {
+                data = await response.json();
+            }
+
+            if (response.ok && data.ok && data.redirect) {
+                window.location.assign(data.redirect);
+                return;
+            }
+
+            // Stay on this page — file inputs keep their selected files.
+            if (!contentType.includes('application/json')) {
+                showErrors({
+                    __all__: [
+                        'Upload failed. Your files are still selected — change the BOQ name and try again.',
+                    ],
+                });
+                return;
+            }
+            showErrors(data.errors || {}, data.message || 'Please fix the errors below.');
+            if (nameInput && data.errors && data.errors.boq_name) {
+                nameInput.focus();
+            }
+        } catch (err) {
+            showErrors({ __all__: [err.message || 'Upload failed.'] });
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.textContent = previousLabel || 'Upload BOQ';
+        }
+    });
+})();
+</script>
 {% endblock %}

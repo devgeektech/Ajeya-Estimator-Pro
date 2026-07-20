@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Ajeya Estimator Pro{% endblock %}</title>
     <meta name="csrf-token" content="{{ csrf_token }}">
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=28">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=36">
     <style>
         .confirm-modal {
             position: fixed;
@@ -70,6 +70,40 @@
             text-align: center;
         }
 
+        /* Make List: stretch across the panel so Approved Makes uses the right side. */
+        .boq-sheet-wrap--make-list {
+            width: 100% !important;
+        }
+        .table.boq-sheet.boq-sheet--make-list {
+            width: 100% !important;
+            min-width: 100% !important;
+            max-width: 100% !important;
+            table-layout: fixed !important;
+        }
+        .table.boq-sheet.boq-sheet--make-list th,
+        .table.boq-sheet.boq-sheet--make-list td {
+            text-align: left !important;
+            white-space: normal !important;
+            vertical-align: top;
+        }
+        .table.boq-sheet.boq-sheet--make-list th.boq-sheet__col-makes,
+        .table.boq-sheet.boq-sheet--make-list td.boq-sheet__col-makes {
+            text-align: right !important;
+            padding-right: 4.5rem !important;
+        }
+        .table.boq-sheet.boq-sheet--make-list col:nth-child(1),
+        .table.boq-sheet.boq-sheet--make-list .boq-sheet__col-sno {
+            width: 5% !important;
+        }
+        .table.boq-sheet.boq-sheet--make-list col:nth-child(2),
+        .table.boq-sheet.boq-sheet--make-list .boq-sheet__col-desc {
+            width: 30% !important;
+        }
+        .table.boq-sheet.boq-sheet--make-list col:nth-child(3),
+        .table.boq-sheet.boq-sheet--make-list .boq-sheet__col-makes {
+            width: 65% !important;
+        }
+
         /* White / grey zebra rows (same as Analysis cards) */
         .table tbody tr:nth-child(odd) td { background-color: #ffffff; }
         .table tbody tr:nth-child(even) td { background-color: #e2e8f0; }
@@ -109,9 +143,9 @@
         .boq-detail-header {
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            gap: 4px;
             width: 100%;
-            margin-bottom: 10px;
+            margin-bottom: 4px;
         }
 
         .boq-detail-toolbar {
@@ -248,7 +282,7 @@
             align-items: stretch;
             gap: 4px;
             width: 100%;
-            margin-bottom: 12px;
+            margin-bottom: 0;
             padding: 4px;
             background: var(--surface-alt);
             border: 1px solid var(--border);
@@ -389,6 +423,420 @@
             border-top: 1px dashed var(--border);
         }
 
+        .extraction-activities__row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 6px 8px;
+        }
+
+        .extraction-activities__heading {
+            flex-shrink: 0;
+            font-size: .72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: .04em;
+            color: var(--primary, #2563eb);
+            background: rgba(37, 99, 235, 0.1);
+            border: 1px solid rgba(37, 99, 235, 0.25);
+            padding: 2px 8px;
+            border-radius: 4px;
+            line-height: 1.4;
+        }
+
+        .extraction-activities__list {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 4px;
+            margin: 0;
+            padding: 0;
+            list-style: none;
+        }
+
+        .extraction-activities__chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 2px;
+            font-size: .78rem;
+            padding: 2px 8px;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            background: var(--surface-alt, #f8fafc);
+            color: var(--text);
+            line-height: 1.35;
+        }
+
+        .extraction-activities__chip-text {
+            white-space: nowrap;
+        }
+
+        .extraction-activities__remove {
+            border: none;
+            background: transparent;
+            color: var(--text-muted);
+            font-size: 1rem;
+            line-height: 1;
+            cursor: pointer;
+            padding: 0 2px;
+            margin-left: 2px;
+        }
+
+        .extraction-activities__remove:hover {
+            color: #dc2626;
+        }
+
+        .extraction-activities__add {
+            flex-shrink: 0;
+            min-width: 1.7rem;
+            padding-left: .45rem !important;
+            padding-right: .45rem !important;
+        }
+
+        .extraction-products {
+            margin-top: 12px;
+        }
+
+        .extraction-product-tabs {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 4px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .extraction-product-tabs__btn {
+            min-width: 2rem;
+            height: 2rem;
+            padding: 0 .65rem;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--surface);
+            color: var(--text);
+            font-size: .9rem;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            cursor: pointer;
+            line-height: 1;
+        }
+
+        .extraction-product-tabs__btn:hover {
+            border-color: var(--primary, #2563eb);
+            color: var(--primary, #2563eb);
+        }
+
+        .extraction-product-tabs__btn.is-active {
+            background: var(--primary, #2563eb);
+            border-color: var(--primary, #2563eb);
+            color: #fff;
+        }
+
+        .extraction-product-tabs__add {
+            margin-left: 4px;
+        }
+
+        .extraction-product-tabs__actions {
+            display: inline-flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 6px;
+            margin-left: auto;
+        }
+
+        .extraction-product-tabs__status {
+            display: inline-flex;
+            align-items: center;
+            flex: 0 0 auto;
+            min-height: 1.25rem;
+        }
+
+        .extraction-product-status {
+            margin: 0 0 6px;
+            min-height: 1rem;
+        }
+
+        .extraction-products > .extraction-product-card {
+            margin-top: 0;
+            border-top: none;
+            padding-top: 12px;
+        }
+
+        .extraction-product-panel > .extraction-product-card {
+            margin-top: 0;
+            border-top: none;
+            padding-top: 12px;
+        }
+
+        /* Dense Analysis layout: fit one product card in the viewport */
+        .analysis-tab-canvas .extraction-lines {
+            gap: 8px;
+        }
+
+        .analysis-tab-canvas .extraction-line {
+            padding: 8px 10px;
+            border-radius: 8px;
+            box-shadow: none;
+        }
+
+        .analysis-tab-canvas .extraction-line__header {
+            margin-bottom: 4px;
+            gap: 8px;
+        }
+
+        .analysis-tab-canvas .extraction-line__meta {
+            font-size: .78rem;
+            gap: 6px;
+        }
+
+        .analysis-tab-canvas .extraction-line__description {
+            margin-bottom: 4px;
+        }
+
+        .analysis-tab-canvas .extraction-line__description-text {
+            font-size: .82rem;
+            line-height: 1.3;
+        }
+
+        .analysis-tab-canvas .extraction-line__description-text--preview,
+        .analysis-tab-canvas .extraction-line__description-text {
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 1;
+            overflow: hidden;
+            white-space: normal;
+        }
+
+        .analysis-tab-canvas .extraction-line__description-text--full {
+            display: block;
+            -webkit-line-clamp: unset;
+            overflow: visible;
+            white-space: pre-wrap;
+            margin: 4px 0 0;
+        }
+
+        .analysis-tab-canvas .extraction-line__ellipsis {
+            display: none;
+        }
+
+        .analysis-tab-canvas .extraction-lineage {
+            margin-top: 2px;
+            font-size: .78rem;
+        }
+
+        .analysis-tab-canvas .extraction-activities {
+            margin-top: 4px;
+            padding-top: 4px;
+        }
+
+        .analysis-tab-canvas .extraction-activities__heading {
+            font-size: .68rem;
+            padding: 1px 7px;
+        }
+
+        .analysis-tab-canvas .extraction-activities__chip {
+            font-size: .72rem;
+            padding: 1px 7px;
+        }
+
+        .analysis-tab-canvas .extraction-activities__row {
+            gap: 4px 6px;
+        }
+
+        .analysis-tab-canvas .extraction-section-label {
+            font-size: .68rem;
+            letter-spacing: .03em;
+        }
+
+        .analysis-tab-canvas .extraction-products {
+            margin-top: 6px;
+        }
+
+        .analysis-tab-canvas .extraction-product-tabs {
+            gap: 4px;
+            margin-bottom: 0;
+            padding-bottom: 6px;
+        }
+
+        .analysis-tab-canvas .extraction-product-tabs__btn {
+            min-width: auto;
+            height: 1.7rem;
+            padding: 0 .65rem;
+            font-size: .78rem;
+            border-radius: 5px;
+            white-space: nowrap;
+        }
+
+        .analysis-tab-canvas .extraction-product-tabs__actions {
+            gap: 4px;
+            margin-left: auto;
+        }
+
+        .analysis-tab-canvas .extraction-product-tabs__status {
+            font-size: .72rem;
+        }
+
+        .analysis-tab-canvas .extraction-product-status {
+            margin: 0 0 4px;
+        }
+
+        .analysis-tab-canvas .extraction-product-panel > .extraction-product-card {
+            padding-top: 6px;
+        }
+
+        .analysis-tab-canvas .extraction-line {
+            content-visibility: auto;
+            contain-intrinsic-size: auto 280px;
+        }
+
+        .analysis-tab-canvas .extraction-db-match {
+            margin: 0 0 6px;
+            padding: 6px 8px;
+            border-radius: 6px;
+        }
+
+        .analysis-tab-canvas .extraction-db-match__head {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 4px 8px;
+            margin-bottom: 0;
+        }
+
+        .analysis-tab-canvas .extraction-db-match__heading {
+            flex-shrink: 0;
+            font-size: .68rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: .04em;
+            color: var(--primary, #2563eb);
+            background: rgba(37, 99, 235, 0.1);
+            border: 1px solid rgba(37, 99, 235, 0.25);
+            padding: 1px 7px;
+            border-radius: 4px;
+            line-height: 1.35;
+        }
+
+        .analysis-tab-canvas .extraction-db-match__summary {
+            font-size: .8rem;
+            font-weight: 600;
+            line-height: 1.25;
+            color: var(--text);
+        }
+
+        .analysis-tab-canvas .extraction-db-match__meta {
+            display: none;
+        }
+
+        .analysis-tab-canvas .extraction-db-match__notes,
+        .analysis-tab-canvas .extraction-db-match__missing {
+            margin: 4px 0 0;
+            font-size: .72rem;
+            line-height: 1.25;
+        }
+
+        .analysis-tab-canvas .extraction-db-candidates {
+            margin: 0 0 6px;
+            font-size: .75rem;
+        }
+
+        .analysis-tab-canvas .extraction-field-grid {
+            grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+            gap: 5px 8px;
+        }
+
+        .analysis-tab-canvas .extraction-field {
+            gap: 2px;
+        }
+
+        .analysis-tab-canvas .extraction-field__label {
+            font-size: .68rem;
+            line-height: 1.2;
+        }
+
+        .analysis-tab-canvas .extraction-input {
+            padding: 4px 7px;
+            font-size: .78rem;
+            border-radius: 4px;
+            line-height: 1.25;
+            transition: none;
+            box-shadow: none;
+        }
+
+        .analysis-tab-canvas .extraction-input:hover,
+        .analysis-tab-canvas .extraction-input:focus {
+            box-shadow: none;
+            outline: none;
+            border-color: var(--primary, #2563eb);
+        }
+
+        .analysis-tab-canvas .extraction-input--wrap {
+            min-height: 1.7rem;
+            max-height: 3.2rem;
+            line-height: 1.3;
+            resize: none;
+        }
+
+        .analysis-tab-canvas .extraction-attributes-block {
+            margin-top: 6px;
+            padding-top: 6px;
+            max-height: none;
+            overflow: visible;
+        }
+
+        .analysis-tab-canvas .extraction-attributes-block__head {
+            margin-bottom: 4px;
+            gap: 8px;
+            position: static;
+            background: transparent;
+            padding-bottom: 0;
+        }
+
+        .analysis-tab-canvas .extraction-attributes-block__hint {
+            font-size: .68rem;
+        }
+
+        .analysis-tab-canvas .extraction-extra-attrs {
+            margin-top: 6px;
+        }
+
+        .analysis-tab-canvas .extraction-extra-attrs__row {
+            gap: 4px 6px;
+        }
+
+        .analysis-tab-canvas .extraction-extra-attr-item {
+            padding: 1px 7px;
+            font-size: .72rem;
+            border-radius: 999px;
+        }
+
+        .analysis-tab-canvas .extraction-extra-attr-add {
+            gap: 4px;
+        }
+
+        .analysis-tab-canvas .extraction-input--compact {
+            width: 5.5rem;
+            min-width: 4rem;
+            max-width: 7rem;
+            padding: 2px 6px;
+            font-size: .72rem;
+        }
+
+        .analysis-tab-canvas .extraction-save-hint {
+            font-size: .72rem;
+        }
+
+        .analysis-tab-canvas .extraction-confidence-badge {
+            min-width: 2.6rem;
+            font-size: .72rem;
+        }
+
+        .analysis-tab-canvas .extraction-line__empty {
+            margin: 4px 0;
+            font-size: .78rem;
+        }
+
         .extraction-make-list__match {
             display: flex;
             flex-wrap: wrap;
@@ -449,8 +897,195 @@
             border: 1px solid var(--border);
         }
 
+        .extraction-product-card__actions {
+            display: inline-flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
         .extraction-product-card__remove {
             flex-shrink: 0;
+        }
+
+        .make-vendor-summary {
+            margin: 0 0 12px;
+        }
+
+        .make-vendor-categories {
+            margin: 0 0 18px;
+            padding: 12px 14px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--surface);
+        }
+
+        .make-vendor-categories__title {
+            margin: 0 0 6px;
+            font-size: 1rem;
+        }
+
+        .make-vendor-category-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .make-vendor-category-row {
+            display: grid;
+            grid-template-columns: minmax(140px, 1.1fr) minmax(180px, 1.2fr) auto;
+            gap: 10px;
+            align-items: end;
+            padding: 10px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--surface-alt, #f8fafc);
+        }
+
+        .make-vendor-category-row__meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+            padding-bottom: 4px;
+        }
+
+        .make-vendor-category-row__actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+
+        @media (max-width: 900px) {
+            .make-vendor-category-row {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .make-vendor-line {
+            margin: 0 0 16px;
+            padding: 12px 14px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--surface);
+        }
+
+        .make-vendor-line__header {
+            margin-bottom: 10px;
+        }
+
+        .make-vendor-line__title {
+            display: flex;
+            gap: 12px;
+            align-items: baseline;
+            margin-bottom: 4px;
+        }
+
+        .make-vendor-line__serial {
+            font-weight: 700;
+        }
+
+        .make-vendor-line__description {
+            margin: 0;
+            color: var(--text-muted, #64748b);
+        }
+
+        .make-vendor-card {
+            margin-top: 10px;
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--surface-alt, #f8fafc);
+        }
+
+        .make-vendor-card__head {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .make-vendor-card__title {
+            margin: 0;
+            font-size: .95rem;
+        }
+
+        .make-vendor-readonly {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 8px 12px;
+            margin: 0 0 12px;
+        }
+
+        .make-vendor-readonly div {
+            margin: 0;
+        }
+
+        .make-vendor-readonly dt {
+            font-size: .72rem;
+            color: var(--text-muted, #64748b);
+        }
+
+        .make-vendor-readonly dd {
+            margin: 2px 0 0;
+            font-weight: 600;
+        }
+
+        .make-vendor-fields {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 10px;
+            align-items: end;
+        }
+
+        .make-vendor-fields__actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .make-vendor-result {
+            margin-top: 12px;
+            padding-top: 10px;
+            border-top: 1px solid var(--border);
+        }
+
+        .make-vendor-result__meta p {
+            margin: 0 0 4px;
+            font-size: .85rem;
+        }
+
+        .make-vendor-result__notes {
+            color: var(--text-muted, #64748b);
+        }
+
+        .make-vendor-rates {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .make-vendor-rates div {
+            padding: 8px;
+            border-radius: 6px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+        }
+
+        .make-vendor-rates span {
+            display: block;
+            font-size: .72rem;
+            color: var(--text-muted, #64748b);
+        }
+
+        .make-vendor-rates strong {
+            font-size: .95rem;
         }
 
         .btn--xsmall {
@@ -534,36 +1169,39 @@
             margin: 0;
             padding: 0;
             display: flex;
-            flex-direction: column;
-            gap: 6px;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 4px;
         }
 
         .extraction-extra-attr-item {
-            display: flex;
+            display: inline-flex;
             align-items: center;
-            justify-content: space-between;
-            gap: 8px;
-            padding: 6px 10px;
+            gap: 2px;
+            width: auto;
+            flex: 0 0 auto;
+            padding: 2px 8px;
             border: 1px solid var(--border);
-            border-radius: 6px;
+            border-radius: 999px;
             background: var(--chip-bg, #f8fafc);
             color: var(--text);
-            font-size: .85rem;
+            font-size: .78rem;
+            line-height: 1.35;
         }
 
         .extraction-extra-attr-item__text {
-            flex: 1;
-            word-break: break-word;
+            white-space: nowrap;
         }
 
         .extraction-extra-attr-item__remove {
             border: none;
             background: transparent;
             color: var(--text-muted);
-            font-size: 1.1rem;
+            font-size: 1rem;
             line-height: 1;
             cursor: pointer;
-            padding: 0 4px;
+            padding: 0 2px;
+            margin-left: 2px;
         }
 
         .extraction-extra-attr-item__remove:hover {
@@ -571,10 +1209,19 @@
         }
 
         .extraction-extra-attr-add {
-            display: grid;
-            grid-template-columns: 1fr 1fr auto;
-            gap: 8px;
+            display: inline-flex;
             align-items: center;
+            gap: 4px;
+            width: auto;
+            flex: 0 0 auto;
+        }
+
+        .extraction-input--compact {
+            width: 6rem;
+            min-width: 4.5rem;
+            max-width: 8rem;
+            padding: 3px 7px;
+            font-size: .78rem;
         }
 
         .extraction-save-hint {
@@ -585,6 +1232,11 @@
         .extraction-save-hint--ok {
             color: #15803d;
             font-weight: 600;
+        }
+
+        .extraction-save-hint--saving {
+            color: var(--text-muted);
+            font-weight: 500;
         }
 
         .extraction-save-hint--error {
@@ -610,6 +1262,99 @@
             border-color: #f59e0b;
             background: var(--input-missing-bg, #fffbeb);
             color: var(--text);
+        }
+
+        .extraction-field--empty .extraction-field__label {
+            color: var(--text-muted);
+        }
+
+        .extraction-field--empty .extraction-input {
+            border-style: dashed;
+            background: var(--surface-alt, #f8fafc);
+        }
+
+        .extraction-attr--empty {
+            color: var(--text-muted);
+            font-style: italic;
+        }
+
+        .extraction-db-match {
+            margin: 0 0 12px;
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--surface-alt, #f8fafc);
+        }
+        .extraction-db-match__head {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px 12px;
+            margin-bottom: 0;
+        }
+        .extraction-db-match__heading {
+            flex-shrink: 0;
+            font-size: .72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: .04em;
+            color: var(--primary, #2563eb);
+            background: rgba(37, 99, 235, 0.1);
+            border: 1px solid rgba(37, 99, 235, 0.25);
+            padding: 2px 8px;
+            border-radius: 4px;
+            line-height: 1.4;
+        }
+        .extraction-db-match__summary {
+            margin: 0;
+            font-weight: 600;
+            font-size: .9rem;
+            color: var(--text);
+        }
+        .extraction-db-match__meta {
+            display: none;
+        }
+        .extraction-db-match__notes {
+            margin: 6px 0 0;
+            font-size: .8rem;
+            color: var(--text-muted);
+        }
+        .extraction-db-match__missing {
+            margin: 6px 0 0;
+            font-size: .8rem;
+            color: #9a3412;
+        }
+        .extraction-db-match--provisional {
+            border-color: #fdba74;
+            background: #fff7ed;
+        }
+        .extraction-db-match--unmatched {
+            border-style: dashed;
+            background: transparent;
+        }
+        .extraction-db-candidates {
+            margin: 0 0 12px;
+            font-size: .82rem;
+        }
+        .extraction-db-candidates summary {
+            cursor: pointer;
+            color: var(--text-muted);
+        }
+        .extraction-db-candidates__list {
+            margin: 8px 0 0;
+            padding-left: 1.1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .extraction-db-candidates__list li {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 6px;
+        }
+        .extraction-db-candidates .muted {
+            color: var(--text-muted);
         }
 
         .extraction-input {
@@ -740,9 +1485,33 @@
 
         .extraction-extra-attrs {
             margin-top: 8px;
+        }
+
+        .extraction-extra-attrs__row {
             display: flex;
-            flex-direction: column;
-            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 6px 8px;
+        }
+
+        .extraction-extra-attrs__heading {
+            flex-shrink: 0;
+            font-size: .72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: .04em;
+            color: var(--primary, #2563eb);
+            background: rgba(37, 99, 235, 0.1);
+            border: 1px solid rgba(37, 99, 235, 0.25);
+            padding: 2px 8px;
+            border-radius: 4px;
+            line-height: 1.4;
+        }
+
+        .extraction-extra-attrs__empty {
+            font-size: .78rem;
+            color: var(--text-muted);
+            font-style: italic;
         }
 
         .extraction-extra-attr-row {
@@ -790,6 +1559,22 @@
             .table th,
             .table td {
                 white-space: nowrap;
+            }
+            /* Make List stays full-width with left-aligned columns. */
+            .table.boq-sheet.boq-sheet--make-list {
+                width: 100% !important;
+                min-width: 100% !important;
+                max-width: 100%;
+                table-layout: fixed !important;
+            }
+            .table.boq-sheet.boq-sheet--make-list th,
+            .table.boq-sheet.boq-sheet--make-list td {
+                text-align: left !important;
+                white-space: normal !important;
+            }
+            .table.boq-sheet.boq-sheet--make-list th.boq-sheet__col-makes,
+            .table.boq-sheet.boq-sheet--make-list td.boq-sheet__col-makes {
+                text-align: right !important;
             }
             .sidebar-backdrop {
                 position: fixed;
@@ -867,6 +1652,72 @@
             border-color: var(--border);
             color: var(--text);
         }
+
+        .dark-mode .extraction-product-tabs {
+            border-color: var(--border);
+        }
+
+        .dark-mode .extraction-product-tabs__btn {
+            background: var(--surface);
+            border-color: var(--border);
+            color: var(--text);
+        }
+
+        .dark-mode .extraction-product-tabs__btn.is-active {
+            background: var(--primary, #3b82f6);
+            border-color: var(--primary, #3b82f6);
+            color: #fff;
+        }
+
+        .dark-mode .extraction-activities__heading {
+            color: #93c5fd;
+            background: rgba(59, 130, 246, 0.15);
+            border-color: rgba(59, 130, 246, 0.35);
+        }
+
+        .dark-mode .extraction-activities__chip {
+            background: var(--surface-alt);
+            border-color: var(--border);
+        }
+
+        .dark-mode .extraction-db-match__heading,
+        .dark-mode .extraction-extra-attrs__heading {
+            color: #93c5fd;
+            background: rgba(59, 130, 246, 0.15);
+            border-color: rgba(59, 130, 246, 0.35);
+        }
+
+        .dark-mode .extraction-db-match {
+            background: var(--surface-alt);
+            border-color: var(--border);
+        }
+
+        .dark-mode .extraction-db-match--provisional {
+            background: rgba(251, 146, 60, 0.14);
+            border-color: rgba(251, 146, 60, 0.45);
+        }
+
+        .dark-mode .extraction-db-match__summary {
+            color: var(--text);
+        }
+
+        .dark-mode .extraction-db-match__notes {
+            color: var(--text-muted);
+        }
+
+        .dark-mode .extraction-db-match__missing {
+            color: #fdba74;
+        }
+
+        .dark-mode .extraction-db-match__missing strong {
+            color: #fed7aa;
+        }
+
+        .dark-mode .extraction-db-match--unmatched {
+            background: transparent;
+            border-color: var(--border);
+        }
+
         .dark-mode .extraction-product-card__head {
             background: rgba(148, 163, 184, .12);
             border-color: var(--border);

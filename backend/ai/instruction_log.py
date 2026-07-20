@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from django.conf import settings
+
+from utils.timestamps import now_local_iso
 
 logger = logging.getLogger("boq_ai.instructions")
 
@@ -32,7 +33,7 @@ def log_instruction(
     if not getattr(settings, "AI_INSTRUCTION_LOGGING", True):
         return
 
-    timestamp = datetime.now(timezone.utc).isoformat()
+    timestamp = now_local_iso()
     meta = metadata or {}
     meta_parts = [f"{key}={value}" for key, value in meta.items() if value not in (None, "")]
     meta_line = " ".join(meta_parts)

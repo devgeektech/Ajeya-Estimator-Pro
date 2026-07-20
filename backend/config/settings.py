@@ -241,6 +241,7 @@ LOGGING = {
     "disable_existing_loggers": False,
     "formatters": {
         "verbose": {
+            "()": "common.logging_formatters.LocalTimeFormatter",
             "format": "{asctime} [{levelname}] {name}: {message}",
             "style": "{",
         },

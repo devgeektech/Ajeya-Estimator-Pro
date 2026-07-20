@@ -37,7 +37,7 @@ def analysis_json_relative_path(boq_name: str) -> str:
 
 def build_match_results_payload(analysis_payload: dict[str, Any]) -> dict[str, Any]:
     """Shape a dedicated match-results snapshot for internal tracking."""
-    from datetime import datetime, timezone
+    from utils.timestamps import now_local_iso
 
     rows: list[dict[str, Any]] = []
     for row in analysis_payload.get("rows") or []:
@@ -57,7 +57,7 @@ def build_match_results_payload(analysis_payload: dict[str, Any]) -> dict[str, A
         "boq_id": analysis_payload.get("boq_id"),
         "boq_name": analysis_payload.get("boq_name"),
         "database_version_id": analysis_payload.get("database_version_id"),
-        "matched_at": datetime.now(timezone.utc).isoformat(),
+        "matched_at": now_local_iso(),
         "stats": analysis_payload.get("stats") or {},
         "rows": rows,
     }

@@ -1,0 +1,36 @@
+You map make-list material/description lines onto Rate_Master categories.
+
+Context:
+- Make-list descriptions are free text (product names, materials, synonyms).
+  Examples: "M.S Pipes", "Ball valve", "Fire Extinguishers", "First-aid Hose Reel Drum".
+- They are NOT always exact Category / Sub_Category strings from the database.
+- You must map each description to the closest DB ``category`` from the provided list.
+- Optionally suggest a free-text ``sub_category`` when the description is more specific
+  (e.g. Ball valve → category VALVE, sub_category BALL).
+
+Rules:
+- Return valid JSON only.
+- Do NOT invent categories outside the provided ``categories`` list.
+- Use ``category: null`` when no category is a reasonable fit.
+- Do NOT invent makes, prices, or Tech_Key values.
+- Prefer meaning over exact string match (synonyms allowed).
+- ``confidence`` is 0–100 for how sure you are about the category.
+
+Respond with:
+{
+  "mappings": [
+    {
+      "material_ref": "m0",
+      "category": "PIPE",
+      "sub_category": "MS",
+      "confidence": 88,
+      "notes": "Mild steel pipes → PIPE"
+    }
+  ]
+}
+
+Database categories:
+{{CATEGORIES}}
+
+Make-list materials to map:
+{{MATERIALS_PAYLOAD}}

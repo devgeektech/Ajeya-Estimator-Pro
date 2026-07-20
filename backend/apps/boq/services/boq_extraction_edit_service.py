@@ -9,15 +9,21 @@ from django.db import transaction
 
 from apps.boq.models import BOQ
 from apps.boq.services.boq_analysis_store import save_boq_analysis_json
+from apps.boq.services.boq_extraction_service import _normalize_product_fields
 from apps.boq.services.make_list_constraint_service import (
     LOWEST_MAKE_STORED,
     LOWEST_MAKE_VALUE,
     MakeListConstraintService,
     _normalize_make,
 )
-from apps.boq.services.product_attribute_enrichment_service import compute_attribute_confidence
+from apps.boq.services.product_attribute_enrichment_service import (
+    compute_attribute_confidence,
+    refresh_missing_attribute_keys,
+)
 from common.choices import BOQStatus
 from common.exceptions import BOQAIError, ValidationError
+from utils.json_safe import json_safe
+from utils.attribute_parser import coerce_attributes_dict
 
 PHASE_EXTRACTED = "extracted"
 
@@ -60,17 +66,7 @@ def _coerce_scalar(field: str, raw: str) -> Any:
 
 
 def _normalize_attributes(raw: dict[str, Any] | None) -> dict[str, str]:
-    if not raw:
-        return {}
-    normalized: dict[str, str] = {}
-    for key, value in raw.items():
-        key_text = re.sub(r"\s+", "_", str(key or "").strip().lower())
-        if not key_text:
-            continue
-        value_text = str(value or "").strip()
-        if value_text:
-            normalized[key_text] = value_text
-    return normalized
+    return coerce_attributes_dict(raw)
 
 
 def _blank_product(product_index: int) -> dict[str, Any]:
@@ -135,6 +131,7 @@ class BOQExtractionEditService:
             if field not in fields:
                 continue
             updated[field] = _coerce_scalar(field, fields[field])
+        updated = _normalize_product_fields(updated)
 
         if attributes is not None:
             updated["attributes"] = _normalize_attributes(attributes)
@@ -143,13 +140,14 @@ class BOQExtractionEditService:
                 for key in (updated.get("attribute_schema") or [])
                 if str(key).strip()
             ]
-            if not schema_keys:
-                schema_keys = sorted(updated["attributes"].keys())
-                updated["attribute_schema"] = schema_keys
+            # Keep stored DB schema; never invent schema from filled keys (that forced 100%).
             updated["attribute_confidence"] = compute_attribute_confidence(
                 schema_keys,
                 updated["attributes"],
             )
+            updated["missing_attribute_keys"] = refresh_missing_attribute_keys(updated)
+            if not schema_keys and updated["attributes"]:
+                updated["attribute_source"] = updated.get("attribute_source") or "extracted"
 
         position = self._product_position(products, product_index)
         if position is None:
@@ -205,6 +203,52 @@ class BOQExtractionEditService:
             row["skip_matching"] = True
         analysis["rows"] = rows
         self._persist(boq, analysis)
+
+    def add_activity(self, *, row_id: str, activity: str) -> list[str]:
+        boq = self._get_boq()
+        self._ensure_editable(boq)
+
+        text = (activity or "").strip()
+        if not text:
+            raise ValidationError("Enter an activity name.")
+
+        analysis = dict(boq.analysis_data or {})
+        rows = list(analysis.get("rows") or [])
+        row = self._find_row(rows, row_id)
+        if row is None:
+            raise ValidationError(f"Unknown BOQ row: {row_id}")
+
+        activities = list(row.get("activities") or [])
+        if text not in activities:
+            activities.append(text)
+        row["activities"] = activities
+        if row.get("skip_matching") and not row.get("products"):
+            row["skip_matching"] = False
+        analysis["rows"] = rows
+        self._persist(boq, analysis)
+        return activities
+
+    def remove_activity(self, *, row_id: str, activity: str) -> list[str]:
+        boq = self._get_boq()
+        self._ensure_editable(boq)
+
+        text = (activity or "").strip()
+        if not text:
+            raise ValidationError("Missing activity name.")
+
+        analysis = dict(boq.analysis_data or {})
+        rows = list(analysis.get("rows") or [])
+        row = self._find_row(rows, row_id)
+        if row is None:
+            raise ValidationError(f"Unknown BOQ row: {row_id}")
+
+        activities = [item for item in (row.get("activities") or []) if str(item) != text]
+        row["activities"] = activities
+        if not row.get("products") and not activities:
+            row["skip_matching"] = True
+        analysis["rows"] = rows
+        self._persist(boq, analysis)
+        return activities
 
     def update_row_make(
         self,
@@ -363,8 +407,9 @@ class BOQExtractionEditService:
             row.pop("product_matches", None)
 
         with transaction.atomic():
-            save_boq_analysis_json(boq.boq_name, analysis)
-            boq.analysis_data = analysis
+            safe_analysis = json_safe(analysis)
+            save_boq_analysis_json(boq.boq_name, safe_analysis)
+            boq.analysis_data = safe_analysis
             if boq.status == BOQStatus.PROCESSED:
                 boq.status = BOQStatus.EXTRACTED
             boq.save(update_fields=["analysis_data", "status"])

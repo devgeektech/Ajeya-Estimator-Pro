@@ -34,6 +34,258 @@ run analysis → session confirmations → export Excel
 
 ## Session Log
 
+### 2026-07-20 — Compact BOQ Detail Tab Bar
+
+Completed: Tabs first with tight spacing; status + summary + Match on one row
+below tabs on Analysis (Match right-aligned).
+Pending: Hard-refresh BOQ detail; check all tabs.
+Issues: —
+Next: —
+
+### 2026-07-20 — Analysis Scroll Performance + Match UI
+
+Completed: Scroll lag fixes (content-visibility, no textarea resize, no input
+transitions); inline db match summary; Make/Tech key hidden on product card;
+Additional Attributes as horizontal chips.
+Pending: Hard-refresh Analysis tab; scroll a long BOQ list to confirm smoothness.
+Issues: —
+Next: —
+
+### 2026-07-20 — Product Tab Action Row
+
+Completed: Tabs show Product 1/2/…; Add + Re-analyse + Remove on one row;
+removed Product title/confidence header under the tabs.
+Pending: Hard-refresh Analysis tab.
+Issues: —
+Next: —
+
+### 2026-07-20 — Compact Analysis Product Cards
+
+Completed: Densified Analysis UI (padding, fields, tabs, db match) and
+scrollable attributes so a product card fits in the viewport.
+Pending: Hard-refresh Analysis; verify on typical laptop height.
+Issues: —
+Next: —
+
+### 2026-07-20 — Product Tabs on Analysis Cards
+
+Completed: Multi-product BOQ lines use numbered tabs inside one card; Add
+product sits after the tab numbers.
+Pending: Hard-refresh Analysis tab.
+Issues: —
+Next: —
+
+### 2026-07-20 — Analysis Card Actions Cleanup
+
+Completed: Removed Save product; + Add product sits beside the product card
+number on the last card of each line (autosave unchanged).
+Pending: Hard-refresh Analysis tab.
+Issues: —
+Next: —
+
+### 2026-07-20 — Silent Re-analyse + Scroll Restore
+
+Completed: Re-analyse returns line HTML and swaps the row in place (no full
+reload); detail page restores scroll position after refresh via sessionStorage.
+Pending: Hard-refresh BOQ detail; try Re-analyse on a mid-page product.
+Issues: —
+Next: —
+
+### 2026-07-20 — Material Maps to Class
+
+Completed: Material from BOQ fills product Class (Rate_Master Class), not
+Additional Attributes. Prompt + promote attributes.material→class with MS/SS/CI
+aliases. Soft-fixed on display/save/rematch.
+Pending: Hard-refresh Analysis; Re-analyse to persist.
+Issues: —
+Next: —
+
+### 2026-07-20 — Product Unit vs BOQ Quantity UOM
+
+Completed: Analysis product Unit is Rate_Master measurement (mm/cm/NB), not BOQ
+Each. BOQ UOM maps to quantity_unit; size like 63mm derives unit mm. Soft-fixed
+on display/save/rematch for existing analyses.
+Pending: Hard-refresh Analysis tab; Re-analyse rows to persist corrected units.
+Issues: —
+Next: —
+
+### 2026-07-17 — Category-Wise Make on Make & Vendor
+
+Completed: Make & Vendor tab has Category makes panel — pick approved make per
+category and Apply to all products in that category (then exact-match + rates).
+Pending: Hard-refresh Make & Vendor tab.
+Issues: —
+Next: —
+
+### 2026-07-17 — Make & Vendor Selection Tab
+
+Completed: New Make & Vendor tab after Analysis. Expert selects make/supplier;
+system exact-matches Rate_Master with analysis product fields + selection, then
+loads material/labour rates via Tech_Key (`MakeVendorSelectionService`).
+Pending: Hard-refresh BOQ detail; run Analyse then open Make & Vendor.
+Issues: —
+Next: Optionally feed vendor_selection into Match Results / export.
+
+### 2026-07-17 — Confidence ≥80% Green
+
+Completed: Confidence badges use green for scores 80% and above.
+Pending: Hard-refresh Analysis tab.
+Issues: —
+Next: —
+
+### 2026-07-17 — Flatten Nested AI Attributes in UI
+
+Completed: Nested/stringified AI attribute blobs (e.g. ``attributes:
+{'material': '...'}``) are coerced to normal key/value pairs for display,
+extraction, mapping, and save.
+Pending: Hard-refresh Analysis tab; optional Re-analyse to rewrite stored JSON.
+Issues: —
+Next: —
+
+### 2026-07-17 — Unit Field After Capacity
+
+Completed: Product card shows Unit after Capacity again. Extraction copies BOQ
+row unit/qty onto products when AI leaves them blank; prompt clarifies row UOM.
+Pending: Re-run Analyse on existing BOQs to refresh unit values.
+Issues: —
+Next: —
+
+### 2026-07-17 — Auto Status Refresh + Product Autosave
+
+Completed: Analyse/Match AJAX start with live status badge polling on detail;
+BOQ list status column auto-updates while Analysing/Matching. Product fields
+auto-save as typed; Re-analyse saves first then refreshes confidence.
+Pending: Hard-refresh BOQ list + Analysis tab.
+Issues: —
+Next: —
+
+### 2026-07-17 — Product Card UI Cleanup
+
+Completed: Removed Unit and Preferred make from product card. Additional
+Attributes no longer duplicate DB schema or product field keys. Re-analyse moved
+from row header to product card actions beside Remove.
+Pending: Hard-refresh Analysis tab to pick up template changes.
+Issues: —
+Next: —
+
+### 2026-07-17 — Project Timestamps Use IST
+
+Completed: All app-facing timestamps use Asia/Kolkata (IST). Shared
+``utils.timestamps``; AI instruction log, match/confirm ISO stamps, JSON-safe
+datetimes, and file/console logging formatters no longer emit UTC or host-local
+time. Django ``TIME_ZONE`` / Celery already Kolkata.
+Pending: Restart Django/Celery so new log formatter loads.
+Issues: —
+Next: —
+
+### 2026-07-17 — Fix Analyse Decimal JSON Error
+
+Completed: Product mapping ``db_candidates`` convert Rate_Master Decimal fields
+to strings; ``analysis_data`` sanitized via ``utils.json_safe``; psycopg3 JSON
+dumps use ``DjangoJSONEncoder`` so Analyse never fails on Decimal Size.
+Pending: Restart Celery after pull, then re-run Analyse if status still failed.
+Issues: —
+Next: —
+
+### 2026-07-17 — BOQ Upload Keep Files on Name Error
+
+Completed: Removed BOQ name help text. Upload button is ``type=button`` + fetch JSON
+so duplicate-name validation never reloads the page (file inputs stay selected).
+Pending: Hard-refresh ``/boqs/upload/`` once.
+Issues: —
+Next: —
+
+### 2026-07-17 — Make List → Category Mapping
+
+Completed: Make-list descriptions map to Rate_Master categories (heuristic + AI
+``map_make_list_categories``). Stored as ``category_mappings``; Make List tab shows
+Mapped Category; Analysis/Match select approved makes by product category.
+Pending: Open BOQ detail to persist mappings on existing uploads.
+Issues: —
+Next: —
+
+### 2026-07-17 — DB-Only Product Match + Rematch
+
+Completed: Analyse no longer force-picks weak Rate_Master rows or invents
+Tech_Key; confirmed match only when confidence ≥ 30%. Provisional matches expose
+Attribute schema + missing keys for expert fill. Re-analyse rematches with
+filled attributes (`rematch_row`). Candidates stored on each product.
+Pending: Re-run Analyse on existing BOQs to refresh mapping status.
+Issues: —
+Next: —
+
+### 2026-07-16 — Make List Exact Sheet Only
+
+Completed: Make-list Excel parse picks only the MAKE LIST sheet (not rate/DMRC
+sheets); payload slimmed to S.No / Description / Approved Makes; polluted stored
+JSON re-parses from the uploaded file on load; UI prefers MAKE LIST rows when
+legacy multi-sheet data is present. Verified BOQ `111111111111111111` → 50 rows.
+Pending: Hard-refresh Make List tab if browser cached old page.
+Issues: —
+Next: —
+
+### 2026-07-16 — Make List Tab Columns Fix
+
+Completed: Make List UI shows only S.No / Description / Approved Makes; Excel
+parse no longer merges unrelated sheets; make-column detection excludes rate/qty
+noise. Refresh the BOQ detail Make List tab to see the fix.
+Pending: —
+Issues: —
+Next: —
+### 2026-07-16 — Extract Category Free-Text; Categories-Only Context
+
+Completed: Extract always outputs category + free-text sub_category; DB context
+for extract is categories-only (no subcategory list). Map prompt clarifies
+`rate_master_id` = Rate_Master PK and uses extracted category/sub_category.
+Pending: Re-run Analyse to pick up prompt/context changes.
+Issues: —
+Next: —
+
+### 2026-07-16 — BOQ Hierarchy + Analyse Pipeline Hardening
+
+Completed: Hardened upload hierarchy (spec/roman under lettered products, Cont.
+serials, indent fallback, multi-sheet merge, fail-loud empty parses); PDF make-list
+continuation merge; anchor rules use children_map; extract prompt + MS/DI/CI value
+synonyms; refreshed `media/extract_json` for 000/test/1 from BOQ_4/BOQ_1.
+Pending: Re-run Analyse on fixture BOQs so analysis_data picks up new lineage.
+Issues: —
+Next: Estimator re-Analyse on 000/test after hierarchy refresh.
+
+### 2026-07-16 — AI Product + Attribute Mapping on Analyse
+
+Completed: Added `ProductAIMappingService` + `map_product_match` prompt. Analyse
+recalls Rate_Master candidates, AI selects product and maps attributes onto DB
+schema, service confidence shown with matched product summary on Analysis UI.
+Pending: Refresh Analysis tab / re-run Analyse to populate mappings.
+Issues: —
+Next: —
+
+### 2026-07-16 — Backfill DB Attribute Schema on Analysis
+
+Completed: Attribute enrichment uses SQL-first Rate_Master lookup; Analysis page
+backfills missing `attribute_schema` so DB Attribute keys show (empty when AI
+missed them) and AI-only keys stay under Additional Attributes.
+Pending: —
+Issues: —
+Next: Refresh Analysis tab on BOQ 000 to attach schemas.
+
+### 2026-07-16 — DB Schema Attributes UI
+
+Completed: Attributes section shows full DB schema (empty or filled); AI-only
+keys listed under Additional Attributes.
+Pending: Re-run Analyse to refresh attribute_schema on existing products.
+Issues: —
+Next: —
+
+### 2026-07-16 — Fix Analysis Confidence + Row Mapping + Extraction
+
+Completed: Attribute confidence no longer defaults to 100% without a DB schema;
+qty reads Total/Ground/Basement; lettered priced lines become anchors; resolve
+anchor stops at nearest real anchor; consolidate uses group_ids only.
+Pending: Re-run Analyse on affected BOQs to refresh analysis_data.
+Issues: —
+Next: —
+
 ### 2026-07-16 — Heuristic Make-List Column Roles
 
 Completed: Make-list columns are resolved from header + cell-content scores so

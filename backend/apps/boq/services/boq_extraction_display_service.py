@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 from apps.boq.models import BOQ
+from apps.boq.services.boq_extraction_service import _normalize_product_fields
 from apps.boq.services.boq_row_grouping_service import grouped_anchor_rows
 from apps.boq.services.extraction_attribute_fields import COMMON_ATTRIBUTE_LABELS
 from apps.boq.services.make_list_constraint_service import MakeListConstraintService
@@ -13,6 +14,7 @@ from apps.boq.services.product_attribute_enrichment_service import (
     confidence_band,
     humanize_attribute_key,
 )
+from utils.attribute_parser import coerce_attributes_dict, normalize_attribute_key
 
 _PRODUCT_FIELDS: tuple[tuple[str, str], ...] = (
     ("description_hint", "Product description"),
@@ -20,10 +22,13 @@ _PRODUCT_FIELDS: tuple[tuple[str, str], ...] = (
     ("sub_category", "Sub-category"),
     ("class", "Class"),
     ("size", "Size"),
-    ("unit", "Unit"),
     ("capacity", "Capacity"),
-    ("quantity", "Quantity"),
-    ("quantity_unit", "Qty unit"),
+    ("unit", "Unit"),
+)
+
+# Product scalars shown in the card — never repeated under Additional Attributes.
+_PRODUCT_FIELD_KEYS: frozenset[str] = frozenset(key for key, _label in _PRODUCT_FIELDS) | frozenset(
+    ("make_hint", "quantity", "quantity_unit")
 )
 
 # All product property fields are optional — products differ in which apply.
@@ -43,40 +48,56 @@ def _attribute_label(key: str) -> str:
 
 
 def _shape_attribute_fields(product: dict[str, Any]) -> dict[str, Any]:
-    attrs = dict(product.get("attributes") or {})
+    """
+    Attributes grid = DB schema keys (filled when AI found a value, else empty).
+    Additional Attributes = AI keys not in the DB schema or product field grid.
+    """
+    attrs = coerce_attributes_dict(product.get("attributes"))
     schema_keys = [
         str(key)
         for key in (product.get("attribute_schema") or [])
         if str(key).strip()
     ]
-    if not schema_keys:
-        schema_keys = sorted(str(key) for key in attrs if not _is_blank(attrs.get(key)))
+    schema_set = {normalize_attribute_key(key) for key in schema_keys}
+    exclude_keys = schema_set | {normalize_attribute_key(key) for key in _PRODUCT_FIELD_KEYS}
 
-    schema_set = set(schema_keys)
+    # Always render the full DB schema — empty inputs for keys AI did not find.
     fields = [
         {
             "key": key,
             "label": _attribute_label(key),
-            "value": attrs.get(key, "") or "",
+            "value": "" if _is_blank(attrs.get(key)) else str(attrs.get(key)),
             "filled": not _is_blank(attrs.get(key)),
         }
         for key in schema_keys
     ]
-    extra = [
-        {"key": key, "value": value}
-        for key, value in sorted(attrs.items())
-        if key not in schema_set and not _is_blank(value)
-    ]
+
+    # AI-only attributes (not schema keys or product card fields).
+    extra = []
+    for key, value in sorted(attrs.items()):
+        if _is_blank(value):
+            continue
+        canon = normalize_attribute_key(str(key))
+        if canon in exclude_keys:
+            continue
+        extra.append({"key": key, "value": value})
+
     confidence = product.get("attribute_confidence")
     if confidence is None:
-        confidence = compute_attribute_confidence(schema_keys, attrs)
+        confidence = (
+            compute_attribute_confidence(schema_keys, attrs)
+            if schema_keys
+            else 0.0
+        )
     confidence = float(confidence or 0.0)
+    source = product.get("attribute_source") or ("database" if schema_keys else "extracted")
     return {
         "fields": fields,
         "extra": extra,
         "confidence": confidence,
         "confidence_band": confidence_band(confidence),
-        "source": product.get("attribute_source") or ("database" if schema_keys else "extracted"),
+        "source": source,
+        "has_db_schema": bool(schema_keys),
     }
 
 
@@ -87,6 +108,7 @@ def _shape_product(
     total: int,
     source_row_id: str,
 ) -> dict[str, Any]:
+    product = _normalize_product_fields(product)
     fields: list[dict[str, Any]] = []
     missing_count = 0
     for key, label in _PRODUCT_FIELDS:
@@ -104,6 +126,53 @@ def _shape_product(
         )
 
     attribute_fields = _shape_attribute_fields(product)
+    missing_attr_keys = [
+        str(key)
+        for key in (product.get("missing_attribute_keys") or [])
+        if str(key).strip()
+    ]
+    if not missing_attr_keys:
+        missing_attr_keys = [
+            field["key"]
+            for field in attribute_fields.get("fields") or []
+            if not field.get("filled")
+        ]
+
+    db_match_status = str(product.get("db_match_status") or "").strip() or (
+        "matched" if product.get("db_product_id") else "unmatched"
+    )
+    db_match = None
+    if product.get("db_product_id") or product.get("db_product_summary") or db_match_status == "provisional":
+        db_match = {
+            "rate_master_id": product.get("db_product_id"),
+            "suggested_id": product.get("suggested_db_product_id"),
+            "status": db_match_status,
+            "summary": product.get("db_product_summary")
+            or _product_summary(
+                {
+                    "category": product.get("category"),
+                    "sub_category": product.get("sub_category"),
+                    "class": product.get("class"),
+                    "size": product.get("size"),
+                }
+            ),
+            "make": product.get("db_product_make") or "",
+            "tech_key": product.get("db_product_tech_key") or "",
+            "notes": ((product.get("ai_mapping") or {}).get("notes") or ""),
+            "missing_attribute_keys": missing_attr_keys,
+        }
+
+    candidates = []
+    for item in (product.get("db_candidates") or [])[:5]:
+        candidates.append(
+            {
+                "id": item.get("id"),
+                "summary": item.get("summary")
+                or _product_summary(item),
+                "tech_key": item.get("tech_key") or "",
+                "confidence": item.get("confidence"),
+            }
+        )
 
     return {
         "product_index": int(product.get("product_index") or 0),
@@ -119,6 +188,11 @@ def _shape_product(
         ),
         "attribute_confidence": attribute_fields["confidence"],
         "attribute_confidence_band": attribute_fields["confidence_band"],
+        "db_match": db_match,
+        "db_match_status": db_match_status,
+        "db_candidates": candidates,
+        "missing_attribute_keys": missing_attr_keys,
+        "missing_attribute_count": len(missing_attr_keys),
         "missing_count": missing_count,
         "summary": _product_summary(product),
         "raw": product,
@@ -186,6 +260,8 @@ def _shape_make_list(
         "matched": bool(options_data.get("matched") or stored_data),
         "material": stored_data.get("material") or options_data.get("material") or "",
         "category_material": options_data.get("category_material") or "",
+        "mapped_category": options_data.get("mapped_category") or category or "",
+        "selection_basis": options_data.get("selection_basis") or "",
         "approved_makes": make_options,
         "make_options": make_options,
         "selected_make": selected,

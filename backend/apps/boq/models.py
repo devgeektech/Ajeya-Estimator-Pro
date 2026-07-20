@@ -3,6 +3,7 @@
 Stores uploaded BOQ workbooks (and optional make lists) for future processing.
 """
 from django.conf import settings
+from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
 from django.db.models.functions import Lower
 
@@ -29,9 +30,9 @@ class BOQ(models.Model):
     make_list_file = models.FileField(
         upload_to=make_list_upload_path, blank=True, null=True
     )
-    boq_data = models.JSONField(default=dict, blank=True)
-    make_list_data = models.JSONField(default=dict, blank=True)
-    analysis_data = models.JSONField(default=dict, blank=True)
+    boq_data = models.JSONField(default=dict, blank=True, encoder=DjangoJSONEncoder)
+    make_list_data = models.JSONField(default=dict, blank=True, encoder=DjangoJSONEncoder)
+    analysis_data = models.JSONField(default=dict, blank=True, encoder=DjangoJSONEncoder)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

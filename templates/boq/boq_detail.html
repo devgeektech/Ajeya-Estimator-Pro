@@ -14,13 +14,51 @@
 
 {% block content %}
 <style>
+    .boq-view {
+        margin-top: -10px;
+    }
     .boq-detail-header {
         position: sticky !important;
         top: 63px !important;
         z-index: 20 !important;
         background: var(--surface-alt) !important;
-        padding-top: 16px !important;
-        padding-bottom: 8px !important;
+        padding-top: 0 !important;
+        padding-bottom: 2px !important;
+        margin-bottom: 4px !important;
+        gap: 4px !important;
+    }
+    .boq-detail-header .boq-tabs {
+        margin-bottom: 0 !important;
+    }
+    .boq-tab-context {
+        display: flex;
+        align-items: center;
+        gap: 8px 12px;
+        width: 100%;
+        min-height: 0;
+        padding: 2px 0 4px;
+    }
+    .boq-tab-context__status {
+        flex-shrink: 0;
+    }
+    .boq-tab-context__summary {
+        flex: 1 1 auto;
+        min-width: 0;
+        font-size: .8rem;
+        line-height: 1.35;
+        color: var(--text-muted);
+    }
+    .boq-tab-context__summary strong {
+        color: var(--text);
+        font-weight: 600;
+    }
+    .boq-tab-context__actions {
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+        flex-wrap: wrap;
     }
     .dark-mode .boq-detail-header {
         background: var(--surface-alt) !important;
@@ -30,18 +68,14 @@
         background-color: #ffffff !important;
     }
     .extraction-line:nth-child(even) {
-        background-color: #e2e8f0 !important; /* Slate-200 for very clear distinction */
+        background-color: #e2e8f0 !important;
     }
-    
-    /* Distinct alternating card colors - Dark Mode */
     .dark-mode .extraction-line:nth-child(odd) {
-        background-color: #111827 !important; /* Slate-900 */
+        background-color: #111827 !important;
     }
     .dark-mode .extraction-line:nth-child(even) {
-        background-color: #334155 !important; /* Slate-700 (Canvas is Slate-800) */
+        background-color: #334155 !important;
     }
-    
-    /* Ensure nested elements are transparent so the card background shows through */
     .extraction-product-card {
         background-color: transparent !important;
     }
@@ -54,109 +88,197 @@
     x-data="{
         tab: '{{ default_tab }}',
         analysisEnabled: {{ tab_access.analysis|yesno:'true,false' }},
+        makeVendorEnabled: {{ tab_access.make_vendor|yesno:'true,false' }},
         matchResultsEnabled: {{ tab_access.match_results|yesno:'true,false' }},
         analysing: {{ is_extracting|yesno:'true,false' }},
         matching: {{ is_matching|yesno:'true,false' }},
+        statusLabel: '{{ status_display.label|escapejs }}',
+        statusBadge: '{{ status_display.badge|escapejs }}',
+        extractUrl: '{% url 'boq:extract' boq.pk %}',
+        matchUrl: '{% url 'boq:match' boq.pk %}',
         extractStatusUrl: '{% url 'boq:status' boq.pk %}?expect=extract',
         matchStatusUrl: '{% url 'boq:status' boq.pk %}?expect=match',
+        detailAnalysisUrl: '{% url 'boq:detail' boq.pk %}?tab=analysis',
+        detailMakeVendorUrl: '{% url 'boq:detail' boq.pk %}?tab=make_vendor',
+        detailMatchUrl: '{% url 'boq:detail' boq.pk %}?tab=match_results',
         pollTimer: null,
         scrollPositions: {},
+        scrollStorageKey(tabName) {
+            return 'boq-detail-scroll-{{ boq.pk }}-' + (tabName || this.tab || 'analysis');
+        },
+        persistScroll(tabName) {
+            try {
+                sessionStorage.setItem(this.scrollStorageKey(tabName || this.tab), String(window.scrollY));
+            } catch (e) { /* ignore */ }
+        },
+        restoreScroll(tabName) {
+            try {
+                const raw = sessionStorage.getItem(this.scrollStorageKey(tabName || this.tab));
+                if (raw == null || raw === '') return;
+                const y = Number(raw);
+                if (!Number.isFinite(y) || y < 0) return;
+                const apply = () => window.scrollTo(0, y);
+                this.$nextTick(() => {
+                    apply();
+                    setTimeout(apply, 50);
+                    setTimeout(apply, 200);
+                });
+            } catch (e) { /* ignore */ }
+        },
+        csrfToken() {
+            return document.querySelector('meta[name=csrf-token]')?.getAttribute('content') || '';
+        },
         selectTab(name) {
             if (name === 'analysis' && !this.analysisEnabled) return;
+            if (name === 'make_vendor' && !this.makeVendorEnabled) return;
             if (name === 'match_results' && !this.matchResultsEnabled) return;
-            
-            // Save current scroll position
+            this.persistScroll(this.tab);
             this.scrollPositions[this.tab] = window.scrollY;
-            
             this.tab = name;
-            
-            // Restore new tab's scroll position after DOM updates
+            this.syncTabUrl(name);
             this.$nextTick(() => {
-                window.scrollTo(0, this.scrollPositions[name] || 0);
+                const saved = this.scrollPositions[name];
+                if (typeof saved === 'number') {
+                    window.scrollTo(0, saved);
+                } else {
+                    this.restoreScroll(name);
+                }
             });
         },
+        applyStatus(data) {
+            if (data.label) this.statusLabel = data.label;
+            if (data.badge) this.statusBadge = data.badge;
+            if (data.ready && data.expect === 'extract') {
+                this.makeVendorEnabled = true;
+                this.analysisEnabled = true;
+            }
+        },
+        reloadWithCacheBust(url) {
+            const sep = url.includes('?') ? '&' : '?';
+            window.location.href = url + sep + '_t=' + Date.now();
+        },
+        async postJob(url) {
+            const body = new FormData();
+            body.append('ajax', '1');
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRFToken': this.csrfToken(),
+                    'Accept': 'application/json',
+                },
+                credentials: 'same-origin',
+                body,
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || data.ok === false) {
+                throw new Error(data.message || 'Request failed.');
+            }
+            return data;
+        },
+        pollExtract() {
+            fetch(this.extractStatusUrl, { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
+                .then((response) => response.json())
+                .then((data) => {
+                    this.applyStatus(data);
+                    if (data.ready) {
+                        // After Analyse, land on Make & Vendor for make/supplier selection.
+                        this.reloadWithCacheBust(this.detailMakeVendorUrl);
+                        return;
+                    }
+                    this.pollTimer = setTimeout(() => this.pollExtract(), 2500);
+                })
+                .catch(() => { this.pollTimer = setTimeout(() => this.pollExtract(), 5000); });
+        },
+        pollMatch() {
+            fetch(this.matchStatusUrl, { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
+                .then((response) => response.json())
+                .then((data) => {
+                    this.applyStatus(data);
+                    if (data.ready) {
+                        this.reloadWithCacheBust(this.detailMatchUrl);
+                        return;
+                    }
+                    this.pollTimer = setTimeout(() => this.pollMatch(), 2500);
+                })
+                .catch(() => { this.pollTimer = setTimeout(() => this.pollMatch(), 5000); });
+        },
         startPolling() {
-            const pollExtract = () => {
-                fetch(this.extractStatusUrl, { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
-                    .then((response) => response.json())
-                    .then((data) => {
-                        if (data.ready) {
-                            window.location.href = '{% url "boq:detail" boq.pk %}?tab=analysis&_t=' + Date.now();
-                            return;
-                        }
-                        this.pollTimer = setTimeout(pollExtract, 3000);
-                    })
-                    .catch(() => { this.pollTimer = setTimeout(pollExtract, 5000); });
-            };
-            const pollMatch = () => {
-                fetch(this.matchStatusUrl, { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
-                    .then((response) => response.json())
-                    .then((data) => {
-                        if (data.ready) {
-                            window.location.href = '{% url "boq:detail" boq.pk %}?tab=match_results&_t=' + Date.now();
-                            return;
-                        }
-                        this.pollTimer = setTimeout(pollMatch, 3000);
-                    })
-                    .catch(() => { this.pollTimer = setTimeout(pollMatch, 5000); });
-            };
+            if (this.pollTimer) {
+                clearTimeout(this.pollTimer);
+                this.pollTimer = null;
+            }
             if (this.analysing) {
                 this.tab = 'analysis';
-                pollExtract();
+                this.syncTabUrl('analysis');
+                this.pollExtract();
             } else if (this.matching) {
                 this.tab = 'match_results';
-                pollMatch();
+                this.syncTabUrl('match_results');
+                this.pollMatch();
+            } else {
+                this.syncTabUrl(this.tab);
             }
+        },
+        async startAnalyse() {
+            if (this.analysing || this.matching) return;
+            this.analysing = true;
+            this.analysisEnabled = true;
+            this.tab = 'analysis';
+            this.syncTabUrl('analysis');
+            this.statusLabel = 'Analysing';
+            this.statusBadge = 'badge--yellow';
+            try {
+                const data = await this.postJob(this.extractUrl);
+                this.applyStatus(data);
+                if (data.ready || data.mode === 'sync') {
+                    this.reloadWithCacheBust(this.detailMakeVendorUrl);
+                    return;
+                }
+                this.startPolling();
+            } catch (error) {
+                this.analysing = false;
+                alert(error.message || 'Failed to start analysis.');
+            }
+        },
+        async startMatch() {
+            if (this.analysing || this.matching) return;
+            this.matching = true;
+            this.matchResultsEnabled = true;
+            this.tab = 'match_results';
+            this.syncTabUrl('match_results');
+            this.statusLabel = 'Matching';
+            this.statusBadge = 'badge--red';
+            try {
+                const data = await this.postJob(this.matchUrl);
+                this.applyStatus(data);
+                if (data.ready || data.mode === 'sync') {
+                    this.reloadWithCacheBust(this.detailMatchUrl);
+                    return;
+                }
+                this.startPolling();
+            } catch (error) {
+                this.matching = false;
+                alert(error.message || 'Failed to start matching.');
+            }
+        },
+        syncTabUrl(name) {
+            try {
+                const url = new URL(window.location.href);
+                if (url.searchParams.get('tab') === name && !url.searchParams.has('_t')) return;
+                url.searchParams.set('tab', name);
+                url.searchParams.delete('_t');
+                window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+            } catch (e) { /* ignore */ }
         }
     }"
-    x-init="startPolling()"
+    x-init="
+        startPolling();
+        restoreScroll();
+        window.addEventListener('beforeunload', () => persistScroll());
+    "
 >
     <div class="boq-detail-header">
-        <div class="boq-detail-toolbar">
-            <div class="boq-detail-toolbar__status">
-                <span class="badge {{ status_display.badge }}">{{ status_display.label }}</span>
-            </div>
-            <div class="boq-detail-toolbar__actions">
-                {% if can_analyse and not extraction_display.has_extraction %}
-                    <form method="post" action="{% url 'boq:extract' boq.pk %}" @submit.prevent="analysing = true; analysisEnabled = true; tab = 'analysis'; setTimeout(() => $el.submit(), 100)">
-                        {% csrf_token %}
-                        <button
-                            type="submit"
-                            class="btn btn--small btn--boq-analyse"
-                            :class="{ 'btn--analysis-loading': analysing }"
-                            :disabled="analysing"
-                        >
-                            <span x-show="!analysing">Analyse BOQ</span>
-                            <span x-show="analysing" x-cloak>Analysing...</span>
-                        </button>
-                    </form>
-                {% elif is_extracting %}
-                    <button type="button" class="btn btn--small btn--analysis-loading" disabled>Analysing...</button>
-                {% endif %}
-
-                {% if can_match and boq.status != "PROCESSED" %}
-                    <form method="post" action="{% url 'boq:match' boq.pk %}" @submit.prevent="matching = true; matchResultsEnabled = true; tab = 'match_results'; setTimeout(() => $el.submit(), 100)">
-                        {% csrf_token %}
-                        <button
-                            type="submit"
-                            class="btn btn--small btn--boq-match"
-                            :class="{ 'btn--matching-loading': matching }"
-                            :disabled="matching"
-                        >
-                            <span x-show="!matching">Match</span>
-                            <span x-show="matching" x-cloak>Matching...</span>
-                        </button>
-                    </form>
-                {% elif is_matching %}
-                    <button type="button" class="btn btn--small btn--matching-loading" disabled>Matching...</button>
-                {% endif %}
-
-                {% if can_export %}
-                    <a href="{% url 'boq:export' boq.pk %}" class="btn btn--small btn--boq-export">Export Excel</a>
-                {% endif %}
-            </div>
-        </div>
-
         <div class="boq-tabs" role="tablist">
             <button
                 type="button"
@@ -193,6 +315,18 @@
             <button
                 type="button"
                 class="boq-tabs__btn"
+                :class="{ 'is-active': tab === 'make_vendor', 'is-disabled': !makeVendorEnabled }"
+                @click="selectTab('make_vendor')"
+                role="tab"
+                :aria-selected="tab === 'make_vendor'"
+                :aria-disabled="!makeVendorEnabled"
+                :tabindex="makeVendorEnabled ? 0 : -1"
+            >
+                Make &amp; Vendor
+            </button>
+            <button
+                type="button"
+                class="boq-tabs__btn"
                 :class="{ 'is-active': tab === 'match_results', 'is-disabled': !matchResultsEnabled }"
                 @click="selectTab('match_results')"
                 role="tab"
@@ -203,26 +337,74 @@
                 Match Results
             </button>
         </div>
-    </div>
 
-    {% if extraction_display.has_extraction %}
-    <p
-        class="analysis-summary-line panel__text panel__text--muted"
-        x-show="tab === 'analysis' && !analysing"
-        x-cloak
-    >
-        {{ extraction_display.product_count }} product(s) and
-        {{ extraction_display.activity_count }} activity line(s) extracted.
-        {% if extraction_display.missing_field_count %}
-            <span class="extraction-missing-summary">{{ extraction_display.missing_field_count }} field(s) need review.</span>
-        {% endif %}
-        {% if can_edit_extraction %}
-            Fill missing values below, then click <strong>Match</strong> when ready.
-        {% elif can_match %}
-            Click <strong>Match</strong> to compare against the master database.
-        {% endif %}
-    </p>
-    {% endif %}
+        <div class="boq-tab-context">
+            <div class="boq-tab-context__status">
+                <span class="badge" :class="statusBadge" x-text="statusLabel">{{ status_display.label }}</span>
+            </div>
+
+            <div class="boq-tab-context__summary">
+                {% if extraction_display.has_extraction %}
+                <span x-show="tab === 'analysis' && !analysing" x-cloak>
+                    {{ extraction_display.product_count }} product(s) and
+                    {{ extraction_display.activity_count }} activity line(s) extracted.
+                    {% if extraction_display.missing_field_count %}
+                        <span class="extraction-missing-summary">{{ extraction_display.missing_field_count }} field(s) need review.</span>
+                    {% endif %}
+                    {% if can_edit_extraction %}
+                        Fill missing values below, then click <strong>Match</strong> when ready.
+                    {% elif can_match %}
+                        Click <strong>Match</strong> to compare against the master database.
+                    {% endif %}
+                </span>
+                {% endif %}
+                {% if analysis_stats and analysis_display.has_analysis %}
+                <span x-show="tab === 'match_results' && !matching" x-cloak>
+                    Matched {{ analysis_stats.products_matched|default:0 }} / {{ analysis_stats.products_total }} products
+                    ({{ analysis_stats.products_pending }} pending).
+                </span>
+                {% endif %}
+            </div>
+
+            <div class="boq-tab-context__actions">
+                {% if can_analyse and not extraction_display.has_extraction %}
+                    <button
+                        type="button"
+                        class="btn btn--small btn--boq-analyse"
+                        :class="{ 'btn--analysis-loading': analysing }"
+                        :disabled="analysing"
+                        @click="startAnalyse()"
+                    >
+                        <span x-show="!analysing">Analyse BOQ</span>
+                        <span x-show="analysing" x-cloak>Analysing...</span>
+                    </button>
+                {% elif is_extracting %}
+                    <button type="button" class="btn btn--small btn--analysis-loading" disabled>Analysing...</button>
+                {% endif %}
+
+                <span x-show="tab === 'analysis'" x-cloak>
+                    {% if can_match and boq.status != "PROCESSED" %}
+                        <button
+                            type="button"
+                            class="btn btn--small btn--boq-match"
+                            :class="{ 'btn--matching-loading': matching }"
+                            :disabled="matching"
+                            @click="startMatch()"
+                        >
+                            <span x-show="!matching">Match</span>
+                            <span x-show="matching" x-cloak>Matching...</span>
+                        </button>
+                    {% elif is_matching %}
+                        <button type="button" class="btn btn--small btn--matching-loading" disabled>Matching...</button>
+                    {% endif %}
+                </span>
+
+                {% if can_export %}
+                    <a href="{% url 'boq:export' boq.pk %}" class="btn btn--small btn--boq-export">Export Excel</a>
+                {% endif %}
+            </div>
+        </div>
+    </div>
 
     <div class="panel" :class="{ 'panel--analysis-flat': tab === 'analysis' }">
         <div x-show="tab === 'boq'" x-cloak role="tabpanel">
@@ -231,7 +413,7 @@
 
         <div x-show="tab === 'make_list'" x-cloak role="tabpanel">
             {% if has_make_list %}
-                {% include "boq/_sheet_table.html" with structure=make_list_structure %}
+                {% include "boq/_sheet_table.html" with structure=make_list_structure sheet_variant="make_list" %}
             {% else %}
                 <p class="panel__text">No make list uploaded for this BOQ.</p>
             {% endif %}
@@ -267,13 +449,11 @@
             </div>
         </div>
 
+        <div x-show="tab === 'make_vendor'" x-cloak role="tabpanel" class="make-vendor-tab-canvas">
+            {% include "boq/_make_vendor_table.html" with make_vendor_display=make_vendor_display boq=boq %}
+        </div>
+
         <div x-show="tab === 'match_results'" x-cloak role="tabpanel">
-            {% if analysis_stats and analysis_display.has_analysis %}
-                <p class="panel__text panel__text--muted">
-                    Matched {{ analysis_stats.products_matched|default:0 }} / {{ analysis_stats.products_total }} products
-                    ({{ analysis_stats.products_pending }} pending).
-                </p>
-            {% endif %}
             <div x-show="matching" x-cloak class="analysis-loading-panel">
                 <div class="analysis-loading-panel__header">
                     <span class="analysis-loading-panel__dot analysis-loading-panel__dot--red"></span>

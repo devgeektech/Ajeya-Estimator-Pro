@@ -15,16 +15,18 @@ from apps.boq.services.boq_analysis_store import (
     save_boq_analysis_json,
     save_boq_match_results_json,
 )
-from apps.boq.services.boq_extraction_service import BOQExtractionService
+from apps.boq.services.boq_extraction_service import BOQExtractionService, _normalize_product_fields
 from apps.boq.services.boq_extract_service import load_extract_data
 from apps.boq.services.boq_row_grouping_service import full_description_for_row, resolve_anchor_row_id
 from apps.boq.services.make_list_constraint_service import MakeListConstraintService, walk_rows_tree
-from apps.boq.services.product_attribute_enrichment_service import ProductAttributeEnrichmentService
+from apps.boq.services.product_ai_mapping_service import ProductAIMappingService
+from apps.boq.services.product_attribute_enrichment_service import product_needs_attribute_enrichment
 from apps.boq.services.product_matching_service import ProductMatchingService
 from apps.boq.services.serial_normalizer import structure_for_analysis
 from apps.database_manager.services.activation import get_active_database_version
 from common.choices import BOQStatus
 from common.exceptions import AIServiceError, BOQAIError, ValidationError
+from utils.json_safe import json_safe
 
 logger = logging.getLogger("boq_ai")
 
@@ -183,6 +185,65 @@ class BOQAnalysisService:
             if isinstance(exc, (AIServiceError, BOQAIError)):
                 raise
             raise BOQAIError(f"BOQ extraction failed: {exc}") from exc
+
+    def rematch_row(self, row_id: str) -> dict[str, Any]:
+        """
+        Re-run DB candidate recall + AI mapping for one row using current products.
+
+        Preserves expert-filled fields/attributes and rematches against Rate_Master
+        (fill missing attrs → Re-analyse → better DB product). Does not re-extract
+        from the BOQ workbook text.
+        """
+        boq = self._get_boq()
+        existing = dict(boq.analysis_data or {})
+        rows = list(existing.get("rows") or [])
+        if not rows:
+            raise ValidationError("Run Analyse first to extract products from this BOQ.")
+        if boq.status in {BOQStatus.PROCESSING, BOQStatus.MATCHING}:
+            raise ValidationError("Wait for the current job to finish.")
+
+        target = next(
+            (row for row in rows if str(row.get("row_id")) == str(row_id)),
+            None,
+        )
+        if target is None:
+            raise ValidationError(f"Unknown BOQ row: {row_id}")
+        if not (target.get("products") or []):
+            # No products yet — fall back to full re-extract from workbook text.
+            return self.re_extract_row(row_id)
+
+        previous_status = boq.status
+        try:
+            target = dict(target)
+            target["products"] = [
+                _normalize_product_fields(product)
+                for product in (target.get("products") or [])
+            ]
+            rematched = self._enrich_extracted_attributes([target])
+            updated_rows = _replace_rows(rows, rematched)
+            analysis_payload = {
+                **existing,
+                "schema_version": 2,
+                "phase": PHASE_EXTRACTED,
+                "boq_id": boq.pk,
+                "boq_name": boq.boq_name,
+                "stats": _compute_extraction_stats(updated_rows),
+                "extraction": {
+                    **(existing.get("extraction") or {}),
+                    "last_row_rematch": str(row_id),
+                },
+                "rows": updated_rows,
+            }
+            # Do not flip the BOQ to PROCESSING (blocks autosave on other cards).
+            self._persist_analysis(boq, analysis_payload, BOQStatus.EXTRACTED)
+            logger.info("BOQ row rematch completed for id=%s row=%s", boq.pk, row_id)
+            return analysis_payload
+        except Exception as exc:
+            logger.exception("BOQ row rematch failed for id=%s row=%s", boq.pk, row_id)
+            self._set_status(boq, previous_status if previous_status else BOQStatus.ANALYSIS_FAILED)
+            if isinstance(exc, (AIServiceError, BOQAIError, ValidationError)):
+                raise
+            raise BOQAIError(f"BOQ row rematch failed: {exc}") from exc
 
     def re_extract_row(self, row_id: str) -> dict[str, Any]:
         """Re-run AI extraction for one anchor group and merge into analysis_data."""
@@ -395,16 +456,27 @@ class BOQAnalysisService:
         )
         if not make_list_service.has_constraints and not selected_make:
             prefer_lowest_price = True
-            
-        approved_makes = make_list_service.approved_makes_for_description(description)
+
+        description_makes = make_list_service.approved_makes_for_description(description)
         stored_options = list(row_make_list.get("approved_makes") or [])
-        if prefer_lowest_price:
-            approved_makes = stored_options or approved_makes or make_list_service.all_approved_makes()
-        elif selected_make:
-            approved_makes = [selected_make]
 
         product_matches: list[dict[str, Any]] = []
         for product in row.get("products") or []:
+            # Prefer category-mapped approved makes for this product.
+            category_makes = make_list_service.approved_makes_for_category(
+                str(product.get("category") or ""),
+                str(product.get("sub_category") or ""),
+            )
+            approved_makes = category_makes or description_makes
+            if prefer_lowest_price:
+                approved_makes = (
+                    stored_options
+                    or approved_makes
+                    or make_list_service.all_approved_makes()
+                )
+            elif selected_make:
+                approved_makes = [selected_make]
+
             product_for_match = dict(product)
             if (
                 selected_make
@@ -428,17 +500,56 @@ class BOQAnalysisService:
 
     @staticmethod
     def _enrich_extracted_attributes(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Attach DB attribute schemas and fill confidence after AI extraction."""
+        """AI-map extracted products to Rate_Master + attribute schemas after extract."""
         active_version = get_active_database_version()
         if active_version is None:
             logger.warning("Attribute enrichment skipped: no active master database")
             return rows
         try:
-            enricher = ProductAttributeEnrichmentService(active_version.pk)
-            return enricher.enrich_rows(rows)
+            mapper = ProductAIMappingService(active_version.pk)
+            return mapper.map_rows(rows)
         except Exception:
-            logger.exception("Attribute enrichment failed; keeping AI-extracted attributes")
+            logger.exception("AI product mapping failed; keeping AI-extracted attributes")
             return rows
+
+    def ensure_attribute_enrichment(self) -> bool:
+        """
+        Backfill DB product/attribute mapping for extracted products missing schema.
+
+        Uses AI mapping when available (SQL/Chroma candidate recall + attribute map).
+        """
+        boq = self._get_boq()
+        analysis = dict(boq.analysis_data or {})
+        rows = list(analysis.get("rows") or [])
+        if not rows:
+            return False
+        if not any(
+            product_needs_attribute_enrichment(product)
+            for row in rows
+            for product in (row.get("products") or [])
+        ):
+            return False
+
+        active_version = get_active_database_version()
+        if active_version is None:
+            logger.warning("Attribute enrichment backfill skipped: no active master database")
+            return False
+
+        try:
+            mapper = ProductAIMappingService(active_version.pk)
+            updated_rows = mapper.map_rows(rows, only_missing=True)
+        except Exception:
+            logger.exception("AI product mapping backfill failed for BOQ id=%s", boq.pk)
+            return False
+
+        analysis["rows"] = updated_rows
+        safe_analysis = json_safe(analysis)
+        save_boq_analysis_json(boq.boq_name, safe_analysis)
+        safe_analysis["analysis_json_path"] = analysis_json_relative_path(boq.boq_name)
+        boq.analysis_data = safe_analysis
+        boq.save(update_fields=["analysis_data"])
+        logger.info("Backfilled AI product mappings for BOQ id=%s (%s)", boq.pk, boq.boq_name)
+        return True
 
     def _get_boq(self) -> BOQ:
         try:
@@ -451,13 +562,17 @@ class BOQAnalysisService:
             raise BOQAIError(f"BOQ id={self.boq_id} not found.") from None
 
     def _persist_analysis(self, boq: BOQ, analysis_payload: dict[str, Any], status: str) -> None:
-        save_boq_analysis_json(boq.boq_name, analysis_payload)
-        analysis_payload["analysis_json_path"] = analysis_json_relative_path(boq.boq_name)
-        if analysis_payload.get("phase") == PHASE_MATCHED:
-            match_payload = build_match_results_payload(analysis_payload)
+        # Strip Decimal/datetime so psycopg3 JSON dumps never fail.
+        safe_payload = json_safe(analysis_payload)
+        save_boq_analysis_json(boq.boq_name, safe_payload)
+        safe_payload["analysis_json_path"] = analysis_json_relative_path(boq.boq_name)
+        if safe_payload.get("phase") == PHASE_MATCHED:
+            match_payload = json_safe(build_match_results_payload(safe_payload))
             save_boq_match_results_json(boq.boq_name, match_payload)
-            analysis_payload["match_results_json_path"] = match_results_json_relative_path(boq.boq_name)
-        boq.analysis_data = analysis_payload
+            safe_payload["match_results_json_path"] = match_results_json_relative_path(
+                boq.boq_name
+            )
+        boq.analysis_data = safe_payload
         boq.status = status
         boq.save(update_fields=["analysis_data", "status"])
 

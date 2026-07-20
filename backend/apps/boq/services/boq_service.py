@@ -7,16 +7,17 @@ from __future__ import annotations
 
 import logging
 
+from django.core.exceptions import ValidationError
 from django.db import transaction
 
 from apps.audit.services import record
 from apps.boq.models import BOQ
 from common.choices import BOQStatus
 
-from .boq_parser import parse_boq_workbook
+from .boq_parser import BOQParseError, parse_boq_workbook
 from .boq_extract_service import persist_extract_json
 from .boq_files import upload_basename
-from .make_list_parser import parse_make_list_file
+from .make_list_parser import MakeListParseError, parse_make_list_file
 
 logger = logging.getLogger("boq_ai")
 
@@ -38,9 +39,24 @@ class BOQCreationService:
             make_list_file=self.make_list_file,
         )
 
-        boq.boq_data = self._safe_parse_boq(boq)
-        if self.make_list_file:
-            boq.make_list_data = self._safe_parse_make_list(boq)
+        try:
+            boq.boq_data = parse_boq_workbook(
+                boq.uploaded_file,
+                source_filename=upload_basename(boq.uploaded_file),
+            )
+            if self.make_list_file:
+                boq.make_list_data = parse_make_list_file(
+                    boq.make_list_file,
+                    source_filename=upload_basename(boq.make_list_file),
+                )
+        except (BOQParseError, MakeListParseError, ValueError) as exc:
+            logger.exception("BOQ upload parse failed for id=%s", boq.pk)
+            # Roll back the BOQ row so failed uploads do not leave empty JSON.
+            raise ValidationError(str(exc)) from exc
+
+        if not (boq.boq_data or {}).get("rows"):
+            raise ValidationError("BOQ parse produced no data rows.")
+
         boq.save(update_fields=["boq_data", "make_list_data"])
         persist_extract_json(
             boq,
@@ -57,23 +73,3 @@ class BOQCreationService:
         )
         record(self.user, "Uploaded BOQ", "BOQ", boq.boq_name)
         return boq
-
-    def _safe_parse_boq(self, boq: BOQ) -> dict:
-        try:
-            return parse_boq_workbook(
-                boq.uploaded_file,
-                source_filename=upload_basename(boq.uploaded_file),
-            )
-        except Exception as exc:
-            logger.exception("BOQ parse failed for id=%s", boq.pk)
-            return {"version": 1, "error": str(exc), "headers": [], "rows": []}
-
-    def _safe_parse_make_list(self, boq: BOQ) -> dict:
-        try:
-            return parse_make_list_file(
-                boq.make_list_file,
-                source_filename=upload_basename(boq.make_list_file),
-            )
-        except Exception as exc:
-            logger.exception("Make list parse failed for BOQ id=%s", boq.pk)
-            return {"version": 1, "error": str(exc), "headers": [], "rows": []}

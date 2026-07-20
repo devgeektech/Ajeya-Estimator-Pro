@@ -120,7 +120,18 @@ body {
 .topbar__menu { display: none; background: none; border: none; font-size: 1.4rem; cursor: pointer; color: var(--text); }
 .topbar__title { font-size: 1.25rem; margin: 0; min-width: 0; }
 
-.content { padding: 28px; flex: 1; }
+.content { padding: 28px; flex: 1; width: 100%; box-sizing: border-box; min-width: 0; }
+
+/* BOQ detail pages use the full main area next to the sidebar. */
+.boq-view {
+    width: 100%;
+    max-width: none;
+}
+.boq-view > .panel {
+    width: 100%;
+    max-width: none;
+    box-sizing: border-box;
+}
 
 /* ---------- Auth ---------- */
 .auth { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: linear-gradient(135deg, #1e293b, #0f172a); }
@@ -376,18 +387,53 @@ body {
 .boq-detail-header {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    margin-bottom: 10px;
+    gap: 4px;
+    margin-bottom: 4px;
     width: 100%;
     position: sticky;
     top: 63px;
     z-index: 10;
     background: var(--surface-alt);
-    padding-top: 16px;
+    padding-top: 0;
 }
 
 .boq-detail-header .boq-tabs {
     margin-bottom: 0;
+}
+
+.boq-tab-context {
+    display: flex;
+    align-items: center;
+    gap: 8px 12px;
+    width: 100%;
+    min-height: 0;
+    padding: 2px 0 4px;
+}
+
+.boq-tab-context__status {
+    flex-shrink: 0;
+}
+
+.boq-tab-context__summary {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: .8rem;
+    line-height: 1.35;
+    color: var(--text-muted);
+}
+
+.boq-tab-context__summary strong {
+    color: var(--text);
+    font-weight: 600;
+}
+
+.boq-tab-context__actions {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
 }
 
 .btn--analysis-loading,
@@ -652,6 +698,44 @@ body {
 .table__actions > * { margin-left: 6px; }
 .table__empty { text-align: center; color: var(--text-muted); padding: 32px; }
 .inline-form { display: inline; }
+
+/* Make List: fill the panel; columns stretch across (Makes uses the right side). */
+.boq-sheet-wrap--make-list {
+    overflow-x: auto;
+    width: 100% !important;
+    max-width: 100% !important;
+}
+.table.boq-sheet.boq-sheet--make-list {
+    width: 100% !important;
+    min-width: 100% !important;
+    max-width: 100% !important;
+    table-layout: fixed !important;
+    margin: 0 !important;
+}
+.table.boq-sheet.boq-sheet--make-list th,
+.table.boq-sheet.boq-sheet--make-list td {
+    text-align: left !important;
+    vertical-align: top;
+    white-space: normal !important;
+    overflow-wrap: break-word;
+}
+.table.boq-sheet.boq-sheet--make-list th.boq-sheet__col-makes,
+.table.boq-sheet.boq-sheet--make-list td.boq-sheet__col-makes {
+    text-align: right !important;
+    padding-right: 4.5rem !important;
+}
+.table.boq-sheet.boq-sheet--make-list col:nth-child(1),
+.table.boq-sheet.boq-sheet--make-list .boq-sheet__col-sno {
+    width: 5% !important;
+}
+.table.boq-sheet.boq-sheet--make-list col:nth-child(2),
+.table.boq-sheet.boq-sheet--make-list .boq-sheet__col-desc {
+    width: 30% !important;
+}
+.table.boq-sheet.boq-sheet--make-list col:nth-child(3),
+.table.boq-sheet.boq-sheet--make-list .boq-sheet__col-makes {
+    width: 65% !important;
+}
 
 /* ---------- Status toggle ---------- */
 .status-toggle {

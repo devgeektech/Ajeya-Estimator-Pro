@@ -1,7 +1,6 @@
 """Session-only line confirmations (no database persistence)."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
 
 from django.contrib.sessions.backends.base import SessionBase
@@ -11,6 +10,7 @@ from apps.boq.services.boq_line_output_service import BOQLineOutputService
 from apps.boq.services.labour_detail_retrieval_service import LabourDetailRetrievalService
 from apps.boq.services.rate_detail_retrieval_service import RateDetailRetrievalService
 from common.exceptions import BOQAIError, ValidationError
+from utils.timestamps import now_local_iso
 
 
 def confirmation_session_key(boq_id: int) -> str:
@@ -123,7 +123,7 @@ class BOQConfirmationService:
         confirmations[line_key] = {
             "confirmed": True,
             "rate_master_id": rate_master_id,
-            "confirmed_at": datetime.now(timezone.utc).isoformat(),
+            "confirmed_at": now_local_iso(),
         }
         self.session[self._key] = confirmations
         self.session.modified = True

@@ -9,6 +9,7 @@ from typing import Any
 from ai.context import build_database_context
 from ai.service import AIService
 from common.exceptions import AIServiceError
+from utils.attribute_parser import coerce_attributes_dict
 
 from apps.boq.services.boq_row_grouping_service import (
     anchor_qty_unit,
@@ -86,6 +87,11 @@ def should_skip_anchor_group(group: dict[str, Any], *, lineage_has_qty: bool) ->
     if has_quantity(anchor_fields) or lineage_has_qty:
         return False
 
+    # Structural item rows (1.1, 1.2) still need extraction even without qty on the anchor.
+    serial = str(group.get("serial") or "").strip()
+    if re.match(r"^(\d+(?:\.\d+)+)$", serial):
+        return False
+
     if int(group.get("depth") or 0) == 0:
         return True
 
@@ -98,36 +104,211 @@ def _filter_spec_products(products: list[dict[str, Any]]) -> list[dict[str, Any]
     for index, product in enumerate(filtered):
         product = dict(product)
         product["product_index"] = index
-        attrs = product.get("attributes")
-        if isinstance(attrs, dict):
-            product["attributes"] = {
-                str(key): value
-                for key, value in attrs.items()
-                if value is not None and str(value).strip() != ""
-            }
+        attrs = coerce_attributes_dict(product.get("attributes"))
+        product["attributes"] = attrs
         for key in ("category", "sub_category", "class", "size", "unit", "capacity", "make_hint"):
             if key in product and product.get(key) is not None and str(product.get(key)).strip() == "":
                 product[key] = None
-        cleaned.append(product)
+        cleaned.append(_normalize_product_fields(product))
     return cleaned
+
+
+def _is_blank_value(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    return False
+
+
+# BOQ quantity UOMs — must never populate product ``unit`` (Rate_Master measurement).
+_QTY_UOM_TOKENS = frozenset(
+    {
+        "each",
+        "ea",
+        "nos",
+        "no",
+        "no.",
+        "nr",
+        "set",
+        "sets",
+        "lot",
+        "ls",
+        "lumpsum",
+        "lump sum",
+        "rm",
+        "r.m",
+        "r.mt",
+        "mtr",
+        "mtrs",
+        "meter",
+        "meters",
+        "metre",
+        "metres",
+        "sqm",
+        "sq.m",
+        "cum",
+        "cu.m",
+    }
+)
+
+# Trailing measurement unit on size text (e.g. "63mm", "2 inch") → Rate_Master Unit.
+_SIZE_MEASUREMENT_UNIT = re.compile(
+    r"(?i)^\s*.*?\s*(mm|cm|nb|inch|in)\s*$"
+)
+
+
+def _is_qty_uom(value: Any) -> bool:
+    if _is_blank_value(value):
+        return False
+    return str(value).strip().lower() in _QTY_UOM_TOKENS
+
+
+def _measurement_unit_from_size(size: Any) -> str | None:
+    if _is_blank_value(size):
+        return None
+    match = _SIZE_MEASUREMENT_UNIT.match(str(size).strip())
+    if not match:
+        return None
+    token = match.group(1).lower()
+    if token == "in":
+        return "inch"
+    if token == "nb":
+        return "NB"
+    return token
+
+
+def _normalize_product_unit_fields(product: dict[str, Any]) -> dict[str, Any]:
+    """
+    Keep ``unit`` as Rate_Master measurement (mm/cm/NB/…) and BOQ UOM on
+    ``quantity_unit`` only.
+    """
+    item = dict(product)
+    raw_unit = item.get("unit")
+    if _is_qty_uom(raw_unit):
+        if _is_blank_value(item.get("quantity_unit")):
+            item["quantity_unit"] = str(raw_unit).strip()
+        item["unit"] = None
+
+    if _is_blank_value(item.get("unit")):
+        derived = _measurement_unit_from_size(item.get("size"))
+        if derived:
+            item["unit"] = derived
+    return item
+
+
+# Material / construction phrases → Rate_Master Class tokens.
+_MATERIAL_CLASS_ALIASES: dict[str, str] = {
+    "ms": "MS",
+    "m.s": "MS",
+    "m.s.": "MS",
+    "mild steel": "MS",
+    "ms sheet": "MS Sheet",
+    "ss": "SS",
+    "s.s": "SS",
+    "s.s.": "SS",
+    "stainless steel": "SS",
+    "ci": "CI",
+    "c.i": "CI",
+    "c.i.": "CI",
+    "cast iron": "CI",
+    "di": "DI",
+    "d.i": "DI",
+    "d.i.": "DI",
+    "ductile iron": "DI",
+    "gi": "GI",
+    "g.i": "GI",
+    "g.i.": "GI",
+    "galvanised iron": "GI",
+    "galvanized iron": "GI",
+    "brass": "Brass",
+    "grp": "GRP",
+    "rubber": "Rubber",
+    "forged steel": "Forged Steel",
+}
+
+_MATERIAL_ATTR_KEYS = frozenset(
+    {"material", "body_material", "construction", "material_of_construction", "moc"}
+)
+
+
+def _normalize_class_material(value: Any) -> str | None:
+    if _is_blank_value(value):
+        return None
+    text = str(value).strip()
+    alias = _MATERIAL_CLASS_ALIASES.get(text.lower())
+    return alias or text
+
+
+def _promote_material_to_class(product: dict[str, Any]) -> dict[str, Any]:
+    """Move attributes.material (and synonyms) onto product class for Rate_Master."""
+    item = dict(product)
+    attrs = coerce_attributes_dict(item.get("attributes"))
+    material_value = None
+    remaining: dict[str, Any] = {}
+    for key, value in attrs.items():
+        if str(key).strip().lower() in _MATERIAL_ATTR_KEYS and not _is_blank_value(value):
+            if material_value is None:
+                material_value = value
+            continue
+        remaining[key] = value
+
+    if _is_blank_value(item.get("class")) and material_value is not None:
+        item["class"] = _normalize_class_material(material_value)
+    elif not _is_blank_value(item.get("class")):
+        item["class"] = _normalize_class_material(item.get("class"))
+
+    item["attributes"] = remaining
+    return item
+
+
+def _normalize_product_fields(product: dict[str, Any]) -> dict[str, Any]:
+    """Normalize unit/qty UOM and promote material into class."""
+    return _normalize_product_unit_fields(_promote_material_to_class(product))
+
+
+def _apply_row_qty_unit(
+    products: list[dict[str, Any]],
+    *,
+    qty: Any,
+    unit: Any,
+) -> list[dict[str, Any]]:
+    """Fill quantity / quantity_unit from the BOQ row; never overwrite product unit."""
+    if not products:
+        return products
+    row_unit = None if _is_blank_value(unit) else str(unit).strip()
+    row_qty = qty
+    if isinstance(row_qty, str) and not row_qty.strip():
+        row_qty = None
+
+    filled: list[dict[str, Any]] = []
+    for product in products:
+        item = _normalize_product_fields(product)
+        if row_unit and _is_blank_value(item.get("quantity_unit")):
+            item["quantity_unit"] = row_unit
+        if row_qty is not None and _is_blank_value(item.get("quantity")):
+            item["quantity"] = row_qty
+        filled.append(item)
+    return filled
 
 
 def _consolidate_to_anchors(
     anchor_groups: list[dict[str, Any]],
     extracted_by_id: dict[str, dict[str, Any]],
 ) -> None:
-    """Move products returned on lineage child row_ids onto the anchor row."""
+    """Move products returned on group child row_ids onto the anchor row."""
     anchor_ids = {str(g.get("row_id")) for g in anchor_groups if g.get("row_id")}
-    
+
     for group in anchor_groups:
         anchor_id = str(group.get("row_id") or "")
         if not anchor_id:
             continue
-        lineage_ids = [str(row_id) for row_id in (group.get("lineage_ids") or [anchor_id])]
+        # Own products only — do not pull from shared ancestors/siblings.
+        group_ids = [str(row_id) for row_id in (group.get("group_ids") or [anchor_id])]
 
         merged_products: list[dict[str, Any]] = []
         merged_activities: list[str] = []
-        for row_id in lineage_ids:
+        for row_id in group_ids:
             row = extracted_by_id.get(row_id) or {}
             merged_products.extend(row.get("products") or [])
             for activity in row.get("activities") or []:
@@ -148,7 +329,7 @@ def _consolidate_to_anchors(
         anchor_row.pop("skip_reason", None)
         extracted_by_id[anchor_id] = anchor_row
 
-        for row_id in lineage_ids:
+        for row_id in group_ids:
             if row_id == anchor_id:
                 continue
             if row_id in anchor_ids:
@@ -171,7 +352,10 @@ def _resolve_batch_row(
     if row is not None:
         return row
 
-    for row_id in group.get("lineage_ids") or []:
+    # Prefer group children only — never shared ancestors (prevents sibling theft).
+    for row_id in group.get("group_ids") or []:
+        if str(row_id) == str(anchor_id):
+            continue
         candidate = by_id.get(row_id)
         if candidate is not None:
             return candidate
@@ -328,10 +512,11 @@ class BOQExtractionService:
             raise AIServiceError(f"Unknown BOQ anchor row: {anchor_id}")
 
         lineage_ids = [str(item) for item in (group.get("lineage_ids") or [anchor_id])]
+        group_ids = [str(item) for item in (group.get("group_ids") or [anchor_id])]
         if should_skip_anchor_group(group, lineage_has_qty=bool(group.get("lineage_has_qty"))):
             rows = [
                 {
-                    "row_id": lineage_ids[0],
+                    "row_id": anchor_id,
                     "skip_matching": True,
                     "products": [],
                     "activities": [],
@@ -345,7 +530,7 @@ class BOQExtractionService:
                         "activities": [],
                         "skip_reason": "lineage_child_row",
                     }
-                    for child_id in lineage_ids[1:]
+                    for child_id in group_ids[1:]
                 ],
             ]
             return {
@@ -363,8 +548,8 @@ class BOQExtractionService:
         _consolidate_to_anchors([group], extracted_by_id)
 
         rows = []
-        for lineage_id in lineage_ids:
-            if lineage_id == anchor_id:
+        for group_id in group_ids:
+            if group_id == anchor_id:
                 rows.append(
                     extracted_by_id.get(
                         anchor_id,
@@ -380,7 +565,7 @@ class BOQExtractionService:
             else:
                 rows.append(
                     {
-                        "row_id": lineage_id,
+                        "row_id": group_id,
                         "skip_matching": True,
                         "products": [],
                         "activities": [],
@@ -412,7 +597,12 @@ class BOQExtractionService:
             row_id = group.get("row_id")
             row = _resolve_batch_row(group, by_id)
             row.setdefault("row_id", row_id)
-            row["products"] = _filter_spec_products(list(row.get("products") or []))
+            products = _filter_spec_products(list(row.get("products") or []))
+            row["products"] = _apply_row_qty_unit(
+                products,
+                qty=group.get("anchor_qty"),
+                unit=group.get("anchor_unit"),
+            )
             row.setdefault("activities", [])
             row.setdefault("skip_matching", not row.get("products"))
             normalized.append(row)

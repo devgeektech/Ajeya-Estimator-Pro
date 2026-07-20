@@ -105,15 +105,66 @@ def _looks_like_material_text(value: Any) -> bool:
     return len(text) >= 18 or len(words) >= 4
 
 
+# Columns that must never be treated as make sources.
+_MAKE_EXCLUDE_HINTS = (
+    "rate",
+    "amount",
+    "qty",
+    "quantity",
+    "unit",
+    "uom",
+    "discount",
+    "price",
+    "cost",
+    "dia",
+    "mm",
+    "column_",
+    "remark",
+    "ref_to",
+    "page",
+    "sub_head",
+    "packing",
+    "freight",
+    "contractor",
+    "overhead",
+    "excise",
+    "wastage",
+    "installation",
+    "signage",
+    "increase",
+)
+
+
+def is_excluded_make_key(key: str, label: str = "") -> bool:
+    """True when a column must not be treated as an approved-makes source."""
+    blob = _header_blob(key, label)
+    key_text = _norm_key(key)
+    if key_text.startswith("column_") or key_text.isdigit():
+        return True
+    if key_text.startswith("approved_makes"):
+        return False
+    if "make" in blob or "manufacturer" in blob or "brand" in blob:
+        return False
+    return any(hint in blob for hint in _MAKE_EXCLUDE_HINTS)
+
+
+# Backward-compatible private alias.
+_is_excluded_make_key = is_excluded_make_key
+
+
 def score_make_header(key: str, label: str = "") -> int:
     """Score how likely a header is the approved-makes column."""
     blob = _header_blob(key, label)
     key_text = _norm_key(key)
     if not blob or _is_serial_key(key_text):
         return -100
+    if _is_excluded_make_key(key, label):
+        return -100
     score = 0
     if key_text == "make" or blob == "make":
         score += 40
+    if key_text.startswith("approved_makes"):
+        score += 50
     if any(token in blob for token in _MAKE_HEADER_STRONG):
         score += 35
     if "make" in blob:
@@ -206,6 +257,13 @@ def resolve_make_list_columns(
         key_text = _norm_key(key)
         if not key_text or _is_serial_key(key_text):
             continue
+        if _is_excluded_make_key(key, label) and not key_text.startswith("approved_makes"):
+            # Still allow material scoring for description columns.
+            material_score = score_material_header(key, label) + (
+                40.0 * _content_material_score(_column_values(rows, key))
+            )
+            material_ranked.append((material_score, key))
+            continue
         values = _column_values(rows, key)
         make_score = score_make_header(key, label) + (40.0 * _content_make_score(values))
         material_score = score_material_header(key, label) + (
@@ -219,10 +277,18 @@ def resolve_make_list_columns(
 
     make_keys: list[str] = []
     for score, key in make_ranked:
-        if score < 12:
+        if score < 25:
             break
-        # Keep strong make columns; allow multiple approved_makes_* style columns.
-        if score >= 20 or key == (make_ranked[0][1] if make_ranked else ""):
+        # Prefer explicit make/approved columns; allow multiple approved_makes_*.
+        key_text = _norm_key(key)
+        strong = (
+            key_text.startswith("approved_makes")
+            or "make" in key_text
+            or "manufacturer" in key_text
+            or "brand" in key_text
+            or score >= 40
+        )
+        if strong or (not make_keys and score >= 25):
             make_keys.append(key)
 
     material_keys: list[str] = []

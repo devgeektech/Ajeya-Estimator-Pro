@@ -3,307 +3,7 @@
 {% else %}
 <div class="extraction-lines" id="extraction-lines">
     {% for line in extraction_display.lines %}
-    <article class="extraction-line extraction-line--{{ line.status }}" id="line-{{ line.row_id }}">
-        <header class="extraction-line__header">
-            <div class="extraction-line__title">
-                <span class="extraction-line__serial">{{ line.serial|default:"—" }}</span>
-                {% if line.lineage_count > 1 %}
-                    <span class="badge badge--dark">{{ line.lineage_count }} lines grouped</span>
-                {% endif %}
-            </div>
-            <div class="extraction-line__meta">
-                {% if line.qty %}<span>Qty: {{ line.qty }}{% if line.unit %} {{ line.unit }}{% endif %}</span>{% endif %}
-                {% if line.product_count > 1 %}
-                    <span class="badge badge--dark">{{ line.product_count }} products</span>
-                {% endif %}
-                {% if line.status == 'skipped' %}
-                    <span class="badge badge--gray">section</span>
-                {% endif %}
-                {% if line.status != 'skipped' and can_edit_extraction %}
-                <div class="extraction-line__row-actions">
-                    <button
-                        type="button"
-                        class="btn btn--small btn--boq-analyse"
-                        @click="
-                            const btn = $el;
-                            btn.disabled = true;
-                            btn.textContent = 'Re-analysing…';
-                            window.extractionAjaxPost('{% url "boq:row_extract" boq.pk line.row_id %}', {})
-                                .then(() => window.location.assign('{% url "boq:detail" boq.pk %}?tab=analysis#line-{{ line.row_id }}'))
-                                .catch((error) => { btn.disabled = false; btn.textContent = 'Re-analyse'; alert(error.message); })
-                        "
-                    >Re-analyse</button>
-                </div>
-                {% endif %}
-            </div>
-        </header>
-
-        <div class="extraction-line__description">
-            <p class="extraction-line__description-text{% if line.lineage_count > 1 %} extraction-line__description-text--preview{% endif %}">{{ line.description }}</p>
-            {% if line.lineage_count > 1 %}
-            <p class="extraction-line__ellipsis" aria-hidden="true">…</p>
-            <details class="extraction-lineage">
-                <summary>View {{ line.lineage_count }} grouped lines</summary>
-                <ul class="extraction-lineage__list">
-                    {% for part in line.lineage_parts %}
-                    <li>
-                        <span class="extraction-lineage__serial">{{ part.serial|default:"—" }}</span>
-                        {{ part.description }}
-                    </li>
-                    {% endfor %}
-                </ul>
-            </details>
-            {% endif %}
-        </div>
-
-        {% if line.activities %}
-        <section class="extraction-activities">
-            <span class="extraction-section-label">Activities</span>
-            <ul class="extraction-list">
-                {% for activity in line.activities %}
-                <li>{{ activity }}</li>
-                {% endfor %}
-            </ul>
-        </section>
-        {% endif %}
-
-        {% if can_edit_extraction and line.status != 'skipped' and not line.products %}
-        <div class="extraction-line__actions">
-            <button
-                type="button"
-                class="btn btn--small btn--primary"
-                @click="window.extractionAjaxPost('{% url 'boq:extraction_edit' boq.pk %}', { action: 'add_product', row_id: '{{ line.row_id }}' }).then(() => window.location.reload())"
-            >+ Add product</button>
-        </div>
-        {% endif %}
-
-        {% for product in line.products %}
-        <section
-            class="extraction-product-card"
-            id="product-{{ line.row_id }}-{{ product.product_index }}"
-            {% if can_edit_extraction %}
-            x-data="extractionProductForm({
-                url: '{% url 'boq:extraction_edit' boq.pk %}',
-                rowId: '{{ line.row_id }}',
-                productRowId: '{{ product.source_row_id }}',
-                productIndex: {{ product.product_index }},
-                missingCount: {{ product.missing_count }},
-                attributeConfidence: {{ product.attribute_confidence|default:0 }},
-                attributeSchema: {{ product.attribute_schema_json }},
-                extraAttrs: {{ product.extra_attrs_json }}
-            })"
-            {% endif %}
-        >
-            <div class="extraction-product-card__head">
-                <div class="extraction-product-card__badges">
-                    <h4 class="extraction-product-card__title">
-                        {{ product.display_label }}
-                        {% if product.is_user_added %}<span class="badge badge--gray">manual</span>{% endif %}
-                    </h4>
-                    {% if can_edit_extraction %}
-                    <span
-                        class="badge extraction-confidence-badge"
-                        title="Attribute fill confidence"
-                        :class="'badge--' + attributeConfidenceBand"
-                        x-text="Math.round(attributeConfidence) + '%'"
-                    >{{ product.attribute_confidence|floatformat:0 }}%</span>
-                    {% else %}
-                    <span
-                        class="badge extraction-confidence-badge badge--{{ product.attribute_confidence_band }}"
-                        title="Attribute fill confidence"
-                    >{{ product.attribute_confidence|floatformat:0 }}%</span>
-                    {% endif %}
-                </div>
-                {% if can_edit_extraction %}
-                <button
-                    type="button"
-                    class="btn btn--xsmall btn--danger extraction-product-card__remove"
-                    @click="if (confirm('Remove this product from the row?')) { window.extractionAjaxPost('{% url 'boq:extraction_edit' boq.pk %}', { action: 'remove_product', row_id: '{{ product.source_row_id }}', product_index: '{{ product.product_index }}' }).then(() => $el.closest('.extraction-product-card').remove()) }"
-                >Remove</button>
-                {% endif %}
-            </div>
-
-            {% if can_edit_extraction %}
-            <form class="extraction-product-form" @submit.prevent="saveProduct($event)">
-                <input type="hidden" name="action" value="update_product">
-                <input type="hidden" name="row_id" value="{{ line.row_id }}">
-                <input type="hidden" name="product_row_id" value="{{ product.source_row_id }}">
-                <input type="hidden" name="product_index" value="{{ product.product_index }}">
-
-                <div class="extraction-field-grid">
-                    {% for field in product.fields %}
-                    <label class="extraction-field {% if field.key == 'description_hint' %}extraction-field--full{% endif %}{% if field.missing %} extraction-field--missing{% endif %}">
-                        <span class="extraction-field__label">{{ field.label }}{% if field.missing %} *{% endif %}</span>
-                        {% if field.key == 'description_hint' %}
-                        <textarea
-                            name="{{ field.key }}"
-                            class="extraction-input extraction-input--textarea extraction-input--wrap"
-                            rows="1"
-                            placeholder="Optional — fill when known"
-                            x-data
-                            x-init="$nextTick(() => { $el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px' })"
-                            @input="$el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'"
-                        >{{ field.value }}</textarea>
-                        {% else %}
-                        <input
-                            type="text"
-                            name="{{ field.key }}"
-                            value="{{ field.value }}"
-                            class="extraction-input"
-                            placeholder="Optional"
-                        >
-                        {% endif %}
-                    </label>
-                    {% if field.key == 'capacity' and line.make_list.has_make_list and forloop.parentloop.first %}
-                    <div
-                        class="extraction-field"
-                        x-data="extractionMakeForm({
-                            url: '{% url 'boq:extraction_edit' boq.pk %}',
-                            rowId: '{{ line.row_id }}',
-                            category: '{{ line.primary_category|escapejs }}',
-                            subCategory: '{{ line.primary_sub_category|escapejs }}',
-                            makeChoice: '{% if line.make_list.is_lowest_make %}__lowest__{% elif line.make_list.is_custom_make %}__custom__{% else %}{{ line.make_list.selected_make|default:''|escapejs }}{% endif %}',
-                            showCustom: {{ line.make_list.is_custom_make|yesno:'true,false' }},
-                            customMake: '{{ line.make_list.custom_make|default:''|escapejs }}'
-                        })"
-                    >
-                        <span class="extraction-field__label">Preferred make</span>
-                        <select
-                            class="extraction-input"
-                            x-model="makeChoice"
-                            @change="onMakeChange()"
-                        >
-                            <option value="">Select make…</option>
-                            {% for make in line.make_list.make_options %}
-                            <option value="{{ make }}">{{ make }}</option>
-                            {% endfor %}
-                            <option value="__custom__">Other (type below)</option>
-                            <option value="__lowest__">Lowest price</option>
-                        </select>
-                        <span class="extraction-save-hint extraction-save-hint--ok" x-show="saved" x-cloak>Saved</span>
-                        <span class="extraction-save-hint extraction-save-hint--error" x-show="saveError" x-text="saveError" x-cloak></span>
-                        <label class="extraction-field extraction-make-form__custom" x-show="showCustom" x-cloak>
-                            <span class="extraction-field__label">Custom make</span>
-                            <input
-                                type="text"
-                                class="extraction-input"
-                                x-model="customMake"
-                                placeholder="Enter make name"
-                                @blur="saveCustomMake()"
-                            >
-                        </label>
-                    </div>
-                    {% endif %}
-                    {% endfor %}
-                </div>
-
-                <div class="extraction-attributes-block">
-                    <div class="extraction-attributes-block__head">
-                        <span class="extraction-section-label">Attributes</span>
-                        <span class="extraction-attributes-block__hint">
-                            {% if product.attributes.source == 'database' %}
-                            From matched database product
-                            {% else %}
-                            From extraction
-                            {% endif %}
-                        </span>
-                    </div>
-                    <div class="extraction-field-grid">
-                        {% for attr in product.attributes.fields %}
-                        <label class="extraction-field{% if not attr.filled %} extraction-field--missing{% endif %}">
-                            <span class="extraction-field__label">{{ attr.label }}</span>
-                            <input
-                                type="text"
-                                name="attr_{{ attr.key }}"
-                                value="{{ attr.value }}"
-                                class="extraction-input"
-                                placeholder="Optional"
-                                @input="recalcAttributeConfidence()"
-                            >
-                        </label>
-                        {% empty %}
-                        <p class="extraction-line__empty">No database attributes for this product yet.</p>
-                        {% endfor %}
-                    </div>
-                    <div class="extraction-extra-attrs">
-                        <span class="extraction-field__label">Additional Attributes</span>
-                        <ul class="extraction-extra-attr-list" x-show="extraAttrs.length" x-cloak>
-                            <template x-for="(item, index) in extraAttrs" :key="index">
-                                <li class="extraction-extra-attr-item">
-                                    <span class="extraction-extra-attr-item__text" x-text="item.key + ': ' + item.value"></span>
-                                    <button type="button" class="extraction-extra-attr-item__remove" @click="removeExtra(index)" aria-label="Remove attribute">&times;</button>
-                                </li>
-                            </template>
-                        </ul>
-                        <div class="extraction-extra-attr-add">
-                            <input type="text" x-model="newKey" class="extraction-input" placeholder="Name">
-                            <input type="text" x-model="newValue" class="extraction-input" placeholder="Value" @keydown.enter.prevent="addExtra()">
-                            <button type="button" class="btn btn--small btn--primary" @click="addExtra()">+ Add attribute</button>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="extraction-product-form__actions">
-                    <button type="submit" class="btn btn--small btn--boq-analyse" :disabled="saving">
-                        <span x-show="!saving && !saved">Save product</span>
-                        <span x-show="saving" x-cloak>Saving…</span>
-                        <span x-show="saved && !saving" x-cloak>Saved</span>
-                    </button>
-                    {% if forloop.last %}
-                    <button
-                        type="button"
-                        class="btn btn--small btn--primary"
-                        @click="window.extractionAjaxPost('{% url 'boq:extraction_edit' boq.pk %}', { action: 'add_product', row_id: '{{ line.row_id }}' }).then(() => window.location.reload())"
-                    >+ Add product</button>
-                    {% endif %}
-                    <span class="extraction-save-hint extraction-save-hint--error" x-show="saveError" x-text="saveError" x-cloak></span>
-                </div>
-            </form>
-            {% else %}
-            <dl class="extraction-readonly-grid">
-                {% for field in product.fields %}
-                <div class="extraction-readonly-item {% if field.key == 'description_hint' %}extraction-readonly-item--full{% endif %}{% if field.missing %} extraction-field--missing{% endif %}">
-                    <dt>{{ field.label }}</dt>
-                    <dd class="extraction-readonly-item__wrap">{{ field.value|default:"—" }}</dd>
-                </div>
-                {% if field.key == 'capacity' and forloop.parentloop.first and line.make_list.selected_make %}
-                <div class="extraction-readonly-item">
-                    <dt>Preferred make</dt>
-                    <dd>{{ line.make_list.selected_make }}</dd>
-                </div>
-                {% endif %}
-                {% endfor %}
-            </dl>
-            <div class="extraction-attributes-readonly">
-                <div class="extraction-attributes-block__head">
-                    <span class="extraction-section-label">Attributes</span>
-                    <span class="extraction-attributes-block__hint">
-                        {% if product.attributes.source == 'database' %}
-                        From matched database product
-                        {% else %}
-                        From extraction
-                        {% endif %}
-                    </span>
-                </div>
-                <ul class="extraction-list">
-                    {% for attr in product.attributes.fields %}
-                        {% if attr.value %}
-                        <li>{{ attr.label }}: {{ attr.value }}</li>
-                        {% endif %}
-                    {% endfor %}
-                    {% for extra in product.attributes.extra %}
-                        <li>{{ extra.key }}: {{ extra.value }}</li>
-                    {% endfor %}
-                </ul>
-            </div>
-            {% endif %}
-        </section>
-        {% empty %}
-            {% if line.status != 'skipped' %}
-            <p class="extraction-line__empty">No products extracted for this row.</p>
-            {% endif %}
-        {% endfor %}
-    </article>
+    {% include "boq/_extraction_line.html" %}
     {% endfor %}
 </div>
 
@@ -332,61 +32,146 @@ document.addEventListener('alpine:init', () => {
         return data;
     };
 
-    Alpine.data('extractionMakeForm', (config) => ({
-        url: config.url,
-        rowId: config.rowId,
-        category: config.category,
-        subCategory: config.subCategory,
-        makeChoice: config.makeChoice,
-        showCustom: config.showCustom,
-        customMake: config.customMake,
-        saving: false,
-        saved: false,
-        saveError: '',
-        onMakeChange() {
-            this.showCustom = this.makeChoice === '__custom__';
-            this.saveError = '';
-            this.saved = false;
-            if (this.makeChoice && this.makeChoice !== '__custom__') {
-                this.persistMake();
-            }
-        },
-        saveCustomMake() {
-            if (!this.showCustom) {
+    window.replaceExtractionLine = function replaceExtractionLine(rowId, lineHtml) {
+        if (!rowId || !lineHtml) {
+            return false;
+        }
+        const current = document.getElementById('line-' + rowId);
+        if (!current) {
+            return false;
+        }
+        const scrollY = window.scrollY;
+        const holder = document.createElement('div');
+        holder.innerHTML = String(lineHtml).trim();
+        const next = holder.firstElementChild;
+        if (!next) {
+            return false;
+        }
+        if (window.Alpine && typeof Alpine.destroyTree === 'function') {
+            Alpine.destroyTree(current);
+        }
+        current.replaceWith(next);
+        if (window.Alpine && typeof Alpine.initTree === 'function') {
+            Alpine.initTree(next);
+        }
+        window.scrollTo(0, scrollY);
+        return true;
+    };
+
+    window.getActiveExtractionProductData = function getActiveExtractionProductData(fromEl) {
+        const root = fromEl && fromEl.closest('.extraction-products');
+        if (!root || !window.Alpine) {
+            return null;
+        }
+        const panels = root.querySelectorAll('.extraction-product-panel');
+        let activePanel = null;
+        panels.forEach((panel) => {
+            if (window.getComputedStyle(panel).display === 'none') {
                 return;
             }
-            this.persistMake();
-        },
-        async persistMake() {
-            if (this.saving) {
-                return;
-            }
-            if (this.makeChoice === '__custom__' && !this.customMake.trim()) {
-                return;
-            }
-            if (!this.makeChoice) {
-                return;
-            }
-            this.saving = true;
-            this.saveError = '';
+            activePanel = panel;
+        });
+        const card = activePanel && activePanel.querySelector('.extraction-product-card');
+        if (!card) {
+            return null;
+        }
+        try {
+            return Alpine.$data(card);
+        } catch (e) {
+            return null;
+        }
+    };
+
+    window.reanalyseActiveExtractionProduct = async function reanalyseActiveExtractionProduct(fromEl, rematchUrl) {
+        const data = window.getActiveExtractionProductData(fromEl);
+        if (!data || typeof data.reanalyseRow !== 'function') {
+            alert('Select a product tab first.');
+            return;
+        }
+        const btn = fromEl;
+        const original = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Re-analysing…';
+        try {
+            await data.reanalyseRow(rematchUrl);
+        } catch (e) {
+            btn.disabled = false;
+            btn.textContent = original;
+        }
+    };
+
+    window.removeActiveExtractionProduct = async function removeActiveExtractionProduct(fromEl, editUrl, boqPk) {
+        const data = window.getActiveExtractionProductData(fromEl);
+        if (!data) {
+            alert('Select a product tab first.');
+            return;
+        }
+        if (!confirm('Remove this product from the row?')) {
+            return;
+        }
+        try {
+            await window.extractionAjaxPost(editUrl, {
+                action: 'remove_product',
+                row_id: data.productRowId,
+                product_index: String(data.productIndex),
+            });
             try {
-                await window.extractionAjaxPost(this.url, {
-                    action: 'update_make',
-                    row_id: this.rowId,
-                    category: this.category,
-                    sub_category: this.subCategory,
-                    selected_make: this.makeChoice,
-                    custom_make: this.customMake,
-                });
-                this.saved = true;
-                setTimeout(() => { this.saved = false; }, 2000);
-            } catch (error) {
-                this.saveError = error.message;
-            } finally {
-                this.saving = false;
+                sessionStorage.setItem('boq-detail-scroll-' + boqPk + '-analysis', String(window.scrollY));
+            } catch (e) { /* ignore */ }
+            window.location.reload();
+        } catch (error) {
+            alert(error.message || 'Failed to remove product.');
+        }
+    };
+
+    window.refreshExtractionLine = function refreshExtractionLine(rowId, lineHtml) {
+        const replaced = window.replaceExtractionLine(rowId, lineHtml);
+        if (!replaced) {
+            window.location.reload();
+        }
+    };
+
+    window.addExtractionActivity = async function addExtractionActivity(fromEl, editUrl, rowId) {
+        const name = window.prompt('Activity name:');
+        if (!name || !String(name).trim()) {
+            return;
+        }
+        const btn = fromEl;
+        if (btn) {
+            btn.disabled = true;
+        }
+        try {
+            const data = await window.extractionAjaxPost(editUrl, {
+                action: 'add_activity',
+                row_id: rowId,
+                activity: String(name).trim(),
+            });
+            window.refreshExtractionLine(data.row_id || rowId, data.line_html);
+        } catch (error) {
+            alert(error.message || 'Failed to add activity.');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
             }
-        },
-    }));
+        }
+    };
+
+    window.removeExtractionActivity = async function removeExtractionActivity(fromEl, editUrl, rowId) {
+        const activity = fromEl.getAttribute('data-activity') || '';
+        if (!activity) {
+            return;
+        }
+        try {
+            const data = await window.extractionAjaxPost(editUrl, {
+                action: 'remove_activity',
+                row_id: rowId,
+                activity,
+            });
+            window.refreshExtractionLine(data.row_id || rowId, data.line_html);
+        } catch (error) {
+            alert(error.message || 'Failed to remove activity.');
+        }
+    };
 
     Alpine.data('extractionProductForm', (config) => ({
         url: config.url,
@@ -402,11 +187,20 @@ document.addEventListener('alpine:init', () => {
         saving: false,
         saved: false,
         saveError: '',
+        reanalysing: false,
+        autoSaveTimer: null,
+        emitSaveStatus(phase, message = '') {
+            this.$dispatch('extraction-save-status', {
+                productIndex: this.productIndex,
+                phase,
+                message,
+            });
+        },
         get attributeConfidenceBand() {
             const score = Number(this.attributeConfidence || 0);
-            if (score > 90) return 'green';
-            if (score > 80) return 'yellow';
-            if (score > 70) return 'orange';
+            if (score >= 80) return 'green';
+            if (score > 70) return 'yellow';
+            if (score > 50) return 'orange';
             return 'red';
         },
         addExtra() {
@@ -419,10 +213,12 @@ document.addEventListener('alpine:init', () => {
             this.newKey = '';
             this.newValue = '';
             this.recalcAttributeConfidence();
+            this.scheduleAutoSave();
         },
         removeExtra(index) {
             this.extraAttrs.splice(index, 1);
             this.recalcAttributeConfidence();
+            this.scheduleAutoSave();
         },
         recalcAttributeConfidence() {
             const form = this.$el.querySelector('form') || this.$el.closest('form') || this.$root;
@@ -439,11 +235,30 @@ document.addEventListener('alpine:init', () => {
             });
             this.attributeConfidence = Math.round((100 * found) / schema.length);
         },
-        async saveProduct(event) {
-            if (this.saving) {
+        scheduleAutoSave() {
+            this.recalcAttributeConfidence();
+            if (this.autoSaveTimer) {
+                clearTimeout(this.autoSaveTimer);
+            }
+            this.autoSaveTimer = setTimeout(() => {
+                this.persistProduct({ silent: true });
+            }, 700);
+        },
+        getForm() {
+            return this.$el.querySelector('form') || this.$el.closest('form');
+        },
+        async persistProduct({ silent = false } = {}) {
+            while (this.saving) {
+                await new Promise((resolve) => setTimeout(resolve, 50));
+            }
+            const form = this.getForm();
+            if (!form) {
                 return;
             }
-            const form = event.target.closest('form');
+            if (this.autoSaveTimer) {
+                clearTimeout(this.autoSaveTimer);
+                this.autoSaveTimer = null;
+            }
             const body = new FormData(form);
             body.append('ajax', '1');
             body.delete('extra_attr_key');
@@ -455,6 +270,7 @@ document.addEventListener('alpine:init', () => {
             this.saving = true;
             this.saved = false;
             this.saveError = '';
+            this.emitSaveStatus('saving');
             try {
                 const response = await fetch(this.url, {
                     method: 'POST',
@@ -477,11 +293,53 @@ document.addEventListener('alpine:init', () => {
                 }
                 this.recalcAttributeConfidence();
                 this.saved = true;
-                setTimeout(() => { this.saved = false; }, 2000);
+                this.emitSaveStatus('ok');
+                setTimeout(() => { this.saved = false; }, silent ? 1500 : 2000);
             } catch (error) {
                 this.saveError = error.message;
+                this.emitSaveStatus('error', error.message);
+                throw error;
             } finally {
                 this.saving = false;
+            }
+        },
+        async saveProduct(event) {
+            event.preventDefault();
+            try {
+                await this.persistProduct({ silent: false });
+            } catch (error) {
+                /* saveError already set */
+            }
+        },
+        async reanalyseRow(rematchUrl) {
+            if (this.reanalysing) {
+                return;
+            }
+            this.reanalysing = true;
+            this.saveError = '';
+            const scrollY = window.scrollY;
+            try {
+                await this.persistProduct({ silent: true });
+                const data = await window.extractionAjaxPost(rematchUrl, {});
+                const rowId = data.row_id || this.rowId;
+                const replaced = window.replaceExtractionLine(rowId, data.line_html);
+                if (!replaced) {
+                    // Fallback: keep place via sessionStorage, then soft reload.
+                    try {
+                        sessionStorage.setItem(
+                            'boq-detail-scroll-{{ boq.pk }}-analysis',
+                            String(scrollY)
+                        );
+                    } catch (e) { /* ignore */ }
+                    window.location.assign('{% url "boq:detail" boq.pk %}?tab=analysis&_t=' + Date.now());
+                    return;
+                }
+                window.scrollTo(0, scrollY);
+            } catch (error) {
+                this.reanalysing = false;
+                this.saveError = error.message || 'Re-analyse failed.';
+                this.emitSaveStatus('error', this.saveError);
+                alert(this.saveError);
             }
         },
     }));

@@ -206,12 +206,123 @@ def _sheet_selection_score(
     return (matches, len(records), header_count)
 
 
+def score_make_list_sheet(
+    headers: list[dict],
+    records: list[dict],
+    sheet_name: str = "",
+) -> tuple[int, int, int, int]:
+    """
+    Rank worksheets for make-list extraction.
+
+    Prefers sheets named like MAKE LIST and headers with approved makes /
+    manufacturer columns. Penalizes rate/amount/BOQ analysis sheets and does
+    **not** prefer larger row counts (that selected wrong DMRC sheets before).
+    """
+    name = re.sub(r"[^0-9a-zA-Z]+", " ", (sheet_name or "").lower()).strip()
+    header_blob = " ".join(
+        f"{(h.get('key') or '')} {(h.get('label') or '')}".lower() for h in headers
+    )
+
+    score = 0
+    if "make list" in name or name in {"makes", "make", "approved makes"}:
+        score += 200
+    elif "make" in name:
+        score += 80
+
+    make_header_hits = 0
+    for token in (
+        "approved_makes",
+        "approved make",
+        "manufacturer",
+        "manufacturers",
+        "make_manufacturers",
+    ):
+        if token in header_blob:
+            make_header_hits += 1
+            score += 60
+    if re.search(r"\bmake\b|\bmakes\b|\bbrand\b", header_blob):
+        make_header_hits += 1
+        score += 40
+    if "description" in header_blob or "material" in header_blob:
+        score += 20
+    if any(hint in header_blob for hint in ("s_no", "s. no", "sl_no", "serial")):
+        score += 10
+
+    # Rate / estimate sheets dominate many client workbooks — demote them.
+    for bad in (
+        "rate",
+        "amount",
+        "analysis",
+        "dmrc",
+        "discount",
+        "qty",
+        "quantity",
+        "boq format",
+        "packing",
+        "freight",
+    ):
+        if bad in header_blob:
+            score -= 35
+        if bad in name:
+            score -= 50
+
+    # Prefer compact make lists over giant analysis sheets.
+    row_count = len(records)
+    if 5 <= row_count <= 250:
+        score += 25
+    elif row_count > 250:
+        score -= min(120, row_count // 5)
+
+    # Content signal: cells that look like slash-separated makes.
+    make_like = 0
+    checked = 0
+    for record in records[:40]:
+        values = record.get("display_values") or {}
+        for value in values.values():
+            text = str(value or "").strip()
+            if not text:
+                continue
+            checked += 1
+            if "/" in text and 1 <= len(text.split("/")) <= 8 and len(text) < 120:
+                make_like += 1
+            elif 1 <= len(text.split()) <= 3 and text[:1].isalpha() and len(text) < 40:
+                make_like += 0.25
+    if checked:
+        score += int(40 * (make_like / checked))
+
+    # Tie-breakers: more make-header hits, then fewer rows, then fewer columns.
+    return (score, make_header_hits, -row_count, -len(headers))
+
+
+def _merge_headers(header_sets: list[list[dict]]) -> list[dict]:
+    """Union headers by key, preserving first-seen order and labels."""
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for headers in header_sets:
+        for header in headers:
+            key = header.get("key") or ""
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            merged.append(
+                {
+                    "key": key,
+                    "label": header.get("label") or key,
+                    "index": len(merged),
+                }
+            )
+    return merged
+
+
 def read_rows_with_metadata(
     file_path: str | Path,
     sheet_name: str | None = None,
     header_keys: HeaderKeys | None = None,
     *,
     expand_columns: bool = False,
+    merge_matching_sheets: bool = False,
+    min_header_matches: int = 2,
+    sheet_score_fn=None,
 ) -> tuple[list[dict], list[dict]]:
     """Read rows with original header labels and worksheet row numbers.
 
@@ -220,30 +331,68 @@ def read_rows_with_metadata(
     Fully empty rows are skipped, but blank cells inside captured rows are
     preserved. When ``sheet_name`` is omitted, every worksheet is scored and the
     best match for ``header_keys`` is used.
+
+    When ``merge_matching_sheets`` is True, all worksheets scoring at least
+    ``min_header_matches`` header hits (or matching the best sheet's score floor)
+    are concatenated; each record is tagged with ``sheet_name``.
+
+    ``sheet_score_fn(headers, records, sheet_name)`` may override default scoring
+    (used by make-list parsing to prefer the MAKE LIST sheet).
     """
     workbook = load_workbook(filename=file_path, read_only=True, data_only=True)
     try:
         if sheet_name:
             worksheet = workbook[sheet_name]
-            return _read_worksheet_rows_with_metadata(
+            headers, records = _read_worksheet_rows_with_metadata(
                 worksheet,
                 header_keys,
                 expand_columns=expand_columns,
             )
+            for record in records:
+                record.setdefault("sheet_name", sheet_name)
+            return headers, records
 
-        best_headers: list[dict] = []
-        best_records: list[dict] = []
-        best_score = (-1, -1, -1)
+        scored: list[tuple[tuple, str, list[dict], list[dict]]] = []
         for worksheet in workbook.worksheets:
             headers, records = _read_worksheet_rows_with_metadata(
                 worksheet,
                 header_keys,
                 expand_columns=expand_columns,
             )
-            score = _sheet_selection_score(headers, records, header_keys)
-            if score > best_score:
-                best_headers, best_records, best_score = headers, records, score
-        return best_headers, best_records
+            if sheet_score_fn is not None:
+                score = sheet_score_fn(headers, records, worksheet.title)
+            else:
+                score = _sheet_selection_score(headers, records, header_keys)
+            scored.append((score, worksheet.title, headers, records))
+
+        if not scored:
+            return [], []
+
+        scored.sort(key=lambda item: item[0], reverse=True)
+        best_score, best_name, best_headers, best_records = scored[0]
+
+        if not merge_matching_sheets:
+            for record in best_records:
+                record.setdefault("sheet_name", best_name)
+            return best_headers, best_records
+
+        # Merge every sheet that looks like a BOQ table (default scorer only).
+        selected = []
+        for score, name, headers, records in scored:
+            matches = score[0] if isinstance(score, tuple) else 0
+            if matches >= min_header_matches or score == best_score:
+                if records:
+                    selected.append((score, name, headers, records))
+        if not selected:
+            selected = [scored[0]]
+
+        merged_headers = _merge_headers([headers for *_, headers, _records in selected])
+        merged_records: list[dict] = []
+        for _score, name, _headers, records in selected:
+            for record in records:
+                tagged = {**record, "sheet_name": name}
+                merged_records.append(tagged)
+        return merged_headers, merged_records
     finally:
         workbook.close()
 

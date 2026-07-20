@@ -90,6 +90,56 @@ def refresh_all_extract(boq: BOQ) -> tuple[dict, dict]:
     return boq_payload, make_list_payload
 
 
+def _make_list_sheet_names(payload: dict | None) -> set[str]:
+    rows = list((payload or {}).get("rows") or [])
+    names = {str(row.get("sheet_name") or "").strip() for row in rows}
+    names.discard("")
+    declared = (payload or {}).get("sheets") or []
+    for name in declared:
+        text = str(name or "").strip()
+        if text:
+            names.add(text)
+    return names
+
+
+def make_list_payload_is_polluted(payload: dict | None) -> bool:
+    """True when stored make-list JSON looks like a multi-sheet / rate merge."""
+    if not payload:
+        return False
+    headers = list(payload.get("headers") or [])
+    rows = list(payload.get("rows") or [])
+    if len(headers) > 12 or len(rows) > 300:
+        return True
+
+    sheet_names = _make_list_sheet_names(payload)
+    if len(sheet_names) > 1:
+        return True
+
+    header_blob = " ".join(
+        f"{(h.get('key') or '')} {(h.get('label') or '')}".lower() for h in headers
+    )
+    for bad in (
+        "approved_dmrc",
+        "basic_rate",
+        "packing_freight",
+        "age_increase",
+        "rate_adopted",
+        "boq_item_page",
+        "sub_head",
+    ):
+        if bad in header_blob:
+            return True
+
+    roles = payload.get("column_roles") or {}
+    make_keys = list(roles.get("make_keys") or [])
+    from utils.make_list_splits import is_excluded_make_key
+
+    return any(
+        is_excluded_make_key(key) and not str(key).lower().startswith("approved_makes")
+        for key in make_keys
+    )
+
+
 def _normalize_make_list_payload(payload: dict | None) -> dict:
     """Ensure stored make-list JSON has approved makes and rows_tree."""
     if not payload:
@@ -103,10 +153,24 @@ def _normalize_make_list_payload(payload: dict | None) -> dict:
     roles = payload.get("column_roles") or {}
     make_keys = list(roles.get("make_keys") or [])
 
-    needs_attach = (not make_keys) or any(
-        (not (row.get("approved_makes_list") or []))
-        and row_has_make_source(row, make_keys=make_keys or None)
-        for row in rows
+    from utils.make_list_splits import is_excluded_make_key
+    from apps.boq.services.make_list_parser import slim_make_list_payload
+
+    polluted_make_keys = any(
+        is_excluded_make_key(key) and not str(key).lower().startswith("approved_makes")
+        for key in make_keys
+    )
+    polluted = make_list_payload_is_polluted(payload)
+
+    needs_attach = (
+        (not make_keys)
+        or polluted_make_keys
+        or polluted
+        or any(
+            (not (row.get("approved_makes_list") or []))
+            and row_has_make_source(row, make_keys=make_keys or None)
+            for row in rows
+        )
     )
 
     normalized = dict(payload)
@@ -115,11 +179,27 @@ def _normalize_make_list_payload(payload: dict | None) -> dict:
         normalized["rows"] = attached_rows
         normalized["column_roles"] = column_roles
 
-    if not normalized.get("rows_tree"):
+    # Always slim polluted legacy payloads (merged rate sheets) to make-list columns only.
+    if polluted or polluted_make_keys:
+        normalized = slim_make_list_payload(normalized)
+    elif not normalized.get("rows_tree"):
         normalized = structure_for_analysis(normalized)
     elif needs_attach:
-        # rows changed; rebuild tree so approved makes are visible to matching.
         normalized = structure_for_analysis({**normalized, "rows": normalized["rows"]})
+
+    try:
+        from apps.boq.services.make_list_category_mapping_service import (
+            MakeListCategoryMappingService,
+        )
+
+        mapped = MakeListCategoryMappingService().ensure_mappings(normalized)
+        if mapped != normalized:
+            # Rebuild rows_tree after category stamps on flat rows.
+            normalized = structure_for_analysis(mapped) if mapped.get("rows") else mapped
+        else:
+            normalized = mapped
+    except Exception:
+        logger.exception("Make-list category mapping failed during normalize")
 
     return normalized
 
@@ -139,10 +219,23 @@ def load_extract_data(boq: BOQ, *, refresh: bool = False) -> tuple[dict, dict]:
         logger.info("BOQ id=%s missing make-list JSON; parsing file once", boq.pk)
         make_list_payload = refresh_make_list_extract(boq)
 
+    # Re-parse from the uploaded make-list file when stored JSON still has merged junk.
+    if boq.make_list_file and make_list_payload_is_polluted(make_list_payload):
+        headers = list((make_list_payload or {}).get("headers") or [])
+        rows = list((make_list_payload or {}).get("rows") or [])
+        sheets = sorted(_make_list_sheet_names(make_list_payload))
+        logger.info(
+            "BOQ id=%s make-list JSON polluted (%s headers, %s rows, sheets=%s); re-parsing file",
+            boq.pk,
+            len(headers),
+            len(rows),
+            sheets,
+        )
+        make_list_payload = refresh_make_list_extract(boq)
+
     before = make_list_payload
     make_list_payload = _normalize_make_list_payload(make_list_payload)
     if boq.make_list_file and make_list_payload.get("rows") and make_list_payload != (boq.make_list_data or {}):
-        # Persist repaired column_roles / approved_makes_list for future loads.
         if make_list_payload != before or make_list_payload != (boq.make_list_data or {}):
             persist_extract_json(boq, make_list_data=make_list_payload)
 
