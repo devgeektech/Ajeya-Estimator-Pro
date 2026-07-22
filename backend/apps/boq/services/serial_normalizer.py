@@ -12,8 +12,12 @@ _DECIMAL_SERIAL = re.compile(r"^(\d+(?:\.\d+)*)$")
 _INTEGER_SERIAL = re.compile(r"^\d+$")
 _ALPHA_SERIAL = re.compile(r"^[a-zA-Z]$")
 _PAREN_ALPHA = re.compile(r"^\(([a-zA-Z])\)$")
+# Common BOQ forms: a)  b)  A)
+_SUFFIX_ALPHA = re.compile(r"^([a-zA-Z])\)$")
 _PAREN_NUM = re.compile(r"^\((\d+)\)$")
 _DESC_ALPHA = re.compile(r"^\(?([a-zA-Z])\)?[\).:\-]\s*")
+# Standalone section romans (I, II, III…) — not product-line continuations.
+_SECTION_ROMAN = re.compile(r"^(?:i{1,3}|iv|vi{0,3}|ix|x|v)$", re.IGNORECASE)
 # Roman-numeral continuations under lettered products (i / ii / iii / iv…).
 _ROMAN_CONT = re.compile(
     r"^(?:\(\s*)?(i{1,3}|iv|vi{0,3}|ix|x|v)(?:\s*[\).:\-]|\s+)\s*",
@@ -206,6 +210,7 @@ def structure_for_make_list_display(structure: dict) -> dict:
         material_label = "Material"
     display_headers.append({"key": material_key, "label": material_label})
     display_headers.append({"key": "_mapped_category", "label": "Mapped Category"})
+    display_headers.append({"key": "_mapped_sub_category", "label": "Mapped Sub-category"})
     display_headers.append({"key": "_approved_makes", "label": "Approved Makes"})
 
     rows: list[dict] = []
@@ -245,14 +250,12 @@ def structure_for_make_list_display(structure: dict) -> dict:
             continue
         mapped_category = str(row.get("mapped_category") or "").strip()
         mapped_sub = str(row.get("mapped_sub_category") or "").strip()
-        mapped_text = mapped_category
-        if mapped_category and mapped_sub:
-            mapped_text = f"{mapped_category} / {mapped_sub}"
         cells = []
         if serial_key:
             cells.append(serial_text)
         cells.append(material_text)
-        cells.append(mapped_text)
+        cells.append(mapped_category)
+        cells.append(mapped_sub)
         cells.append(makes_text)
         rows.append(
             {
@@ -394,25 +397,52 @@ def _is_structural_serial(serial_key: str) -> bool:
     return bool(_INTEGER_SERIAL.match(serial_key) or _DECIMAL_SERIAL.match(serial_key))
 
 
-def _is_product_alpha(serial: str) -> bool:
-    alpha = serial
-    paren = _PAREN_ALPHA.match(serial)
+def letter_from_serial(serial: str) -> str | None:
+    """Return the single letter for ``a``, ``(A)``, ``a)`` forms; else None."""
+    text = str(serial or "").strip()
+    if not text:
+        return None
+    if _ALPHA_SERIAL.match(text):
+        return text
+    paren = _PAREN_ALPHA.match(text)
     if paren:
-        alpha = paren.group(1)
-    return bool(_ALPHA_SERIAL.match(alpha))
+        return paren.group(1)
+    suffix = _SUFFIX_ALPHA.match(text)
+    if suffix:
+        return suffix.group(1)
+    return None
+
+
+def _is_product_alpha(serial: str) -> bool:
+    return letter_from_serial(serial) is not None
+
+
+def _is_section_roman(serial: str) -> bool:
+    """True for standalone section markers ``I`` / ``II`` / ``III`` / ``IV``…"""
+    return bool(_SECTION_ROMAN.match(str(serial or "").strip()))
+
+
+is_section_roman = _is_section_roman
 
 
 def _is_spec_continuation_row(serial: str, description: str) -> bool:
     """True for Operating Temp / roman-numeral lines that belong under a lettered product."""
     text = (description or "").strip()
+    serial_text = str(serial or "").strip()
+    # Section headers like ``III SPRINKLER SYSTEM`` are top-level, not continuations.
+    if serial_text and _is_section_roman(serial_text) and not _SPEC_CONTINUATION.search(text):
+        return False
     if _ROMAN_CONT.match(text):
         return True
-    if serial and _ROMAN_CONT.match(f"{serial}) "):
+    if serial_text and _ROMAN_CONT.match(f"{serial_text}) "):
+        # Bare section roman without trailing punctuation is not a continuation.
+        if _is_section_roman(serial_text) and not re.search(r"[).:\-]", serial_text):
+            return False
         return True
     # Single letter ``i`` often marks roman ``i)`` under a/b products.
-    if serial and serial.lower() == "i" and _SPEC_CONTINUATION.search(text):
+    if serial_text and serial_text.lower() == "i" and _SPEC_CONTINUATION.search(text):
         return True
-    if not serial and _SPEC_CONTINUATION.search(text):
+    if not serial_text and _SPEC_CONTINUATION.search(text):
         return True
     return False
 
@@ -477,7 +507,36 @@ def _serial_depth_and_parent(
                 "continuation",
             )
 
+    # Section romans (I, II, III…) are top-level chapter markers.
+    if serial and _is_section_roman(serial) and not _is_product_alpha(serial):
+        return 0, None, None, "structural"
+    # Single-letter ``I`` / ``V`` used as section titles (not product a/b/c).
+    if serial and _is_section_roman(serial) and _is_product_alpha(serial):
+        # Prefer section when description looks like a chapter title (short, no specs).
+        text = (description or "").strip()
+        if text and not _SPEC_CONTINUATION.search(text) and len(text) < 80:
+            return 0, None, None, "structural"
+
     if not serial:
+        # Blank spec lines (Speed / Head / Capacity) stay under the open product
+        # or the nearest structural item — never float up to a distant section.
+        if _is_spec_continuation_row(serial, description):
+            alpha_parent = _last_product_alpha(stack)
+            if alpha_parent:
+                return (
+                    alpha_parent["depth"] + 1,
+                    alpha_parent["serial_key"],
+                    alpha_parent["row_id"],
+                    "continuation",
+                )
+            structural = _structural_parent(stack)
+            if structural:
+                return (
+                    structural["depth"] + 1,
+                    structural["serial_key"],
+                    structural["row_id"],
+                    "continuation",
+                )
         # Blank under an open lettered product (or its continuations) stays there.
         # Blank after a structural row stays under the structural parent.
         if stack and stack[-1].get("kind") in {"alpha", "continuation"}:
@@ -500,7 +559,9 @@ def _serial_depth_and_parent(
         if not stack:
             return 0, None, None, "continuation"
         depth, parent_key = _child_of_structural_parent(stack)
-        return depth, parent_key, None, "continuation"
+        structural = _structural_parent(stack)
+        parent_row = structural["row_id"] if structural else None
+        return depth, parent_key, parent_row, "continuation"
 
     decimal_match = _DECIMAL_SERIAL.match(serial)
     if decimal_match:
@@ -516,12 +577,8 @@ def _serial_depth_and_parent(
     if paren_num:
         return 1, paren_num.group(1), None, "alpha"
 
-    alpha = serial
-    paren_alpha = _PAREN_ALPHA.match(serial)
-    if paren_alpha:
-        alpha = paren_alpha.group(1)
-
-    if _ALPHA_SERIAL.match(alpha):
+    letter = letter_from_serial(serial)
+    if letter:
         # Spec-like lettered ``i)`` under a/b product.
         if _is_spec_continuation_row(serial, description):
             alpha_parent = _last_product_alpha(stack)

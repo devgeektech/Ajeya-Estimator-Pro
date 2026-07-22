@@ -70,9 +70,15 @@ Upload BOQ (+ optional make list) → parse to JSON → store files + hierarchy
 - Make list: `.xlsx`, `.xlsm`, or `.pdf`
 - **BOQ name must be unique** (case-insensitive) so each upload gets its own
   `media/extract_json/{boq_name}/` folder.
-- On upload, rows are normalized by serial number (`1`, `1.1`, `a`, `(a)`, etc.)
-  into JSON (`boq_data`, `make_list_data`) while preserving hierarchy for UI,
-  AI extraction, and future priced export.
+- On upload, rows are normalized by serial number (`1`, `1.1`, `a`, `(a)`, `a)`,
+  section romans `I`/`II`/`III`, etc.) into JSON (`boq_data`, `make_list_data`)
+  while preserving hierarchy for UI, AI extraction, and future priced export.
+- **Analysis uses serial lineage sections:** one Analysis card per item that sits
+  under a chapter/section (for example ``1``), including its full subtree
+  (``1.1``, ``1.2``, lettered sub-items, specs). Shared parent description stays
+  with the children so AI can extract every product in that part. Amounts still
+  come only from filled Unit/Qty cells inside the subtree (``0`` kept as 0;
+  ``Rate Only`` keeps that marker and copies BOQ ``boq_rate``).
 - Hierarchy also nests Operating Temp / roman-numeral continuation lines under the
   nearest lettered product, supports indent fallback when serials are sparse, and
   merges multi-sheet workbooks that look like BOQ tables (`sheets` on payload;
@@ -107,9 +113,13 @@ Step 3 — Match Results: priced review / confirm / export (existing Match flow)
 - Status: `PROCESSING` → `EXTRACTED`
 - Flow per product:
   1. AI extract product fields/attributes from the BOQ line (always includes
-     `category` + free-text `sub_category` from BOQ meaning; DB context lists
-     **categories only** — no full subcategory dump)
-  2. Retrieve Rate_Master candidates (Chroma + structured/SQL) with important
+     `category` + `sub_category` from BOQ meaning; DB context lists
+     **categories and sub-categories** (`sub_categories_by_category`) so AI maps onto
+     existing Rate_Master labels; values are snapped to DB labels after extract)
+  2. After DB candidate mapping, **category / sub_category are aligned** to the matched
+     or suggested Rate_Master row so Make & Vendor uses the same taxonomy as the DB
+     product (e.g. ACCESSORIES / Air Cushion Tank instead of a looser AI label like TANK)
+  3. Retrieve Rate_Master candidates (Chroma + structured/SQL) with important
      columns + Attribute schema/values — never invent catalog rows or Tech_Key
   3. **AI mapping layer** (`ProductAIMappingService`) selects a candidate only when
      blended confidence ≥ 30%; otherwise status is `provisional` (schema for
@@ -128,32 +138,43 @@ Step 3 — Match Results: priced review / confirm / export (existing Match flow)
 - **Unit vs quantity_unit:** product ``unit`` is the Rate_Master measurement unit
   (mm, cm, NB, inch, …) used for matching; BOQ row UOM (Each, Nos, Mtr) maps to
   ``quantity`` / ``quantity_unit`` only — never into product ``unit``.
+  Quantity comes from filled Unit/Qty cells inside the lineage section
+  (including ``0`` and ``Rate Only``); for Rate Only the BOQ rate cell is stored
+  as ``boq_rate``. When several children have qty, each product gets its own.
 - **Class vs material:** product ``class`` maps to Rate_Master ``Class`` (often
   material: MS, SS, CI, GI, …). Material from BOQ goes into ``class``, not
   Additional Attributes.
 
 **Step 2 — Make & Vendor** (BOQ detail → **Make & Vendor** tab, after Analyse):
 
+- From Analysis, toolbar **Next** (blue) prefills every product with the
+  **lowest-price** Rate_Master row among **approved makes** for its category /
+  sub-category, then opens **Make & Vendor**.
+- After full Analyse completes, the page **stays on Analysis** (review first;
+  use Next to continue).
 - Enabled when `analysis_data.rows` exist and status is `EXTRACTED` / `PROCESSED` /
   `ANALYSIS_FAILED`.
 - For each analysed product, expert selects **Make** and/or **Supplier** from options
   (make-list approved makes preferred, plus distinct values from Rate_Master for the
   product category/spec).
-- **Category makes:** top of the tab lists each distinct product category with approved
-  makes from the make list. **Apply to category** sets that make on every product in
-  the category and runs exact Rate_Master matching + rate load for each.
-- **Find rates** (per product) → `POST /boqs/<id>/make-vendor/` (`MakeVendorSelectionService`)
-  combines Analysis product fields + selected make/supplier, searches Rate_Master for
-  the exact row, then loads material rates and labour via `Tech_Key`.
-- Selection persisted on the product as `selected_make`, `selected_supplier`, and
-  `vendor_selection`; category choices stored in `analysis_data.category_make_selections`.
+- **Sub-category makes:** top panel lists **category → sub-category → approved make → supplier**
+  (only categories/sub-categories present in Analysis extraction). **Apply to sub-category**
+  sets make/supplier on every product in that sub-category and loads rates. Default make is
+  **Lowest price** among approved makes from the make list; empty supplier also picks the
+  lowest-priced Rate_Master row for the chosen make. The cascade shows a **filter ready to
+  apply** summary and an **Applied filters** list below so estimators remember what was set.
+- Selection persisted per product as `selected_make`, `selected_supplier`, `vendor_selection`;
+  sub-category choices stored in `analysis_data.subcategory_make_selections`.
 - AI does not choose make/supplier or calculate prices — rates are read from the master DB.
+- Toolbar **Match** (red) lives on this tab (not Analysis).
+- **Client approach (experimental):** full narrative, business rules, demo script, and
+  decision checklist for stakeholder review — [`docs/MAKE_VENDOR_APPROACH.md`](MAKE_VENDOR_APPROACH.md).
 
-**Step 3 — Match** (BOQ detail → **Match** button → Match Results tab):
+**Step 3 — Match** (BOQ detail → **Make & Vendor** → **Match** → Match Results tab):
 
-- Button: **Match** (toolbar, first run after Analyse only) → `POST /boqs/<id>/match/`
-  → Match Results tab. Full-BOQ re-match is not offered in the toolbar; use per-row
-  **Re-match**.
+- Button: **Match** (Make & Vendor toolbar, first run after Analyse only) →
+  `POST /boqs/<id>/match/` → Match Results tab. Full-BOQ re-match is not offered in
+  the toolbar; use per-row **Re-match**.
 - Per-row: **Re-match** (Match Results tab only, after status is `PROCESSED`) →
   `POST /boqs/<id>/rows/<row_id>/match/` (`BOQAnalysisService.re_match_row`)
 - Matching / DB search uses **only filled product properties** (null/blank fields and
@@ -206,11 +227,11 @@ Approved makes are split on `/`, `,`, `;`, or `|` into `approved_makes_list`
 `column_roles` and rebuilt on load when missing.
 
 **Make-list → category mapping:** each make-list description (free text / synonym)
-is mapped onto a Rate_Master ``Category`` (heuristic + AI
-``map_make_list_categories``). Stored as ``category_mappings`` on `make_list_data`
-and shown as **Mapped Category** on the Make List tab. Analysis make dropdown and
-Match hard-filter prefer approved makes for the product's category
-(`MakeListConstraintService.approved_makes_for_category`).
+is mapped onto Rate_Master ``Category`` and ``Sub_Category`` (heuristic + AI
+``map_make_list_categories`` using the full taxonomy). Stored as ``category_mappings``
+on `make_list_data` and shown as separate **Mapped Category** and **Mapped Sub-category**
+columns on the Make List tab. Analysis make dropdown and Match hard-filter prefer approved makes for the
+product's category (`MakeListConstraintService.approved_makes_for_category`).
 
 **Matching layer (three passes):**
 

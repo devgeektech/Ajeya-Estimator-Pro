@@ -496,17 +496,92 @@ body {
     padding: 14px;
 }
 
-.analysis-loading-panel__header {
+.analysis-loading-panel__body {
     display: flex;
     align-items: center;
-    gap: 12px;
-    margin-bottom: 12px;
+    gap: 16px;
+    margin-bottom: 14px;
 }
 
-.analysis-loading-panel__header p {
-    margin: 3px 0 0;
+.analysis-loading-panel__body--centered {
+    flex-direction: column;
+    justify-content: center;
+    text-align: center;
+    gap: 12px;
+    padding: 18px 12px 8px;
+}
+
+.analysis-loading-panel__copy {
+    min-width: 0;
+}
+
+.analysis-loading-panel__percent {
+    display: block;
+    font-size: 1.35rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--text);
+    line-height: 1.2;
+}
+
+.analysis-loading-panel__title {
+    margin: 6px 0 0;
+    color: var(--text);
+    font-size: .95rem;
+    font-weight: 600;
+}
+
+.analysis-loading-panel__detail {
+    margin: 4px 0 0;
+    color: var(--text-muted);
+    font-size: .82rem;
+}
+
+.analysis-loading-panel__copy strong {
+    display: block;
+    font-size: 1rem;
+}
+
+.analysis-loading-panel__copy p {
+    margin: 4px 0 0;
     color: var(--text-muted);
     font-size: .86rem;
+}
+
+/* Small rotating spinner (CSS only — not an SVG fill). */
+.analysis-loading-spinner {
+    position: relative;
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+}
+
+.analysis-loading-spinner__arc {
+    display: block;
+    box-sizing: border-box;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 3px solid rgba(245, 158, 11, 0.22);
+    border-top-color: #f59e0b;
+    animation: analysisSpinnerSpin 0.75s linear infinite;
+}
+
+@keyframes analysisSpinnerSpin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.analysis-loading-progress__bar--determinate {
+    width: 4%;
+    animation: none;
+    transition: width 0.35s ease;
+}
+
+.analysis-loading-panel--match .analysis-loading-spinner__arc {
+    border-color: rgba(239, 68, 68, 0.22);
+    border-top-color: #ef4444;
 }
 
 .analysis-loading-panel__dot {
@@ -521,6 +596,45 @@ body {
 .analysis-loading-rows {
     display: grid;
     gap: 7px;
+}
+
+.analysis-loading-progress {
+    margin-top: 2px;
+}
+
+.analysis-loading-progress__track {
+    height: 10px;
+    border-radius: 999px;
+    background: rgba(245, 158, 11, 0.18);
+    overflow: hidden;
+    border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+.analysis-loading-progress__bar {
+    display: block;
+    height: 100%;
+    width: 42%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #f59e0b, #fbbf24);
+    animation: analysisProgressSlide 1.35s ease-in-out infinite;
+}
+
+.analysis-loading-panel--match .analysis-loading-progress__track {
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.25);
+}
+
+.analysis-loading-panel--match .analysis-loading-progress__bar {
+    background: linear-gradient(90deg, #ef4444, #f87171);
+}
+
+@keyframes analysisProgressSlide {
+    0% {
+        transform: translateX(-120%);
+    }
+    100% {
+        transform: translateX(320%);
+    }
 }
 
 .analysis-loading-row {

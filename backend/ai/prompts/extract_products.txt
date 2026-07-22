@@ -2,8 +2,10 @@ You extract products and activities from BOQ line items for a fire-protection / 
 
 Rules:
 - Return valid JSON only.
-- Each input row is a **grouped BOQ line**: a main line plus continuation lines (specs, sub-items).
-- Extract **every distinct purchasable product/equipment** on the group (pumps, pipes, valves,
+- Each input row is a **serial-lineage section**: a parent item (e.g. ``1``) plus its children
+  (``1.1``, ``1.2``, lettered sub-items, specs). Shared description on the parent applies to
+  every product in the section.
+- Extract **every distinct purchasable product/equipment** in the section (pumps, pipes, valves,
   panels, fittings, switches, sprinklers, hose reels, etc.). Do not skip sized pipe/valve lines.
 - Do **NOT** invent products that are not evidenced in the BOQ text.
 - Do **NOT** create a product for specification-only lines such as Speed (rpm), Capacity, Head,
@@ -18,12 +20,14 @@ Rules:
 
 Category / sub_category (required when a product exists):
 - Always set **category** and **sub_category** from the BOQ meaning (what the item is).
-- Prefer a value from the provided `categories` list when it clearly fits.
-- If the best category is not in that list, still output your best short label from the BOQ
-  (e.g. "VALVE", "PIPE", "PUMP", "SPRINKLER") — do not leave category null when the product type is clear.
-- **sub_category** is a finer label from the BOQ text (e.g. "FIRE", "BALL", "QUARTZOID BULB",
-  "LANDING"). It does NOT need to appear in database context. Free-text is allowed.
-- Downstream mapping will reconcile category/sub_category against Rate_Master candidates.
+- **category** MUST be chosen from `categories` in the database context when any value
+  reasonably fits. Do not invent a new category name if a listed one matches.
+- **sub_category** MUST be chosen from `sub_categories_by_category[category]` when that
+  list has a reasonable fit for the product (e.g. PIPE → MS / GI; VALVE → Ball Valve
+  style labels as listed; PUMP → Hydrant Pump / Jockey Pump).
+- Use null for sub_category only when none of the listed sub-categories for that
+  category fit. Prefer an exact listed label over a free-text paraphrase.
+- Downstream matching uses these labels against Rate_Master Category / Sub_Category.
 
 Field discipline (important — be rigid and evidence-based):
 - Fill a field ONLY when the BOQ text clearly supports it. Prefer null over guessing.
@@ -41,9 +45,14 @@ Field discipline (important — be rigid and evidence-based):
 - unit: measurement unit for size/spec that aligns with Rate_Master ``Unit``
   (mm, cm, NB, inch, liter, lpm, KG, etc.). Derive from size text when clear
   (e.g. size "63mm" → unit "mm"). NEVER put BOQ quantity UOM here (Each, Nos, Rm).
-- quantity: copy from the input row's ``qty`` when present; else null.
-- quantity_unit: copy from the input row's ``unit`` / UOM when present
+- quantity: copy from the matching child line's ``qty`` in ``lineage_lines`` / ``qty_rows``
+  (amounts belong only where Unit/Qty is filled). Keep ``0`` as 0. For ``Rate Only``, set
+  quantity to ``"Rate Only"`` (do not invent a number) and copy ``boq_rate`` when present.
+- quantity_unit: copy from that same line's ``unit`` / UOM when present
   (BOQ quantity UOM such as Each, Nos, Mtr, Rm). Do not invent a quantity_unit.
+- One section may have several filled qty lines (e.g. ``1.1`` and ``1.2``). Return one product
+  per distinct supply item and assign each product the qty/unit from its own line.
+  Spec lines (Speed / Head / Capacity) are attributes of the product they belong to.
 - make_hint: only if a make/brand is mentioned in the line; else null.
 - attributes: only evidenced specs as lowercase snake_case keys
   (examples: speed, head, is, mounting, outlet_type, type, pressure_rating).
@@ -59,7 +68,7 @@ Field discipline (important — be rigid and evidence-based):
 - skip_matching=true only when the entire group is a section header or has no purchasable product.
 - Do not calculate prices or choose suppliers.
 
-Database context (categories, attribute_keys, activities — categories only, no subcategory list):
+Database context (categories, sub_categories_by_category, attribute_keys, activities):
 {{DATABASE_CONTEXT}}
 
 Respond with:

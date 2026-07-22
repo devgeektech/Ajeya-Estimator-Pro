@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Ajeya Estimator Pro{% endblock %}</title>
     <meta name="csrf-token" content="{{ csrf_token }}">
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=36">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=37">
     <style>
         .confirm-modal {
             position: fixed;
@@ -668,6 +668,14 @@
             white-space: nowrap;
         }
 
+        .analysis-tab-canvas .extraction-product-tabs__add {
+            min-width: 1.7rem;
+            height: 1.7rem;
+            padding: 0 .45rem;
+            font-size: .85rem;
+            line-height: 1;
+        }
+
         .analysis-tab-canvas .extraction-product-tabs__actions {
             gap: 4px;
             margin-left: auto;
@@ -801,8 +809,17 @@
             margin-top: 6px;
         }
 
-        .analysis-tab-canvas .extraction-extra-attrs__row {
-            gap: 4px 6px;
+        .analysis-tab-canvas .extraction-extra-attrs__head {
+            gap: 4px 8px;
+            margin-bottom: 4px;
+        }
+
+        .analysis-tab-canvas .extraction-extra-attrs__hint {
+            font-size: .68rem;
+        }
+
+        .analysis-tab-canvas .extraction-extra-attrs__chips-row {
+            gap: 4px;
         }
 
         .analysis-tab-canvas .extraction-extra-attr-item {
@@ -926,6 +943,84 @@
             font-size: 1rem;
         }
 
+        .make-vendor-subcategory-panel__grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(140px, 1fr));
+            gap: 10px;
+            align-items: end;
+            margin-top: 10px;
+        }
+
+        .make-vendor-subcategory-panel__actions {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 10px;
+            margin-top: 12px;
+        }
+
+        .make-vendor-filter-preview,
+        .make-vendor-applied-filters {
+            margin-top: 14px;
+            padding: 10px 12px;
+            border: 1px dashed var(--border);
+            border-radius: 8px;
+            background: var(--surface-alt, rgba(148, 163, 184, 0.08));
+        }
+
+        .make-vendor-filter-preview__title {
+            margin: 0 0 8px;
+            font-size: .85rem;
+        }
+
+        .make-vendor-filter-preview__grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 8px 12px;
+            margin: 0;
+        }
+
+        .make-vendor-filter-preview__grid dt {
+            font-size: .68rem;
+            text-transform: uppercase;
+            letter-spacing: .03em;
+            color: var(--text-muted);
+            margin: 0 0 2px;
+        }
+
+        .make-vendor-filter-preview__grid dd {
+            margin: 0;
+            font-weight: 600;
+            font-size: .86rem;
+        }
+
+        .make-vendor-applied-filters__list {
+            list-style: none;
+            margin: 8px 0 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .make-vendor-applied-filters__item {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px 12px;
+            padding: 8px 10px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--surface);
+            font-size: .84rem;
+        }
+
+        @media (max-width: 960px) {
+            .make-vendor-subcategory-panel__grid {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+
         .make-vendor-category-list {
             display: flex;
             flex-direction: column;
@@ -1005,8 +1100,35 @@
             display: flex;
             justify-content: space-between;
             gap: 10px;
-            align-items: center;
+            align-items: flex-start;
             margin-bottom: 10px;
+        }
+
+        .make-vendor-card__heading {
+            flex: 1 1 200px;
+            min-width: 0;
+        }
+
+        .make-vendor-card__taxonomy {
+            margin: 4px 0 0;
+            font-size: .78rem;
+            color: var(--text-muted, #64748b);
+            display: flex;
+            flex-wrap: wrap;
+            align-items: baseline;
+            gap: 6px;
+        }
+
+        .make-vendor-card__taxonomy-label {
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: .03em;
+            font-size: .68rem;
+        }
+
+        .make-vendor-card__taxonomy-value {
+            font-weight: 600;
+            color: var(--text);
         }
 
         .make-vendor-card__title {
@@ -1487,25 +1609,25 @@
             margin-top: 8px;
         }
 
-        .extraction-extra-attrs__row {
+        .extraction-extra-attrs__head {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px 12px;
+            margin-bottom: 6px;
+        }
+
+        .extraction-extra-attrs__hint {
+            margin-left: auto;
+            font-size: .75rem;
+            color: var(--text-muted);
+        }
+
+        .extraction-extra-attrs__chips-row {
             display: flex;
             flex-wrap: wrap;
             align-items: center;
-            gap: 6px 8px;
-        }
-
-        .extraction-extra-attrs__heading {
-            flex-shrink: 0;
-            font-size: .72rem;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: .04em;
-            color: var(--primary, #2563eb);
-            background: rgba(37, 99, 235, 0.1);
-            border: 1px solid rgba(37, 99, 235, 0.25);
-            padding: 2px 8px;
-            border-radius: 4px;
-            line-height: 1.4;
+            gap: 4px 6px;
         }
 
         .extraction-extra-attrs__empty {
@@ -1680,11 +1802,14 @@
             border-color: var(--border);
         }
 
-        .dark-mode .extraction-db-match__heading,
-        .dark-mode .extraction-extra-attrs__heading {
+        .dark-mode .extraction-db-match__heading {
             color: #93c5fd;
             background: rgba(59, 130, 246, 0.15);
             border-color: rgba(59, 130, 246, 0.35);
+        }
+
+        .dark-mode .extraction-extra-attrs__hint {
+            color: var(--text-muted);
         }
 
         .dark-mode .extraction-db-match {

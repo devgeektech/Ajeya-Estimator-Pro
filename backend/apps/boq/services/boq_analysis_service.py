@@ -17,6 +17,10 @@ from apps.boq.services.boq_analysis_store import (
 )
 from apps.boq.services.boq_extraction_service import BOQExtractionService, _normalize_product_fields
 from apps.boq.services.boq_extract_service import load_extract_data
+from apps.boq.services.boq_job_progress import (
+    clear_boq_job_progress,
+    set_boq_job_progress,
+)
 from apps.boq.services.boq_row_grouping_service import full_description_for_row, resolve_anchor_row_id
 from apps.boq.services.make_list_constraint_service import MakeListConstraintService, walk_rows_tree
 from apps.boq.services.product_ai_mapping_service import ProductAIMappingService
@@ -145,10 +149,26 @@ class BOQAnalysisService:
         """Extract products/activities, then enrich attributes from Rate_Master."""
         boq = self._get_boq()
         self._set_status(boq, BOQStatus.PROCESSING)
+        set_boq_job_progress(boq.pk, percent=2, label="Starting analysis…", phase="extract")
         try:
             boq_payload, _make_list_payload = load_extract_data(boq)
             boq_data = structure_for_analysis(boq_payload)
-            extraction = BOQExtractionService(boq_data).extract()
+            set_boq_job_progress(boq.pk, percent=8, label="Extracting products…", phase="extract")
+
+            def _on_extract_progress(done: int, total: int) -> None:
+                total = max(total, 1)
+                # Extraction covers roughly 8% → 55%.
+                percent = 8 + int((done / total) * 47)
+                set_boq_job_progress(
+                    boq.pk,
+                    percent=percent,
+                    label=f"Extracting products ({done}/{total})…",
+                    phase="extract",
+                )
+
+            extraction = BOQExtractionService(boq_data).extract(
+                progress_callback=_on_extract_progress,
+            )
             extraction_by_row = {
                 str(row.get("row_id")): row
                 for row in extraction.get("rows") or []
@@ -162,8 +182,30 @@ class BOQAnalysisService:
                     continue
                 extracted_rows.append({**row, "product_matches": []})
 
-            extracted_rows = self._enrich_extracted_attributes(extracted_rows)
+            set_boq_job_progress(
+                boq.pk,
+                percent=58,
+                label="Matching products to database…",
+                phase="extract",
+            )
 
+            def _on_enrich_progress(done: int, total: int) -> None:
+                total = max(total, 1)
+                # Enrichment covers roughly 58% → 95%.
+                percent = 58 + int((done / total) * 37)
+                set_boq_job_progress(
+                    boq.pk,
+                    percent=percent,
+                    label=f"Matching products to database ({done}/{total})…",
+                    phase="extract",
+                )
+
+            extracted_rows = self._enrich_extracted_attributes(
+                extracted_rows,
+                progress_callback=_on_enrich_progress,
+            )
+
+            set_boq_job_progress(boq.pk, percent=98, label="Saving results…", phase="extract")
             analysis_payload = {
                 "schema_version": 2,
                 "phase": PHASE_EXTRACTED,
@@ -177,14 +219,19 @@ class BOQAnalysisService:
                 "rows": extracted_rows,
             }
             self._persist_analysis(boq, analysis_payload, BOQStatus.EXTRACTED)
+            set_boq_job_progress(boq.pk, percent=100, label="Analysis complete", phase="extract")
             logger.info("BOQ extraction completed for id=%s (%s)", boq.pk, boq.boq_name)
             return analysis_payload
         except Exception as exc:
             logger.exception("BOQ extraction failed for id=%s", boq.pk)
+            set_boq_job_progress(boq.pk, percent=100, label="Analysis failed", phase="extract")
             self._set_status(boq, BOQStatus.ANALYSIS_FAILED)
             if isinstance(exc, (AIServiceError, BOQAIError)):
                 raise
             raise BOQAIError(f"BOQ extraction failed: {exc}") from exc
+        finally:
+            # Keep 100% briefly for the last poll, then clear on next request cycle.
+            pass
 
     def rematch_row(self, row_id: str) -> dict[str, Any]:
         """
@@ -499,7 +546,10 @@ class BOQAnalysisService:
         return {**row, "product_matches": product_matches}
 
     @staticmethod
-    def _enrich_extracted_attributes(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _enrich_extracted_attributes(
+        rows: list[dict[str, Any]],
+        progress_callback=None,
+    ) -> list[dict[str, Any]]:
         """AI-map extracted products to Rate_Master + attribute schemas after extract."""
         active_version = get_active_database_version()
         if active_version is None:
@@ -507,7 +557,7 @@ class BOQAnalysisService:
             return rows
         try:
             mapper = ProductAIMappingService(active_version.pk)
-            return mapper.map_rows(rows)
+            return mapper.map_rows(rows, progress_callback=progress_callback)
         except Exception:
             logger.exception("AI product mapping failed; keeping AI-extracted attributes")
             return rows

@@ -2,6 +2,82 @@
 
 Meaningful product and technical changes only. Older history is in git.
 
+## 2026-07-22 — Analysis Spinner Fix (Small CSS Spinner)
+
+- Replaced the broken large SVG ring with a small animated CSS spinner, live
+  percentage, and title “Analysing BOQ And Extracting Products”.
+
+## 2026-07-21 — Analysis Loading Spinner + Percent
+
+- Analysis loading panel shows progress percent and status label while Analyse
+  runs (progress from extraction + DB mapping batches).
+
+## 2026-07-21 — Analysis Stay + Next Prefills Lowest Make/Vendor
+
+- After Analyse completes, stay on the **Analysis** tab (no auto-jump to Make & Vendor).
+- Re-analyse restores scroll to the same line position (row-relative offset).
+- **Next** on Analysis runs `apply_lowest_defaults` (lowest approved make/vendor on all
+  products), then opens Make & Vendor. Cascade shows filter preview + applied filters list.
+
+## 2026-07-21 — Make & Vendor Client Approach Doc
+
+- Added `docs/MAKE_VENDOR_APPROACH.md` for client review of the experimental
+  Make & Vendor cascade (rules, demo script, decision checklist).
+
+## 2026-07-21 — Align Category to Matched DB Product
+
+- After Analysis DB mapping, product `category` / `sub_category` are aligned to the
+  matched or suggested Rate_Master row so Make & Vendor taxonomy matches the DB product.
+- Re-analyse affected rows (or the full BOQ) to refresh existing extractions.
+
+## 2026-07-21 — Make & Vendor Sub-category Cascade
+
+- Make & Vendor tab: cascade **category → sub-category → approved make → supplier**
+  (lists limited to categories/sub-categories from Analysis extraction).
+- Apply to sub-category updates all products in that sub-category; default matching uses
+  lowest price among approved makes (make list is source of truth for makes).
+- Stored in `analysis_data.subcategory_make_selections`.
+
+## 2026-07-21 — Serial-lineage Extraction Sections
+
+- Analysis/extraction groups by serial lineage: parent item (e.g. ``1``) plus
+  children (``1.1``, ``1.2``, specs) form one section so shared description is
+  available when extracting multiple products.
+- Amounts still come only from filled Unit/Qty cells inside the section
+  (``0`` and ``Rate Only`` / ``boq_rate`` preserved per qty line).
+- Re-run Analyse after deploy (re-upload if hierarchy is stale).
+
+## 2026-07-21 — Quantity-block Extraction
+
+- Superseded by serial-lineage sections (same-day correction).
+
+## 2026-07-20 — Category + Sub-category Taxonomy Mapping
+
+- Database context for extraction includes `sub_categories_by_category`.
+- Make-list AI mapping and Analysis extraction prefer Rate_Master Category /
+  Sub_Category labels; values are snapped to existing DB labels after mapping.
+
+## 2026-07-20 — Next on Analysis, Match on Make & Vendor
+
+- Analysis toolbar shows blue **Next** (opens Make & Vendor).
+- Red **Match** button moved to the Make & Vendor toolbar.
+
+## 2026-07-20 — Row-wise Analysis (No Merged Variants)
+
+- Lettered BOQ lines (`a)`, `(A)`, sized variants) are separate Analysis anchors
+  instead of being combined into the parent item.
+- Section romans (`I`/`II`/`III`…) stay top-level; blank Speed/Head/Capacity specs
+  nest under the nearest product/structural item.
+- Re-upload the BOQ (or upload a new copy) so stored hierarchy is rebuilt, then
+  run Analyse again.
+
+## 2026-07-20 — Additional Attributes Layout + Attribute Labels
+
+- Additional Attributes: bold heading (not chip), hint on the right, name/value
+  inputs on the heading row, chips on the row below.
+- Attributes hint text: “Attributes found in Database — AI-mapped values filled
+  where found”.
+
 ## 2026-07-20 — Compact BOQ Detail Tab Bar
 
 - Tabs sit at the top with minimal padding; status, tab summary, and actions share

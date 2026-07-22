@@ -6,6 +6,7 @@ import logging
 from decimal import Decimal
 from typing import Any
 
+from ai.context import align_product_taxonomy_from_db_labels, align_product_taxonomy_from_rate
 from ai.service import AIService
 from apps.boq.services.product_matching_service import (
     ProductMatchingService,
@@ -259,6 +260,7 @@ class ProductAIMappingService:
         rows: list[dict[str, Any]],
         *,
         only_missing: bool = False,
+        progress_callback=None,
     ) -> list[dict[str, Any]]:
         from .product_attribute_enrichment_service import product_needs_attribute_enrichment
 
@@ -270,9 +272,22 @@ class ProductAIMappingService:
                 pending.append((row_index, product_index, product))
 
         if not pending:
+            if progress_callback:
+                progress_callback(1, 1)
             return rows
 
-        mapped_products = self.map_products([item[2] for item in pending])
+        # Map in small chunks so progress can advance during long enrichments.
+        chunk_size = max(_BATCH_SIZE, 4)
+        mapped_products: list[dict[str, Any]] = []
+        total = len(pending)
+        if progress_callback:
+            progress_callback(0, total)
+        for start in range(0, total, chunk_size):
+            chunk = pending[start : start + chunk_size]
+            mapped_products.extend(self.map_products([item[2] for item in chunk]))
+            if progress_callback:
+                progress_callback(min(total, start + len(chunk)), total)
+
         updated_rows = [dict(row) for row in rows]
         for (row_index, product_index, _product), mapped in zip(pending, mapped_products, strict=False):
             products = list(updated_rows[row_index].get("products") or [])
@@ -512,7 +527,7 @@ class ProductAIMappingService:
             "candidate_ids": [item["id"] for item in candidates],
             "match_status": DB_MATCH_MATCHED,
         }
-        return enriched
+        return align_product_taxonomy_from_rate(enriched, rate)
 
     def _provisional_schema_match(
         self,
@@ -562,7 +577,7 @@ class ProductAIMappingService:
             "candidate_ids": [item.get("id") for item in candidates],
             "match_status": DB_MATCH_PROVISIONAL,
         }
-        return enriched
+        return align_product_taxonomy_from_rate(enriched, rate)
 
     @staticmethod
     def _extracted_payload(product: dict[str, Any]) -> dict[str, Any]:
@@ -677,4 +692,9 @@ class ProductAIMappingService:
             "candidate_ids": [item.get("id") for item in candidates],
             "match_status": DB_MATCH_PROVISIONAL,
         }
-        return enriched
+        top = candidates[0] if candidates else {}
+        return align_product_taxonomy_from_db_labels(
+            enriched,
+            category=top.get("category"),
+            sub_category=top.get("sub_category"),
+        )

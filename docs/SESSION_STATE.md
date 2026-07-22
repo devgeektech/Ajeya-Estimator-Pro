@@ -34,6 +34,95 @@ run analysis → session confirmations → export Excel
 
 ## Session Log
 
+### 2026-07-22 — Analysis Spinner Fix
+
+Completed: Replaced large black SVG circle with small CSS spinner + % + title
+“Analysing BOQ And Extracting Products”; detail label still updates from poll.
+Pending: Hard-refresh (Ctrl+F5) BOQ detail; re-run Analyse.
+Issues: SVG progress ring rendered as a huge filled circle in browser.
+Next: Optional Match-tab spinner parity if needed.
+
+### 2026-07-21 — Analysis Loading Spinner + Percent
+
+Completed: Job progress from extraction + DB mapping batches via cache + status
+poll (1.5s).
+Pending: —
+Issues: SVG ring rendered incorrectly (fixed 2026-07-22).
+Next: —
+
+### 2026-07-21 — Analysis Stay + Next Prefills Lowest Make/Vendor
+
+Completed: Stay on Analysis after Analyse; row-relative scroll restore on Re-analyse;
+Next prefills lowest approved make/vendor then opens Make & Vendor; filter preview +
+applied filters list under cascade.
+Pending: Hard-refresh BOQ detail; run Analyse → stay on Analysis → Next.
+Issues: —
+Next: Client feedback on lowest-price material vs material+labour.
+
+### 2026-07-21 — Make & Vendor Client Approach Doc
+
+Completed: Published `docs/MAKE_VENDOR_APPROACH.md` (client narrative, business
+rules, demo script, decision checklist); linked from PRODUCT.md.
+Pending: Share with client; collect checklist answers before hardening export /
+one-click apply-all.
+Issues: —
+Next: Client feedback on lowest-price basis (material vs material+labour).
+
+### 2026-07-21 — Make & Vendor Sub-category Cascade
+
+Completed: Category → sub-category → make → supplier panel on Make & Vendor; apply to
+sub-category; lowest-price default from approved makes.
+Pending: Re-open Make & Vendor after Analyse to use new panel.
+Issues: —
+Next: Filter UI for refined make/vendor selection.
+
+### 2026-07-21 — Serial-lineage Extraction Sections
+
+Completed: Corrected grouping — Analysis sections follow serial lineage (parent
+``1`` + children ``1.1``/``1.2`` as one section for multi-product extract). Qty 0 /
+Rate Only still applied from filled qty lines inside the section.
+Pending: Re-Analyse BOQs (re-upload if hierarchy old).
+Issues: —
+Next: Optional UI badge for Rate Only / zero qty.
+
+### 2026-07-21 — Quantity-block Extraction
+
+Completed: (superseded same day by serial-lineage sections)
+Pending: —
+Issues: Quantity-only windows split sibling products that share parent text.
+Next: —
+
+### 2026-07-20 — Category + Sub-category Taxonomy Mapping
+
+Completed: DB context + make-list/analysis prompts map category and sub-category
+onto Rate_Master taxonomy; snap labels after extract/edit.
+Pending: Re-upload make list (or re-run mapping) and re-Analyse BOQs to refresh.
+Issues: Existing make_list_data.category_mappings without sub-category stay until remapped.
+Next: —
+
+### 2026-07-20 — Next on Analysis, Match on Make & Vendor
+
+Completed: Analysis toolbar Next (blue) → Make & Vendor; Match (red) on Make & Vendor.
+Pending: Hard-refresh BOQ detail; check both tabs.
+Issues: —
+Next: —
+
+### 2026-07-20 — Row-wise Analysis (No Merged Variants)
+
+Completed: Fixed BOQ_2-style hierarchy so lettered variants and section romans
+are not merged; Analysis keeps one card per product line.
+Pending: Re-upload BOQ_2_c3W7Y0P.xlsx (or equivalent) and re-run Analyse.
+Issues: Existing boq_data parent links need re-parse on upload.
+Next: —
+
+### 2026-07-20 — Additional Attributes Layout + Attribute Labels
+
+Completed: Restructured Additional Attributes UI; updated Attributes section hint
+text.
+Pending: Hard-refresh Analysis tab.
+Issues: —
+Next: —
+
 ### 2026-07-20 — Compact BOQ Detail Tab Bar
 
 Completed: Tabs first with tight spacing; status + summary + Match on one row

@@ -2,7 +2,6 @@ You validate extracted BOQ products against Rate_Master candidate rows and map
 attributes onto the database Attribute schema.
 
 About candidate `id`:
-- Rate_Master has NO column named rate_master_id.
 - Table columns include: Category, Sub_Category, Class, Size, Make, Capacity,
   Unit, Attribute, Tech_Key, Supplier, rate fields, plus Django auto PK `id`.
 - In this prompt, candidate `id` is Rate_Master.id (the primary key).
@@ -15,8 +14,8 @@ Rules:
 - Choose at most ONE candidate `id` that best matches the extracted product.
   Use null when no candidate is a reasonable match (prefer null over a weak guess).
 - Prefer evidence from extracted category, sub_category, class, size, unit, capacity,
-  description_hint, and attributes. Extracted sub_category may be free-text (not from a
-  fixed DB list) — map it onto the closest candidate Sub_Category when meaning aligns.
+  description_hint, and attributes. Category and sub_category should already align with
+  Rate_Master labels from extraction; map them onto the closest candidate when meaning aligns.
 - Extracted ``class`` is Rate_Master Class (often material: MS, SS, CI, GI, Brass).
   If material appears only under attributes, treat it as class evidence for matching.
 - When attributes were filled by an expert, weight them heavily for rematch.

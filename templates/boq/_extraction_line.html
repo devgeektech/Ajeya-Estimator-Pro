@@ -76,9 +76,11 @@
         <div class="extraction-line__actions">
             <button
                 type="button"
-                class="btn btn--small btn--primary"
-                @click="window.extractionAjaxPost('{% url 'boq:extraction_edit' boq.pk %}', { action: 'add_product', row_id: '{{ line.row_id }}' }).then(() => { try { sessionStorage.setItem('boq-detail-scroll-{{ boq.pk }}-analysis', String(window.scrollY)); } catch (e) {} window.location.reload(); })"
-            >+ Add product</button>
+                class="btn btn--xsmall btn--primary"
+                title="Add product"
+                aria-label="Add product"
+                @click="window.extractionAjaxPost('{% url 'boq:extraction_edit' boq.pk %}', { action: 'add_product', row_id: '{{ line.row_id }}' }).then(() => { try { const el = document.getElementById('line-{{ line.row_id }}'); sessionStorage.setItem('boq-detail-scroll-{{ boq.pk }}-analysis', JSON.stringify({ y: window.scrollY, rowId: '{{ line.row_id }}', offset: el ? el.getBoundingClientRect().top : null })); } catch (e) {} window.location.reload(); })"
+            >+</button>
         </div>
         {% endif %}
 
@@ -136,6 +138,15 @@
                     @click="activeProduct = {{ product.product_index }}; clearSaveStatus()"
                 >Product {{ product.display_number }}</button>
                 {% endfor %}
+                {% if can_edit_extraction and line.status != 'skipped' %}
+                <button
+                    type="button"
+                    class="btn btn--xsmall btn--primary extraction-product-tabs__add"
+                    title="Add product"
+                    aria-label="Add product"
+                    @click="window.extractionAjaxPost('{% url 'boq:extraction_edit' boq.pk %}', { action: 'add_product', row_id: '{{ line.row_id }}' }).then(() => { try { const el = document.getElementById('line-{{ line.row_id }}'); sessionStorage.setItem('boq-detail-scroll-{{ boq.pk }}-analysis', JSON.stringify({ y: window.scrollY, rowId: '{{ line.row_id }}', offset: el ? el.getBoundingClientRect().top : null })); } catch (e) {} window.location.reload(); })"
+                >+</button>
+                {% endif %}
                 {% if can_edit_extraction %}
                 <div class="extraction-product-tabs__status" x-show="saveStatus.visible" x-cloak>
                     <span class="extraction-save-hint extraction-save-hint--saving" x-show="saveStatus.type === 'saving'" x-text="saveStatus.message"></span>
@@ -150,11 +161,6 @@
                         class="btn btn--xsmall btn--boq-analyse"
                         @click="window.reanalyseActiveExtractionProduct($el, '{% url "boq:row_extract" boq.pk line.row_id %}')"
                     >Re-analyse</button>
-                    <button
-                        type="button"
-                        class="btn btn--xsmall btn--primary"
-                        @click="window.extractionAjaxPost('{% url 'boq:extraction_edit' boq.pk %}', { action: 'add_product', row_id: '{{ line.row_id }}' }).then(() => { try { sessionStorage.setItem('boq-detail-scroll-{{ boq.pk }}-analysis', String(window.scrollY)); } catch (e) {} window.location.reload(); })"
-                    >+ Add product</button>
                     <button
                         type="button"
                         class="btn btn--xsmall btn--danger"
@@ -278,7 +284,7 @@
                             <span class="extraction-section-label">Attributes</span>
                             <span class="extraction-attributes-block__hint">
                                 {% if product.attributes.has_db_schema %}
-                                Database attribute schema — AI-mapped values filled where found
+                                Attributes found in Database — AI-mapped values filled where found
                                 {% else %}
                                 No matched database attribute schema yet
                                 {% endif %}
@@ -298,12 +304,20 @@
                                 >
                             </label>
                             {% empty %}
-                            <p class="extraction-line__empty">No database attributes for this product. AI findings appear under Additional Attributes.</p>
+                            <p class="extraction-line__empty">None</p>
                             {% endfor %}
                         </div>
                         <div class="extraction-extra-attrs">
-                            <div class="extraction-extra-attrs__row">
-                                <span class="extraction-extra-attrs__heading">Additional Attributes</span>
+                            <div class="extraction-extra-attrs__head">
+                                <span class="extraction-section-label">Additional Attributes</span>
+                                <div class="extraction-extra-attr-add">
+                                    <input type="text" x-model="newKey" class="extraction-input extraction-input--compact" placeholder="Name">
+                                    <input type="text" x-model="newValue" class="extraction-input extraction-input--compact" placeholder="Value" @keydown.enter.prevent="addExtra()">
+                                    <button type="button" class="btn btn--xsmall btn--primary" @click="addExtra()">+</button>
+                                </div>
+                                <span class="extraction-extra-attrs__hint">Additional attributes found in BOQ by AI analysis</span>
+                            </div>
+                            <div class="extraction-extra-attrs__chips-row">
                                 <ul class="extraction-extra-attr-list" x-show="extraAttrs.length" x-cloak>
                                     <template x-for="(item, index) in extraAttrs" :key="index">
                                         <li class="extraction-extra-attr-item">
@@ -313,11 +327,6 @@
                                     </template>
                                 </ul>
                                 <span class="extraction-extra-attrs__empty" x-show="!extraAttrs.length" x-cloak>None</span>
-                                <div class="extraction-extra-attr-add">
-                                    <input type="text" x-model="newKey" class="extraction-input extraction-input--compact" placeholder="Name">
-                                    <input type="text" x-model="newValue" class="extraction-input extraction-input--compact" placeholder="Value" @keydown.enter.prevent="addExtra()">
-                                    <button type="button" class="btn btn--xsmall btn--primary" @click="addExtra()">+</button>
-                                </div>
                             </div>
                         </div>
                     </div>
@@ -336,7 +345,7 @@
                         <span class="extraction-section-label">Attributes</span>
                         <span class="extraction-attributes-block__hint">
                             {% if product.attributes.has_db_schema %}
-                            Database product schema
+                            Attributes found in Database
                             {% else %}
                             No matched database attribute schema
                             {% endif %}
@@ -348,12 +357,15 @@
                                 {{ attr.label }}: {% if attr.value %}{{ attr.value }}{% else %}—{% endif %}
                             </li>
                         {% empty %}
-                            <li class="extraction-attr--empty">No database attributes</li>
+                            <li class="extraction-attr--empty">None</li>
                         {% endfor %}
                     </ul>
                     <div class="extraction-extra-attrs extraction-extra-attrs--readonly">
-                        <div class="extraction-extra-attrs__row">
-                            <span class="extraction-extra-attrs__heading">Additional Attributes</span>
+                        <div class="extraction-extra-attrs__head">
+                            <span class="extraction-section-label">Additional Attributes</span>
+                            <span class="extraction-extra-attrs__hint">Additional attributes found in BOQ by AI analysis</span>
+                        </div>
+                        <div class="extraction-extra-attrs__chips-row">
                             <ul class="extraction-extra-attr-list">
                                 {% for extra in product.attributes.extra %}
                                 <li class="extraction-extra-attr-item">

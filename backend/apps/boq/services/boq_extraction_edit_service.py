@@ -7,6 +7,7 @@ from typing import Any
 
 from django.db import transaction
 
+from ai.context import snap_product_taxonomy
 from apps.boq.models import BOQ
 from apps.boq.services.boq_analysis_store import save_boq_analysis_json
 from apps.boq.services.boq_extraction_service import _normalize_product_fields
@@ -132,6 +133,7 @@ class BOQExtractionEditService:
                 continue
             updated[field] = _coerce_scalar(field, fields[field])
         updated = _normalize_product_fields(updated)
+        updated = snap_product_taxonomy(updated)
 
         if attributes is not None:
             updated["attributes"] = _normalize_attributes(attributes)

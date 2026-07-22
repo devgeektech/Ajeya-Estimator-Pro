@@ -6,7 +6,7 @@ import logging
 import re
 from typing import Any
 
-from ai.context import build_database_context
+from ai.context import build_database_context, load_rate_master_taxonomy, snap_product_taxonomy
 from ai.service import AIService
 from common.exceptions import AIServiceError
 from utils.attribute_parser import coerce_attributes_dict
@@ -14,7 +14,6 @@ from utils.attribute_parser import coerce_attributes_dict
 from apps.boq.services.boq_row_grouping_service import (
     anchor_qty_unit,
     grouped_anchor_rows,
-    is_anchor_row,
     resolve_anchor_row_id,
     has_quantity,
 )
@@ -83,13 +82,19 @@ def should_skip_anchor_group(group: dict[str, Any], *, lineage_has_qty: bool) ->
     if not full_text:
         return True
 
+    # Lineage sections with any filled qty/unit (including 0 / Rate Only) stay actionable.
+    if group.get("qty_status") and group.get("qty_status") != "empty":
+        return False
+    if group.get("qty_rows"):
+        return False
+
     anchor_fields = group.get("anchor_fields") or {}
     if has_quantity(anchor_fields) or lineage_has_qty:
         return False
 
-    # Structural item rows (1.1, 1.2) still need extraction even without qty on the anchor.
+    # Structural item rows (1, 1.1, 1.2) still need extraction — children may be products.
     serial = str(group.get("serial") or "").strip()
-    if re.match(r"^(\d+(?:\.\d+)+)$", serial):
+    if re.match(r"^(\d+(?:\.\d+)*)$", serial):
         return False
 
     if int(group.get("depth") or 0) == 0:
@@ -98,7 +103,97 @@ def should_skip_anchor_group(group: dict[str, Any], *, lineage_has_qty: bool) ->
     return False
 
 
-def _filter_spec_products(products: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _apply_one_qty(
+    item: dict[str, Any],
+    *,
+    qty: Any,
+    unit: Any,
+    qty_status: str | None = None,
+    boq_rate: Any = None,
+) -> dict[str, Any]:
+    """Fill one product from one BOQ qty row; never overwrite product unit."""
+    row_unit = None if _is_blank_value(unit) else str(unit).strip()
+    status = qty_status or ("empty" if qty in (None, "") else "numeric")
+    if row_unit and _is_blank_value(item.get("quantity_unit")):
+        item["quantity_unit"] = row_unit
+    if status == "rate_only":
+        item["rate_only"] = True
+        if _is_blank_value(item.get("quantity")):
+            item["quantity"] = "Rate Only"
+        if boq_rate not in (None, "") and _is_blank_value(item.get("boq_rate")):
+            item["boq_rate"] = boq_rate
+    elif status == "zero":
+        item["rate_only"] = False
+        item["quantity"] = 0
+    elif status == "numeric" or qty not in (None, ""):
+        item["rate_only"] = False
+        if _is_blank_value(item.get("quantity")):
+            item["quantity"] = qty
+    return item
+
+
+def _apply_row_qty_unit(
+    products: list[dict[str, Any]],
+    *,
+    qty: Any,
+    unit: Any,
+    qty_status: str | None = None,
+    boq_rate: Any = None,
+    qty_rows: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Fill quantity / quantity_unit from BOQ qty row(s).
+
+    Single filled qty in the lineage → apply to all products (usual case).
+    Multiple filled qty rows → zip onto products in order so each child product
+    (1.1, 1.2, …) keeps its own amount / Rate Only / zero.
+    """
+    if not products:
+        return products
+
+    rows = list(qty_rows or [])
+    if len(rows) > 1:
+        filled: list[dict[str, Any]] = []
+        for index, product in enumerate(products):
+            item = _normalize_product_fields(product)
+            if index < len(rows):
+                qty_row = rows[index]
+                item = _apply_one_qty(
+                    item,
+                    qty=qty_row.get("qty"),
+                    unit=qty_row.get("unit"),
+                    qty_status=qty_row.get("qty_status"),
+                    boq_rate=qty_row.get("boq_rate"),
+                )
+                if qty_row.get("row_id") and _is_blank_value(item.get("source_row_id")):
+                    item["source_row_id"] = qty_row.get("row_id")
+            filled.append(item)
+        return filled
+
+    if len(rows) == 1:
+        only = rows[0]
+        qty = only.get("qty", qty)
+        unit = only.get("unit", unit)
+        qty_status = only.get("qty_status", qty_status)
+        boq_rate = only.get("boq_rate", boq_rate)
+
+    return [
+        _apply_one_qty(
+            _normalize_product_fields(product),
+            qty=qty,
+            unit=unit,
+            qty_status=qty_status,
+            boq_rate=boq_rate,
+        )
+        for product in products
+    ]
+
+
+def _filter_spec_products(
+    products: list[dict[str, Any]],
+    *,
+    taxonomy: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     filtered = [product for product in products if not _is_spec_only_product(product)]
     cleaned: list[dict[str, Any]] = []
     for index, product in enumerate(filtered):
@@ -109,7 +204,8 @@ def _filter_spec_products(products: list[dict[str, Any]]) -> list[dict[str, Any]
         for key in ("category", "sub_category", "class", "size", "unit", "capacity", "make_hint"):
             if key in product and product.get(key) is not None and str(product.get(key)).strip() == "":
                 product[key] = None
-        cleaned.append(_normalize_product_fields(product))
+        product = _normalize_product_fields(product)
+        cleaned.append(snap_product_taxonomy(product, taxonomy))
     return cleaned
 
 
@@ -267,31 +363,6 @@ def _normalize_product_fields(product: dict[str, Any]) -> dict[str, Any]:
     return _normalize_product_unit_fields(_promote_material_to_class(product))
 
 
-def _apply_row_qty_unit(
-    products: list[dict[str, Any]],
-    *,
-    qty: Any,
-    unit: Any,
-) -> list[dict[str, Any]]:
-    """Fill quantity / quantity_unit from the BOQ row; never overwrite product unit."""
-    if not products:
-        return products
-    row_unit = None if _is_blank_value(unit) else str(unit).strip()
-    row_qty = qty
-    if isinstance(row_qty, str) and not row_qty.strip():
-        row_qty = None
-
-    filled: list[dict[str, Any]] = []
-    for product in products:
-        item = _normalize_product_fields(product)
-        if row_unit and _is_blank_value(item.get("quantity_unit")):
-            item["quantity_unit"] = row_unit
-        if row_qty is not None and _is_blank_value(item.get("quantity")):
-            item["quantity"] = row_qty
-        filled.append(item)
-    return filled
-
-
 def _consolidate_to_anchors(
     anchor_groups: list[dict[str, Any]],
     extracted_by_id: dict[str, dict[str, Any]],
@@ -319,10 +390,11 @@ def _consolidate_to_anchors(
             continue
 
         existing = extracted_by_id.get(anchor_id) or {}
+        taxonomy = load_rate_master_taxonomy()
         anchor_row: dict[str, Any] = {
             **existing,
             "row_id": anchor_id,
-            "products": _filter_spec_products(merged_products),
+            "products": _filter_spec_products(merged_products, taxonomy=taxonomy),
             "activities": merged_activities,
             "skip_matching": not bool(merged_products),
         }
@@ -378,14 +450,21 @@ def _build_anchor_groups(boq_data: dict[str, Any]) -> list[dict[str, Any]]:
         row_id = str(group.get("row_id") or "")
         anchor_row = index.get(row_id) or {}
         lineage_ids = list(group.get("lineage_ids") or [row_id])
-        qty, unit = anchor_qty_unit(index, row_id)
+        qty_rows = list(group.get("qty_rows") or [])
+        qty = group.get("qty")
+        unit = group.get("unit")
+        if not qty_rows and qty in (None, "") and unit in (None, ""):
+            qty, unit = anchor_qty_unit(index, row_id)
         groups.append(
             {
                 **group,
                 "anchor_fields": analysis_fields(anchor_row),
-                "lineage_has_qty": _lineage_has_quantity(rows, lineage_ids),
+                "lineage_has_qty": bool(qty_rows) or _lineage_has_quantity(rows, lineage_ids),
                 "anchor_qty": qty,
                 "anchor_unit": unit,
+                "qty_status": group.get("qty_status") or ("empty" if not qty_rows else "numeric"),
+                "boq_rate": group.get("boq_rate"),
+                "qty_rows": qty_rows,
             }
         )
     return groups
@@ -400,6 +479,10 @@ def _compact_anchor_payload(group: dict[str, Any]) -> dict[str, Any]:
         "lineage_lines": group.get("lineage_parts") or [],
         "qty": group.get("anchor_qty"),
         "unit": group.get("anchor_unit"),
+        "qty_status": group.get("qty_status"),
+        "rate_only": bool(group.get("rate_only")),
+        "boq_rate": group.get("boq_rate"),
+        "qty_rows": group.get("qty_rows") or [],
         "heuristic_skip": should_skip_anchor_group(
             group,
             lineage_has_qty=bool(group.get("lineage_has_qty")),
@@ -414,7 +497,7 @@ class BOQExtractionService:
         self.boq_data = boq_data or {}
         self.ai = AIService()
 
-    def extract(self) -> dict[str, Any]:
+    def extract(self, progress_callback=None) -> dict[str, Any]:
         if not self.ai.is_enabled():
             raise AIServiceError("OPENAI_API_KEY is not configured.")
 
@@ -436,16 +519,61 @@ class BOQExtractionService:
                 row_id = row.get("row_id")
                 if row_id:
                     extracted_by_id[str(row_id)] = row
+            if progress_callback:
+                done = min(len(actionable_groups), batch_start + len(batch))
+                progress_callback(done, max(len(actionable_groups), 1))
 
         _consolidate_to_anchors(anchor_groups, extracted_by_id)
+
+        block_by_anchor = {
+            str(group.get("row_id")): group
+            for group in anchor_groups
+            if group.get("row_id")
+        }
+        block_member_ids: set[str] = set()
+        for group in anchor_groups:
+            for member_id in group.get("group_ids") or []:
+                block_member_ids.add(str(member_id))
 
         extracted_rows: list[dict[str, Any]] = []
         for row in flat_rows:
             row_id = row.get("row_id")
             if not row_id:
                 continue
+            row_key = str(row_id)
 
-            if not is_anchor_row(row):
+            group = block_by_anchor.get(row_key)
+            if group is not None:
+                if should_skip_anchor_group(
+                    group,
+                    lineage_has_qty=bool(group.get("lineage_has_qty")),
+                ):
+                    extracted_rows.append(
+                        {
+                            "row_id": row_id,
+                            "skip_matching": True,
+                            "products": [],
+                            "activities": [],
+                            "skip_reason": "section_or_empty_row",
+                        }
+                    )
+                    continue
+
+                extracted_rows.append(
+                    extracted_by_id.get(
+                        row_key,
+                        {
+                            "row_id": row_id,
+                            "skip_matching": True,
+                            "products": [],
+                            "activities": [],
+                            "skip_reason": "ai_missing_row",
+                        },
+                    )
+                )
+                continue
+
+            if row_key in block_member_ids:
                 extracted_rows.append(
                     {
                         "row_id": row_id,
@@ -457,36 +585,15 @@ class BOQExtractionService:
                 )
                 continue
 
-            group = next(
-                (item for item in anchor_groups if str(item.get("row_id")) == str(row_id)),
-                None,
-            )
-            if group and should_skip_anchor_group(
-                group,
-                lineage_has_qty=bool(group.get("lineage_has_qty")),
-            ):
-                extracted_rows.append(
-                    {
-                        "row_id": row_id,
-                        "skip_matching": True,
-                        "products": [],
-                        "activities": [],
-                        "skip_reason": "section_or_empty_row",
-                    }
-                )
-                continue
-
+            # Rows outside any filled Unit/Qty block (headers, blanks, totals).
             extracted_rows.append(
-                extracted_by_id.get(
-                    str(row_id),
-                    {
-                        "row_id": row_id,
-                        "skip_matching": True,
-                        "products": [],
-                        "activities": [],
-                        "skip_reason": "ai_missing_row",
-                    },
-                )
+                {
+                    "row_id": row_id,
+                    "skip_matching": True,
+                    "products": [],
+                    "activities": [],
+                    "skip_reason": "section_or_empty_row",
+                }
             )
 
         return {
@@ -592,16 +699,23 @@ class BOQExtractionService:
             raise AIServiceError("Extraction response missing rows list.")
 
         by_id = {row.get("row_id"): row for row in rows if row.get("row_id")}
+        taxonomy = load_rate_master_taxonomy()
         normalized: list[dict[str, Any]] = []
         for group in groups:
             row_id = group.get("row_id")
             row = _resolve_batch_row(group, by_id)
             row.setdefault("row_id", row_id)
-            products = _filter_spec_products(list(row.get("products") or []))
+            products = _filter_spec_products(
+                list(row.get("products") or []),
+                taxonomy=taxonomy,
+            )
             row["products"] = _apply_row_qty_unit(
                 products,
                 qty=group.get("anchor_qty"),
                 unit=group.get("anchor_unit"),
+                qty_status=group.get("qty_status"),
+                boq_rate=group.get("boq_rate"),
+                qty_rows=list(group.get("qty_rows") or []),
             )
             row.setdefault("activities", [])
             row.setdefault("skip_matching", not row.get("products"))

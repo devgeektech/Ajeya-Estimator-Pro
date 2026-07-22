@@ -1,4 +1,4 @@
-"""Map make-list material descriptions onto Rate_Master categories."""
+"""Map make-list material descriptions onto Rate_Master categories and sub-categories."""
 from __future__ import annotations
 
 import json
@@ -6,9 +6,12 @@ import logging
 import re
 from typing import Any
 
+from ai.context import (
+    load_rate_master_taxonomy,
+    resolve_category_label,
+    resolve_sub_category_label,
+)
 from ai.service import AIService
-from apps.database_manager.models import Rate_Master
-from apps.database_manager.services.activation import get_active_database_version
 
 logger = logging.getLogger("boq_ai")
 
@@ -40,6 +43,33 @@ _DESCRIPTION_HINTS: tuple[tuple[str, str], ...] = (
     ("meter", "ACCESSORIES"),
 )
 
+# Phrase hints that often map onto a sub-category once category is known.
+# Phrases are matched against normalized description text (punctuation stripped).
+_SUB_CATEGORY_HINTS: tuple[tuple[str, str], ...] = (
+    ("ball valve", "ball"),
+    ("butterfly", "butterfly"),
+    ("sluice", "sluice"),
+    ("non return", "non return"),
+    ("jockey", "jockey"),
+    ("diesel", "diesel"),
+    ("hydrant pump", "hydrant"),
+    ("sprinkler pump", "sprinkler"),
+    ("hose reel", "hose reel"),
+    ("hose box", "hose box"),
+    ("fire hose", "fire hose"),
+    ("branch pipe", "branch"),
+    ("air cushion", "air cushion"),
+    ("pressure vessel", "pressure vessel"),
+    ("mild steel", "ms"),
+    ("m s", "ms"),
+    ("galvan", "gi"),
+    ("g i", "gi"),
+    ("abc", "abc"),
+    ("co2", "co2"),
+    ("foam", "foam"),
+    ("dcp", "dcp"),
+)
+
 
 def _normalize(text: str) -> str:
     cleaned = re.sub(r"[^0-9a-zA-Z]+", " ", (text or "").lower())
@@ -52,50 +82,67 @@ def _token_set(text: str) -> set[str]:
 
 def list_rate_master_categories(database_version_id: int | None = None) -> list[str]:
     """Distinct Category values from the active (or given) Rate_Master."""
-    version = None
-    if database_version_id is not None:
-        from apps.database_manager.models import DatabaseVersion
-
-        version = DatabaseVersion.objects.filter(pk=database_version_id).first()
-    else:
-        version = get_active_database_version()
-    if version is None:
-        return []
-    values = (
-        Rate_Master.objects.filter(database_version=version)
-        .exclude(Category__isnull=True)
-        .exclude(Category="")
-        .values_list("Category", flat=True)
-        .distinct()
-    )
-    return sorted({str(value).strip() for value in values if str(value).strip()})
+    taxonomy = load_rate_master_taxonomy(database_version_id)
+    return list(taxonomy.get("categories") or [])
 
 
-def _resolve_category_label(hint: str, categories: list[str]) -> str | None:
-    """Match a hint token/phrase onto an actual DB category label."""
-    if not hint or not categories:
+def _heuristic_sub_category(
+    description: str,
+    *,
+    category: str | None,
+    sub_categories_by_category: dict[str, list[str]],
+) -> str | None:
+    if not description or not category:
         return None
-    hint_norm = _normalize(hint)
-    by_norm = {_normalize(cat): cat for cat in categories}
-    if hint_norm in by_norm:
-        return by_norm[hint_norm]
-    # Hint contained in category or category contained in hint.
-    for cat_norm, cat in by_norm.items():
-        if hint_norm == cat_norm or hint_norm in cat_norm or cat_norm in hint_norm:
-            return cat
+    text = _normalize(description)
+    for phrase, hint in _SUB_CATEGORY_HINTS:
+        if phrase in text:
+            resolved = resolve_sub_category_label(
+                hint,
+                category=category,
+                sub_categories_by_category=sub_categories_by_category,
+            )
+            if resolved:
+                return resolved
+
+    desc_tokens = _token_set(description)
+    best = None
+    best_score = 0.0
+    for sub in sub_categories_by_category.get(category) or []:
+        sub_tokens = _token_set(sub)
+        if not sub_tokens:
+            continue
+        overlap = desc_tokens & sub_tokens
+        if not overlap:
+            continue
+        score = 100.0 * len(overlap) / max(len(sub_tokens), 1)
+        if score > best_score:
+            best_score = score
+            best = sub
+    if best_score >= 50:
+        return best
     return None
 
 
-def _heuristic_category(description: str, categories: list[str]) -> tuple[str | None, float]:
+def _heuristic_category(
+    description: str,
+    categories: list[str],
+    sub_categories_by_category: dict[str, list[str]],
+) -> tuple[str | None, str | None, float]:
     """Fast synonym / token match before calling AI."""
     if not description or not categories:
-        return None, 0.0
+        return None, None, 0.0
     text = _normalize(description)
     for phrase, hint in _DESCRIPTION_HINTS:
         if phrase in text:
-            resolved = _resolve_category_label(hint, categories)
+            resolved = resolve_category_label(hint, categories)
             if resolved:
-                return resolved, 70.0
+                sub = _heuristic_sub_category(
+                    description,
+                    category=resolved,
+                    sub_categories_by_category=sub_categories_by_category,
+                )
+                return resolved, sub, 70.0
 
     desc_tokens = _token_set(description)
     best_cat = None
@@ -112,8 +159,13 @@ def _heuristic_category(description: str, categories: list[str]) -> tuple[str | 
             best_score = score
             best_cat = category
     if best_score >= 50:
-        return best_cat, round(best_score, 2)
-    return None, 0.0
+        sub = _heuristic_sub_category(
+            description,
+            category=best_cat,
+            sub_categories_by_category=sub_categories_by_category,
+        )
+        return best_cat, sub, round(best_score, 2)
+    return None, None, 0.0
 
 
 def _materials_from_payload(payload: dict) -> list[dict[str, Any]]:
@@ -159,13 +211,14 @@ def _materials_from_payload(payload: dict) -> list[dict[str, Any]]:
 
 class MakeListCategoryMappingService:
     """
-    Map make-list descriptions onto Rate_Master categories so approved makes
-    can be selected category-wise (not only by raw description token overlap).
+    Map make-list descriptions onto Rate_Master categories and sub-categories so
+    approved makes can be selected category-wise (not only by raw description overlap).
     """
 
     def __init__(self, database_version_id: int | None = None):
         self.database_version_id = database_version_id
         self._ai = AIService()
+        self._taxonomy = load_rate_master_taxonomy(database_version_id)
 
     def map_payload(self, payload: dict | None) -> dict:
         """Return make-list payload with ``category_mappings`` and per-row category fields."""
@@ -175,7 +228,7 @@ class MakeListCategoryMappingService:
         if payload.get("category_mappings"):
             return self._apply_mappings_to_rows(dict(payload), payload["category_mappings"])
 
-        categories = list_rate_master_categories(self.database_version_id)
+        categories = list(self._taxonomy.get("categories") or [])
         materials = _materials_from_payload(payload)
         if not materials:
             enriched = dict(payload)
@@ -201,23 +254,28 @@ class MakeListCategoryMappingService:
         materials: list[dict[str, Any]],
         categories: list[str],
     ) -> list[dict[str, Any]]:
+        by_category = dict(self._taxonomy.get("sub_categories_by_category") or {})
         mapped: list[dict[str, Any]] = []
         needs_ai: list[tuple[int, dict[str, Any]]] = []
 
         for index, item in enumerate(materials):
-            category, confidence = _heuristic_category(item["material"], categories)
+            category, sub_category, confidence = _heuristic_category(
+                item["material"],
+                categories,
+                by_category,
+            )
             entry = {
                 "material": item["material"],
                 "material_ref": f"m{index}",
                 "approved_makes_list": list(item.get("approved_makes_list") or []),
                 "mapped_category": category,
-                "mapped_sub_category": None,
+                "mapped_sub_category": sub_category,
                 "confidence": confidence,
                 "source": "heuristic" if category else "pending",
                 "notes": "",
             }
             mapped.append(entry)
-            if category is None or confidence < 65:
+            if category is None or confidence < 65 or sub_category is None:
                 needs_ai.append((index, item))
 
         if needs_ai and categories and self._ai.is_enabled():
@@ -231,14 +289,24 @@ class MakeListCategoryMappingService:
                 ai_result = ai_by_ref.get(ref) or {}
                 category = ai_result.get("category")
                 if category:
-                    resolved = _resolve_category_label(str(category), categories)
+                    resolved = resolve_category_label(str(category), categories)
                     if resolved is None and str(category).strip() in categories:
                         resolved = str(category).strip()
                     if resolved:
                         mapped[index]["mapped_category"] = resolved
-                        mapped[index]["mapped_sub_category"] = (
-                            str(ai_result.get("sub_category") or "").strip() or None
+                        raw_sub = str(ai_result.get("sub_category") or "").strip()
+                        resolved_sub = resolve_sub_category_label(
+                            raw_sub,
+                            category=resolved,
+                            sub_categories_by_category=by_category,
                         )
+                        if not resolved_sub:
+                            resolved_sub = _heuristic_sub_category(
+                                item["material"],
+                                category=resolved,
+                                sub_categories_by_category=by_category,
+                            )
+                        mapped[index]["mapped_sub_category"] = resolved_sub
                         try:
                             mapped[index]["confidence"] = float(ai_result.get("confidence") or 75)
                         except (TypeError, ValueError):
@@ -249,6 +317,13 @@ class MakeListCategoryMappingService:
                 if mapped[index]["mapped_category"] is None:
                     mapped[index]["source"] = "unmapped"
                     mapped[index]["notes"] = str(ai_result.get("notes") or "No category match.")
+                elif mapped[index]["mapped_sub_category"] is None:
+                    # Keep heuristic category; try one more sub-category pass.
+                    mapped[index]["mapped_sub_category"] = _heuristic_sub_category(
+                        item["material"],
+                        category=mapped[index]["mapped_category"],
+                        sub_categories_by_category=by_category,
+                    )
 
         return mapped
 
@@ -258,6 +333,10 @@ class MakeListCategoryMappingService:
         categories: list[str],
     ) -> dict[str, dict[str, Any]]:
         template = AIService.load_prompt("map_make_list_categories.txt")
+        taxonomy_payload = {
+            "categories": categories,
+            "sub_categories_by_category": self._taxonomy.get("sub_categories_by_category") or {},
+        }
         by_ref: dict[str, dict[str, Any]] = {}
         for start in range(0, len(needs_ai), _BATCH_SIZE):
             batch = needs_ai[start : start + _BATCH_SIZE]
@@ -270,7 +349,7 @@ class MakeListCategoryMappingService:
                 for index, item in batch
             ]
             prompt = (
-                template.replace("{{CATEGORIES}}", json.dumps(categories, ensure_ascii=False))
+                template.replace("{{TAXONOMY}}", json.dumps(taxonomy_payload, ensure_ascii=False))
                 .replace(
                     "{{MATERIALS_PAYLOAD}}",
                     json.dumps(materials_payload, ensure_ascii=False),
@@ -288,7 +367,7 @@ class MakeListCategoryMappingService:
 
     @staticmethod
     def _apply_mappings_to_rows(payload: dict, mappings: list[dict[str, Any]]) -> dict:
-        """Stamp mapped_category onto make-list rows for UI and constraint lookup."""
+        """Stamp mapped_category / mapped_sub_category onto make-list rows."""
         by_material = {
             _normalize(str(item.get("material") or "")): item
             for item in mappings

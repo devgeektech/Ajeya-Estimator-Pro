@@ -148,12 +148,20 @@ def _job_is_running(boq: BOQ) -> bool:
 
 def _status_payload(boq: BOQ, session, *, expect: str = "extract") -> dict:
     """JSON fields for polling Analyse / Match completion."""
+    from apps.boq.services.boq_job_progress import get_boq_job_progress
+
     expect_key = (expect or "extract").strip().lower()
     if expect_key == "match":
         ready = boq.status in {BOQStatus.PROCESSED, BOQStatus.ANALYSIS_FAILED}
     else:
         ready = boq.status in {BOQStatus.EXTRACTED, BOQStatus.ANALYSIS_FAILED}
     display = build_boq_status_display(boq, session)
+    progress = get_boq_job_progress(boq.pk)
+    percent = int(progress.get("percent") or 0)
+    if ready and boq.status != BOQStatus.ANALYSIS_FAILED:
+        percent = 100
+    elif boq.status in {BOQStatus.PROCESSING, BOQStatus.MATCHING} and percent <= 0:
+        percent = 3
     return {
         "status": boq.status,
         "ready": ready,
@@ -162,6 +170,8 @@ def _status_payload(boq: BOQ, session, *, expect: str = "extract") -> dict:
         "label": display["label"],
         "badge": display["badge"],
         "polling": boq.status in {BOQStatus.PROCESSING, BOQStatus.MATCHING},
+        "progress_percent": percent,
+        "progress_label": progress.get("label") or display["label"],
     }
 
 
@@ -617,6 +627,42 @@ class BOQMakeVendorSelectView(LoginRequiredMixin, View):
         service = MakeVendorSelectionService(boq.pk, make_list_payload)
 
         try:
+            if action == "apply_lowest_defaults":
+                find_rates = (request.POST.get("find_rates") or "1").strip() != "0"
+                result = service.apply_lowest_defaults_all(find_rates=find_rates)
+                message = (
+                    f"Prefilled lowest approved make/vendor on {result['updated_count']} "
+                    f"product(s) ({result['matched_count']} matched with rates)."
+                )
+                if ajax:
+                    return _extraction_edit_json_ok(message, selection=result, reload=True)
+                messages.success(request, message)
+                return HttpResponseRedirect(redirect_url)
+
+            if action == "apply_subcategory":
+                category = (request.POST.get("category") or "").strip()
+                sub_category = (request.POST.get("sub_category") or "").strip()
+                make = (request.POST.get("make") or "").strip()
+                supplier = (request.POST.get("supplier") or "").strip()
+                find_rates = (request.POST.get("find_rates") or "1").strip() != "0"
+                result = service.apply_subcategory_make(
+                    category=category,
+                    sub_category=sub_category,
+                    make=make,
+                    supplier=supplier,
+                    find_rates=find_rates,
+                )
+                message = (
+                    f"Applied {result.get('make') or 'lowest price'} to "
+                    f"{result['updated_count']} product(s) in "
+                    f"{result['category']} / {result['sub_category']} "
+                    f"({result['matched_count']} matched with rates)."
+                )
+                if ajax:
+                    return _extraction_edit_json_ok(message, selection=result, reload=True)
+                messages.success(request, message)
+                return HttpResponseRedirect(redirect_url)
+
             if action == "apply_category":
                 category = (request.POST.get("category") or "").strip()
                 make = (request.POST.get("make") or "").strip()

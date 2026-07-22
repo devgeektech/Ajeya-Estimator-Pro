@@ -92,6 +92,10 @@
         matchResultsEnabled: {{ tab_access.match_results|yesno:'true,false' }},
         analysing: {{ is_extracting|yesno:'true,false' }},
         matching: {{ is_matching|yesno:'true,false' }},
+        analysisProgress: {{ is_extracting|yesno:'3,0' }},
+        analysisProgressLabel: '{{ is_extracting|yesno:"Starting analysis…,"|escapejs }}',
+        matchProgress: {{ is_matching|yesno:'3,0' }},
+        matchProgressLabel: '',
         statusLabel: '{{ status_display.label|escapejs }}',
         statusBadge: '{{ status_display.badge|escapejs }}',
         extractUrl: '{% url 'boq:extract' boq.pk %}',
@@ -102,6 +106,7 @@
         detailMakeVendorUrl: '{% url 'boq:detail' boq.pk %}?tab=make_vendor',
         detailMatchUrl: '{% url 'boq:detail' boq.pk %}?tab=match_results',
         pollTimer: null,
+        prefillingMakeVendor: false,
         scrollPositions: {},
         scrollStorageKey(tabName) {
             return 'boq-detail-scroll-{{ boq.pk }}-' + (tabName || this.tab || 'analysis');
@@ -113,17 +118,84 @@
         },
         restoreScroll(tabName) {
             try {
-                const raw = sessionStorage.getItem(this.scrollStorageKey(tabName || this.tab));
+                const key = this.scrollStorageKey(tabName || this.tab);
+                const raw = sessionStorage.getItem(key);
                 if (raw == null || raw === '') return;
-                const y = Number(raw);
+                let payload = null;
+                try {
+                    payload = JSON.parse(raw);
+                } catch (e) {
+                    payload = { y: Number(raw) };
+                }
+                const y = Number(payload && payload.y);
                 if (!Number.isFinite(y) || y < 0) return;
-                const apply = () => window.scrollTo(0, y);
+                const rowId = payload && payload.rowId ? String(payload.rowId) : '';
+                const offset = Number(payload && payload.offset);
+                const apply = () => {
+                    if (rowId && Number.isFinite(offset)) {
+                        const el = document.getElementById('line-' + rowId)
+                            || document.getElementById('make-vendor-' + rowId);
+                        if (el) {
+                            const top = el.getBoundingClientRect().top + window.scrollY;
+                            window.scrollTo(0, Math.max(0, top - offset));
+                            return;
+                        }
+                    }
+                    window.scrollTo(0, y);
+                };
                 this.$nextTick(() => {
                     apply();
+                    requestAnimationFrame(apply);
                     setTimeout(apply, 50);
                     setTimeout(apply, 200);
+                    setTimeout(apply, 500);
                 });
             } catch (e) { /* ignore */ }
+        },
+        persistScrollForRow(rowId, tabName) {
+            try {
+                const el = rowId
+                    ? (document.getElementById('line-' + rowId) || document.getElementById('make-vendor-' + rowId))
+                    : null;
+                const payload = {
+                    y: window.scrollY,
+                    rowId: rowId || '',
+                    offset: el ? el.getBoundingClientRect().top : null,
+                };
+                sessionStorage.setItem(
+                    this.scrollStorageKey(tabName || this.tab),
+                    JSON.stringify(payload)
+                );
+            } catch (e) { /* ignore */ }
+        },
+        async goToMakeVendor() {
+            if (this.analysing || this.matching || this.prefillingMakeVendor) return;
+            this.prefillingMakeVendor = true;
+            try {
+                const body = new FormData();
+                body.append('ajax', '1');
+                body.append('action', 'apply_lowest_defaults');
+                body.append('find_rates', '1');
+                const response = await fetch('{% url "boq:make_vendor_select" boq.pk %}', {
+                    method: 'POST',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-CSRFToken': this.csrfToken(),
+                        'Accept': 'application/json',
+                    },
+                    credentials: 'same-origin',
+                    body,
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || data.ok === false) {
+                    throw new Error(data.message || 'Failed to prefill lowest make/vendor.');
+                }
+                this.makeVendorEnabled = true;
+                this.reloadWithCacheBust(this.detailMakeVendorUrl);
+            } catch (error) {
+                this.prefillingMakeVendor = false;
+                alert(error.message || 'Failed to open Make & Vendor.');
+            }
         },
         csrfToken() {
             return document.querySelector('meta[name=csrf-token]')?.getAttribute('content') || '';
@@ -148,9 +220,30 @@
         applyStatus(data) {
             if (data.label) this.statusLabel = data.label;
             if (data.badge) this.statusBadge = data.badge;
+            if (data.progress_percent != null && data.progress_percent !== '') {
+                const pct = Number(data.progress_percent);
+                if (Number.isFinite(pct)) {
+                    if (data.expect === 'match' || this.matching) {
+                        this.matchProgress = Math.max(0, Math.min(100, pct));
+                    } else {
+                        this.analysisProgress = Math.max(0, Math.min(100, pct));
+                    }
+                }
+            }
+            if (data.progress_label) {
+                if (data.expect === 'match' || this.matching) {
+                    this.matchProgressLabel = data.progress_label;
+                } else {
+                    this.analysisProgressLabel = data.progress_label;
+                }
+            }
             if (data.ready && data.expect === 'extract') {
                 this.makeVendorEnabled = true;
                 this.analysisEnabled = true;
+                this.analysisProgress = 100;
+            }
+            if (data.ready && data.expect === 'match') {
+                this.matchProgress = 100;
             }
         },
         reloadWithCacheBust(url) {
@@ -182,11 +275,11 @@
                 .then((data) => {
                     this.applyStatus(data);
                     if (data.ready) {
-                        // After Analyse, land on Make & Vendor for make/supplier selection.
-                        this.reloadWithCacheBust(this.detailMakeVendorUrl);
+                        // Stay on Analysis so the expert can review before Make & Vendor.
+                        this.reloadWithCacheBust(this.detailAnalysisUrl);
                         return;
                     }
-                    this.pollTimer = setTimeout(() => this.pollExtract(), 2500);
+                    this.pollTimer = setTimeout(() => this.pollExtract(), 1500);
                 })
                 .catch(() => { this.pollTimer = setTimeout(() => this.pollExtract(), 5000); });
         },
@@ -228,11 +321,13 @@
             this.syncTabUrl('analysis');
             this.statusLabel = 'Analysing';
             this.statusBadge = 'badge--yellow';
+            this.analysisProgress = 3;
+            this.analysisProgressLabel = 'Starting analysis…';
             try {
                 const data = await this.postJob(this.extractUrl);
                 this.applyStatus(data);
                 if (data.ready || data.mode === 'sync') {
-                    this.reloadWithCacheBust(this.detailMakeVendorUrl);
+                    this.reloadWithCacheBust(this.detailAnalysisUrl);
                     return;
                 }
                 this.startPolling();
@@ -351,13 +446,15 @@
                     {% if extraction_display.missing_field_count %}
                         <span class="extraction-missing-summary">{{ extraction_display.missing_field_count }} field(s) need review.</span>
                     {% endif %}
-                    {% if can_edit_extraction %}
-                        Fill missing values below, then click <strong>Match</strong> when ready.
-                    {% elif can_match %}
-                        Click <strong>Match</strong> to compare against the master database.
+                    {% if can_edit_extraction or makeVendorEnabled %}
+                        Fill missing values below, then click <strong>Next</strong> to open Make &amp; Vendor
+                        (auto-fills lowest approved make/vendor on every product).
                     {% endif %}
                 </span>
                 {% endif %}
+                <span x-show="tab === 'make_vendor'" x-cloak>
+                    Products are prefilled with lowest approved make/vendor. Adjust from the cascade above, then click <strong>Match</strong> when ready.
+                </span>
                 {% if analysis_stats and analysis_display.has_analysis %}
                 <span x-show="tab === 'match_results' && !matching" x-cloak>
                     Matched {{ analysis_stats.products_matched|default:0 }} / {{ analysis_stats.products_total }} products
@@ -382,7 +479,19 @@
                     <button type="button" class="btn btn--small btn--analysis-loading" disabled>Analysing...</button>
                 {% endif %}
 
-                <span x-show="tab === 'analysis'" x-cloak>
+                <span x-show="tab === 'analysis' && !analysing && makeVendorEnabled" x-cloak>
+                    <button
+                        type="button"
+                        class="btn btn--small btn--primary"
+                        :disabled="prefillingMakeVendor"
+                        @click="goToMakeVendor()"
+                    >
+                        <span x-show="!prefillingMakeVendor">Next</span>
+                        <span x-show="prefillingMakeVendor" x-cloak>Loading…</span>
+                    </button>
+                </span>
+
+                <span x-show="tab === 'make_vendor'" x-cloak>
                     {% if can_match and boq.status != "PROCESSED" %}
                         <button
                             type="button"
@@ -421,27 +530,34 @@
 
         <div x-show="tab === 'analysis'" x-cloak role="tabpanel" class="analysis-tab-canvas">
             <div x-show="analysing" x-cloak class="analysis-loading-panel">
-                <div class="analysis-loading-panel__header">
-                    <span class="analysis-loading-panel__dot"></span>
-                    <div>
-                        <strong>Analysing products...</strong>
-                        <p>Extracting product rows and activities from the BOQ structure.</p>
+                <div
+                    class="analysis-loading-panel__body analysis-loading-panel__body--centered"
+                    role="progressbar"
+                    :aria-valuenow="analysisProgress"
+                    aria-valuemin="0"
+                    aria-valuemax="100"
+                    aria-label="Analysis progress"
+                >
+                    <div class="analysis-loading-spinner" aria-hidden="true">
+                        <span class="analysis-loading-spinner__arc"></span>
+                    </div>
+                    <div class="analysis-loading-panel__copy">
+                        <strong class="analysis-loading-panel__percent" x-text="Math.round(analysisProgress) + '%'">0%</strong>
+                        <p class="analysis-loading-panel__title">Analysing BOQ And Extracting Products</p>
+                        <p
+                            class="analysis-loading-panel__detail"
+                            x-show="analysisProgressLabel"
+                            x-text="analysisProgressLabel"
+                        ></p>
                     </div>
                 </div>
-                <div class="analysis-loading-rows">
-                    {% for row in boq_structure.rows|slice:":8" %}
-                    <div class="analysis-loading-row">
-                        <span>{{ row.serial|default:row.row_index }}</span>
-                        <div>{{ row.cells.1|default:"Product row"|truncatechars:100 }}</div>
-                        <em>queued</em>
+                <div class="analysis-loading-progress" aria-hidden="true">
+                    <div class="analysis-loading-progress__track">
+                        <span
+                            class="analysis-loading-progress__bar analysis-loading-progress__bar--determinate"
+                            :style="'width:' + Math.max(4, analysisProgress) + '%'"
+                        ></span>
                     </div>
-                    {% empty %}
-                    <div class="analysis-loading-row">
-                        <span>1</span>
-                        <div>Preparing BOQ rows</div>
-                        <em>queued</em>
-                    </div>
-                    {% endfor %}
                 </div>
             </div>
             <div x-show="!analysing">
@@ -454,12 +570,17 @@
         </div>
 
         <div x-show="tab === 'match_results'" x-cloak role="tabpanel">
-            <div x-show="matching" x-cloak class="analysis-loading-panel">
+            <div x-show="matching" x-cloak class="analysis-loading-panel analysis-loading-panel--match">
                 <div class="analysis-loading-panel__header">
                     <span class="analysis-loading-panel__dot analysis-loading-panel__dot--red"></span>
                     <div>
                         <strong>Matching products...</strong>
                         <p>Comparing extracted products against the master database and fetching labour charges.</p>
+                    </div>
+                </div>
+                <div class="analysis-loading-progress" role="progressbar" aria-label="Matching in progress">
+                    <div class="analysis-loading-progress__track">
+                        <span class="analysis-loading-progress__bar"></span>
                     </div>
                 </div>
             </div>
