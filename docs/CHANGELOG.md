@@ -2,6 +2,13 @@
 
 Meaningful product and technical changes only. Older history is in git.
 
+## 2026-07-24 — Manual Make/Vendor for Not Found
+
+- Not-found products (no approved make in make list) show text inputs for Make
+  and Supplier; Find rates searches Rate_Master with the typed values.
+- Cascade panel accepts typed make/supplier when a scope has no approved makes.
+- Manual override leaves the not-found summary bucket (treated as filtered).
+
 ## 2026-07-24 — Fix Not Found / No Match Counts
 
 - Summary buckets are mutually exclusive: not found, no match, filtered, default.

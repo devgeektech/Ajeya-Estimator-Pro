@@ -38,6 +38,7 @@
                 <span class="extraction-field__label">Approved make</span>
                 <select
                     class="extraction-input"
+                    x-show="!category || hasApprovedMakes"
                     x-model="make"
                     :disabled="!category || !hasApprovedMakes"
                     @change="onMakeChange()"
@@ -47,22 +48,45 @@
                         <option :value="option" x-text="option"></option>
                     </template>
                 </select>
+                <input
+                    type="text"
+                    class="extraction-input"
+                    x-show="category && !hasApprovedMakes"
+                    x-cloak
+                    x-model="make"
+                    placeholder="Enter make…"
+                    autocomplete="off"
+                >
             </label>
             <label class="extraction-field">
                 <span class="extraction-field__label">Supplier</span>
-                <select class="extraction-input" x-model="supplier" :disabled="!category || !hasApprovedMakes || !make || isLowestMake(make)">
+                <select
+                    class="extraction-input"
+                    x-show="!category || hasApprovedMakes"
+                    x-model="supplier"
+                    :disabled="!category || !hasApprovedMakes || !make || isLowestMake(make)"
+                >
                     <option value="">Auto (lowest price)</option>
                     <template x-for="option in supplierOptions" :key="option">
                         <option :value="option" x-text="option"></option>
                     </template>
                 </select>
+                <input
+                    type="text"
+                    class="extraction-input"
+                    x-show="category && !hasApprovedMakes"
+                    x-cloak
+                    x-model="supplier"
+                    placeholder="Enter supplier (optional)"
+                    autocomplete="off"
+                >
             </label>
         </div>
         <div class="make-vendor-subcategory-panel__actions">
             <button
                 type="button"
                 class="btn btn--small btn--boq-analyse"
-                :disabled="saving || !category || !hasApprovedMakes"
+                :disabled="saving || !category || (!hasApprovedMakes && !String(make || '').trim())"
                 @click="applySubcategory()"
             >
                 <span x-show="!saving" x-text="subCategory ? 'Apply to sub-category' : 'Apply to category'"></span>
@@ -73,7 +97,7 @@
                 class="extraction-save-hint extraction-save-hint--error"
                 x-show="category && !hasApprovedMakes && !error"
                 x-cloak
-            >No Approved Make Found in Make List</span>
+            >No Approved Make Found in Make List — enter make and supplier above, then Apply.</span>
         </div>
     </div>
 </section>
@@ -171,8 +195,8 @@
             <section
                 class="make-vendor-card"
                 :class="{
-                    'make-vendor-card--no-make': {{ product.highlight_no_make|yesno:'true,false' }},
-                    'make-vendor-card--no-match': status === 'unmatched' && !{{ product.highlight_no_make|yesno:'true,false' }}
+                    'make-vendor-card--no-make': notFound,
+                    'make-vendor-card--no-match': status === 'unmatched' && !notFound
                 }"
                 role="tabpanel"
                 x-data="makeVendorForm({
@@ -188,7 +212,8 @@
                     notes: '{{ product.notes|default:''|escapejs }}',
                     materialRate: '{{ product.line_output.material_rate|default:''|escapejs }}',
                     labourRate: '{{ product.line_output.labour_rate|default:''|escapejs }}',
-                    totalAmount: '{{ product.line_output.total_amount|default:''|escapejs }}'
+                    totalAmount: '{{ product.line_output.total_amount|default:''|escapejs }}',
+                    notFound: {{ product.highlight_no_make|yesno:'true,false' }}
                 })"
             >
                 <div class="make-vendor-card__head">
@@ -199,14 +224,17 @@
                             <span class="make-vendor-card__taxonomy-value">{{ product.taxonomy_label }}</span>
                         </p>
                         {% if product.highlight_no_make %}
-                        <p class="make-vendor-card__no-make-note">No Approved Make Found in Make List</p>
+                        <p class="make-vendor-card__no-make-note">No Approved Make Found in Make List — enter make and supplier below, then Find rates.</p>
                         {% endif %}
                     </div>
-                    {% if product.highlight_no_make %}
-                    <span class="badge badge--red">Not found</span>
-                    {% else %}
+                    <span
+                        class="badge badge--red"
+                        x-show="notFound"
+                        x-cloak
+                    >Not found</span>
                     <span
                         class="badge"
+                        x-show="!notFound"
                         :class="{
                             'badge--green': status === 'matched',
                             'badge--yellow': status === 'pending',
@@ -215,7 +243,6 @@
                         }"
                         x-text="statusLabel"
                     >{{ product.match_status }}</span>
-                    {% endif %}
                 </div>
 
                 <dl class="make-vendor-readonly">
@@ -228,6 +255,28 @@
                 </dl>
 
                 <div class="make-vendor-fields">
+                    {% if product.highlight_no_make %}
+                    <label class="extraction-field">
+                        <span class="extraction-field__label">Make</span>
+                        <input
+                            type="text"
+                            class="extraction-input"
+                            x-model="make"
+                            placeholder="Enter make…"
+                            autocomplete="off"
+                        >
+                    </label>
+                    <label class="extraction-field">
+                        <span class="extraction-field__label">Supplier</span>
+                        <input
+                            type="text"
+                            class="extraction-input"
+                            x-model="supplier"
+                            placeholder="Enter supplier (optional)"
+                            autocomplete="off"
+                        >
+                    </label>
+                    {% else %}
                     <label class="extraction-field">
                         <span class="extraction-field__label">Make</span>
                         <select class="extraction-input" x-model="make">
@@ -246,6 +295,7 @@
                             {% endfor %}
                         </select>
                     </label>
+                    {% endif %}
                     <div class="make-vendor-fields__actions">
                         <button
                             type="button"
@@ -406,7 +456,11 @@ document.addEventListener('alpine:init', () => {
             }
         },
         async applySubcategory() {
-            if (this.saving || !this.category || !this.hasApprovedMakes) return;
+            if (this.saving || !this.category) return;
+            if (!this.hasApprovedMakes && !String(this.make || '').trim()) {
+                this.error = 'Enter a make to apply.';
+                return;
+            }
             this.saving = true;
             this.error = '';
             try {
@@ -415,7 +469,7 @@ document.addEventListener('alpine:init', () => {
                 body.append('action', 'apply_subcategory');
                 body.append('category', this.category);
                 body.append('sub_category', this.subCategory || '');
-                body.append('make', this.make || LOWEST_LABEL);
+                body.append('make', this.hasApprovedMakes ? (this.make || LOWEST_LABEL) : String(this.make || '').trim());
                 body.append('supplier', this.supplier || '');
                 body.append('find_rates', '1');
                 const response = await fetch(this.url, {
@@ -456,6 +510,7 @@ document.addEventListener('alpine:init', () => {
         materialRate: config.materialRate || '',
         labourRate: config.labourRate || '',
         totalAmount: config.totalAmount || '',
+        notFound: Boolean(config.notFound),
         saving: false,
         error: '',
         get statusLabel() {
@@ -466,19 +521,31 @@ document.addEventListener('alpine:init', () => {
         },
         async findRates() {
             if (this.saving) return;
+            if (this.notFound && !String(this.make || '').trim()) {
+                this.error = 'Enter a make to continue.';
+                return;
+            }
             if (!this.make && !this.supplier) {
-                this.error = 'Select a make or supplier.';
+                this.error = this.notFound
+                    ? 'Enter a make or supplier.'
+                    : 'Select a make or supplier.';
                 return;
             }
             this.saving = true;
             this.error = '';
+            const wasNotFound = this.notFound;
             try {
                 const body = new FormData();
                 body.append('ajax', '1');
                 body.append('action', 'select_product');
                 body.append('row_id', this.rowId);
                 body.append('product_index', String(this.productIndex));
-                body.append('make', this.make || 'Lowest price');
+                body.append(
+                    'make',
+                    this.notFound
+                        ? String(this.make || '').trim()
+                        : (this.make || 'Lowest price')
+                );
                 body.append('supplier', this.supplier || '');
                 const response = await fetch(this.url, {
                     method: 'POST',
@@ -493,6 +560,13 @@ document.addEventListener('alpine:init', () => {
                 const data = await response.json().catch(() => ({}));
                 if (!response.ok || !data.ok) {
                     throw new Error(data.message || 'Search failed.');
+                }
+                // Reload so summary counts leave the not-found bucket.
+                if (wasNotFound) {
+                    window.location.assign(
+                        '{% url "boq:detail" boq.pk %}?tab=make_vendor&_t=' + Date.now()
+                    );
+                    return;
                 }
                 const selection = data.selection || {};
                 this.status = selection.status || 'unmatched';

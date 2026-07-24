@@ -34,6 +34,16 @@ run analysis → session confirmations → export Excel
 
 ## Session Log
 
+### 2026-07-24 — Manual Make/Vendor for Not Found
+
+Completed: Not-found Make & Vendor cards and cascade accept typed make/supplier;
+select_and_match allows Rate_Master search without approved list; product leaves
+not-found counts after manual entry.
+Pending: Open a not-found product, type make/vendor, Find rates; confirm rates
+and summary counts.
+Issues: None.
+Next: —
+
 ### 2026-07-24 — Fix Not Found / No Match Counts
 
 Completed: Summary not-found / no-match / filtered / default are exclusive and

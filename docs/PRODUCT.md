@@ -193,6 +193,11 @@ Step 3 — Match Results: Match → Calculate Price → Export
 - For each analysed product, expert selects **Make** and/or **Supplier** from options
   (make-list approved makes when present; otherwise Rate_Master makes for the
   product category/spec).
+- When the make list has **no approved make** for a product's category/sub-category
+  (**Not found**), Make and Supplier become free-text inputs so the expert can type
+  values and run **Find rates** against Rate_Master. The cascade panel also accepts
+  typed make/supplier for that scope. After a manual entry, the product leaves the
+  not-found summary bucket (counts as filtered/manual).
 - **Sub-category makes:** top panel lists **category → sub-category → make → supplier**
   (only categories/sub-categories present in Analysis extraction). **Apply to sub-category**
   sets make/supplier on every product in that sub-category and loads rates. Default make is

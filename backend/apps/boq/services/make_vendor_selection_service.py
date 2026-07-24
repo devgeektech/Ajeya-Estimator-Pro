@@ -294,7 +294,7 @@ class MakeVendorSelectionService:
                 else category_text
             )
             raise ValidationError(
-                f"{NO_APPROVED_MAKE_LABEL} for {scope}."
+                f"{NO_APPROVED_MAKE_LABEL} for {scope}. Enter a make to continue."
             )
 
         if supplier_text and _is_lowest_make(supplier_text):
@@ -1080,12 +1080,18 @@ class MakeVendorSelectionService:
         category = str(product.get("category") or "").strip()
         sub_category = str(product.get("sub_category") or "").strip()
         approved_makes = self._approved_makes_for_subcategory(category, sub_category) or None
+        # Make-list gap: expert may type make/supplier freely and search Rate_Master.
+        allow_manual_override = self.has_make_list and not approved_makes
         prefer_lowest = _is_lowest_make(make_text) or (not make_text and not supplier_text)
         if make_text and not _is_lowest_make(make_text) and approved_makes:
             if not MakeListConstraintService.make_is_allowed(make_text, approved_makes):
                 raise ValidationError(
                     f"Make '{make_text}' is not approved for {category} / {sub_category}."
                 )
+        if allow_manual_override and prefer_lowest:
+            raise ValidationError(
+                "Enter a make (and optional supplier) — no approved make in the make list."
+            )
         if _is_lowest_make(supplier_text):
             supplier_text = ""
         if prefer_lowest:
@@ -1107,7 +1113,8 @@ class MakeVendorSelectionService:
             quantity=qty,
             database_version_id=database_version_id,
             prefer_lowest_price=prefer_lowest or (bool(make_text) and not supplier_text),
-            approved_makes=approved_makes,
+            # Do not constrain to an empty approved list when overriding not-found.
+            approved_makes=None if allow_manual_override else approved_makes,
         )
 
         updated = dict(product)
@@ -1115,9 +1122,10 @@ class MakeVendorSelectionService:
         updated["selected_supplier"] = match_payload.get("supplier") or supplier_text or None
         updated["make_hint"] = make_text or updated.get("make_hint")
         updated["vendor_selection"] = match_payload
-        updated["approved_make_found"] = (
-            True if not self.has_make_list else bool(approved_makes)
-        )
+        # Manual override leaves the not-found bucket even when the make list has no entry.
+        updated["approved_make_found"] = True if (
+            allow_manual_override or not self.has_make_list or bool(approved_makes)
+        ) else False
         updated["vendor_selection_source"] = "manual"
 
         position = next(
@@ -1194,9 +1202,11 @@ class MakeVendorSelectionService:
         else:
             approved_make_found = bool(stored_approved)
 
-        # not_found = no approved makes for category/sub-category in the make list.
-        # Prefer explicit Next/cascade markers; otherwise use live make-list lookup.
-        if (
+        # Manual typed make/vendor (not-found override) counts as filtered, not not_found.
+        if source == "manual" and (selected_make or selected_supplier or match_status != "not_searched"):
+            make_status = "filtered"
+            approved_make_found = True
+        elif (
             source == "not_found"
             or notes == NO_APPROVED_MAKE_LABEL
             or (
@@ -1206,6 +1216,7 @@ class MakeVendorSelectionService:
                 and match_status != "matched"
             )
         ):
+            # not_found = no approved makes for category/sub-category in the make list.
             make_status = "not_found"
             approved_make_found = False
         elif source == "manual":
