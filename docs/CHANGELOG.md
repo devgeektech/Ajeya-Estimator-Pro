@@ -2,6 +2,252 @@
 
 Meaningful product and technical changes only. Older history is in git.
 
+## 2026-07-24 — Fix Not Found / No Match Counts
+
+- Summary buckets are mutually exclusive: not found, no match, filtered, default.
+- not found = no approved makes in make list; no match = approved make but DB miss.
+
+## 2026-07-24 — Persist Make & Vendor Unlock Across Refresh
+
+- Next always saves `MAKE_VENDOR` + unlock flag; hard refresh restores Make &
+  Vendor instead of greying it out.
+- Attribute enrichment is skipped after Make & Vendor unlock so vendor
+  selections are not rewritten on page load.
+- Last detail tab is remembered in session for hard refresh.
+
+## 2026-07-24 — Make & Vendor No-Match Summary Count
+
+- Summary bar shows **no match** for products with an approved make that failed
+  Rate_Master matching (separate from make-list **not found**).
+
+## 2026-07-24 — Remove Filter Updates Summary Counts
+
+- Removing an applied Make & Vendor filter restores those products to lowest
+  defaults and refreshes summary default/filtered counts.
+
+## 2026-07-24 — Analysis Progress Stuck At 3%
+
+- Job progress is stored in a shared media file (plus cache mirror) so Celery
+  workers and the web process see the same percent.
+- Analysis spinner soft-creeps while waiting when server progress lags.
+
+## 2026-07-24 — BOQ Status Pipeline + Calculate Price
+
+- Persisted statuses: Uploaded → Analysing… → Analysed → Make/Vendor selection →
+  Matching → Matched → Ready to Export → Exported.
+- Match Results: Calculate Price maps rates onto original rows; Export appears after.
+- Export gated until Calculate Price; successful download sets Exported.
+
+## 2026-07-24 — Remove Upload File Name Labels
+
+- Upload BOQ no longer shows “Selected: …” under file inputs.
+
+## 2026-07-24 — Hide Export On Make & Vendor
+
+- Export Excel is hidden on the Make & Vendor tab.
+
+## 2026-07-24 — Make & Vendor No-Match Sections Red
+
+- Not-found and No-match product cards use red highlight (not orange).
+
+## 2026-07-24 — Make & Vendor Summary Pinned To Header
+
+- Summary (counts + Match) sits in the sticky tab header so it no longer
+  scrolls away with the page.
+
+## 2026-07-24 — Make & Vendor Stays Open After Match
+
+- Matching no longer drops Make & Vendor unlock/filter state.
+- Make & Vendor tab stays accessible from Match Results (not greyed out).
+
+## 2026-07-24 — Sticky Summary Fix + Remove Applied Filter
+
+- Summary bar sticks cleanly under the tab header (no overlap) while scrolling.
+- Applied filters rows include an × control to remove that manual filter.
+
+## 2026-07-24 — Make & Vendor Sticky Summary Order + Tabs Wrap
+
+- Summary (with Match) sits above the selection card and stays sticky; selection
+  and Applied filters scroll away.
+- BOQ tab row wraps / scales with screen width instead of squeezing labels.
+
+## 2026-07-24 — Make & Vendor Sticky Summary + Cards
+
+- Selection cascade and summary (with Match on the right) stick under the tab
+  bar; prefill hint scrolls away.
+- Selection and Applied filters are separate cards; only field labels are bold.
+
+## 2026-07-24 — Make & Vendor Summary Card
+
+- Make & Vendor counts sit in a sticky card at the top.
+- Removed the “Analysis completed” status badge text after extract.
+
+## 2026-07-24 — Make & Vendor Product Tabs
+
+- Make & Vendor products use Analysis-style Product 1 / Product 2 tabs.
+- Matched product tabs are green; unmatched tabs are red (updates after Find rates).
+
+## 2026-07-24 — Make & Vendor Applied Filters + Flatten UI
+
+- Applied filters list only manual cascade applies (auto lowest-price defaults
+  from Next are excluded).
+- Make List table sits flush under the tab bar (removed empty gap above the
+  heading row).
+- Make & Vendor layout flattened: removed nested card boxes around summary,
+  cascade, and product lines.
+- Removed the “Filter ready to apply” preview block from Make & Vendor.
+
+## 2026-07-24 — Re-analyse Per Product Card
+
+- Re-analyse rematches a single product and refreshes only that product panel
+  (card overlay while waiting) so the page no longer blinks/shifts.
+- Other product tabs on the same row stay available during rematch; the UI
+  stays on the product you were viewing instead of jumping to product 1.
+
+## 2026-07-23 — BOQs Header + Sidebar Theme Toggle
+
+- BOQs page shows count beside the header title and Upload BOQ in the topbar;
+  theme toggle moved next to the sidebar profile chip.
+
+## 2026-07-24 — Audit Log Columns + BOQ Actions
+
+- Audit user log columns: ID/Name first, When last.
+- Audit entries now recorded for Analysed BOQ, Matched BOQ, and Exported BOQ
+  (plus analysis/matching failure), in addition to Uploaded BOQ.
+
+## 2026-07-24 — Analysis Progress Tracks Real Job
+
+- Analysis % resumes from server/session progress after leaving the page (no reset
+  to 0). Display follows real job progress from the backend; fake time-based
+  ticker removed (small smooth catch-up only).
+
+## 2026-07-24 — Notification Select + Clear Style
+
+- Notifications list has circular selection checkboxes (select all / per row);
+  Clear clears selected or all; Clear button uses dull yellow transparent styling.
+
+## 2026-07-23 — BOQ Step Notifications
+
+- In-app notifications for each BOQ step: uploaded, analysed, matched, and
+  exported (plus analysis/matching failure alerts).
+
+## 2026-07-23 — Notifications Create + Clear
+
+- Notifications are created for BOQ upload, analysis/matching success or failure,
+  and database import. Notifications page has Mark all read and Clear all.
+
+## 2026-07-23 — Dashboard View All Blue
+
+- Recent BOQs **View all** button uses the primary blue style.
+
+## 2026-07-23 — Dashboard Status Badge Colors
+
+- Recent BOQs status pills reuse the same `badge--*` classes as the BOQ list
+  (Uploaded, Analysing, Matching, completed, failed).
+
+## 2026-07-23 — Mobile Responsive Layout
+
+- App shell and key pages respond at tablet/phone widths (≤980 / ≤560): off-canvas
+  sidebar, tighter padding, scrollable BOQ tabs and wide tables, stacked dashboard
+  hero/CTAs, wrapping toolbars and form actions, larger tap targets. Desktop-only
+  `zoom: 0.9` so mobile viewport scaling is not distorted.
+
+## 2026-07-23 — Recent BOQs Table Layout
+
+- Recent BOQs matches the reference table: uppercase NAME/STATUS/UPLOADED/ACTION
+  headers, row dividers, pill status, outlined View all / Open buttons; still
+  capped at 7 rows.
+
+## 2026-07-23 — Dashboard Cards + Sidebar Active Fix
+
+- Top metric cards are larger (padding, icon, value/label type).
+- Recent BOQs use card rows with larger text, sized to show up to 7 items
+  with no list scroll.
+- Sidebar current section uses path matching and a solid blue active style.
+
+## 2026-07-23 — Sidebar Active Nav Highlight
+
+- Sidebar nav links now apply `is-active` from the current URL namespace
+  (Dashboard, BOQs, Database, Notifications, Audit, Users, Admin).
+
+## 2026-07-23 — Dashboard Redesign
+
+- Dashboard hub with hero, metric cards, recent BOQs, and workflow panel; layout
+  is compacted to fit one desktop viewport without page scrolling.
+
+## 2026-07-23 — Database Version Detail Plain Rows
+
+- Version detail summary/statistics tables no longer use alternating grey row
+  backgrounds (`table--plain`).
+
+## 2026-07-23 — Analysis Progress Ease + Hide Analysing Badge
+
+- Analyse progress eases toward 99% for the job duration (no hard 92% ceiling) and
+  reaches 100% when analysis completes; the top-left Analysing status badge is
+  hidden while the center spinner is shown.
+
+## 2026-07-22 — Adaptive Lineage Split for Large BOQs
+
+- Analysis grouping keeps small serial clusters together but splits oversized
+  chapter trees at dotted packages (`1.1`, `2.1`, …) so large BOQs extract
+  products under each package instead of one huge skipped section.
+- Extract batches pack by payload size; bare chapter title leftovers are skipped;
+  Analysis UI labels AI-missed rows as “needs re-analyse” instead of “section”.
+
+## 2026-07-22 — In-App Confirm for Product/Activity Edits
+
+- Analysis product remove and activity add/remove use the in-app confirm modal
+  instead of browser `confirm`/`prompt` dialogs.
+
+## 2026-07-22 — No Make List Uses Open Lowest Price
+
+- When no make list is uploaded, Make & Vendor **Next** / **Lowest price** picks
+  the cheapest Rate_Master row for each product’s category/sub-category across
+  all makes (cascade lists Rate_Master makes). Approved-make constraints still
+  apply when a make list is present.
+
+## 2026-07-22 — Analysis Center Spinner + Gradual Percent
+
+- Analysis loading shows a centered blue CSS spinner with percentage and title.
+- Percent advances one point at a time while Analyse runs (client ticker), so it
+  no longer sticks near 3% and then jumps to complete under sync/eager jobs.
+
+## 2026-07-22 — Single-Sheet Excel Upload Validation
+
+- BOQ and make-list Excel uploads must contain exactly one worksheet; multi-sheet
+  workbooks are rejected with a clear validation message.
+
+## 2026-07-22 — Product-Only Confidence + Make Status Summary
+
+- Analysis confidence uses product fields/attributes only (make/vendor omitted from
+  structured score, Chroma query, AI candidate payload, and attribute blend).
+- Make & Vendor products with no approved make are highlighted light orange.
+- Make & Vendor summary line: `N products · X default · Y filtered · Z not found`.
+
+## 2026-07-22 — Make & Vendor Gate + Approved-Make Rules
+
+- Make & Vendor tab stays greyed until Analysis **Next** runs lowest-price prefills
+  (`make_vendor_defaults_applied`).
+- Cascade: sub-category optional (entire category); empty approved list shows
+  “No Approved Make Found in Make List” (no all-makes fallback).
+- Lowest price / Rate_Master make filter uses optimal make-name matching
+  (exact / fingerprint / similarity) against make-list approved makes only.
+- Analysis matched-product summary omits make; confirmed DB match overwrites
+  blank/wrong class/size/unit/capacity from Rate_Master so Re-analyse is not
+  required just to pick up DB identity fields.
+
+## 2026-07-22 — Analysis Spinner Visible + Centered
+
+- Fixed Alpine `x-data` break from nested quotes (spinner never initialized).
+- Analysis loading is a centered spinner with percentage and title
+  “Analysing BOQ And Extracting Products”.
+
+## 2026-07-22 — Legacy Excel (.xls) Upload Support
+
+- BOQ and make-list uploads accept Excel 97–2003 (`.xls`). Files are converted to
+  `.xlsx` on upload (`XlsUploadConversionService` + `xlrd`), then parsed with the
+  existing openpyxl path. If conversion fails, user is asked to Save As `.xlsx`.
+
 ## 2026-07-22 — Analysis Spinner Fix (Small CSS Spinner)
 
 - Replaced the broken large SVG ring with a small animated CSS spinner, live

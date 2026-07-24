@@ -217,15 +217,30 @@ class BOQAnalysisService:
                     "row_count": extraction.get("row_count"),
                 },
                 "rows": extracted_rows,
+                # Locked until Analysis → Next runs lowest-price prefills.
+                "make_vendor_defaults_applied": False,
+                "subcategory_make_selections": {},
             }
             self._persist_analysis(boq, analysis_payload, BOQStatus.EXTRACTED)
             set_boq_job_progress(boq.pk, percent=100, label="Analysis complete", phase="extract")
             logger.info("BOQ extraction completed for id=%s (%s)", boq.pk, boq.boq_name)
+            self._audit(boq, "Analysed BOQ")
+            self._notify_user(
+                boq,
+                "BOQ analysed",
+                f"BOQ '{boq.boq_name}' analysis finished. Review products on the Analysis tab.",
+            )
             return analysis_payload
         except Exception as exc:
             logger.exception("BOQ extraction failed for id=%s", boq.pk)
             set_boq_job_progress(boq.pk, percent=100, label="Analysis failed", phase="extract")
             self._set_status(boq, BOQStatus.ANALYSIS_FAILED)
+            self._audit(boq, "Analysis failed")
+            self._notify_user(
+                boq,
+                "BOQ analysis failed",
+                f"BOQ '{boq.boq_name}' analysis failed. Open the BOQ to retry.",
+            )
             if isinstance(exc, (AIServiceError, BOQAIError)):
                 raise
             raise BOQAIError(f"BOQ extraction failed: {exc}") from exc
@@ -233,64 +248,116 @@ class BOQAnalysisService:
             # Keep 100% briefly for the last poll, then clear on next request cycle.
             pass
 
-    def rematch_row(self, row_id: str) -> dict[str, Any]:
+    def rematch_row(
+        self,
+        row_id: str,
+        product_index: int | None = None,
+    ) -> dict[str, Any]:
         """
         Re-run DB candidate recall + AI mapping for one row using current products.
 
         Preserves expert-filled fields/attributes and rematches against Rate_Master
         (fill missing attrs → Re-analyse → better DB product). Does not re-extract
         from the BOQ workbook text.
+
+        When ``product_index`` is set, only that product is rematched so other
+        product cards on the same row stay interactive.
         """
-        boq = self._get_boq()
-        existing = dict(boq.analysis_data or {})
-        rows = list(existing.get("rows") or [])
-        if not rows:
-            raise ValidationError("Run Analyse first to extract products from this BOQ.")
-        if boq.status in {BOQStatus.PROCESSING, BOQStatus.MATCHING}:
-            raise ValidationError("Wait for the current job to finish.")
+        with transaction.atomic():
+            try:
+                boq = BOQ.objects.select_for_update().get(pk=self.boq_id)
+            except BOQ.DoesNotExist:
+                raise BOQAIError(f"BOQ id={self.boq_id} not found.") from None
 
-        target = next(
-            (row for row in rows if str(row.get("row_id")) == str(row_id)),
-            None,
-        )
-        if target is None:
-            raise ValidationError(f"Unknown BOQ row: {row_id}")
-        if not (target.get("products") or []):
-            # No products yet — fall back to full re-extract from workbook text.
-            return self.re_extract_row(row_id)
+            existing = dict(boq.analysis_data or {})
+            rows = list(existing.get("rows") or [])
+            if not rows:
+                raise ValidationError("Run Analyse first to extract products from this BOQ.")
+            if boq.status in {BOQStatus.PROCESSING, BOQStatus.MATCHING}:
+                raise ValidationError("Wait for the current job to finish.")
 
-        previous_status = boq.status
-        try:
-            target = dict(target)
-            target["products"] = [
-                _normalize_product_fields(product)
-                for product in (target.get("products") or [])
-            ]
-            rematched = self._enrich_extracted_attributes([target])
-            updated_rows = _replace_rows(rows, rematched)
-            analysis_payload = {
-                **existing,
-                "schema_version": 2,
-                "phase": PHASE_EXTRACTED,
-                "boq_id": boq.pk,
-                "boq_name": boq.boq_name,
-                "stats": _compute_extraction_stats(updated_rows),
-                "extraction": {
-                    **(existing.get("extraction") or {}),
-                    "last_row_rematch": str(row_id),
-                },
-                "rows": updated_rows,
-            }
-            # Do not flip the BOQ to PROCESSING (blocks autosave on other cards).
-            self._persist_analysis(boq, analysis_payload, BOQStatus.EXTRACTED)
-            logger.info("BOQ row rematch completed for id=%s row=%s", boq.pk, row_id)
-            return analysis_payload
-        except Exception as exc:
-            logger.exception("BOQ row rematch failed for id=%s row=%s", boq.pk, row_id)
-            self._set_status(boq, previous_status if previous_status else BOQStatus.ANALYSIS_FAILED)
-            if isinstance(exc, (AIServiceError, BOQAIError, ValidationError)):
-                raise
-            raise BOQAIError(f"BOQ row rematch failed: {exc}") from exc
+            target = next(
+                (row for row in rows if str(row.get("row_id")) == str(row_id)),
+                None,
+            )
+            if target is None:
+                raise ValidationError(f"Unknown BOQ row: {row_id}")
+            if not (target.get("products") or []):
+                # No products yet — fall back to full re-extract from workbook text.
+                # Release lock before long extract by ending this block via call outside.
+                pass
+            else:
+                previous_status = boq.status
+                try:
+                    target = dict(target)
+                    products = [
+                        _normalize_product_fields(product)
+                        for product in (target.get("products") or [])
+                    ]
+                    if product_index is not None:
+                        want = int(product_index)
+                        selected = next(
+                            (
+                                product
+                                for product in products
+                                if int(product.get("product_index", -1)) == want
+                            ),
+                            None,
+                        )
+                        if selected is None:
+                            raise ValidationError(f"Unknown product index: {product_index}")
+                        stub = {**target, "products": [selected]}
+                        rematched = self._enrich_extracted_attributes([stub])
+                        updated_product = (rematched[0].get("products") or [selected])[0]
+                        merged_products = []
+                        for product in products:
+                            if int(product.get("product_index", -1)) == want:
+                                merged_products.append(updated_product)
+                            else:
+                                merged_products.append(product)
+                        target["products"] = merged_products
+                        rematched_rows = [target]
+                    else:
+                        target["products"] = products
+                        rematched_rows = self._enrich_extracted_attributes([target])
+
+                    updated_rows = _replace_rows(rows, rematched_rows)
+                    analysis_payload = {
+                        **existing,
+                        "schema_version": 2,
+                        "phase": PHASE_EXTRACTED,
+                        "boq_id": boq.pk,
+                        "boq_name": boq.boq_name,
+                        "stats": _compute_extraction_stats(updated_rows),
+                        "extraction": {
+                            **(existing.get("extraction") or {}),
+                            "last_row_rematch": str(row_id),
+                            "last_product_rematch": product_index,
+                        },
+                        "rows": updated_rows,
+                    }
+                    # Do not flip the BOQ to PROCESSING (blocks autosave on other cards).
+                    self._persist_analysis(boq, analysis_payload, BOQStatus.EXTRACTED)
+                    logger.info(
+                        "BOQ row rematch completed for id=%s row=%s product=%s",
+                        boq.pk,
+                        row_id,
+                        product_index,
+                    )
+                    return analysis_payload
+                except Exception as exc:
+                    logger.exception(
+                        "BOQ row rematch failed for id=%s row=%s", boq.pk, row_id
+                    )
+                    self._set_status(
+                        boq, previous_status if previous_status else BOQStatus.ANALYSIS_FAILED
+                    )
+                    if isinstance(exc, (AIServiceError, BOQAIError, ValidationError)):
+                        raise
+                    raise BOQAIError(f"BOQ row rematch failed: {exc}") from exc
+
+        # Empty-products path: re-extract outside the rematch lock scope above.
+        return self.re_extract_row(row_id)
 
     def re_extract_row(self, row_id: str) -> dict[str, Any]:
         """Re-run AI extraction for one anchor group and merge into analysis_data."""
@@ -404,14 +471,35 @@ class BOQAnalysisService:
                 "database_version_id": active_version.pk,
                 "stats": _compute_match_stats(analyzed_rows),
                 "extraction": existing.get("extraction") or {},
+                # Keep Make & Vendor unlock + cascade filters after Match.
+                "make_vendor_defaults_applied": bool(
+                    existing.get("make_vendor_defaults_applied")
+                ),
+                "subcategory_make_selections": existing.get("subcategory_make_selections")
+                or {},
+                # Match invalidates prior Calculate Price output.
+                "pricing_ready": False,
+                "row_pricing": {},
                 "rows": analyzed_rows,
             }
             self._persist_analysis(boq, analysis_payload, BOQStatus.PROCESSED)
             logger.info("BOQ matching completed for id=%s (%s)", boq.pk, boq.boq_name)
+            self._audit(boq, "Matched BOQ")
+            self._notify_user(
+                boq,
+                "BOQ matched",
+                f"BOQ '{boq.boq_name}' matching finished. Review Match Results.",
+            )
             return analysis_payload
         except Exception as exc:
             logger.exception("BOQ matching failed for id=%s", boq.pk)
             self._set_status(boq, BOQStatus.ANALYSIS_FAILED)
+            self._audit(boq, "Matching failed")
+            self._notify_user(
+                boq,
+                "BOQ matching failed",
+                f"BOQ '{boq.boq_name}' matching failed. Open the BOQ to retry.",
+            )
             if isinstance(exc, (AIServiceError, BOQAIError)):
                 raise
             raise BOQAIError(f"BOQ matching failed: {exc}") from exc
@@ -471,6 +559,8 @@ class BOQAnalysisService:
                 "database_version_id": active_version.pk,
                 "stats": _compute_match_stats(updated_rows),
                 "extraction": existing.get("extraction") or {},
+                "pricing_ready": False,
+                "row_pricing": {},
                 "rows": updated_rows,
             }
             self._persist_analysis(boq, analysis_payload, BOQStatus.PROCESSED)
@@ -631,3 +721,15 @@ class BOQAnalysisService:
         with transaction.atomic():
             boq.status = status
             boq.save(update_fields=["status"])
+
+    @staticmethod
+    def _notify_user(boq: BOQ, title: str, message: str = "") -> None:
+        from apps.notifications.services import notify
+
+        notify(getattr(boq, "user", None), title, message)
+
+    @staticmethod
+    def _audit(boq: BOQ, action: str) -> None:
+        from apps.audit.services import record
+
+        record(getattr(boq, "user", None), action, "BOQ", boq.boq_name)

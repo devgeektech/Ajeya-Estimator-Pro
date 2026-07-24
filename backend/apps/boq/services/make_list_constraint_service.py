@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import re
+from difflib import SequenceMatcher
 from typing import Any, Iterable
 
 LOWEST_MAKE_VALUE = "__lowest__"
 LOWEST_MAKE_LABEL = "Lowest price"
 LOWEST_MAKE_STORED = "LOWEST PRICE"
+NO_APPROVED_MAKE_LABEL = "No Approved Make Found in Make List"
 
 _DESCRIPTION_KEYS = (
     "description",
@@ -17,9 +19,17 @@ _DESCRIPTION_KEYS = (
     "materials",
 )
 
+# Optimal make-name match threshold (make-list vs Rate_Master spelling variants).
+_MAKE_MATCH_THRESHOLD = 0.82
+
 
 def _normalize_make(value: str) -> str:
     return re.sub(r"\s+", " ", (value or "").strip().upper())
+
+
+def _make_fingerprint(value: str) -> str:
+    """Alphanumeric-only fingerprint for near-duplicate brand names."""
+    return re.sub(r"[^0-9A-Z]+", "", _normalize_make(value))
 
 
 def _normalize_text(value: str) -> str:
@@ -29,6 +39,46 @@ def _normalize_text(value: str) -> str:
 
 def _token_set(text: str) -> set[str]:
     return {token for token in _normalize_text(text).split() if len(token) > 2}
+
+
+def makes_optimally_match(
+    left: str | None,
+    right: str | None,
+    *,
+    threshold: float = _MAKE_MATCH_THRESHOLD,
+) -> bool:
+    """
+    True when two make names refer to the same brand despite spelling variants.
+
+    Order: exact normalize → fingerprint / containment → SequenceMatcher → token Jaccard.
+    """
+    a = _normalize_make(str(left or ""))
+    b = _normalize_make(str(right or ""))
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+
+    fa = _make_fingerprint(a)
+    fb = _make_fingerprint(b)
+    if fa and fb and (fa == fb or fa in fb or fb in fa):
+        return True
+    if a in b or b in a:
+        return True
+
+    ratio = SequenceMatcher(None, a, b).ratio()
+    if ratio >= threshold:
+        return True
+
+    tokens_a = {token for token in a.split() if token}
+    tokens_b = {token for token in b.split() if token}
+    if tokens_a and tokens_b:
+        overlap = tokens_a & tokens_b
+        union = tokens_a | tokens_b
+        jaccard = len(overlap) / max(len(union), 1)
+        if jaccard >= 0.67 and (tokens_a <= tokens_b or tokens_b <= tokens_a or ratio >= 0.7):
+            return True
+    return False
 
 
 def _categories_equivalent(left: str, right: str) -> bool:
@@ -169,7 +219,12 @@ class MakeListConstraintService:
         category: str,
         sub_category: str = "",
     ) -> list[str] | None:
-        """Return approved makes mapped to this Rate_Master / product category."""
+        """Return approved makes mapped to this Rate_Master / product category.
+
+        When ``sub_category`` is set and no make-list row maps to that
+        sub-category (or description), returns ``None`` — do **not** fall back
+        to every make under the parent category.
+        """
         if not category or not self._entries:
             return None
 
@@ -201,8 +256,10 @@ class MakeListConstraintService:
                 if _normalize_text(str(entry.get("mapped_sub_category") or "")) == sub_norm
                 or sub_norm in _normalize_text(entry["description"])
             ]
-            if sub_hits:
-                matched_entries = sub_hits
+            if not sub_hits:
+                # Explicit sub-category with no make-list coverage.
+                return None
+            matched_entries = sub_hits
 
         makes: list[str] = []
         for entry in matched_entries:
@@ -307,20 +364,38 @@ class MakeListConstraintService:
     def make_is_allowed(make_value: str | None, approved_makes: list[str] | None) -> bool:
         if not approved_makes:
             return True
-        normalized = _normalize_make(str(make_value or ""))
-        if not normalized:
+        candidate = str(make_value or "").strip()
+        if not candidate:
             return False
-        return normalized in approved_makes
+        for approved in approved_makes:
+            if makes_optimally_match(candidate, approved):
+                return True
+        return False
 
     @staticmethod
     def filter_rate_ids_by_make(
         rate_rows: list[Any],
         approved_makes: list[str] | None,
     ) -> list[Any]:
-        """Hard filter: keep only rows whose Make is in the approved list."""
+        """Hard filter: keep only rows whose Make optimally matches the approved list."""
         if not approved_makes:
             return rate_rows
         filtered = [
-            row for row in rate_rows if MakeListConstraintService.make_is_allowed(row.Make, approved_makes)
+            row
+            for row in rate_rows
+            if MakeListConstraintService.make_is_allowed(getattr(row, "Make", None), approved_makes)
         ]
         return filtered
+
+    @staticmethod
+    def resolve_canonical_make(make_value: str | None, approved_makes: list[str] | None) -> str:
+        """Map a DB make onto the closest approved make-list label when possible."""
+        text = str(make_value or "").strip()
+        if not text:
+            return ""
+        if not approved_makes:
+            return text
+        for approved in approved_makes:
+            if makes_optimally_match(text, approved):
+                return approved
+        return text

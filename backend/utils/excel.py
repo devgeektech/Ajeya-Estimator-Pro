@@ -12,7 +12,17 @@ from pathlib import Path
 import pandas as pd
 from openpyxl import load_workbook
 
+from utils.xls_convert import (
+    is_xls_filename,
+    list_xls_visible_sheet_names,
+    openxml_workbook_path,
+)
+
 HeaderKeys = set[str] | frozenset[str]
+
+
+class MultiSheetWorkbookError(ValueError):
+    """Raised when an Excel upload contains more than one visible worksheet."""
 
 
 def read_sheets(file_path: str | Path) -> dict[str, pd.DataFrame]:
@@ -24,12 +34,60 @@ def read_sheets(file_path: str | Path) -> dict[str, pd.DataFrame]:
 
 
 def list_sheet_names(file_path: str | Path) -> list[str]:
-    """Return the sheet names present in a workbook."""
-    workbook = load_workbook(filename=file_path, read_only=True)
-    try:
-        return list(workbook.sheetnames)
-    finally:
-        workbook.close()
+    """Return all worksheet names present in a workbook (including hidden)."""
+    with openxml_workbook_path(file_path) as workbook_path:
+        workbook = load_workbook(filename=workbook_path, read_only=True)
+        try:
+            return list(workbook.sheetnames)
+        finally:
+            workbook.close()
+
+
+def list_visible_sheet_names(file_path: str | Path) -> list[str]:
+    """Return visible worksheet names only (hidden sheets are ignored)."""
+    path = Path(file_path)
+    if is_xls_filename(path.name):
+        return list_xls_visible_sheet_names(path)
+
+    with openxml_workbook_path(path) as workbook_path:
+        # Need full load for reliable sheet_state (read_only may not expose it).
+        workbook = load_workbook(filename=workbook_path, read_only=False)
+        try:
+            names: list[str] = []
+            for sheet in workbook.worksheets:
+                state = str(getattr(sheet, "sheet_state", "visible") or "visible").lower()
+                if state != "visible":
+                    continue
+                title = str(sheet.title or "").strip()
+                if title:
+                    names.append(title)
+            return names
+        finally:
+            workbook.close()
+
+
+def require_single_worksheet(
+    file_path: str | Path,
+    *,
+    detail_label: str = "BOQ details",
+) -> str:
+    """Ensure the workbook has exactly one visible worksheet; return that name.
+
+    Raises ``MultiSheetWorkbookError`` when there are multiple visible sheets.
+    """
+    names = list_visible_sheet_names(file_path)
+    if len(names) == 1:
+        return names[0]
+    if not names:
+        raise MultiSheetWorkbookError(
+            f"This file is not valid. It has no visible worksheets. "
+            f"Please upload single sheet file with {detail_label}."
+        )
+    sheet_list = ", ".join(names)
+    raise MultiSheetWorkbookError(
+        f"This file is not valid. It contains multiple sheets - {sheet_list}. "
+        f"Please upload single sheet file with {detail_label}."
+    )
 
 
 def _normalize_header(value) -> str:
@@ -339,62 +397,65 @@ def read_rows_with_metadata(
     ``sheet_score_fn(headers, records, sheet_name)`` may override default scoring
     (used by make-list parsing to prefer the MAKE LIST sheet).
     """
-    workbook = load_workbook(filename=file_path, read_only=True, data_only=True)
-    try:
-        if sheet_name:
-            worksheet = workbook[sheet_name]
-            headers, records = _read_worksheet_rows_with_metadata(
-                worksheet,
-                header_keys,
-                expand_columns=expand_columns,
+    with openxml_workbook_path(file_path) as workbook_path:
+        workbook = load_workbook(filename=workbook_path, read_only=True, data_only=True)
+        try:
+            if sheet_name:
+                worksheet = workbook[sheet_name]
+                headers, records = _read_worksheet_rows_with_metadata(
+                    worksheet,
+                    header_keys,
+                    expand_columns=expand_columns,
+                )
+                for record in records:
+                    record.setdefault("sheet_name", sheet_name)
+                return headers, records
+
+            scored: list[tuple[tuple, str, list[dict], list[dict]]] = []
+            for worksheet in workbook.worksheets:
+                headers, records = _read_worksheet_rows_with_metadata(
+                    worksheet,
+                    header_keys,
+                    expand_columns=expand_columns,
+                )
+                if sheet_score_fn is not None:
+                    score = sheet_score_fn(headers, records, worksheet.title)
+                else:
+                    score = _sheet_selection_score(headers, records, header_keys)
+                scored.append((score, worksheet.title, headers, records))
+
+            if not scored:
+                return [], []
+
+            scored.sort(key=lambda item: item[0], reverse=True)
+            best_score, best_name, best_headers, best_records = scored[0]
+
+            if not merge_matching_sheets:
+                for record in best_records:
+                    record.setdefault("sheet_name", best_name)
+                return best_headers, best_records
+
+            # Merge every sheet that looks like a BOQ table (default scorer only).
+            selected = []
+            for score, name, headers, records in scored:
+                matches = score[0] if isinstance(score, tuple) else 0
+                if matches >= min_header_matches or score == best_score:
+                    if records:
+                        selected.append((score, name, headers, records))
+            if not selected:
+                selected = [scored[0]]
+
+            merged_headers = _merge_headers(
+                [headers for *_, headers, _records in selected]
             )
-            for record in records:
-                record.setdefault("sheet_name", sheet_name)
-            return headers, records
-
-        scored: list[tuple[tuple, str, list[dict], list[dict]]] = []
-        for worksheet in workbook.worksheets:
-            headers, records = _read_worksheet_rows_with_metadata(
-                worksheet,
-                header_keys,
-                expand_columns=expand_columns,
-            )
-            if sheet_score_fn is not None:
-                score = sheet_score_fn(headers, records, worksheet.title)
-            else:
-                score = _sheet_selection_score(headers, records, header_keys)
-            scored.append((score, worksheet.title, headers, records))
-
-        if not scored:
-            return [], []
-
-        scored.sort(key=lambda item: item[0], reverse=True)
-        best_score, best_name, best_headers, best_records = scored[0]
-
-        if not merge_matching_sheets:
-            for record in best_records:
-                record.setdefault("sheet_name", best_name)
-            return best_headers, best_records
-
-        # Merge every sheet that looks like a BOQ table (default scorer only).
-        selected = []
-        for score, name, headers, records in scored:
-            matches = score[0] if isinstance(score, tuple) else 0
-            if matches >= min_header_matches or score == best_score:
-                if records:
-                    selected.append((score, name, headers, records))
-        if not selected:
-            selected = [scored[0]]
-
-        merged_headers = _merge_headers([headers for *_, headers, _records in selected])
-        merged_records: list[dict] = []
-        for _score, name, _headers, records in selected:
-            for record in records:
-                tagged = {**record, "sheet_name": name}
-                merged_records.append(tagged)
-        return merged_headers, merged_records
-    finally:
-        workbook.close()
+            merged_records: list[dict] = []
+            for _score, name, _headers, records in selected:
+                for record in records:
+                    tagged = {**record, "sheet_name": name}
+                    merged_records.append(tagged)
+            return merged_headers, merged_records
+        finally:
+            workbook.close()
 
 
 def read_rows(file_path: str | Path, sheet_name: str | None = None) -> list[dict]:

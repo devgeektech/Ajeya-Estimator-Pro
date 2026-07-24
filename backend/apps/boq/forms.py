@@ -3,19 +3,23 @@ from django import forms
 
 from apps.boq.models import BOQ
 
-_EXCEL_EXTS = (".xlsx", ".xlsm")
+_EXCEL_EXTS = (".xlsx", ".xlsm", ".xls")
 _MAKE_LIST_EXTS = _EXCEL_EXTS + (".pdf",)
 
 
 def _validate_excel(f):
     if f and not (f.name or "").lower().endswith(_EXCEL_EXTS):
-        raise forms.ValidationError("Please upload an .xlsx or .xlsm Excel file.")
+        raise forms.ValidationError(
+            "Please upload an .xlsx, .xlsm, or .xls Excel file."
+        )
     return f
 
 
 def _validate_make_list(f):
     if f and not (f.name or "").lower().endswith(_MAKE_LIST_EXTS):
-        raise forms.ValidationError("Please upload an .xlsx, .xlsm, or .pdf make list.")
+        raise forms.ValidationError(
+            "Please upload an .xlsx, .xlsm, .xls, or .pdf make list."
+        )
     return f
 
 
@@ -32,16 +36,16 @@ class BOQUploadForm(forms.Form):
         ),
     )
     uploaded_file = forms.FileField(
-        label="BOQ workbook (.xlsx or .xlsm)",
+        label="BOQ workbook (.xlsx, .xlsm, or .xls)",
         widget=forms.FileInput(
-            attrs={"class": "form-control", "accept": ".xlsx,.xlsm"}
+            attrs={"class": "form-control", "accept": ".xlsx,.xlsm,.xls"}
         ),
     )
     make_list_file = forms.FileField(
-        label="Make list (.xlsx, .xlsm, or .pdf, optional)",
+        label="Make list (.xlsx, .xlsm, .xls, or .pdf, optional)",
         required=False,
         widget=forms.FileInput(
-            attrs={"class": "form-control", "accept": ".xlsx,.xlsm,.pdf"}
+            attrs={"class": "form-control", "accept": ".xlsx,.xlsm,.xls,.pdf"}
         ),
     )
 

@@ -2,9 +2,10 @@ You extract products and activities from BOQ line items for a fire-protection / 
 
 Rules:
 - Return valid JSON only.
-- Each input row is a **serial-lineage section**: a parent item (e.g. ``1``) plus its children
-  (``1.1``, ``1.2``, lettered sub-items, specs). Shared description on the parent applies to
-  every product in the section.
+- Each input row is an **extractable section**: usually a serial package (e.g. ``1.1``)
+  with its own children (lettered sub-items, specs). Large chapter trees are split so
+  ``1.1`` / ``2.1`` arrive as separate rows; shared ancestor text may still appear in
+  ``lineage_lines``. Shared description on the parent applies to every product in the section.
 - Extract **every distinct purchasable product/equipment** in the section (pumps, pipes, valves,
   panels, fittings, switches, sprinklers, hose reels, etc.). Do not skip sized pipe/valve lines.
 - Do **NOT** invent products that are not evidenced in the BOQ text.

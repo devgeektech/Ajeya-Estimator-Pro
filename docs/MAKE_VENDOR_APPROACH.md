@@ -74,21 +74,36 @@ Category → Sub-category → Approved Make → Supplier (optional) → Apply to
 
 ### 1. Scope of apply
 
-- Selection applies to **all products** sharing the same extracted `category` + `sub_category`.
-- Products in other sub-categories are untouched.
+- Selection applies to **all products** sharing the same extracted `category` +
+  `sub_category`.
+- **Sub-category may be left blank** to apply across the **entire category**.
+- Products outside the chosen scope are untouched.
+- If a **make list was uploaded** and has **no approved makes** for that scope,
+  the UI shows **No Approved Make Found in Make List** (does not fall back to
+  all makes).
+- If **no make list was uploaded**, Lowest price and cascade use all Rate_Master
+  makes for the category/sub-category.
 
 ### 2. Default pricing behaviour
 
+- Analysis **Next** unlocks Make & Vendor and prefills every product with the
+  **lowest-price** Rate_Master row for that product’s category/sub-category.
+  - **With make list:** among **approved makes only** (optimal name matching).
+  - **Without make list:** among **all** Rate_Master rows for that taxonomy.
+- Manual cascade filters override those defaults afterward.
+
 | User choice | System behaviour |
 |-------------|------------------|
-| Make = **Lowest price** (default) | Among Rate_Master rows whose **Make** is in the **approved make list**, pick the **lowest** `Final_Amount_Excl_GST` (fallback: `Net_Material_Rate`). Structured match score is the tie-breaker. |
+| Make = **Lowest price** (default) | **With make list:** among Rate_Master rows whose **Make** is approved, pick the **lowest** `Final_Amount_Excl_GST` (fallback: `Net_Material_Rate`). **Without make list:** same lowest pick across all makes for the category/sub-category. Structured match score is the tie-breaker. |
 | Make = specific approved make, Supplier empty | Filter Rate_Master to that make; pick **lowest price** among matching product rows (same category/sub-category soft filter). |
 | Make + specific Supplier | Filter by make + supplier; pick best structured match (not necessarily cheapest). |
 
 ### 3. Source of truth order
 
-1. **Make list approved makes** — hard constraint for which makes are allowed in the cascade and for lowest-price filtering.
-2. **Rate_Master** — suppliers listed for the selected make; material/labour rates via Tech_Key after a row is chosen.
+1. **Make list approved makes** (when uploaded) — hard constraint for which makes
+   are allowed in the cascade and for lowest-price filtering.
+2. **Rate_Master** — when no make list, open make selection and lowest-price
+   across taxonomy; suppliers/rates always come from Rate_Master after a row is chosen.
 3. **Structured product match** — uses Analysis fields (class, size, unit, capacity, attributes) to choose the correct Rate_Master row within the filtered set.
 
 ### 4. Taxonomy alignment (prerequisite)

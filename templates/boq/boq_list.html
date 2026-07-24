@@ -1,15 +1,13 @@
 {% extends "base.html" %}
 {% block title %}BOQs &middot; Ajeya Estimator Pro{% endblock %}
 {% block heading %}BOQs{% endblock %}
+{% block topbar_actions %}
+<div class="topbar__actions">
+    <a href="{% url 'boq:upload' %}" class="btn btn--primary">Upload</a>
+</div>
+{% endblock %}
 
 {% block content %}
-<div class="toolbar">
-    <p class="toolbar__info">
-        {{ boqs|length }} BOQ{{ boqs|length|pluralize }}
-    </p>
-    <a href="{% url 'boq:upload' %}" class="btn btn--primary">+ Upload BOQ</a>
-</div>
-
 <div class="panel">
     <table class="table">
         <thead>

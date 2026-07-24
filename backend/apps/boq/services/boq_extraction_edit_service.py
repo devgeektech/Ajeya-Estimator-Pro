@@ -412,6 +412,15 @@ class BOQExtractionEditService:
             safe_analysis = json_safe(analysis)
             save_boq_analysis_json(boq.boq_name, safe_analysis)
             boq.analysis_data = safe_analysis
-            if boq.status == BOQStatus.PROCESSED:
-                boq.status = BOQStatus.EXTRACTED
+            # Extraction edits invalidate Match / pricing — return to earlier pipeline step.
+            if boq.status in {
+                BOQStatus.PROCESSED,
+                BOQStatus.READY_EXPORT,
+                BOQStatus.EXPORTED,
+                BOQStatus.MAKE_VENDOR,
+            }:
+                if analysis.get("make_vendor_defaults_applied"):
+                    boq.status = BOQStatus.MAKE_VENDOR
+                else:
+                    boq.status = BOQStatus.EXTRACTED
             boq.save(update_fields=["analysis_data", "status"])

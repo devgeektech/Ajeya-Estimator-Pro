@@ -22,6 +22,7 @@ from .services.boq_analysis_display_service import BOQAnalysisDisplayService
 from .services.boq_analysis_dispatch import dispatch_boq_extraction, dispatch_boq_matching
 from .services.boq_confirmation_service import BOQConfirmationService
 from .services.boq_export_service import BOQExportService
+from .services.boq_price_calculation_service import BOQPriceCalculationService
 from .services.boq_extract_service import load_extract_data
 from .services.boq_analysis_service import BOQAnalysisService, _row_description
 from .services.boq_extraction_edit_service import BOQExtractionEditService
@@ -36,8 +37,11 @@ from .services.boq_status_display_service import (
     build_boq_tab_access,
     clear_exported_in_session,
     default_detail_tab_for_boq,
+    heal_make_vendor_unlock,
+    is_export_ready,
     mark_exported_in_session,
     resolve_detail_tab,
+    should_skip_attribute_enrichment,
 )
 from .services.serial_normalizer import (
     structure_for_analysis,
@@ -46,6 +50,14 @@ from .services.serial_normalizer import (
 )
 
 logger = logging.getLogger("boq_ai")
+
+
+def _upload_error_message(exc: BaseException) -> str:
+    """Flatten Django ValidationError list-style messages for UI display."""
+    messages_attr = getattr(exc, "messages", None)
+    if messages_attr:
+        return "; ".join(str(item) for item in messages_attr)
+    return str(exc)
 
 
 def _structures_for_display(boq: BOQ) -> tuple[dict, dict]:
@@ -108,7 +120,10 @@ def _can_edit_extraction(boq: BOQ) -> bool:
         boq.status
         in {
             BOQStatus.EXTRACTED,
+            BOQStatus.MAKE_VENDOR,
             BOQStatus.PROCESSED,
+            BOQStatus.READY_EXPORT,
+            BOQStatus.EXPORTED,
             BOQStatus.ANALYSIS_FAILED,
         }
         and not _job_is_running(boq)
@@ -222,6 +237,12 @@ class BOQDetailView(LoginRequiredMixin, DetailView):
         context["boq_structure"] = boq_structure
         context["make_list_structure"] = make_list_structure
         context["has_make_list"] = bool(boq.make_list_file)
+        # Persist unlock if Next already wrote vendor selections but status/flag lagged.
+        try:
+            if heal_make_vendor_unlock(boq):
+                boq.refresh_from_db(fields=["analysis_data", "status"])
+        except Exception:
+            logger.exception("Make & Vendor unlock heal failed for BOQ id=%s", boq.pk)
         context["tab_access"] = build_boq_tab_access(boq)
         context["default_tab"] = resolve_detail_tab(
             boq,
@@ -234,32 +255,73 @@ class BOQDetailView(LoginRequiredMixin, DetailView):
         context["can_analyse"] = boq.status in {
             BOQStatus.UPLOADED,
             BOQStatus.EXTRACTED,
+            BOQStatus.MAKE_VENDOR,
             BOQStatus.PROCESSED,
+            BOQStatus.READY_EXPORT,
+            BOQStatus.EXPORTED,
             BOQStatus.ANALYSIS_FAILED,
         } and not _job_is_running(boq)
         context["can_match"] = (
-            boq.status in {BOQStatus.EXTRACTED, BOQStatus.PROCESSED}
+            boq.status
+            in {
+                BOQStatus.EXTRACTED,
+                BOQStatus.MAKE_VENDOR,
+                BOQStatus.PROCESSED,
+            }
             and bool((boq.analysis_data or {}).get("rows"))
             and not _job_is_running(boq)
         )
-        context["can_export"] = boq.status == BOQStatus.PROCESSED and bool(boq.analysis_data)
+        context["can_calculate_price"] = (
+            boq.status == BOQStatus.PROCESSED
+            and bool((boq.analysis_data or {}).get("rows"))
+            and not _job_is_running(boq)
+        )
+        context["can_export"] = is_export_ready(boq) and bool(boq.analysis_data)
         # Per-row Re-match only after a full Match has completed (Match Results tab).
         context["can_rematch"] = (
-            boq.status == BOQStatus.PROCESSED
+            boq.status
+            in {
+                BOQStatus.PROCESSED,
+                BOQStatus.READY_EXPORT,
+                BOQStatus.EXPORTED,
+            }
             and bool((boq.analysis_data or {}).get("rows"))
             and not _job_is_running(boq)
         )
         context["can_edit_extraction"] = boq.status in {
             BOQStatus.EXTRACTED,
+            BOQStatus.MAKE_VENDOR,
             BOQStatus.PROCESSED,
+            BOQStatus.READY_EXPORT,
+            BOQStatus.EXPORTED,
             BOQStatus.ANALYSIS_FAILED,
         } and not _job_is_running(boq) and bool((boq.analysis_data or {}).get("rows"))
         context["status_display"] = build_boq_status_display(boq, self.request.session)
         context["extraction_stats"] = (boq.analysis_data or {}).get("stats")
         context["analysis_stats"] = (boq.analysis_data or {}).get("stats")
 
+        from apps.boq.services.boq_job_progress import get_boq_job_progress
+
+        job_progress = get_boq_job_progress(boq.pk)
+        initial_progress = int(job_progress.get("percent") or 0)
+        if context["is_extracting"] and initial_progress <= 0:
+            initial_progress = 2
+        if not context["is_extracting"]:
+            initial_progress = 0
+        context["analysis_progress_percent"] = initial_progress
+        context["analysis_progress_label"] = (
+            job_progress.get("label") or ""
+            if context["is_extracting"]
+            else ""
+        )
+
         # Attach Rate_Master Attribute schemas for products analysed before enrichment.
-        if (boq.analysis_data or {}).get("rows") and not _job_is_running(boq):
+        # Skip after Make & Vendor unlock — rewriting rows can wipe vendor progress.
+        if (
+            (boq.analysis_data or {}).get("rows")
+            and not _job_is_running(boq)
+            and not should_skip_attribute_enrichment(boq)
+        ):
             try:
                 if BOQAnalysisService(boq.pk).ensure_attribute_enrichment():
                     boq.refresh_from_db(fields=["analysis_data"])
@@ -391,8 +453,19 @@ class BOQRowExtractView(LoginRequiredMixin, View):
             return HttpResponseRedirect(redirect_url)
 
         clear_exported_in_session(boq.pk, request.session)
+        product_index_raw = (request.POST.get("product_index") or "").strip()
+        product_index = None
+        if product_index_raw != "":
+            try:
+                product_index = int(product_index_raw)
+            except (TypeError, ValueError):
+                message = "Invalid product index."
+                if ajax:
+                    return _extraction_edit_json_error(message)
+                messages.error(request, message)
+                return HttpResponseRedirect(redirect_url)
         try:
-            BOQAnalysisService(boq.pk).rematch_row(row_id)
+            BOQAnalysisService(boq.pk).rematch_row(row_id, product_index=product_index)
             message = "Row re-analysed against the database."
             if ajax:
                 line_html = _render_extraction_line_html(request, boq, row_id)
@@ -400,6 +473,7 @@ class BOQRowExtractView(LoginRequiredMixin, View):
                     message,
                     row_id=row_id,
                     line_html=line_html,
+                    product_index=product_index,
                 )
             messages.success(request, message)
         except ValidationError as exc:
@@ -655,9 +729,32 @@ class BOQMakeVendorSelectView(LoginRequiredMixin, View):
                 message = (
                     f"Applied {result.get('make') or 'lowest price'} to "
                     f"{result['updated_count']} product(s) in "
-                    f"{result['category']} / {result['sub_category']} "
-                    f"({result['matched_count']} matched with rates)."
+                    f"{result['category']}"
+                    + (
+                        f" / {result['sub_category']}"
+                        if result.get("sub_category")
+                        else " (entire category)"
+                    )
+                    + f" ({result['matched_count']} matched with rates)."
                 )
+                if ajax:
+                    return _extraction_edit_json_ok(message, selection=result, reload=True)
+                messages.success(request, message)
+                return HttpResponseRedirect(redirect_url)
+
+            if action == "remove_subcategory_filter":
+                category = (request.POST.get("category") or "").strip()
+                sub_category = (request.POST.get("sub_category") or "").strip()
+                result = service.remove_subcategory_filter(
+                    category=category,
+                    sub_category=sub_category,
+                )
+                label = result["category"]
+                if result.get("sub_category"):
+                    label = f"{label} / {result['sub_category']}"
+                else:
+                    label = f"{label} (entire category)"
+                message = f"Removed applied filter for {label}."
                 if ajax:
                     return _extraction_edit_json_ok(message, selection=result, reload=True)
                 messages.success(request, message)
@@ -834,10 +931,62 @@ class BOQMatchResultsView(LoginRequiredMixin, View):
     def get(self, request, pk: int):
         user = cast(User, request.user)
         boq = get_object_or_404(_boq_queryset_for_user(user), pk=pk)
-        if boq.status == BOQStatus.EXTRACTED:
-            messages.info(request, "Click Match to compare extracted products against the database.")
+        if boq.status in {BOQStatus.EXTRACTED, BOQStatus.MAKE_VENDOR, BOQStatus.UPLOADED}:
+            messages.info(request, "Complete Make & Vendor, then click Match.")
+            if boq.status == BOQStatus.MAKE_VENDOR or (
+                (boq.analysis_data or {}).get("make_vendor_defaults_applied")
+            ):
+                return HttpResponseRedirect(_detail_tab_url(boq.pk, "make_vendor"))
             return HttpResponseRedirect(_detail_tab_url(boq.pk, "analysis"))
         return HttpResponseRedirect(_detail_tab_url(boq.pk, "match_results"))
+
+
+class BOQCalculatePriceView(LoginRequiredMixin, View):
+    """Map matched product rates onto original BOQ rows and unlock export."""
+
+    def post(self, request, pk: int):
+        user = cast(User, request.user)
+        boq = get_object_or_404(_boq_queryset_for_user(user), pk=pk)
+        wants_json = _request_wants_json(request)
+        redirect_url = _detail_tab_url(boq.pk, "match_results")
+
+        if _job_is_running(boq):
+            message = "Wait for the current job to finish."
+            if wants_json:
+                return JsonResponse({"ok": False, "message": message}, status=400)
+            messages.error(request, message)
+            return HttpResponseRedirect(redirect_url)
+
+        try:
+            confirmations = BOQConfirmationService(boq.pk, request.session).all()
+            result = BOQPriceCalculationService(boq.pk, confirmations).run()
+            clear_exported_in_session(boq.pk, request.session)
+            message = (
+                f"Prices calculated for {result.get('row_count', 0)} row(s). "
+                "Ready to export."
+            )
+            if wants_json:
+                return JsonResponse(
+                    {
+                        "ok": True,
+                        "message": message,
+                        "status": result.get("status"),
+                        "redirect": redirect_url,
+                    }
+                )
+            messages.success(request, message)
+        except ValidationError as exc:
+            if wants_json:
+                return JsonResponse({"ok": False, "message": str(exc)}, status=400)
+            messages.error(request, str(exc))
+        except Exception:
+            logger.exception("BOQ calculate price failed for id=%s", boq.pk)
+            message = "Failed to calculate prices."
+            if wants_json:
+                return JsonResponse({"ok": False, "message": message}, status=500)
+            messages.error(request, message)
+
+        return HttpResponseRedirect(redirect_url)
 
 
 class BOQAnalysisStatusView(LoginRequiredMixin, View):
@@ -944,14 +1093,22 @@ class BOQUploadView(LoginRequiredMixin, FormView):
             ).run()
         except Exception as exc:  # pragma: no cover - defensive
             logger.exception("BOQ upload failed")
-            form.add_error(None, f"Upload failed: {exc}")
+            message = _upload_error_message(exc)
+            form.add_error(None, f"Upload failed: {message}")
             if not self._wants_json():
-                messages.error(self.request, f"Upload failed: {exc}")
+                messages.error(self.request, f"Upload failed: {message}")
             return self.form_invalid(form)
 
         messages.success(
             self.request,
             f"BOQ '{form.cleaned_data['boq_name']}' uploaded successfully.",
+        )
+        from apps.notifications.services import notify
+
+        notify(
+            self.request.user,
+            "BOQ uploaded",
+            f"BOQ '{form.cleaned_data['boq_name']}' is ready. Open it and run Analyse.",
         )
         if self._wants_json():
             return JsonResponse({"ok": True, "redirect": self.get_success_url()})

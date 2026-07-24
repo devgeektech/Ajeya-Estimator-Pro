@@ -1,4 +1,9 @@
-"""Group BOQ rows for analysis by serial lineage (parent + children as one section)."""
+"""Group BOQ rows for analysis by serial lineage (parent + children as one section).
+
+Small related clusters stay together. Oversized chapter trees (e.g. ``2`` with
+dozens of ``2.1`` / ``2.2`` product packages) are split so each package is
+extracted separately while shared ancestor text remains on the lineage.
+"""
 from __future__ import annotations
 
 import re
@@ -17,6 +22,12 @@ _QTY_KEYS = ("qty", "quantity", "qnty", "nos", "total", "ground", "basement")
 _UNIT_KEYS = ("unit", "uom")
 _RATE_KEYS = ("rate", "unit_rate", "basic_rate")
 
+# Soft budgets for one AI extract group. Exceeding any triggers a split when
+# the group has structural (1.1 / 2.1) or lettered product children.
+MAX_LINEAGE_LINES = 18
+MAX_QTY_ROWS = 10
+MAX_GROUP_CHARS = 10000
+
 _SPEC_QTY_LINE = re.compile(
     r"operating\s*temp|temp\.?\s*:|pressure\s*:|speed\s*:|head\s*:|flow\s*:|"
     r"voltage\s*:|rpm\s*:|capacity\s*:",
@@ -24,6 +35,8 @@ _SPEC_QTY_LINE = re.compile(
 )
 _RATE_ONLY = re.compile(r"^\s*rate\s*only\s*$", re.IGNORECASE)
 _TOTAL_LABEL = re.compile(r"^\s*totals?\s*:?\s*$", re.IGNORECASE)
+_STRUCTURAL_SERIAL = re.compile(r"^(\d+(?:\.\d+)*)$")
+_DOTTED_STRUCTURAL = re.compile(r"^(\d+(?:\.\d+)+)$")
 
 
 def qty_cell_status(fields: dict[str, Any]) -> tuple[str, Any, Any]:
@@ -77,7 +90,12 @@ def has_priced_quantity(fields: dict[str, Any]) -> bool:
 
 
 def _is_structural_serial(serial: str) -> bool:
-    return bool(re.match(r"^(\d+(?:\.\d+)*)$", str(serial).strip()))
+    return bool(_STRUCTURAL_SERIAL.match(str(serial).strip()))
+
+
+def _is_dotted_structural_serial(serial: str) -> bool:
+    """True for ``1.1``, ``2.15`` — not bare chapter ``1`` / ``2``."""
+    return bool(_DOTTED_STRUCTURAL.match(str(serial).strip()))
 
 
 def _is_letter_serial(serial: str) -> bool:
@@ -406,17 +424,20 @@ def _emit_lineage_section(
     rows: list[dict[str, Any]],
     index: dict[str, dict[str, Any]],
     children: dict[str, list[str]],
+    group_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     root_id = str(root.get("row_id"))
-    group_ids = group_ids_for_anchor(root_id, rows)
+    owned_ids = list(group_ids) if group_ids is not None else group_ids_for_anchor(root_id, rows)
+    if root_id not in owned_ids:
+        owned_ids = [root_id, *[item for item in owned_ids if item != root_id]]
     # Ancestors (e.g. chapter title) for text only — ownership stays on group_ids.
     ancestor_ids = [
         ancestor_id
         for ancestor_id in get_ancestor_ids(root_id, index)
-        if ancestor_id not in group_ids
+        if ancestor_id not in owned_ids
     ]
-    lineage_ids = [*ancestor_ids, *group_ids]
-    qty_rows = _qty_rows_in_lineage(index, group_ids)
+    lineage_ids = [*ancestor_ids, *owned_ids]
+    qty_rows = _qty_rows_in_lineage(index, owned_ids)
 
     qty = None
     unit = None
@@ -440,7 +461,7 @@ def _emit_lineage_section(
         "serial": root.get("serial", ""),
         "depth": root.get("depth", 0),
         "lineage_ids": lineage_ids,
-        "group_ids": group_ids,
+        "group_ids": owned_ids,
         "lineage_count": len(lineage_ids),
         "description": row_description(root),
         "full_description": combine_row_descriptions(index, lineage_ids),
@@ -452,19 +473,118 @@ def _emit_lineage_section(
         "boq_rate": boq_rate,
         "qty_row_id": qty_row_id,
         "qty_rows": qty_rows,
-        "has_children": len(group_ids) > 1,
+        "has_children": len(owned_ids) > 1,
     }
+
+
+def _group_exceeds_budget(section: dict[str, Any]) -> bool:
+    lines = int(section.get("lineage_count") or len(section.get("group_ids") or []))
+    qty_count = len(section.get("qty_rows") or [])
+    chars = len(str(section.get("full_description") or ""))
+    return (
+        lines > MAX_LINEAGE_LINES
+        or qty_count > MAX_QTY_ROWS
+        or chars > MAX_GROUP_CHARS
+    )
+
+
+def _is_letter_product_child(row: dict[str, Any]) -> bool:
+    serial = str(row.get("serial") or "").strip()
+    description = row_description(row)
+    if not _is_letter_serial(serial):
+        return False
+    if not description or _is_spec_description(description):
+        return False
+    return True
+
+
+def _is_plain_product_child(row: dict[str, Any]) -> bool:
+    """Blank-serial / free-text child that still names a distinct supply item."""
+    serial = str(row.get("serial") or "").strip()
+    if serial and (_is_structural_serial(serial) or _is_letter_serial(serial)):
+        return False
+    description = row_description(row)
+    if not description or _is_spec_description(description):
+        return False
+    if _TOTAL_LABEL.match(description):
+        return False
+    # Short section headers like INCOMING / BUSBARS stay with the panel package
+    # unless they look like a full supply sentence.
+    if len(description) < 28 and " " not in description.strip():
+        return False
+    return True
+
+
+def _split_child_candidates(
+    root_id: str,
+    *,
+    index: dict[str, dict[str, Any]],
+    children: dict[str, list[str]],
+) -> list[dict[str, Any]]:
+    """Prefer dotted structural packages (1.1, 2.1); else lettered; else plain kids."""
+    direct = [index[cid] for cid in children.get(root_id, []) if cid in index]
+    structural = [
+        row
+        for row in direct
+        if _is_dotted_structural_serial(str(row.get("serial") or ""))
+    ]
+    if structural:
+        return structural
+    lettered = [row for row in direct if _is_letter_product_child(row)]
+    if lettered:
+        return lettered
+    plain = [row for row in direct if _is_plain_product_child(row)]
+    if len(plain) >= 2:
+        return plain
+    return []
+
+
+def _residual_group_ids(
+    root_id: str,
+    *,
+    children: dict[str, list[str]],
+    covered: set[str],
+) -> list[str]:
+    """Root + descendants not already owned by a split child section."""
+    residual = [root_id]
+    for descendant_id in _collect_all_descendant_ids(root_id, children):
+        if descendant_id not in covered:
+            residual.append(descendant_id)
+    return residual
+
+
+def _residual_worth_extracting(
+    section: dict[str, Any],
+    *,
+    index: dict[str, dict[str, Any]],
+) -> bool:
+    """Keep residuals that still carry qty or distinct product text beyond a title."""
+    if section.get("qty_rows"):
+        return True
+    owned = [str(item) for item in (section.get("group_ids") or [])]
+    if len(owned) <= 1:
+        return False
+    root_id = str(section.get("row_id") or "")
+    root_desc = row_description(index.get(root_id) or {})
+    for row_id in owned:
+        if row_id == root_id:
+            continue
+        text = row_description(index.get(row_id) or {})
+        if text and text != root_desc:
+            return True
+    return False
 
 
 def grouped_anchor_rows(boq_data: dict[str, Any]) -> list[dict[str, Any]]:
     """
     Return extractable sections keyed by serial lineage.
 
-    One Analysis section = an item that sits under a chapter/section boundary
-    (for example ``1``) plus its full serial subtree (``1.1``, ``1.2``, specs…).
-    Shared parent description is kept with every child product in that section.
-    Filled Unit/Qty rows inside the subtree still carry amounts (including ``0``
-    and ``Rate Only``); they do not split the lineage into separate sections.
+    Default: an item under a chapter/section boundary (for example ``1``) plus its
+    subtree stays one section so shared parent text applies to every product.
+
+    Oversized trees (too many lines / qty rows / characters) are split at dotted
+    children (``1.1``, ``2.1``, …) and recursively when those packages are still
+    large. Shared ancestor text remains on each split section via ``lineage_ids``.
     """
     rows = boq_data.get("rows") or []
     if not rows:
@@ -475,20 +595,63 @@ def grouped_anchor_rows(boq_data: dict[str, Any]) -> list[dict[str, Any]]:
     covered: set[str] = set()
     grouped: list[dict[str, Any]] = []
 
+    def emit_or_split(root: dict[str, Any]) -> None:
+        root_id = str(root.get("row_id") or "")
+        if not root_id or root_id in covered:
+            return
+
+        section = _emit_lineage_section(
+            root=root,
+            rows=rows,
+            index=index,
+            children=children,
+        )
+        if not _group_exceeds_budget(section):
+            grouped.append(section)
+            covered.update(str(item) for item in section.get("group_ids") or [])
+            return
+
+        split_children = _split_child_candidates(
+            root_id,
+            index=index,
+            children=children,
+        )
+        if not split_children:
+            grouped.append(section)
+            covered.update(str(item) for item in section.get("group_ids") or [])
+            return
+
+        for child in split_children:
+            emit_or_split(child)
+
+        residual_ids = _residual_group_ids(
+            root_id,
+            children=children,
+            covered=covered,
+        )
+        if len(residual_ids) <= 1:
+            covered.add(root_id)
+            return
+
+        residual = _emit_lineage_section(
+            root=root,
+            rows=rows,
+            index=index,
+            children=children,
+            group_ids=residual_ids,
+        )
+        if _residual_worth_extracting(residual, index=index):
+            grouped.append(residual)
+            covered.update(residual_ids)
+        else:
+            covered.update(residual_ids)
+
     for row in rows:
         row_id = str(row.get("row_id") or "")
         if not row_id or row_id in covered:
             continue
         if not _is_lineage_section_root(row, index=index, children=children):
             continue
-
-        section = _emit_lineage_section(
-            root=row,
-            rows=rows,
-            index=index,
-            children=children,
-        )
-        grouped.append(section)
-        covered.update(str(item) for item in section.get("group_ids") or [])
+        emit_or_split(row)
 
     return grouped

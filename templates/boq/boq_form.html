@@ -5,7 +5,8 @@
 {% block content %}
 <div class="panel panel--narrow">
     <p class="panel__text" style="margin-bottom:20px;">
-        Upload a BOQ workbook and, optionally, its make list as Excel or PDF.
+        Upload a BOQ workbook and, optionally, its make list as Excel (.xlsx, .xlsm, .xls) or PDF.
+        Each Excel file must contain <strong>exactly one sheet</strong>.
     </p>
     <form
         id="boq-upload-form"
@@ -27,14 +28,12 @@
         <label class="field" data-field="uploaded_file">
             <span class="field__label">{{ form.uploaded_file.label }}<span class="field__required" aria-hidden="true">*</span></span>
             {{ form.uploaded_file }}
-            <span class="field__file-name" data-file-name-for="uploaded_file" aria-live="polite"></span>
             <span class="field__error" data-error-for="uploaded_file"></span>
         </label>
 
         <label class="field" data-field="make_list_file">
             <span class="field__label">{{ form.make_list_file.label }}</span>
             {{ form.make_list_file }}
-            <span class="field__file-name" data-file-name-for="make_list_file" aria-live="polite"></span>
             <span class="field__error" data-error-for="make_list_file"></span>
         </label>
 
@@ -45,14 +44,6 @@
         </div>
     </form>
 </div>
-<style>
-    .field__file-name {
-        display: block;
-        margin-top: 4px;
-        font-size: .8rem;
-        color: var(--text-muted);
-    }
-</style>
 <script>
 (function () {
     const form = document.getElementById('boq-upload-form');
@@ -97,18 +88,6 @@
             }
         }
     }
-
-    function syncFileName(input) {
-        const slot = form.querySelector('[data-file-name-for="' + input.name + '"]');
-        if (!slot) return;
-        const file = input.files && input.files[0];
-        slot.textContent = file ? ('Selected: ' + file.name) : '';
-    }
-
-    form.querySelectorAll('input[type="file"]').forEach((input) => {
-        syncFileName(input);
-        input.addEventListener('change', () => syncFileName(input));
-    });
 
     // Block Enter-key native submit (would reload and clear files).
     form.addEventListener('submit', (event) => {

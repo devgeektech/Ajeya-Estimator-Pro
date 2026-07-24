@@ -10,8 +10,11 @@ class UserRole(models.TextChoices):
 
 class BOQStatus(models.TextChoices):
     UPLOADED = "UPLOADED", "Uploaded"
-    PROCESSING = "PROCESSING", "Processing"
-    EXTRACTED = "EXTRACTED", "Extracted"
+    PROCESSING = "PROCESSING", "Analysing..."
+    EXTRACTED = "EXTRACTED", "Analysed"
+    MAKE_VENDOR = "MAKE_VENDOR", "Make/Vendor selection"
     MATCHING = "MATCHING", "Matching"
-    PROCESSED = "PROCESSED", "Processed"
+    PROCESSED = "PROCESSED", "Matched"
+    READY_EXPORT = "READY_EXPORT", "Ready to Export"
+    EXPORTED = "EXPORTED", "Exported"
     ANALYSIS_FAILED = "ANALYSIS_FAILED", "Analysis Failed"

@@ -12,7 +12,11 @@
                     <span class="badge badge--dark">{{ line.product_count }} products</span>
                 {% endif %}
                 {% if line.status == 'skipped' %}
+                    {% if line.skip_reason == 'ai_missing_row' %}
+                    <span class="badge badge--yellow">needs re-analyse</span>
+                    {% else %}
                     <span class="badge badge--gray">section</span>
+                    {% endif %}
                 {% endif %}
             </div>
         </header>
@@ -89,8 +93,12 @@
             class="extraction-products"
             x-data="{
                 activeProduct: {{ line.products.0.product_index }},
+                reanalysingByProduct: {},
                 saveStatus: { type: '', message: '', visible: false },
                 saveStatusTimer: null,
+                get activeIsReanalysing() {
+                    return !!this.reanalysingByProduct[this.activeProduct];
+                },
                 clearSaveStatus() {
                     if (this.saveStatusTimer) {
                         clearTimeout(this.saveStatusTimer);
@@ -133,7 +141,10 @@
                     type="button"
                     class="extraction-product-tabs__btn"
                     role="tab"
-                    :class="{ 'is-active': activeProduct === {{ product.product_index }} }"
+                    :class="{
+                        'is-active': activeProduct === {{ product.product_index }},
+                        'is-busy': !!reanalysingByProduct[{{ product.product_index }}],
+                    }"
                     :aria-selected="activeProduct === {{ product.product_index }}"
                     @click="activeProduct = {{ product.product_index }}; clearSaveStatus()"
                 >Product {{ product.display_number }}</button>
@@ -159,11 +170,15 @@
                     <button
                         type="button"
                         class="btn btn--xsmall btn--boq-analyse"
+                        :disabled="activeIsReanalysing"
                         @click="window.reanalyseActiveExtractionProduct($el, '{% url "boq:row_extract" boq.pk line.row_id %}')"
-                    >Re-analyse</button>
+                    >
+                        <span x-text="activeIsReanalysing ? 'Re-analysing…' : 'Re-analyse'"></span>
+                    </button>
                     <button
                         type="button"
                         class="btn btn--xsmall btn--danger"
+                        :disabled="activeIsReanalysing"
                         @click="window.removeActiveExtractionProduct($el, '{% url 'boq:extraction_edit' boq.pk %}', '{{ boq.pk }}')"
                     >Remove</button>
                 </div>
@@ -193,6 +208,17 @@
                 })"
                 {% endif %}
             >
+                {% if can_edit_extraction %}
+                <div
+                    class="extraction-product-card__busy"
+                    x-show="reanalysing"
+                    x-cloak
+                    aria-live="polite"
+                    aria-busy="true"
+                >
+                    <span class="extraction-product-card__busy-text">Re-analysing…</span>
+                </div>
+                {% endif %}
                 {% if product.db_match %}
                 <div class="extraction-db-match extraction-db-match--{{ product.db_match.status|default:product.db_match_status }}">
                     <div class="extraction-db-match__head">

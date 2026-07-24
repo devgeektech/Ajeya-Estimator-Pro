@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from decimal import Decimal
 from typing import Any
 
@@ -105,12 +106,12 @@ def _candidate_snapshot(rate: Rate_Master, *, confidence: float | None = None) -
 
 
 def _product_summary(snapshot: dict[str, Any]) -> str:
+    # Intentionally omit make — Analysis finds the product; Make & Vendor selects make.
     parts = [
         snapshot.get("category"),
         snapshot.get("sub_category"),
         snapshot.get("class"),
         snapshot.get("size"),
-        snapshot.get("make"),
     ]
     return " / ".join(str(part).strip() for part in parts if _is_filled(part)) or "Matched product"
 
@@ -127,20 +128,41 @@ def _compute_match_confidence(
     schema_keys: list[str],
     ai_confidence: float | None,
 ) -> float:
-    """Blend structured field score with attribute mapping fill (service-side)."""
-    structured, _breakdown = structured_match_score(extracted, rate)
+    """Blend structured product score with attribute fill — never make/vendor."""
+    product_only = dict(extracted)
+    product_only["make_hint"] = None
+    structured, _breakdown = structured_match_score(product_only, rate)
+
+    skip_keys = {"make", "manufacturer", "brand", "supplier", "vendor"}
+    product_schema = [
+        key for key in schema_keys if _normalize_text_key(key) not in skip_keys
+    ]
+    product_mapped = {
+        key: value
+        for key, value in (mapped_attributes or {}).items()
+        if _normalize_text_key(key) not in skip_keys
+    }
+    db_attrs = {
+        key: value
+        for key, value in (parse_attributes(rate.Attribute) or {}).items()
+        if _normalize_text_key(key) not in skip_keys
+    }
     attr_score = compute_attribute_confidence(
-        schema_keys,
-        mapped_attributes,
-        db_attrs=parse_attributes(rate.Attribute) or None,
+        product_schema,
+        product_mapped,
+        db_attrs=db_attrs or None,
     )
-    if schema_keys:
+    if product_schema:
         blended = (0.55 * structured) + (0.45 * attr_score)
     else:
         blended = structured
     if ai_confidence is not None:
         blended = (0.7 * blended) + (0.3 * float(ai_confidence))
     return round(max(0.0, min(100.0, blended)), 2)
+
+
+def _normalize_text_key(value: str) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip().lower())
 
 
 def _map_attrs_onto_schema(
@@ -300,7 +322,10 @@ class ProductAIMappingService:
         return self.map_rows(rows, only_missing=False)
 
     def _recall_candidates(self, product: dict[str, Any]) -> list[dict[str, Any]]:
-        match = self._matcher.match_product(product, chroma_limit=25)
+        # Analysis finds the product without make — Make & Vendor selects make later.
+        product_for_recall = dict(product)
+        product_for_recall["make_hint"] = None
+        match = self._matcher.match_product(product_for_recall, chroma_limit=25)
         snapshots: list[dict[str, Any]] = []
         seen: set[int] = set()
 
@@ -359,9 +384,19 @@ class ProductAIMappingService:
                             "size": candidate.get("size"),
                             "unit": candidate.get("unit"),
                             "capacity": candidate.get("capacity"),
-                            "make": candidate.get("make"),
-                            "attribute_schema": candidate.get("attribute_schema") or [],
-                            "attributes": candidate.get("attributes") or {},
+                            # Omit make — Analysis confidence is product-only.
+                            "attribute_schema": [
+                                key
+                                for key in (candidate.get("attribute_schema") or [])
+                                if _normalize_text_key(str(key))
+                                not in {"make", "manufacturer", "brand", "supplier", "vendor"}
+                            ],
+                            "attributes": {
+                                key: value
+                                for key, value in (candidate.get("attributes") or {}).items()
+                                if _normalize_text_key(str(key))
+                                not in {"make", "manufacturer", "brand", "supplier", "vendor"}
+                            },
                             "retrieval_confidence": candidate.get("confidence"),
                         }
                         for candidate in item["candidates"]
@@ -512,7 +547,8 @@ class ProductAIMappingService:
         enriched["attribute_source"] = "database" if schema_keys else "extracted"
         enriched["db_match_status"] = DB_MATCH_MATCHED
         enriched["db_product_id"] = rate.pk
-        enriched["db_product_make"] = rate.Make
+        # Keep make off Analysis UI; Make & Vendor owns vendor selection.
+        enriched["db_product_make"] = ""
         enriched["db_product_tech_key"] = rate.Tech_Key
         enriched["db_match_confidence"] = confidence
         enriched["db_product_summary"] = _product_summary(summary_source)
@@ -527,7 +563,7 @@ class ProductAIMappingService:
             "candidate_ids": [item["id"] for item in candidates],
             "match_status": DB_MATCH_MATCHED,
         }
-        return align_product_taxonomy_from_rate(enriched, rate)
+        return align_product_taxonomy_from_rate(enriched, rate, overwrite_core_fields=True)
 
     def _provisional_schema_match(
         self,
@@ -577,7 +613,7 @@ class ProductAIMappingService:
             "candidate_ids": [item.get("id") for item in candidates],
             "match_status": DB_MATCH_PROVISIONAL,
         }
-        return align_product_taxonomy_from_rate(enriched, rate)
+        return align_product_taxonomy_from_rate(enriched, rate, overwrite_core_fields=False)
 
     @staticmethod
     def _extracted_payload(product: dict[str, Any]) -> dict[str, Any]:
@@ -589,7 +625,8 @@ class ProductAIMappingService:
             "size": product.get("size"),
             "unit": product.get("unit"),
             "capacity": product.get("capacity"),
-            "make_hint": product.get("make_hint"),
+            # Analysis does not select make; omit hints so AI maps product only.
+            "make_hint": None,
             "attributes": product.get("attributes") or {},
         }
 

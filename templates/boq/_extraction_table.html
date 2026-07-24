@@ -32,7 +32,7 @@ document.addEventListener('alpine:init', () => {
         return data;
     };
 
-    window.replaceExtractionLine = function replaceExtractionLine(rowId, lineHtml) {
+    window.replaceExtractionLine = function replaceExtractionLine(rowId, lineHtml, options) {
         if (!rowId || !lineHtml) {
             return false;
         }
@@ -41,7 +41,9 @@ document.addEventListener('alpine:init', () => {
             return false;
         }
         const scrollY = window.scrollY;
-        const offset = current.getBoundingClientRect().top;
+        const preferredProduct = options && options.activeProduct != null
+            ? Number(options.activeProduct)
+            : null;
         const holder = document.createElement('div');
         holder.innerHTML = String(lineHtml).trim();
         const next = holder.firstElementChild;
@@ -55,19 +57,75 @@ document.addEventListener('alpine:init', () => {
         if (window.Alpine && typeof Alpine.initTree === 'function') {
             Alpine.initTree(next);
         }
-        const restore = () => {
-            const el = document.getElementById('line-' + rowId);
-            if (el) {
-                const top = el.getBoundingClientRect().top + window.scrollY;
-                window.scrollTo(0, Math.max(0, top - offset));
-            } else {
-                window.scrollTo(0, scrollY);
+        if (Number.isFinite(preferredProduct) && window.Alpine) {
+            const productsRoot = next.querySelector('.extraction-products');
+            if (productsRoot) {
+                try {
+                    const data = Alpine.$data(productsRoot);
+                    if (data && 'activeProduct' in data) {
+                        data.activeProduct = preferredProduct;
+                    }
+                } catch (e) { /* ignore */ }
             }
-        };
-        restore();
-        requestAnimationFrame(restore);
-        setTimeout(restore, 50);
-        setTimeout(restore, 200);
+        }
+        // Keep viewport stable — avoid scroll correction that causes page blink/shift.
+        window.scrollTo(0, scrollY);
+        return true;
+    };
+
+    // Swap one product panel only so other tabs stay interactive and the page does not blink.
+    window.replaceExtractionProductPanel = function replaceExtractionProductPanel(rowId, productIndex, lineHtml, options) {
+        if (!rowId || lineHtml == null || productIndex == null || productIndex === '') {
+            return false;
+        }
+        const line = document.getElementById('line-' + rowId);
+        if (!line) {
+            return false;
+        }
+        const scrollY = window.scrollY;
+        const index = Number(productIndex);
+        const holder = document.createElement('div');
+        holder.innerHTML = String(lineHtml).trim();
+        const nextLine = holder.firstElementChild;
+        if (!nextLine) {
+            return false;
+        }
+        const productId = 'product-' + rowId + '-' + index;
+        const nextCard = nextLine.querySelector('#' + productId);
+        const currentCard = line.querySelector('#' + productId);
+        if (!nextCard || !currentCard) {
+            return window.replaceExtractionLine(rowId, lineHtml, {
+                activeProduct: Number.isFinite(index) ? index : null,
+                ...(options || {}),
+            });
+        }
+        const nextPanel = nextCard.closest('.extraction-product-panel') || nextCard;
+        const currentPanel = currentCard.closest('.extraction-product-panel') || currentCard;
+        if (window.Alpine && typeof Alpine.destroyTree === 'function') {
+            Alpine.destroyTree(currentPanel);
+        }
+        currentPanel.replaceWith(nextPanel);
+        if (window.Alpine && typeof Alpine.initTree === 'function') {
+            Alpine.initTree(nextPanel);
+        }
+        const forceActive = !(options && options.preserveActiveTab);
+        if (window.Alpine) {
+            const productsRoot = line.querySelector('.extraction-products');
+            if (productsRoot) {
+                try {
+                    const data = Alpine.$data(productsRoot);
+                    if (forceActive && Number.isFinite(index) && data && 'activeProduct' in data) {
+                        data.activeProduct = index;
+                    }
+                    if (data && data.reanalysingByProduct && Number.isFinite(index)) {
+                        const nextBusy = { ...data.reanalysingByProduct };
+                        delete nextBusy[index];
+                        data.reanalysingByProduct = nextBusy;
+                    }
+                } catch (e) { /* ignore */ }
+            }
+        }
+        window.scrollTo(0, scrollY);
         return true;
     };
 
@@ -96,20 +154,52 @@ document.addEventListener('alpine:init', () => {
     };
 
     window.reanalyseActiveExtractionProduct = async function reanalyseActiveExtractionProduct(fromEl, rematchUrl) {
+        const productsRoot = fromEl && fromEl.closest('.extraction-products');
         const data = window.getActiveExtractionProductData(fromEl);
         if (!data || typeof data.reanalyseRow !== 'function') {
             alert('Select a product tab first.');
             return;
         }
-        const btn = fromEl;
-        const original = btn.textContent;
-        btn.disabled = true;
-        btn.textContent = 'Re-analysing…';
+        let lineData = null;
+        if (productsRoot && window.Alpine) {
+            try {
+                lineData = Alpine.$data(productsRoot);
+            } catch (e) {
+                lineData = null;
+            }
+        }
+        const productIndex = Number(data.productIndex);
+        if (lineData) {
+            if (!lineData.reanalysingByProduct) {
+                lineData.reanalysingByProduct = {};
+            }
+            if (lineData.reanalysingByProduct[productIndex]) {
+                return;
+            }
+            lineData.reanalysingByProduct = {
+                ...lineData.reanalysingByProduct,
+                [productIndex]: true,
+            };
+        }
         try {
-            await data.reanalyseRow(rematchUrl);
+            await data.reanalyseRow(rematchUrl, productIndex);
         } catch (e) {
-            btn.disabled = false;
-            btn.textContent = original;
+            /* errors surfaced in reanalyseRow */
+        } finally {
+            // Prefer the live Alpine root — panel swap may have replaced the card.
+            let liveLineData = lineData;
+            if (productsRoot && window.Alpine) {
+                try {
+                    liveLineData = Alpine.$data(productsRoot);
+                } catch (e) {
+                    liveLineData = lineData;
+                }
+            }
+            if (liveLineData && liveLineData.reanalysingByProduct) {
+                const next = { ...liveLineData.reanalysingByProduct };
+                delete next[productIndex];
+                liveLineData.reanalysingByProduct = next;
+            }
         }
     };
 
@@ -119,7 +209,13 @@ document.addEventListener('alpine:init', () => {
             alert('Select a product tab first.');
             return;
         }
-        if (!confirm('Remove this product from the row?')) {
+        const confirmed = window.BOQConfirm
+            ? await window.BOQConfirm.ask('Remove this product from the row?', {
+                title: 'Remove product',
+                confirmLabel: 'Remove',
+            })
+            : window.confirm('Remove this product from the row?');
+        if (!confirmed) {
             return;
         }
         try {
@@ -150,7 +246,13 @@ document.addEventListener('alpine:init', () => {
     };
 
     window.addExtractionActivity = async function addExtractionActivity(fromEl, editUrl, rowId) {
-        const name = window.prompt('Activity name:');
+        const name = window.BOQConfirm
+            ? await window.BOQConfirm.prompt('Enter the activity name to add to this row.', {
+                title: 'Add activity',
+                inputLabel: 'Activity name',
+                confirmLabel: 'Add',
+            })
+            : window.prompt('Activity name:');
         if (!name || !String(name).trim()) {
             return;
         }
@@ -177,6 +279,15 @@ document.addEventListener('alpine:init', () => {
     window.removeExtractionActivity = async function removeExtractionActivity(fromEl, editUrl, rowId) {
         const activity = fromEl.getAttribute('data-activity') || '';
         if (!activity) {
+            return;
+        }
+        const confirmed = window.BOQConfirm
+            ? await window.BOQConfirm.ask(`Remove activity "${activity}" from this row?`, {
+                title: 'Remove activity',
+                confirmLabel: 'Remove',
+            })
+            : window.confirm(`Remove activity "${activity}" from this row?`);
+        if (!confirmed) {
             return;
         }
         try {
@@ -329,20 +440,52 @@ document.addEventListener('alpine:init', () => {
                 /* saveError already set */
             }
         },
-        async reanalyseRow(rematchUrl) {
+        async reanalyseRow(rematchUrl, productIndex) {
             if (this.reanalysing) {
                 return;
             }
             this.reanalysing = true;
             this.saveError = '';
+            const activeIndex = productIndex != null ? Number(productIndex) : Number(this.productIndex);
             const scrollY = window.scrollY;
-            const lineEl = document.getElementById('line-' + this.rowId);
-            const offset = lineEl ? lineEl.getBoundingClientRect().top : null;
+            const productsRoot = this.$el && this.$el.closest
+                ? this.$el.closest('.extraction-products')
+                : null;
             try {
                 await this.persistProduct({ silent: true });
-                const data = await window.extractionAjaxPost(rematchUrl, {});
+                const data = await window.extractionAjaxPost(rematchUrl, {
+                    product_index: String(activeIndex),
+                });
                 const rowId = data.row_id || this.rowId;
-                const replaced = window.replaceExtractionLine(rowId, data.line_html);
+                const preferred = data.product_index != null ? Number(data.product_index) : activeIndex;
+                // If the user switched tabs while this rematch ran, keep their current tab.
+                let viewingIndex = preferred;
+                const liveRoot = document.getElementById('line-' + rowId)
+                    && document.getElementById('line-' + rowId).querySelector('.extraction-products');
+                if (liveRoot && window.Alpine) {
+                    try {
+                        const lineData = Alpine.$data(liveRoot);
+                        if (lineData && lineData.activeProduct != null) {
+                            viewingIndex = Number(lineData.activeProduct);
+                        }
+                    } catch (e) { /* ignore */ }
+                } else if (productsRoot && window.Alpine) {
+                    try {
+                        const lineData = Alpine.$data(productsRoot);
+                        if (lineData && lineData.activeProduct != null) {
+                            viewingIndex = Number(lineData.activeProduct);
+                        }
+                    } catch (e) { /* ignore */ }
+                }
+                const preserveActiveTab = Number.isFinite(viewingIndex) && viewingIndex !== preferred;
+                const replaced = window.replaceExtractionProductPanel(
+                    rowId,
+                    preferred,
+                    data.line_html,
+                    { preserveActiveTab }
+                ) || window.replaceExtractionLine(rowId, data.line_html, {
+                    activeProduct: preserveActiveTab ? viewingIndex : preferred,
+                });
                 if (!replaced) {
                     try {
                         sessionStorage.setItem(
@@ -350,18 +493,20 @@ document.addEventListener('alpine:init', () => {
                             JSON.stringify({
                                 y: scrollY,
                                 rowId: rowId,
-                                offset: offset,
+                                productIndex: preferred,
                             })
                         );
                     } catch (e) { /* ignore */ }
                     window.location.assign('{% url "boq:detail" boq.pk %}?tab=analysis&_t=' + Date.now());
                     return;
                 }
+                window.scrollTo(0, scrollY);
             } catch (error) {
                 this.reanalysing = false;
                 this.saveError = error.message || 'Re-analyse failed.';
                 this.emitSaveStatus('error', this.saveError);
                 alert(this.saveError);
+                throw error;
             }
         },
     }));

@@ -19,6 +19,7 @@ urlpatterns = [
     path("<int:pk>/process/", views.BOQProcessView.as_view(), name="process"),
     path("<int:pk>/match/", views.BOQMatchView.as_view(), name="match"),
     path("<int:pk>/match-results/", views.BOQMatchResultsView.as_view(), name="match_results"),
+    path("<int:pk>/calculate-price/", views.BOQCalculatePriceView.as_view(), name="calculate_price"),
     path("<int:pk>/status/", views.BOQAnalysisStatusView.as_view(), name="status"),
     path("<int:pk>/confirm/", views.BOQConfirmView.as_view(), name="confirm"),
     path("<int:pk>/export/", views.BOQExportView.as_view(), name="export"),

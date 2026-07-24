@@ -1,4 +1,4 @@
-{% load static %}
+﻿{% load static %}
 <!DOCTYPE html>
 <html lang="en" x-data="appState()" :class="{ 'dark-mode': darkMode }">
 <head>
@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Ajeya Estimator Pro{% endblock %}</title>
     <meta name="csrf-token" content="{{ csrf_token }}">
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=37">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=54">
     <style>
         .confirm-modal {
             position: fixed;
@@ -44,6 +44,43 @@
         .confirm-modal__message {
             margin: 0;
             color: #64748b;
+        }
+
+        .confirm-modal__field {
+            display: grid;
+            gap: 6px;
+            margin-top: 14px;
+        }
+
+        .confirm-modal__field[hidden] {
+            display: none !important;
+        }
+
+        .confirm-modal__field-label {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-muted);
+        }
+
+        .confirm-modal__input {
+            width: 100%;
+            box-sizing: border-box;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px 12px;
+            font: inherit;
+            background: var(--surface);
+            color: var(--text);
+        }
+
+        .confirm-modal__error {
+            margin: 10px 0 0;
+            color: var(--red, #b91c1c);
+            font-size: 0.88rem;
+        }
+
+        .confirm-modal__error[hidden] {
+            display: none !important;
         }
 
         .confirm-modal__actions {
@@ -107,6 +144,11 @@
         /* White / grey zebra rows (same as Analysis cards) */
         .table tbody tr:nth-child(odd) td { background-color: #ffffff; }
         .table tbody tr:nth-child(even) td { background-color: #e2e8f0; }
+        .table.table--plain tbody tr td,
+        .table.table--plain tbody tr:nth-child(odd) td,
+        .table.table--plain tbody tr:nth-child(even) td {
+            background-color: transparent !important;
+        }
 
         .field__required {
             color: var(--red, #dc2626);
@@ -279,44 +321,41 @@
         .boq-tabs {
             display: flex;
             flex-direction: row;
+            flex-wrap: wrap;
             align-items: stretch;
             gap: 4px;
             width: 100%;
+            max-width: 100%;
             margin-bottom: 0;
             padding: 4px;
             background: var(--surface-alt);
             border: 1px solid var(--border);
             border-radius: 10px;
             box-shadow: inset 0 1px 2px rgba(15, 23, 42, .04);
+            box-sizing: border-box;
         }
         .boq-tabs__btn {
             position: relative;
-            flex: 1 1 0;
+            flex: 1 1 auto;
             display: inline-flex;
             align-items: center;
             justify-content: center;
+            min-width: max-content;
             min-height: 34px;
-            padding: 6px 10px;
+            padding: 6px 12px;
             border: none;
             border-radius: 8px;
             background: transparent;
             color: var(--text);
             font: inherit;
-            font-size: .875rem;
+            font-size: clamp(.78rem, 1.6vw, .875rem);
             font-weight: 600;
             cursor: pointer;
             white-space: nowrap;
             transition: background .15s, color .15s, box-shadow .15s;
         }
         .boq-tabs__btn + .boq-tabs__btn::before {
-            content: "";
-            position: absolute;
-            left: -2px;
-            top: 7px;
-            bottom: 7px;
-            width: 1px;
-            background: var(--border);
-            opacity: .75;
+            content: none;
         }
         .boq-tabs__btn:hover {
             color: var(--primary);
@@ -326,10 +365,6 @@
             background: var(--primary);
             color: #fff;
             box-shadow: 0 2px 8px rgba(37, 99, 235, .28);
-        }
-        .boq-tabs__btn.is-active::before,
-        .boq-tabs__btn.is-active + .boq-tabs__btn::before {
-            opacity: 0;
         }
         .boq-tabs__btn.is-active:hover { color: #fff; }
 
@@ -360,9 +395,59 @@
             box-shadow: none;
         }
 
+        /* Make List: flush table to the sticky header (no gap above heading row). */
+        .panel.panel--make-list-flush {
+            margin-top: 0;
+        }
+        .make-list-tab-canvas {
+            margin: 0;
+            padding: 0;
+        }
+        .make-list-tab-canvas .boq-sheet-wrap--make-list {
+            margin-top: 0;
+        }
+        .make-list-tab-canvas .table.boq-sheet.boq-sheet--make-list thead th {
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            background: var(--surface, #fff);
+        }
+
         .analysis-tab-canvas {
             /* Removed canvas styling so the cards can stretch full width */
             padding: 0;
+            position: relative;
+            min-height: 420px;
+        }
+
+        .analysis-loading-center.analysis-loading-center--active {
+            display: flex !important;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            min-height: 420px;
+            width: 100%;
+            padding: 64px 20px;
+            text-align: center;
+            box-sizing: border-box;
+        }
+
+        .analysis-loading-center__spinner {
+            display: block !important;
+            flex-shrink: 0;
+            box-sizing: border-box;
+            width: 56px !important;
+            height: 56px !important;
+            margin: 0 auto;
+            border-radius: 50% !important;
+            border: 5px solid #bfdbfe !important;
+            border-top-color: #2563eb !important;
+            animation: boqAnalysisSpinBase 0.7s linear infinite !important;
+        }
+
+        @keyframes boqAnalysisSpinBase {
+            to { transform: rotate(360deg); }
         }
 
         .extraction-lines {
@@ -421,6 +506,38 @@
             margin-top: 12px;
             padding-top: 12px;
             border-top: 1px dashed var(--border);
+        }
+
+        .extraction-product-card__busy {
+            position: absolute;
+            inset: 0;
+            z-index: 3;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: color-mix(in srgb, var(--surface, #fff) 72%, transparent);
+            backdrop-filter: blur(1px);
+            border-radius: 6px;
+            pointer-events: all;
+        }
+
+        .extraction-product-card__busy-text {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text, #111827);
+            padding: 8px 14px;
+            border-radius: 6px;
+            background: var(--surface, #fff);
+            border: 1px solid var(--border, #e5e7eb);
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+        }
+
+        .extraction-product-tabs__btn.is-busy:not(.is-active) {
+            opacity: 0.75;
+        }
+
+        .extraction-product-tabs__btn.is-busy.is-active {
+            cursor: wait;
         }
 
         .extraction-activities__row {
@@ -564,6 +681,7 @@
         }
 
         .extraction-product-panel > .extraction-product-card {
+            position: relative;
             margin-top: 0;
             border-top: none;
             padding-top: 12px;
@@ -926,16 +1044,84 @@
             flex-shrink: 0;
         }
 
-        .make-vendor-summary {
-            margin: 0 0 12px;
+        .make-vendor-tab-canvas {
+            padding: 0;
         }
 
-        .make-vendor-categories {
-            margin: 0 0 18px;
+        .make-vendor-hint {
+            margin: 0 0 10px;
+        }
+
+        .make-vendor-selection-card {
+            margin: 0 0 12px;
             padding: 12px 14px;
             border: 1px solid var(--border);
             border-radius: 8px;
             background: var(--surface);
+            box-shadow: var(--shadow, 0 1px 2px rgba(0, 0, 0, 0.04));
+        }
+
+        .make-vendor-summary {
+            margin: 0 0 12px;
+        }
+
+        .make-vendor-summary--counts,
+        .make-vendor-summary--card {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px 12px;
+            padding: 10px 14px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--surface);
+            box-shadow: var(--shadow, 0 1px 2px rgba(0, 0, 0, 0.04));
+            font-size: .92rem;
+            color: var(--text);
+        }
+
+        /* Lives inside sticky .boq-detail-header — stays put while page scrolls. */
+        .make-vendor-summary--pinned {
+            width: 100%;
+            margin: 0 0 4px;
+            box-shadow: 0 6px 18px rgba(15, 23, 42, 0.12);
+        }
+
+        .make-vendor-summary__counts {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: baseline;
+            gap: 4px 6px;
+            min-width: 0;
+            flex: 1 1 auto;
+        }
+
+        .make-vendor-summary__actions {
+            display: inline-flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+            margin-left: auto;
+        }
+
+        .make-vendor-summary__default { color: #854d0e; font-weight: 600; }
+        .make-vendor-summary__filtered { color: #1d4ed8; font-weight: 600; }
+        .make-vendor-summary__not-found { color: #c2410c; font-weight: 600; }
+        .make-vendor-summary__no-match { color: #b91c1c; font-weight: 600; }
+        .make-vendor-summary__muted {
+            color: var(--text-muted, #64748b);
+            font-weight: 400;
+            margin-left: 4px;
+        }
+
+        .make-vendor-categories {
+            margin: 0 0 16px;
+            padding: 0;
+            border: 0;
+            border-radius: 0;
+            background: transparent;
         }
 
         .make-vendor-categories__title {
@@ -948,7 +1134,16 @@
             grid-template-columns: repeat(4, minmax(140px, 1fr));
             gap: 10px;
             align-items: end;
-            margin-top: 10px;
+            margin-top: 0;
+        }
+
+        .make-vendor-subcategory-panel__grid .extraction-field__label {
+            font-weight: 700;
+            color: var(--text);
+        }
+
+        .make-vendor-subcategory-panel__grid .extraction-input {
+            font-weight: 400;
         }
 
         .make-vendor-subcategory-panel__actions {
@@ -961,16 +1156,26 @@
 
         .make-vendor-filter-preview,
         .make-vendor-applied-filters {
-            margin-top: 14px;
-            padding: 10px 12px;
-            border: 1px dashed var(--border);
+            margin-top: 0;
+            padding: 0;
+            border: 0;
+            border-radius: 0;
+            background: transparent;
+        }
+
+        .make-vendor-applied-filters--card {
+            margin: 0 0 12px;
+            padding: 12px 14px;
+            border: 1px solid var(--border);
             border-radius: 8px;
-            background: var(--surface-alt, rgba(148, 163, 184, 0.08));
+            background: var(--surface);
+            box-shadow: var(--shadow, 0 1px 2px rgba(0, 0, 0, 0.04));
         }
 
         .make-vendor-filter-preview__title {
             margin: 0 0 8px;
             font-size: .85rem;
+            font-weight: 700;
         }
 
         .make-vendor-filter-preview__grid {
@@ -1000,24 +1205,71 @@
             padding: 0;
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            gap: 6px;
         }
 
         .make-vendor-applied-filters__item {
             display: flex;
+            flex-wrap: nowrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px 12px;
+            padding: 6px 0;
+            border: 0;
+            border-bottom: 1px solid var(--border);
+            border-radius: 0;
+            background: transparent;
+            font-size: .84rem;
+        }
+
+        .make-vendor-applied-filters__item:last-child {
+            border-bottom: 0;
+        }
+
+        .make-vendor-applied-filters__body {
+            display: flex;
             flex-wrap: wrap;
             align-items: center;
             gap: 8px 12px;
-            padding: 8px 10px;
+            min-width: 0;
+            flex: 1 1 auto;
+        }
+
+        .make-vendor-applied-filters__remove {
+            flex-shrink: 0;
+            width: 1.6rem;
+            height: 1.6rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
             border: 1px solid var(--border);
-            border-radius: 6px;
-            background: var(--surface);
-            font-size: .84rem;
+            border-radius: 999px;
+            background: var(--surface-alt, #f8fafc);
+            color: #b91c1c;
+            font-size: 1.05rem;
+            line-height: 1;
+            cursor: pointer;
+            padding: 0;
+        }
+
+        .make-vendor-applied-filters__remove:hover {
+            background: #fee2e2;
+            border-color: #fca5a5;
+            color: #991b1b;
         }
 
         @media (max-width: 960px) {
             .make-vendor-subcategory-panel__grid {
                 grid-template-columns: 1fr 1fr;
+            }
+        }
+
+        @media (max-width: 560px) {
+            .make-vendor-subcategory-panel__grid {
+                grid-template-columns: 1fr;
+            }
+            .make-vendor-category-row {
+                grid-template-columns: 1fr;
             }
         }
 
@@ -1060,16 +1312,92 @@
             }
         }
 
+        .make-vendor-lines {
+            margin-top: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .make-vendor-lines__title {
+            margin: 0;
+            font-size: 1rem;
+        }
+
         .make-vendor-line {
-            margin: 0 0 16px;
-            padding: 12px 14px;
+            margin: 0;
+            padding: 14px 16px;
             border: 1px solid var(--border);
-            border-radius: 8px;
+            border-radius: 10px;
+            background: #ffffff;
+            box-shadow: var(--shadow, 0 1px 2px rgba(0, 0, 0, 0.04));
+        }
+
+        .make-vendor-line--alt {
+            background: #f1f5f9;
+        }
+
+        .make-vendor-products {
+            margin-top: 8px;
+        }
+
+        .make-vendor-product-tabs {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 8px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .make-vendor-product-tabs__btn {
+            min-width: 2rem;
+            height: 2rem;
+            padding: 0 .7rem;
+            border: 1px solid var(--border);
+            border-radius: 6px;
             background: var(--surface);
+            color: var(--text);
+            font-size: .86rem;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            cursor: pointer;
+            line-height: 1;
+        }
+
+        .make-vendor-product-tabs__btn.is-matched {
+            background: #dcfce7;
+            border-color: #16a34a;
+            color: #166534;
+        }
+
+        .make-vendor-product-tabs__btn.is-matched.is-active {
+            background: #16a34a;
+            border-color: #15803d;
+            color: #fff;
+        }
+
+        .make-vendor-product-tabs__btn.is-unmatched {
+            background: #fee2e2;
+            border-color: #dc2626;
+            color: #991b1b;
+        }
+
+        .make-vendor-product-tabs__btn.is-unmatched.is-active {
+            background: #dc2626;
+            border-color: #b91c1c;
+            color: #fff;
+        }
+
+        .make-vendor-product-panel > .make-vendor-card {
+            margin-top: 0;
         }
 
         .make-vendor-line__header {
-            margin-bottom: 10px;
+            margin-bottom: 8px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid var(--border);
         }
 
         .make-vendor-line__title {
@@ -1089,11 +1417,31 @@
         }
 
         .make-vendor-card {
-            margin-top: 10px;
-            padding: 12px;
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            background: var(--surface-alt, #f8fafc);
+            margin-top: 0;
+            padding: 12px 0 4px;
+            border: 0;
+            border-radius: 0;
+            background: transparent;
+        }
+
+        .make-vendor-card:last-child {
+            border-bottom: 0;
+        }
+
+        .make-vendor-card--no-make,
+        .make-vendor-card--no-match {
+            background: #fef2f2;
+            border-radius: 6px;
+            padding-left: 10px;
+            padding-right: 10px;
+            box-shadow: inset 3px 0 0 #ef4444;
+        }
+
+        .make-vendor-card__no-make-note {
+            margin: 6px 0 0;
+            font-size: .78rem;
+            font-weight: 600;
+            color: #b91c1c;
         }
 
         .make-vendor-card__head {
@@ -1112,7 +1460,7 @@
         .make-vendor-card__taxonomy {
             margin: 4px 0 0;
             font-size: .78rem;
-            color: var(--text-muted, #64748b);
+            color: #475569;
             display: flex;
             flex-wrap: wrap;
             align-items: baseline;
@@ -1134,6 +1482,8 @@
         .make-vendor-card__title {
             margin: 0;
             font-size: .95rem;
+            color: var(--text);
+            font-weight: 700;
         }
 
         .make-vendor-readonly {
@@ -1149,12 +1499,14 @@
 
         .make-vendor-readonly dt {
             font-size: .72rem;
-            color: var(--text-muted, #64748b);
+            color: #475569;
+            font-weight: 600;
         }
 
         .make-vendor-readonly dd {
             margin: 2px 0 0;
             font-weight: 600;
+            color: var(--text);
         }
 
         .make-vendor-fields {
@@ -1180,10 +1532,11 @@
         .make-vendor-result__meta p {
             margin: 0 0 4px;
             font-size: .85rem;
+            color: var(--text);
         }
 
         .make-vendor-result__notes {
-            color: var(--text-muted, #64748b);
+            color: #475569;
         }
 
         .make-vendor-rates {
@@ -1196,18 +1549,20 @@
         .make-vendor-rates div {
             padding: 8px;
             border-radius: 6px;
-            background: var(--surface);
+            background: var(--surface-alt, #f8fafc);
             border: 1px solid var(--border);
         }
 
         .make-vendor-rates span {
             display: block;
             font-size: .72rem;
-            color: var(--text-muted, #64748b);
+            color: #475569;
+            font-weight: 600;
         }
 
         .make-vendor-rates strong {
             font-size: .95rem;
+            color: var(--text);
         }
 
         .btn--xsmall {
@@ -1647,7 +2002,7 @@
             padding-left: 18px;
         }
 
-        @media (max-width: 860px) {
+        @media (max-width: 980px) {
             .sidebar {
                 width: min(280px, 86vw) !important;
                 max-width: calc(100vw - 48px);
@@ -1664,7 +2019,9 @@
             }
             .topbar__menu { display: block !important; }
             .panel:has(.table),
-            .d-panel:has(.table) {
+            .d-panel:has(.table),
+            .boq-sheet-wrap,
+            .boq-sheet-wrap--fit {
                 max-width: 100%;
                 overflow-x: auto;
                 -webkit-overflow-scrolling: touch;
@@ -1696,7 +2053,8 @@
             }
             .table.boq-sheet.boq-sheet--make-list th.boq-sheet__col-makes,
             .table.boq-sheet.boq-sheet--make-list td.boq-sheet__col-makes {
-                text-align: right !important;
+                text-align: left !important;
+                padding-right: 12px !important;
             }
             .sidebar-backdrop {
                 position: fixed;
@@ -1704,6 +2062,43 @@
                 z-index: 35;
                 display: block;
                 background: rgba(15, 23, 42, .36);
+            }
+
+            /* BOQ detail tabs: wrap / scroll — never squeeze labels */
+            .boq-tabs {
+                flex-wrap: wrap;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+                scrollbar-width: thin;
+            }
+            .boq-tabs__btn {
+                flex: 1 1 auto;
+                min-width: max-content;
+                min-height: 40px;
+                padding: 8px 14px;
+                font-size: .82rem;
+            }
+            .boq-tabs__btn + .boq-tabs__btn::before {
+                display: none;
+            }
+
+            .make-vendor-rates {
+                grid-template-columns: 1fr;
+            }
+            .extraction-extra-attr-row {
+                grid-template-columns: 1fr;
+            }
+            .extraction-product-tabs {
+                overflow-x: auto;
+                flex-wrap: nowrap;
+                -webkit-overflow-scrolling: touch;
+            }
+        }
+
+        @media (max-width: 560px) {
+            .boq-tabs__btn {
+                font-size: .78rem;
+                padding: 8px 12px;
             }
         }
     </style>
@@ -1730,6 +2125,11 @@
         }
         .dark-mode .table tbody tr:nth-child(odd) td { background-color: #111827; }
         .dark-mode .table tbody tr:nth-child(even) td { background-color: #334155; }
+        .dark-mode .table.table--plain tbody tr td,
+        .dark-mode .table.table--plain tbody tr:nth-child(odd) td,
+        .dark-mode .table.table--plain tbody tr:nth-child(even) td {
+            background-color: transparent !important;
+        }
         .dark-mode .topbar {
             background: #111827;
             border-color: #2d3748;
@@ -1742,7 +2142,26 @@
         }
         .dark-mode .btn--ghost { border-color: #2d3748; color: var(--text); }
         .dark-mode .btn--ghost:hover { background: #2d3748; }
-        .dark-mode .confirm-modal__dialog { background: #111827; }
+        .dark-mode .table tbody .table__actions .btn--ghost {
+            background: var(--surface);
+            border-color: var(--border);
+        }
+        .dark-mode .table tbody .table__actions .btn--ghost:hover {
+            background: var(--surface-alt);
+        }
+        .dark-mode .confirm-modal__dialog {
+            background: #111827;
+            border-color: #2d3748;
+        }
+        .dark-mode .confirm-modal__title {
+            color: #ffffff;
+        }
+        .dark-mode .confirm-modal__message {
+            color: #ffffff;
+        }
+        .dark-mode .confirm-modal__field-label {
+            color: #e2e8f0;
+        }
         .dark-mode .auth__card { background: #111827; }
         .dark-mode .select { background: #1a2236; color: var(--text); border-color: #2d3748; }
 
@@ -1753,9 +2172,6 @@
         }
         .dark-mode .boq-tabs__btn {
             color: var(--text);
-        }
-        .dark-mode .boq-tabs__btn + .boq-tabs__btn::before {
-            background: #334155;
         }
         .dark-mode .boq-tabs__btn:hover {
             color: #93c5fd;
@@ -1769,10 +2185,100 @@
         .dark-mode .boq-tabs__btn.is-active:hover { color: #fff; }
 
         .dark-mode .extraction-line,
-        .dark-mode .extraction-product-card {
+        .dark-mode .extraction-product-card,
+        .dark-mode .make-vendor-line {
+            background: #111827;
+            border-color: var(--border);
+            color: var(--text);
+        }
+
+        .dark-mode .make-vendor-line--alt {
+            background: #1e293b;
+        }
+
+        .dark-mode .make-vendor-card {
+            color: var(--text);
+        }
+
+        .dark-mode .make-vendor-card--no-make,
+        .dark-mode .make-vendor-card--no-match {
+            background: rgba(239, 68, 68, 0.14);
+            box-shadow: inset 3px 0 0 #ef4444;
+        }
+
+        .dark-mode .make-vendor-card__title,
+        .dark-mode .make-vendor-card__taxonomy-value,
+        .dark-mode .make-vendor-readonly dd,
+        .dark-mode .make-vendor-result__meta p,
+        .dark-mode .make-vendor-rates strong {
+            color: #e2e8f0;
+        }
+
+        .dark-mode .make-vendor-card__taxonomy,
+        .dark-mode .make-vendor-card__taxonomy-label,
+        .dark-mode .make-vendor-readonly dt,
+        .dark-mode .make-vendor-result__notes,
+        .dark-mode .make-vendor-rates span,
+        .dark-mode .make-vendor-line__description {
+            color: #cbd5e1;
+        }
+
+        .dark-mode .make-vendor-card__no-make-note {
+            color: #fca5a5;
+        }
+
+        .dark-mode .make-vendor-rates div {
+            background: #0f172a;
+            border-color: var(--border);
+        }
+
+        .dark-mode .make-vendor-summary--pinned {
+            background: var(--surface);
+            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+        }
+
+        .dark-mode .make-vendor-selection-card,
+        .dark-mode .make-vendor-summary--card,
+        .dark-mode .make-vendor-applied-filters--card {
             background: var(--surface);
             border-color: var(--border);
             color: var(--text);
+        }
+
+        .dark-mode .make-vendor-applied-filters__remove {
+            background: #1f2937;
+            border-color: var(--border);
+            color: #fca5a5;
+        }
+
+        .dark-mode .make-vendor-applied-filters__remove:hover {
+            background: rgba(220, 38, 38, 0.25);
+            border-color: #f87171;
+            color: #fecaca;
+        }
+
+        .dark-mode .make-vendor-product-tabs__btn.is-matched {
+            background: rgba(22, 163, 74, 0.22);
+            border-color: #22c55e;
+            color: #86efac;
+        }
+
+        .dark-mode .make-vendor-product-tabs__btn.is-matched.is-active {
+            background: #16a34a;
+            border-color: #15803d;
+            color: #fff;
+        }
+
+        .dark-mode .make-vendor-product-tabs__btn.is-unmatched {
+            background: rgba(220, 38, 38, 0.22);
+            border-color: #f87171;
+            color: #fca5a5;
+        }
+
+        .dark-mode .make-vendor-product-tabs__btn.is-unmatched.is-active {
+            background: #dc2626;
+            border-color: #b91c1c;
+            color: #fff;
         }
 
         .dark-mode .extraction-product-tabs {
@@ -1925,26 +2431,59 @@
             /* Transparent canvas */
         }
 
-        /* ---- Theme toggle button ---- */
+        /* ---- Theme toggle button (sidebar profile row) ---- */
         .theme-toggle {
-            margin-left: auto;
             width: 36px; height: 36px;
             border-radius: 10px;
-            border: 1px solid var(--border);
-            background: var(--surface-alt);
-            color: var(--text-muted);
+            border: 1px solid rgba(255,255,255,.16);
+            background: rgba(255,255,255,.06);
+            color: #cbd5e1;
             display: inline-flex; align-items: center; justify-content: center;
             cursor: pointer;
             transition: background .2s, border-color .2s, color .2s, transform .15s;
             flex-shrink: 0;
         }
         .theme-toggle:hover {
-            background: var(--surface);
-            border-color: var(--primary);
-            color: var(--primary);
+            background: rgba(255,255,255,.12);
+            border-color: rgba(147, 197, 253, .55);
+            color: #fff;
             transform: rotate(15deg);
         }
         .theme-toggle svg { width: 18px; height: 18px; }
+
+        .sidebar__profile-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+            min-width: 0;
+        }
+        .sidebar__profile-row .user-chip {
+            flex: 1;
+            min-width: 0;
+            margin-bottom: 0;
+        }
+
+        .topbar__title {
+            display: inline-flex;
+            align-items: baseline;
+            gap: 8px;
+            flex: 1;
+            min-width: 0;
+        }
+        .topbar__count {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            letter-spacing: 0;
+        }
+        .topbar__actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+            margin-left: auto;
+        }
 
         /* ---- Sidebar close button ---- */
         .sidebar__close {
@@ -1961,7 +2500,7 @@
             transition: background .15s, color .15s;
         }
         .sidebar__close:hover { background: rgba(255,255,255,.14); color: #fff; }
-        @media (max-width: 860px) {
+        @media (max-width: 980px) {
             .sidebar__close { display: inline-flex; }
         }
 
@@ -2029,12 +2568,46 @@
         .profile-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
 
         /* ---- User chip clickable ---- */
-        .user-chip { cursor: pointer; border-radius: 10px; padding: 6px 8px; margin: -6px -8px 12px; transition: background .15s; overflow: hidden; }
+        .user-chip { cursor: pointer; border-radius: 10px; padding: 6px 8px; margin: -6px -8px 0; transition: background .15s; overflow: hidden; }
         .user-chip:hover { background: rgba(255,255,255,.08); }
 
-        /* ---- Sidebar logout always white ---- */
-        .sidebar__footer .btn--ghost { color: #fff; border-color: rgba(255,255,255,.2); }
-        .sidebar__footer .btn--ghost:hover { background: rgba(255,255,255,.1); color: #fff; }
+        .sidebar__profile-row .user-chip {
+            margin: -6px -8px -6px -8px;
+        }
+
+        /* ---- Sidebar logout: light text, transparent fill ---- */
+        .sidebar__footer .sidebar__logout,
+        .sidebar__footer .btn.sidebar__logout {
+            background: transparent;
+            background-color: rgba(255, 255, 255, 0);
+            border: 1px solid rgba(255, 255, 255, 0.28);
+            color: #e2e8f0;
+        }
+        .sidebar__footer .sidebar__logout:hover,
+        .sidebar__footer .btn.sidebar__logout:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.4);
+            color: #ffffff;
+        }
+
+        /* Current-section highlight (path-matched in nav markup) */
+        .sidebar__nav .nav-link.is-active {
+            background: #2563eb;
+            color: #fff;
+            font-weight: 700;
+            box-shadow: inset 3px 0 0 #ffffff;
+        }
+        .sidebar__nav .nav-link.is-active:hover {
+            background: #1d4ed8;
+            color: #fff;
+        }
+
+        .sidebar__brand .brand-mark {
+            color: #ffffff !important;
+        }
+        .sidebar__brand .brand-ai {
+            color: #ffffff !important;
+        }
     </style>
     {% block head_extra %}{% endblock %}
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
@@ -2052,31 +2625,45 @@
             </div>
             <span class="sidebar__tagline">AI-Powered BOQ Estimation Platform</span>
         </div>
-        <nav class="sidebar__nav" @click="if (window.innerWidth <= 860) sidebarOpen = false">
-            <a href="{% url 'dashboard:home' %}" class="nav-link">Dashboard</a>
-            <a href="{% url 'boq:list' %}" class="nav-link{% if request.resolver_match.namespace == 'boq' %} is-active{% endif %}">BOQs</a>
-            <a href="{% url 'database:list' %}" class="nav-link">Database</a>
-            <a href="{% url 'notifications:list' %}" class="nav-link">
+        <nav class="sidebar__nav" @click="if (window.innerWidth <= 980) sidebarOpen = false">
+            <a href="{% url 'dashboard:home' %}" class="nav-link{% if request.path == '/dashboard/' or request.path == '/dashboard' %} is-active{% endif %}">Dashboard</a>
+            <a href="{% url 'boq:list' %}" class="nav-link{% if '/boqs/' in request.path %} is-active{% endif %}">BOQs</a>
+            <a href="{% url 'database:list' %}" class="nav-link{% if '/database/' in request.path %} is-active{% endif %}">Database</a>
+            <a href="{% url 'notifications:list' %}" class="nav-link{% if '/notifications/' in request.path %} is-active{% endif %}">
                 Notifications{% if notifications_unread %} <span class="nav-badge">{{ notifications_unread }}</span>{% endif %}
             </a>
 
             {% if user.is_super_admin %}
-            <a href="{% url 'audit:list' %}" class="nav-link">Audit Log</a>
-            <a href="{% url 'users:list' %}" class="nav-link">User Management</a>
-            {% if user.is_superadmin %}<a href="{% url 'admin:index' %}" class="nav-link">Admin</a>{% endif %}
+            <a href="{% url 'audit:list' %}" class="nav-link{% if '/audit/' in request.path %} is-active{% endif %}">Audit Log</a>
+            <a href="{% url 'users:list' %}" class="nav-link{% if '/users/' in request.path %} is-active{% endif %}">User Management</a>
+            {% if user.is_superadmin %}<a href="{% url 'admin:index' %}" class="nav-link{% if '/admin/' in request.path %} is-active{% endif %}">Admin</a>{% endif %}
             {% endif %}
         </nav>
         <div class="sidebar__footer">
-            <div class="user-chip" @click="profileOpen = true" title="View profile" role="button" tabindex="0" @keydown.enter="profileOpen = true">
-                <span class="user-chip__avatar">{{ user.full_name|slice:":1"|upper }}</span>
-                <div class="user-chip__meta">
-                    <span class="user-chip__name">{{ user.full_name }}</span>
-                    <span class="user-chip__role">{{ user.get_role_display }}</span>
+            <div class="sidebar__profile-row">
+                <div class="user-chip" @click="profileOpen = true" title="View profile" role="button" tabindex="0" @keydown.enter="profileOpen = true">
+                    <span class="user-chip__avatar">{{ user.full_name|slice:":1"|upper }}</span>
+                    <div class="user-chip__meta">
+                        <span class="user-chip__name">{{ user.full_name }}</span>
+                        <span class="user-chip__role">{{ user.get_role_display }}</span>
+                    </div>
                 </div>
+                <button class="theme-toggle" @click="toggleTheme" :title="darkMode ? 'Switch to light mode' : 'Switch to dark mode'" aria-label="Toggle theme">
+                    <svg x-show="!darkMode" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                    </svg>
+                    <svg x-show="darkMode" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="5"/>
+                        <line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
+                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+                        <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
+                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+                    </svg>
+                </button>
             </div>
             <form method="post" action="{% url 'accounts:logout' %}" data-confirm="Are you sure you want to log out?" onsubmit="return window.BOQConfirm ? window.BOQConfirm.submit(event, this) : true;">
                 {% csrf_token %}
-                <button type="submit" class="btn btn--ghost btn--block">Log out</button>
+                <button type="submit" class="btn btn--ghost btn--block sidebar__logout">Log out</button>
             </form>
         </div>
     </aside>
@@ -2085,19 +2672,11 @@
         <header class="topbar">
             <button class="topbar__menu" @click="sidebarOpen = !sidebarOpen" aria-label="Toggle menu">&#9776;</button>
             {% block topbar_leading %}{% endblock %}
-            <h1 class="topbar__title">{% block heading %}{% endblock %}</h1>
-            <button class="theme-toggle" @click="toggleTheme" :title="darkMode ? 'Switch to light mode' : 'Switch to dark mode'" aria-label="Toggle theme">
-                <svg x-show="!darkMode" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-                </svg>
-                <svg x-show="darkMode" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <circle cx="12" cy="12" r="5"/>
-                    <line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
-                    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
-                    <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
-                    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
-                </svg>
-            </button>
+            <h1 class="topbar__title">
+                {% block heading %}{% endblock %}
+                {% block heading_meta %}{% endblock %}
+            </h1>
+            {% block topbar_actions %}{% endblock %}
         </header>
 
         {% if messages %}
@@ -2180,6 +2759,16 @@
     <div class="confirm-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title">
         <h2 class="confirm-modal__title" id="confirm-modal-title">Confirm action</h2>
         <p class="confirm-modal__message" id="confirm-modal-message"></p>
+        <label class="confirm-modal__field" id="confirm-modal-field" hidden>
+            <span class="confirm-modal__field-label" id="confirm-modal-field-label">Value</span>
+            <input
+                type="text"
+                class="confirm-modal__input"
+                id="confirm-modal-input"
+                autocomplete="off"
+            >
+        </label>
+        <p class="confirm-modal__error" id="confirm-modal-error" hidden></p>
         <div class="confirm-modal__actions">
             <button type="button" class="btn btn--ghost" data-confirm-cancel>Cancel</button>
             <button type="button" class="btn btn--primary" data-confirm-submit>Confirm</button>
@@ -2189,14 +2778,81 @@
 <script>
     (() => {
         const modal = document.getElementById("confirm-modal");
+        const titleEl = document.getElementById("confirm-modal-title");
         const message = document.getElementById("confirm-modal-message");
+        const fieldWrap = document.getElementById("confirm-modal-field");
+        const fieldLabel = document.getElementById("confirm-modal-field-label");
+        const inputEl = document.getElementById("confirm-modal-input");
+        const errorEl = document.getElementById("confirm-modal-error");
         const confirmButton = modal.querySelector("[data-confirm-submit]");
         const cancelButtons = modal.querySelectorAll("[data-confirm-cancel]");
         let pendingForm = null;
+        let pendingResolve = null;
+        let mode = "form"; // form | confirm | prompt
 
-        const closeModal = () => {
-            pendingForm = null;
+        const resetUi = () => {
+            fieldWrap.hidden = true;
+            errorEl.hidden = true;
+            errorEl.textContent = "";
+            inputEl.value = "";
+            titleEl.textContent = "Confirm action";
+            confirmButton.textContent = "Confirm";
+        };
+
+        const closeModal = (result) => {
             modal.hidden = true;
+            if (pendingResolve) {
+                const resolve = pendingResolve;
+                pendingResolve = null;
+                resolve(result);
+            }
+            pendingForm = null;
+            mode = "form";
+            resetUi();
+        };
+
+        const openModal = ({ title, messageText, confirmLabel, showInput, inputLabel, inputValue }) => {
+            resetUi();
+            titleEl.textContent = title || "Confirm action";
+            message.textContent = messageText || "Are you sure?";
+            confirmButton.textContent = confirmLabel || "Confirm";
+            if (showInput) {
+                fieldWrap.hidden = false;
+                fieldLabel.textContent = inputLabel || "Value";
+                inputEl.value = inputValue || "";
+            }
+            modal.hidden = false;
+            if (showInput) {
+                inputEl.focus();
+                inputEl.select();
+            } else {
+                confirmButton.focus();
+            }
+        };
+
+        const submitPending = () => {
+            if (mode === "form") {
+                if (!pendingForm) return;
+                pendingForm.dataset.confirmed = "true";
+                const form = pendingForm;
+                pendingForm = null;
+                modal.hidden = true;
+                resetUi();
+                form.submit();
+                return;
+            }
+            if (mode === "prompt") {
+                const value = String(inputEl.value || "").trim();
+                if (!value) {
+                    errorEl.textContent = "Please enter a value.";
+                    errorEl.hidden = false;
+                    inputEl.focus();
+                    return;
+                }
+                closeModal(value);
+                return;
+            }
+            closeModal(true);
         };
 
         window.BOQConfirm = {
@@ -2204,10 +2860,38 @@
                 if (!form || form.dataset.confirmed === "true") return true;
                 event.preventDefault();
                 pendingForm = form;
-                message.textContent = form.dataset.confirm || "Are you sure?";
-                modal.hidden = false;
-                confirmButton.focus();
+                mode = "form";
+                openModal({
+                    title: "Confirm action",
+                    messageText: form.dataset.confirm || "Are you sure?",
+                    confirmLabel: "Confirm",
+                });
                 return false;
+            },
+            ask(messageText, options = {}) {
+                return new Promise((resolve) => {
+                    pendingResolve = resolve;
+                    mode = "confirm";
+                    openModal({
+                        title: options.title || "Confirm action",
+                        messageText: messageText || "Are you sure?",
+                        confirmLabel: options.confirmLabel || "Confirm",
+                    });
+                });
+            },
+            prompt(messageText, options = {}) {
+                return new Promise((resolve) => {
+                    pendingResolve = resolve;
+                    mode = "prompt";
+                    openModal({
+                        title: options.title || "Enter value",
+                        messageText: messageText || "",
+                        confirmLabel: options.confirmLabel || "Add",
+                        showInput: true,
+                        inputLabel: options.inputLabel || "Name",
+                        inputValue: options.defaultValue || "",
+                    });
+                });
             },
         };
 
@@ -2216,20 +2900,37 @@
             if (!form || form.dataset.confirmed === "true" || form.dataset.confirmBound === "inline") return;
             event.preventDefault();
             pendingForm = form;
-            message.textContent = form.dataset.confirm;
-            modal.hidden = false;
-            confirmButton.focus();
+            mode = "form";
+            openModal({
+                title: "Confirm action",
+                messageText: form.dataset.confirm,
+                confirmLabel: "Confirm",
+            });
         });
 
-        confirmButton.addEventListener("click", () => {
-            if (!pendingForm) return;
-            pendingForm.dataset.confirmed = "true";
-            pendingForm.submit();
+        confirmButton.addEventListener("click", submitPending);
+        inputEl.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                submitPending();
+            }
         });
 
-        cancelButtons.forEach((button) => button.addEventListener("click", closeModal));
+        cancelButtons.forEach((button) => button.addEventListener("click", () => {
+            if (mode === "confirm" || mode === "prompt") {
+                closeModal(mode === "prompt" ? null : false);
+            } else {
+                closeModal(false);
+            }
+        }));
         document.addEventListener("keydown", (event) => {
-            if (event.key === "Escape" && !modal.hidden) closeModal();
+            if (event.key === "Escape" && !modal.hidden) {
+                if (mode === "confirm" || mode === "prompt") {
+                    closeModal(mode === "prompt" ? null : false);
+                } else {
+                    closeModal(false);
+                }
+            }
         });
     })();
 </script>
@@ -2246,7 +2947,7 @@
             init() {
                 const saved = localStorage.getItem('boq-theme');
                 if (saved) this.darkMode = saved === 'dark';
-                const mobileQuery = window.matchMedia('(max-width: 860px)');
+                const mobileQuery = window.matchMedia('(max-width: 980px)');
                 const closeOnMobile = () => {
                     if (mobileQuery.matches) this.sidebarOpen = false;
                 };

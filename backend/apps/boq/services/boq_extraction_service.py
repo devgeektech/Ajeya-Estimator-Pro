@@ -17,12 +17,13 @@ from apps.boq.services.boq_row_grouping_service import (
     resolve_anchor_row_id,
     has_quantity,
 )
-from apps.boq.services.serial_normalizer import analysis_fields
+from apps.boq.services.serial_normalizer import analysis_fields, letter_from_serial
 
 logger = logging.getLogger("boq_ai")
 
 _QTY_KEYS = ("qty", "quantity", "qnty", "nos")
 _BATCH_SIZE = 4
+_MAX_BATCH_CHARS = 14000
 
 _SPEC_KEYWORDS = frozenset(
     {
@@ -77,7 +78,7 @@ def _lineage_has_quantity(rows: list[dict[str, Any]], lineage_ids: list[str]) ->
 
 
 def should_skip_anchor_group(group: dict[str, Any], *, lineage_has_qty: bool) -> bool:
-    """Skip section-style anchor groups before calling AI."""
+    """Skip section-style / title-only anchor groups before calling AI."""
     full_text = str(group.get("full_description") or "").strip()
     if not full_text:
         return True
@@ -92,15 +93,45 @@ def should_skip_anchor_group(group: dict[str, Any], *, lineage_has_qty: bool) ->
     if has_quantity(anchor_fields) or lineage_has_qty:
         return False
 
-    # Structural item rows (1, 1.1, 1.2) still need extraction — children may be products.
     serial = str(group.get("serial") or "").strip()
-    if re.match(r"^(\d+(?:\.\d+)*)$", serial):
+    # Dotted packages (1.1, 2.15) may still hold lettered products without qty on the root.
+    if re.match(r"^(\d+(?:\.\d+)+)$", serial):
+        return False
+    # Lettered product lines without qty still need extraction.
+    if letter_from_serial(serial):
         return False
 
-    if int(group.get("depth") or 0) == 0:
+    # Bare chapter titles (1, 2, 3) or depth-0 leftovers after hybrid split — skip.
+    if re.match(r"^\d+$", serial) or int(group.get("depth") or 0) == 0:
         return True
 
     return False
+
+
+def _iter_extract_batches(groups: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    """Pack groups into AI batches by count and approximate payload size."""
+    batches: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
+    current_chars = 0
+    for group in groups:
+        payload = _compact_anchor_payload(group)
+        size = len(json.dumps(payload, ensure_ascii=False))
+        would_overflow = (
+            current
+            and (
+                len(current) >= _BATCH_SIZE
+                or current_chars + size > _MAX_BATCH_CHARS
+            )
+        )
+        if would_overflow:
+            batches.append(current)
+            current = []
+            current_chars = 0
+        current.append(group)
+        current_chars += size
+    if current:
+        batches.append(current)
+    return batches
 
 
 def _apply_one_qty(
@@ -513,14 +544,15 @@ class BOQExtractionService:
         ]
 
         extracted_by_id: dict[str, dict[str, Any]] = {}
-        for batch_start in range(0, len(actionable_groups), _BATCH_SIZE):
-            batch = actionable_groups[batch_start : batch_start + _BATCH_SIZE]
+        batches = _iter_extract_batches(actionable_groups)
+        done = 0
+        for batch in batches:
             for row in self._extract_batch(batch):
                 row_id = row.get("row_id")
                 if row_id:
                     extracted_by_id[str(row_id)] = row
+            done += len(batch)
             if progress_callback:
-                done = min(len(actionable_groups), batch_start + len(batch))
                 progress_callback(done, max(len(actionable_groups), 1))
 
         _consolidate_to_anchors(anchor_groups, extracted_by_id)

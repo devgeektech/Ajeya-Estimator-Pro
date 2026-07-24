@@ -7,7 +7,12 @@ from pathlib import Path
 
 from django.core.files.storage import default_storage
 
-from utils.excel import read_rows_with_metadata, score_make_list_sheet
+from utils.excel import (
+    MultiSheetWorkbookError,
+    read_rows_with_metadata,
+    require_single_worksheet,
+    score_make_list_sheet,
+)
 from utils.make_list_splits import attach_approved_makes_list
 
 from .pdf_make_list_parser import parse_make_list_pdf
@@ -153,7 +158,10 @@ def slim_make_list_payload(payload: dict) -> dict:
 
 def _parse_excel_make_list(uploaded_file, *, source_filename: str) -> dict:
     file_path = _resolve_path(uploaded_file)
-    # Single best make-list sheet only (score prefers "MAKE LIST", not giant rate sheets).
+    try:
+        require_single_worksheet(file_path, detail_label="make list details")
+    except MultiSheetWorkbookError as exc:
+        raise MakeListParseError(str(exc)) from exc
     headers, records = read_rows_with_metadata(
         file_path,
         header_keys=MAKE_LIST_HEADER_HINTS,
@@ -215,10 +223,12 @@ def parse_make_list_file(uploaded_file, *, source_filename: str = "") -> dict:
     lower_name = name.lower()
     if lower_name.endswith(".pdf"):
         payload = _parse_pdf_make_list(uploaded_file, source_filename=name)
-    elif lower_name.endswith((".xlsx", ".xlsm")):
+    elif lower_name.endswith((".xlsx", ".xlsm", ".xls")):
         payload = _parse_excel_make_list(uploaded_file, source_filename=name)
     else:
-        raise MakeListParseError("Make list must be .xlsx, .xlsm, or .pdf")
+        raise MakeListParseError(
+            "Make list must be .xlsx, .xlsm, .xls, or .pdf"
+        )
 
     if not payload.get("row_count"):
         raise MakeListParseError(f"Make list '{name}' produced no data rows.")

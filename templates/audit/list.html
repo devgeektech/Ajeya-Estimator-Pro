@@ -3,6 +3,19 @@
 {% block heading %}Audit Log{% endblock %}
 
 {% block content %}
+<style>
+    .db-list-actions .btn--ghost {
+        background: #ffffff !important;
+        border: 1px solid #d0d7e2 !important;
+        color: #334155 !important;
+        border-radius: 8px;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+    }
+    .db-list-actions .btn--ghost:hover {
+        background: #f8fafc !important;
+        color: #0f172a !important;
+    }
+</style>
 <div class="panel">
     <table class="table">
         <thead>
@@ -10,7 +23,7 @@
                 <th style="text-align: left;">Name</th>
                 <th>Recent Action</th>
                 <th>Recent Action Datetime</th>
-                <th class="table__actions" style="text-align: center;">Actions</th>
+                <th class="table__actions" style="text-align: left;">Actions</th>
             </tr>
         </thead>
         <tbody>
@@ -24,8 +37,8 @@
                 </td>
                 <td>{{ u.recent_action }}</td>
                 <td>{{ u.recent_action_datetime|date:"M d, H:i" }}</td>
-                <td class="table__actions" style="text-align: center;">
-                    <div style="display: flex; gap: 8px; align-items: center; justify-content: center;">
+                <td class="table__actions" style="text-align: left;">
+                    <div class="db-list-actions" style="display: flex; gap: 8px; align-items: center; justify-content: flex-start;">
                         <a href="{% url 'audit:user_list' u.pk %}" class="btn btn--small btn--ghost" aria-label="View" title="View">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                         </a>

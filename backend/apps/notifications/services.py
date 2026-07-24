@@ -29,3 +29,26 @@ def unread_count(user) -> int:
 
 def mark_all_read(user) -> int:
     return Notification.objects.filter(user=user, is_read=False).update(is_read=True)
+
+
+def mark_selected_read(user, ids: list[int]) -> int:
+    """Mark selected notifications as read. Returns updated count."""
+    if not ids:
+        return 0
+    return Notification.objects.filter(
+        user=user, pk__in=ids, is_read=False
+    ).update(is_read=True)
+
+
+def clear_all(user) -> int:
+    """Delete all notifications for the user. Returns deleted count."""
+    deleted, _ = Notification.objects.filter(user=user).delete()
+    return deleted
+
+
+def clear_selected(user, ids: list[int]) -> int:
+    """Delete selected notifications owned by the user. Returns deleted count."""
+    if not ids:
+        return 0
+    deleted, _ = Notification.objects.filter(user=user, pk__in=ids).delete()
+    return deleted

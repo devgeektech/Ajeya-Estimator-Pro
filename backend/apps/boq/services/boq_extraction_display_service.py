@@ -400,6 +400,7 @@ class BOQExtractionDisplayService:
                     "rate_only": bool(group.get("rate_only")),
                     "boq_rate": group.get("boq_rate"),
                     "status": status,
+                    "skip_reason": analysis_row.get("skip_reason") or "",
                     "product_count": product_total,
                     "products": shaped_products,
                     "activities": activities,

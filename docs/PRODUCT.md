@@ -66,19 +66,37 @@ Views call the service directly (thin views).
 Upload BOQ (+ optional make list) → parse to JSON → store files + hierarchy
 ```
 
-- BOQ workbook: `.xlsx` / `.xlsm`
-- Make list: `.xlsx`, `.xlsm`, or `.pdf`
+- BOQ workbook: `.xlsx` / `.xlsm` / `.xls` (legacy `.xls` is converted to
+  `.xlsx` on upload via `XlsUploadConversionService`, then parsed with openpyxl)
+- Make list: `.xlsx`, `.xlsm`, `.xls`, or `.pdf` (same `.xls` conversion)
+- Excel BOQ and make-list uploads must contain **exactly one worksheet**. Multiple
+  sheets are rejected with a validation error asking for a single sheet of BOQ or
+  make-list details.
+- After Analyse, **Make & Vendor stays locked** until **Next** runs
+  `apply_lowest_defaults_all` (sets `make_vendor_defaults_applied` and prefills
+  lowest make/vendor per product). Manual cascade filters override those
+  defaults afterward.
+- **No make list uploaded:** Next and cascade **Lowest price** pick the cheapest
+  Rate_Master row for each product’s category/sub-category across **all** makes.
+- **Make list uploaded:** cascade approved makes come only from the make list for
+  that scope — if none map, UI shows “No Approved Make Found in Make List”
+  (no fallback to all makes). Cascade: Category required; Sub-category optional
+  (blank = entire category).
+- Make-list ↔ Rate_Master make comparison uses optimal matching (normalize,
+  fingerprint, similarity) so spelling variants still count as approved.
 - **BOQ name must be unique** (case-insensitive) so each upload gets its own
   `media/extract_json/{boq_name}/` folder.
 - On upload, rows are normalized by serial number (`1`, `1.1`, `a`, `(a)`, `a)`,
   section romans `I`/`II`/`III`, etc.) into JSON (`boq_data`, `make_list_data`)
   while preserving hierarchy for UI, AI extraction, and future priced export.
-- **Analysis uses serial lineage sections:** one Analysis card per item that sits
-  under a chapter/section (for example ``1``), including its full subtree
-  (``1.1``, ``1.2``, lettered sub-items, specs). Shared parent description stays
-  with the children so AI can extract every product in that part. Amounts still
-  come only from filled Unit/Qty cells inside the subtree (``0`` kept as 0;
-  ``Rate Only`` keeps that marker and copies BOQ ``boq_rate``).
+- **Analysis uses adaptive serial lineage sections:** small related clusters stay one
+  Analysis card (parent + children). Oversized chapter trees (too many lines / qty
+  rows / characters) are split at dotted packages (``1.1``, ``2.1``, …) so products
+  under large BOQ chapters are extracted separately; shared ancestor text is still
+  passed to AI. Extract batches are also packed by payload size so huge sections are
+  not dropped in one OpenAI call. Amounts still come only from filled Unit/Qty cells
+  inside each section (``0`` kept as 0; ``Rate Only`` keeps that marker and copies
+  BOQ ``boq_rate``).
 - Hierarchy also nests Operating Temp / roman-numeral continuation lines under the
   nearest lettered product, supports indent fallback when serials are sparse, and
   merges multi-sheet workbooks that look like BOQ tables (`sheets` on payload;
@@ -97,8 +115,22 @@ Entry point: `BOQCreationService` in `apps/boq/services/boq_service.py`.
 ```text
 Step 1 — Analyse:       rows → AI extract → attributes (Analysis tab)
 Step 2 — Make & Vendor: select Make + Supplier → exact Rate_Master match → rates via Tech_Key
-Step 3 — Match Results: priced review / confirm / export (existing Match flow)
+Step 3 — Match Results: Match → Calculate Price → Export
 ```
+
+**Status pipeline** (persisted on `BOQ.status`):
+
+| Status | Label |
+| --- | --- |
+| `UPLOADED` | Uploaded |
+| `PROCESSING` | Analysing... |
+| `EXTRACTED` | Analysed |
+| `MAKE_VENDOR` | Make/Vendor selection (set when Analysis → Next applies defaults) |
+| `MATCHING` | Matching |
+| `PROCESSED` | Matched |
+| `READY_EXPORT` | Ready to Export (after Calculate Price) |
+| `EXPORTED` | Exported |
+| `ANALYSIS_FAILED` | Failed |
 
 **Step 1 — Analyse** (BOQ detail → **Analysis** tab):
 
@@ -131,6 +163,9 @@ Step 3 — Match Results: priced review / confirm / export (existing Match flow)
   **Additional Attributes**.
 - Attribute / match confidence badge colors: ≥80 green, >70 yellow, >50 orange,
   else red
+- Analysis confidence is **product-only** (category, sub-category, class, size,
+  unit, capacity, attributes). Make / vendor / brand fields are excluded from the
+  score, Chroma query, and AI mapping payload — Make & Vendor owns vendor selection.
 - **Interactive review:** all product fields (class, size, capacity, unit, etc.) are
   optional — products differ in which properties apply. Users can edit filled fields.
   Saves via `POST /boqs/<id>/extraction/edit/`
@@ -148,21 +183,22 @@ Step 3 — Match Results: priced review / confirm / export (existing Match flow)
 **Step 2 — Make & Vendor** (BOQ detail → **Make & Vendor** tab, after Analyse):
 
 - From Analysis, toolbar **Next** (blue) prefills every product with the
-  **lowest-price** Rate_Master row among **approved makes** for its category /
-  sub-category, then opens **Make & Vendor**.
+  **lowest-price** Rate_Master row for its category / sub-category (among
+  **approved makes** when a make list exists; among **all makes** when none was
+  uploaded), then opens **Make & Vendor** and sets status `MAKE_VENDOR`.
 - After full Analyse completes, the page **stays on Analysis** (review first;
   use Next to continue).
-- Enabled when `analysis_data.rows` exist and status is `EXTRACTED` / `PROCESSED` /
-  `ANALYSIS_FAILED`.
+- Enabled when `analysis_data.rows` exist and Make & Vendor defaults have been
+  applied (`MAKE_VENDOR` / later pipeline statuses).
 - For each analysed product, expert selects **Make** and/or **Supplier** from options
-  (make-list approved makes preferred, plus distinct values from Rate_Master for the
+  (make-list approved makes when present; otherwise Rate_Master makes for the
   product category/spec).
-- **Sub-category makes:** top panel lists **category → sub-category → approved make → supplier**
+- **Sub-category makes:** top panel lists **category → sub-category → make → supplier**
   (only categories/sub-categories present in Analysis extraction). **Apply to sub-category**
   sets make/supplier on every product in that sub-category and loads rates. Default make is
-  **Lowest price** among approved makes from the make list; empty supplier also picks the
-  lowest-priced Rate_Master row for the chosen make. The cascade shows a **filter ready to
-  apply** summary and an **Applied filters** list below so estimators remember what was set.
+  **Lowest price** (approved-make constrained when a make list exists). Empty supplier also
+  picks the lowest-priced Rate_Master row for the chosen make. Applied filters list
+  shows manual cascade applies.
 - Selection persisted per product as `selected_make`, `selected_supplier`, `vendor_selection`;
   sub-category choices stored in `analysis_data.subcategory_make_selections`.
 - AI does not choose make/supplier or calculate prices — rates are read from the master DB.
@@ -170,19 +206,22 @@ Step 3 — Match Results: priced review / confirm / export (existing Match flow)
 - **Client approach (experimental):** full narrative, business rules, demo script, and
   decision checklist for stakeholder review — [`docs/MAKE_VENDOR_APPROACH.md`](MAKE_VENDOR_APPROACH.md).
 
-**Step 3 — Match** (BOQ detail → **Make & Vendor** → **Match** → Match Results tab):
+**Step 3 — Match + Calculate Price + Export** (Match Results tab):
 
-- Button: **Match** (Make & Vendor toolbar, first run after Analyse only) →
-  `POST /boqs/<id>/match/` → Match Results tab. Full-BOQ re-match is not offered in
-  the toolbar; use per-row **Re-match**.
-- Per-row: **Re-match** (Match Results tab only, after status is `PROCESSED`) →
-  `POST /boqs/<id>/rows/<row_id>/match/` (`BOQAnalysisService.re_match_row`)
+- Button: **Match** (Make & Vendor toolbar) → `POST /boqs/<id>/match/` → Match Results.
+  Status: `MATCHING` → `PROCESSED` (**Matched**). Export stays hidden.
+- Per-row: **Re-match** (Match Results, after Match) →
+  `POST /boqs/<id>/rows/<row_id>/match/` (`BOQAnalysisService.re_match_row`);
+  clears prior Calculate Price output.
 - Matching / DB search uses **only filled product properties** (null/blank fields and
   empty attributes are omitted from Chroma query text, structured scoring, and SQL
   fallback filters).
 - Celery task: `boq.process_matching` (full BOQ only)
-- Status: `MATCHING` → `PROCESSED`
-- Match results page: rates, labour, confirm, export
+- **Calculate Price** (`POST /boqs/<id>/calculate-price/`) aggregates product
+  line amounts onto original BOQ rows (`analysis_data.row_pricing`,
+  `pricing_ready`), sets status `READY_EXPORT`, then shows **Export Excel**.
+- Export (`GET /boqs/<id>/export/`) writes rates/amounts into the original BOQ
+  sheet columns plus a Charge Breakdown sheet; sets status `EXPORTED`.
 
 Poll `GET /boqs/<id>/status/?expect=extract|match` while `PROCESSING` / `MATCHING`.
 
@@ -204,6 +243,8 @@ live analysis is edited before re-match.
 | `MakeVendorSelectionService` | After Analyse: make/supplier pick → exact Rate_Master → rates by Tech_Key |
 | `ProductMatchingService` | Chroma recall + structured `Rate_Master` scoring |
 | `MakeListConstraintService` | Map BOQ lines to `approved_makes_list`; hard Make filter |
+| `BOQPriceCalculationService` | Map matched rates onto original rows; unlock export |
+| `BOQExportService` | Excel export (original BOQ format + breakdown) |
 | `BOQAnalysisService` | Orchestrator |
 | `utils/attribute_parser.py` | Parse/normalize dynamic `Attribute` key-value text |
 
@@ -271,9 +312,10 @@ rows (size-aware when multiple rows share a key). Per-unit labour uses precomput
 `Total_Labour_per_unit_with_labour_Multipler` → `Total_Labour_per_Unit` → `Labour_Rate_Per_unit`.
 Component breakdown (testing, scaffolding, consumables, painting, buffer) is exposed for export.
 
-**Export:** `BOQExportService` → Excel download with two sheets: **BOQ**
-(original upload layout with rate/amount filled) and **Charge Breakdown**
-(detailed material/labour lines). Applies session confirmations when present.
+**Export:** After **Calculate Price** (`READY_EXPORT`), `BOQExportService` → Excel
+download with two sheets: **BOQ** (original upload layout with rate/amount filled)
+and **Charge Breakdown** (detailed material/labour lines). Successful download sets
+`EXPORTED`. Applies session confirmations when present.
 
 ## Business Rules (stable)
 
@@ -350,9 +392,12 @@ BOQ_AI/
 | `apps/database_manager/services/activation.py` | Single active upload |
 | `apps/database_manager/views.py` | DB upload UI |
 | `apps/boq/services/boq_service.py` | BOQ file persistence |
+| `apps/boq/services/xls_upload_conversion_service.py` | Convert legacy `.xls` → `.xlsx` on upload |
+| `utils/xls_convert.py` | xlrd → openpyxl workbook conversion |
 | `apps/boq/services/boq_analysis_service.py` | Analysis orchestrator |
 | `apps/boq/services/rate_detail_retrieval_service.py` | Rate_Master snapshot by id |
 | `apps/boq/services/labour_detail_retrieval_service.py` | Labour_Master by Tech_Key |
+| `apps/boq/services/boq_price_calculation_service.py` | Calculate Price → row pricing / ready to export |
 | `apps/boq/services/boq_export_service.py` | Excel export |
 | `ai/openai_client.py` | OpenAI client + API key check |
 | `ai/embeddings/` | Chroma product index |

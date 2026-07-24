@@ -28,6 +28,7 @@ redis==8.0.1
 # File processing
 pandas==3.0.3
 openpyxl==3.1.5
+xlrd==2.0.2
 numpy==2.5.0
 pypdf==5.3.0
 

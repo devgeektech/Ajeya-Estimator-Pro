@@ -6,7 +6,7 @@ from pathlib import Path
 
 from django.core.files.storage import default_storage
 
-from utils.excel import read_rows_with_metadata
+from utils.excel import MultiSheetWorkbookError, read_rows_with_metadata, require_single_worksheet
 
 from .serial_normalizer import attach_row_hierarchy, detect_serial_key, structure_for_analysis
 
@@ -63,11 +63,15 @@ def parse_boq_workbook(uploaded_file, *, source_filename: str = "") -> dict:
     Raises ``BOQParseError`` when no usable headers/rows are found.
     """
     file_path = _resolve_path(uploaded_file)
+    try:
+        require_single_worksheet(file_path, detail_label="BOQ details")
+    except MultiSheetWorkbookError as exc:
+        raise BOQParseError(str(exc)) from exc
     headers, records = read_rows_with_metadata(
         file_path,
         header_keys=BOQ_HEADER_HINTS,
         expand_columns=True,
-        merge_matching_sheets=True,
+        merge_matching_sheets=False,
         min_header_matches=2,
     )
     if not headers or not records:

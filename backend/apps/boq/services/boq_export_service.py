@@ -2,10 +2,9 @@
 from __future__ import annotations
 
 import logging
-from decimal import Decimal, InvalidOperation
-from io import BytesIO
 from typing import Any
 
+from django.db import transaction
 from django.utils.text import slugify
 from openpyxl import Workbook
 from openpyxl.styles import Font
@@ -13,7 +12,9 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from apps.boq.models import BOQ
 from apps.boq.services.boq_analysis_display_service import BOQAnalysisDisplayService
+from apps.boq.services.boq_price_calculation_service import build_row_pricing
 from apps.boq.services.serial_normalizer import cell_value
+from common.choices import BOQStatus
 
 logger = logging.getLogger("boq_ai")
 
@@ -50,21 +51,6 @@ _BREAKDOWN_HEADERS = [
 ]
 
 
-def _to_decimal(value: Any) -> Decimal | None:
-    if value in (None, ""):
-        return None
-    try:
-        return Decimal(str(value))
-    except (InvalidOperation, ValueError):
-        return None
-
-
-def _format_decimal(value: Decimal | None) -> Any:
-    if value is None:
-        return None
-    return float(value)
-
-
 def _header_keys(headers: list[dict[str, Any]]) -> tuple[str | None, str | None]:
     rate_key = amount_key = None
     for header in headers:
@@ -76,53 +62,6 @@ def _header_keys(headers: list[dict[str, Any]]) -> tuple[str | None, str | None]
     return rate_key, amount_key
 
 
-def _pricing_by_row(display: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """Aggregate priced output per BOQ row for the original sheet."""
-    pricing: dict[str, dict[str, Any]] = {}
-    for line in display.get("lines") or []:
-        row_id = str(line.get("row_id") or "")
-        if not row_id:
-            continue
-
-        material_total = Decimal("0")
-        labour_total = Decimal("0")
-        total_amount = Decimal("0")
-        has_values = False
-
-        for product in line.get("products") or []:
-            line_output = product.get("line_output") or {}
-            if line_output.get("is_blank"):
-                continue
-            material_amount = _to_decimal(line_output.get("material_amount"))
-            labour_amount = _to_decimal(line_output.get("labour_amount"))
-            row_total = _to_decimal(line_output.get("total_amount"))
-            if material_amount is not None:
-                material_total += material_amount
-                has_values = True
-            if labour_amount is not None:
-                labour_total += labour_amount
-                has_values = True
-            if row_total is not None:
-                total_amount += row_total
-                has_values = True
-
-        if not has_values:
-            continue
-
-        qty = _to_decimal(line.get("qty"))
-        unit_rate = None
-        if qty and qty != 0:
-            unit_rate = total_amount / qty
-
-        pricing[row_id] = {
-            "rate": _format_decimal(unit_rate),
-            "amount": _format_decimal(total_amount),
-            "material_amount": _format_decimal(material_total),
-            "labour_amount": _format_decimal(labour_total),
-        }
-    return pricing
-
-
 class BOQExportService:
     """Write priced BOQ workbook with original sheet + charge breakdown."""
 
@@ -131,13 +70,22 @@ class BOQExportService:
         self.confirmations = confirmations or {}
 
     def run(self) -> tuple[bytes, str]:
+        from io import BytesIO
+
         boq = BOQ.objects.get(pk=self.boq_id)
+        analysis = boq.analysis_data or {}
+        if boq.status not in {BOQStatus.READY_EXPORT, BOQStatus.EXPORTED} and not analysis.get(
+            "pricing_ready"
+        ):
+            raise ValueError("Calculate Price before exporting.")
+
         display = BOQAnalysisDisplayService(boq, self.confirmations).build()
         if not display.get("has_analysis"):
             raise ValueError("Run Match before exporting.")
 
         boq_data = boq.boq_data or {}
-        pricing = _pricing_by_row(display)
+        stored_pricing = analysis.get("row_pricing") or {}
+        pricing = stored_pricing if isinstance(stored_pricing, dict) and stored_pricing else build_row_pricing(display)
 
         workbook = Workbook()
         boq_sheet = workbook.active
@@ -153,7 +101,22 @@ class BOQExportService:
         buffer = BytesIO()
         workbook.save(buffer)
         filename = f"{slugify(boq.boq_name) or 'boq'}-export.xlsx"
+
+        with transaction.atomic():
+            if boq.status != BOQStatus.EXPORTED:
+                boq.status = BOQStatus.EXPORTED
+                boq.save(update_fields=["status"])
+
         logger.info("Exported BOQ workbook for id=%s (%s)", boq.pk, filename)
+        from apps.audit.services import record
+        from apps.notifications.services import notify
+
+        record(getattr(boq, "user", None), "Exported BOQ", "BOQ", boq.boq_name)
+        notify(
+            getattr(boq, "user", None),
+            "BOQ exported",
+            f"BOQ '{boq.boq_name}' was exported as {filename}.",
+        )
         return buffer.getvalue(), filename
 
     @staticmethod

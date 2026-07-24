@@ -72,6 +72,13 @@ class DatabaseUploadView(DatabaseAccessRequiredMixin, FormView):
             ).run()
             record(self.request.user, "database_import", "Workbook", upload.name)
             messages.success(self.request, "Database imported and activated.")
+            from apps.notifications.services import notify
+
+            notify(
+                self.request.user,
+                "Database activated",
+                f"'{name or upload.name}' was imported and is now the active database.",
+            )
         except BOQAIError as exc:
             messages.error(self.request, str(exc))
             return self.form_invalid(form)

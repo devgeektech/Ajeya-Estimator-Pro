@@ -80,13 +80,18 @@ def _size_match_score(left: Any, right: Any) -> float:
 
 
 def structured_match_score(extracted: dict[str, Any], rate: Rate_Master) -> tuple[float, dict[str, Any]]:
-    """Return 0-100 structured score using only filled extracted properties."""
+    """Return 0-100 structured score using product fields only (never make/vendor)."""
     extracted_attrs = {
         str(key): str(value)
         for key, value in (extracted.get("attributes") or {}).items()
         if _is_filled(value)
+        and _normalize_text(key) not in {"make", "manufacturer", "brand", "supplier", "vendor"}
     }
-    rate_attrs = parse_attributes(rate.Attribute)
+    rate_attrs = {
+        key: value
+        for key, value in parse_attributes(rate.Attribute).items()
+        if _normalize_text(key) not in {"make", "manufacturer", "brand", "supplier", "vendor"}
+    }
 
     field_checks: list[tuple[str, Any, Any, Any]] = [
         ("category", extracted.get("category"), rate.Category, _text_match_score),
@@ -127,7 +132,7 @@ def structured_match_score(extracted: dict[str, Any], rate: Rate_Master) -> tupl
 
 
 def build_match_query_text(extracted: dict[str, Any]) -> str:
-    """Build Chroma query text from filled properties only (skip null/blank)."""
+    """Build Chroma query text from filled product properties only (no make/vendor)."""
     parts = [
         extracted.get("description_hint"),
         extracted.get("category"),
@@ -136,11 +141,15 @@ def build_match_query_text(extracted: dict[str, Any]) -> str:
         extracted.get("size"),
         extracted.get("unit"),
         extracted.get("capacity"),
-        extracted.get("make_hint"),
+        # Intentionally omit make_hint / supplier — product identity only.
     ]
     attrs = extracted.get("attributes") or {}
     for key, value in attrs.items():
         if not _is_filled(value):
+            continue
+        # Skip make/vendor-like attribute keys so they do not bias product score.
+        key_norm = _normalize_text(key)
+        if key_norm in {"make", "manufacturer", "brand", "supplier", "vendor"}:
             continue
         parts.append(f"{key}={value}")
     return " ".join(str(part).strip() for part in parts if _is_filled(part))

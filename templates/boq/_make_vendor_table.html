@@ -1,22 +1,12 @@
 {% if not make_vendor_display.has_products %}
 <p class="panel__text">No analysed products yet. Run <strong>Analyse</strong> first, then select make and supplier here.</p>
 {% else %}
-<div class="make-vendor-summary panel__text panel__text--muted">
-    {{ make_vendor_display.stats.matched_count|default:0 }} / {{ make_vendor_display.stats.product_count|default:0 }}
-    products matched with rates.
-    Choose <strong>category → sub-category → make → supplier</strong> to apply to every product in that sub-category.
-    Default make is <strong>Lowest price</strong> among approved makes from the make list.
-</div>
+<p class="make-vendor-hint panel__text panel__text--muted">
+    Products are prefilled with lowest approved make/vendor. Adjust from the cascade below, then click <strong>Match</strong> when ready.
+</p>
 
 {% if make_vendor_display.selection_catalog.categories %}
-<section class="make-vendor-categories" id="make-vendor-categories">
-    <div class="make-vendor-categories__head">
-        <h3 class="make-vendor-categories__title">Category &amp; sub-category selection</h3>
-        <p class="panel__text panel__text--muted">
-            Lists only categories and sub-categories found in Analysis. Approved makes come from the make list;
-            suppliers are loaded from Rate_Master for the selected make.
-        </p>
-    </div>
+<section class="make-vendor-selection-card" id="make-vendor-categories">
     {{ make_vendor_display.selection_catalog|json_script:"make-vendor-catalog-data" }}
     <div
         class="make-vendor-subcategory-panel"
@@ -38,7 +28,7 @@
             <label class="extraction-field">
                 <span class="extraction-field__label">Sub-category</span>
                 <select class="extraction-input" x-model="subCategory" :disabled="!category" @change="onSubCategoryChange()">
-                    <option value="">Select sub-category…</option>
+                    <option value="">No selection (entire category)</option>
                     <template x-for="item in subCategories" :key="item.sub_category">
                         <option :value="item.sub_category" x-text="item.sub_category + ' (' + item.product_count + ')'"></option>
                     </template>
@@ -46,8 +36,13 @@
             </label>
             <label class="extraction-field">
                 <span class="extraction-field__label">Approved make</span>
-                <select class="extraction-input" x-model="make" :disabled="!subCategory" @change="onMakeChange()">
-                    <option value="">Select make…</option>
+                <select
+                    class="extraction-input"
+                    x-model="make"
+                    :disabled="!category || !hasApprovedMakes"
+                    @change="onMakeChange()"
+                >
+                    <option value="" x-show="!hasApprovedMakes" x-cloak>No Approved Make Found in Make List</option>
                     <template x-for="option in makeOptions" :key="option">
                         <option :value="option" x-text="option"></option>
                     </template>
@@ -55,7 +50,7 @@
             </label>
             <label class="extraction-field">
                 <span class="extraction-field__label">Supplier</span>
-                <select class="extraction-input" x-model="supplier" :disabled="!subCategory || !make || isLowestMake(make)">
+                <select class="extraction-input" x-model="supplier" :disabled="!category || !hasApprovedMakes || !make || isLowestMake(make)">
                     <option value="">Auto (lowest price)</option>
                     <template x-for="option in supplierOptions" :key="option">
                         <option :value="option" x-text="option"></option>
@@ -67,162 +62,222 @@
             <button
                 type="button"
                 class="btn btn--small btn--boq-analyse"
-                :disabled="saving || !category || !subCategory"
+                :disabled="saving || !category || !hasApprovedMakes"
                 @click="applySubcategory()"
             >
-                <span x-show="!saving">Apply to sub-category</span>
+                <span x-show="!saving" x-text="subCategory ? 'Apply to sub-category' : 'Apply to category'"></span>
                 <span x-show="saving" x-cloak>Applying…</span>
             </button>
             <span class="extraction-save-hint extraction-save-hint--error" x-show="error" x-text="error" x-cloak></span>
-        </div>
-
-        <div class="make-vendor-filter-preview" x-show="category || subCategory" x-cloak>
-            <h4 class="make-vendor-filter-preview__title">Filter ready to apply</h4>
-            <dl class="make-vendor-filter-preview__grid">
-                <div><dt>Category</dt><dd x-text="category || '—'"></dd></div>
-                <div><dt>Sub-category</dt><dd x-text="subCategory || '—'"></dd></div>
-                <div><dt>Make</dt><dd x-text="make || 'Lowest price'"></dd></div>
-                <div><dt>Supplier</dt><dd x-text="isLowestMake(make) ? 'Auto (lowest price)' : (supplier || 'Auto (lowest price)')"></dd></div>
-            </dl>
-            <p class="panel__text panel__text--muted" x-show="subCategory">
-                Click <strong>Apply to sub-category</strong> to update all products under this filter.
-            </p>
+            <span
+                class="extraction-save-hint extraction-save-hint--error"
+                x-show="category && !hasApprovedMakes && !error"
+                x-cloak
+            >No Approved Make Found in Make List</span>
         </div>
     </div>
+</section>
+{% endif %}
 
-    {% if make_vendor_display.selection_catalog.applied_filters %}
-    <div class="make-vendor-applied-filters">
-        <h4 class="make-vendor-filter-preview__title">Applied filters</h4>
-        <p class="panel__text panel__text--muted">
-            Reminder of make/vendor choices already applied (including auto lowest-price from Next).
-        </p>
-        <ul class="make-vendor-applied-filters__list">
-            {% for item in make_vendor_display.selection_catalog.applied_filters %}
-            <li class="make-vendor-applied-filters__item">
+{% if make_vendor_display.selection_catalog.applied_filters %}
+<section class="make-vendor-applied-filters make-vendor-applied-filters--card">
+    <h4 class="make-vendor-filter-preview__title">Applied filters</h4>
+    <ul class="make-vendor-applied-filters__list">
+        {% for item in make_vendor_display.selection_catalog.applied_filters %}
+        <li class="make-vendor-applied-filters__item">
+            <div class="make-vendor-applied-filters__body">
                 <strong>{{ item.category }} / {{ item.sub_category }}</strong>
                 <span>{{ item.make }} · {{ item.supplier }}</span>
                 {% if item.product_count %}
                 <span class="badge badge--gray">{{ item.product_count }} product{{ item.product_count|pluralize }}</span>
                 {% endif %}
-                {% if item.source == "lowest_defaults" %}
-                <span class="badge badge--yellow">Auto lowest</span>
-                {% endif %}
-            </li>
-            {% endfor %}
-        </ul>
-    </div>
-    {% endif %}
+            </div>
+            <button
+                type="button"
+                class="make-vendor-applied-filters__remove"
+                title="Remove filter"
+                aria-label="Remove filter {{ item.category }} / {{ item.sub_category }}"
+                @click="window.removeMakeVendorAppliedFilter('{% url 'boq:make_vendor_select' boq.pk %}', '{{ item.category|escapejs }}', '{{ item.sub_category_value|default:''|escapejs }}')"
+            >&times;</button>
+        </li>
+        {% endfor %}
+    </ul>
 </section>
 {% endif %}
 
 <div class="make-vendor-lines" id="make-vendor-lines">
-    <h3 class="make-vendor-categories__title">Products</h3>
+    <h3 class="make-vendor-lines__title">Products</h3>
     {% for line in make_vendor_display.lines %}
-    <article class="make-vendor-line" id="make-vendor-{{ line.row_id }}">
+    <article class="make-vendor-line{% if forloop.counter|divisibleby:2 %} make-vendor-line--alt{% endif %}" id="make-vendor-{{ line.row_id }}">
         <header class="make-vendor-line__header">
             <div class="make-vendor-line__title">
                 <span class="make-vendor-line__serial">{{ line.serial|default:"—" }}</span>
                 {% if line.qty %}<span>Qty: {{ line.qty }}{% if line.unit %} {{ line.unit }}{% endif %}</span>{% endif %}
+                {% if line.products|length > 1 %}
+                <span class="badge badge--dark">{{ line.products|length }} products</span>
+                {% endif %}
             </div>
             <p class="make-vendor-line__description">{{ line.description }}</p>
         </header>
 
-        {% for product in line.products %}
-        <section
-            class="make-vendor-card"
-            x-data="makeVendorForm({
-                url: '{% url 'boq:make_vendor_select' boq.pk %}',
-                rowId: '{{ line.row_id }}',
-                productIndex: {{ product.product_index }},
-                make: '{{ product.selected_make|default:''|escapejs }}',
-                supplier: '{{ product.selected_supplier|default:''|escapejs }}',
-                status: '{{ product.match_status|default:'not_searched'|escapejs }}',
-                confidence: {{ product.confidence|default:'null' }},
-                techKey: '{{ product.tech_key|default:''|escapejs }}',
-                matchedSummary: '{{ product.matched_summary|default:''|escapejs }}',
-                notes: '{{ product.notes|default:''|escapejs }}',
-                materialRate: '{{ product.line_output.material_rate|default:''|escapejs }}',
-                labourRate: '{{ product.line_output.labour_rate|default:''|escapejs }}',
-                totalAmount: '{{ product.line_output.total_amount|default:''|escapejs }}'
-            })"
+        {% if line.products %}
+        <div
+            class="make-vendor-products"
+            x-data="{
+                activeProduct: {{ line.products.0.product_index }},
+                productStatus: {
+                    {% for product in line.products %}
+                    {{ product.product_index }}: '{{ product.match_status|default:'not_searched'|escapejs }}'{% if not forloop.last %},{% endif %}
+                    {% endfor %}
+                },
+                tabClass(index) {
+                    const matched = this.productStatus[index] === 'matched';
+                    return {
+                        'is-active': this.activeProduct === index,
+                        'is-matched': matched,
+                        'is-unmatched': !matched,
+                    };
+                },
+                onProductStatus(event) {
+                    const detail = event.detail || {};
+                    if (detail.productIndex == null) return;
+                    this.productStatus = {
+                        ...this.productStatus,
+                        [detail.productIndex]: detail.status || 'unmatched',
+                    };
+                },
+            }"
+            @make-vendor-status="onProductStatus($event)"
         >
-            <div class="make-vendor-card__head">
-                <div class="make-vendor-card__heading">
-                    <h4 class="make-vendor-card__title">{{ product.description_hint|default:product.summary }}</h4>
-                    <p class="make-vendor-card__taxonomy">
-                        <span class="make-vendor-card__taxonomy-label">Category / Sub-category</span>
-                        <span class="make-vendor-card__taxonomy-value">{{ product.taxonomy_label }}</span>
-                    </p>
-                </div>
-                <span
-                    class="badge"
-                    :class="{
-                        'badge--green': status === 'matched',
-                        'badge--yellow': status === 'pending',
-                        'badge--red': status === 'unmatched',
-                        'badge--gray': status === 'not_searched'
-                    }"
-                    x-text="statusLabel"
-                >{{ product.match_status }}</span>
+            <div class="make-vendor-product-tabs" role="tablist" aria-label="Products">
+                {% for product in line.products %}
+                <button
+                    type="button"
+                    class="make-vendor-product-tabs__btn"
+                    role="tab"
+                    :class="tabClass({{ product.product_index }})"
+                    :aria-selected="activeProduct === {{ product.product_index }}"
+                    @click="activeProduct = {{ product.product_index }}"
+                >Product {{ product.display_number }}</button>
+                {% endfor %}
             </div>
 
-            <dl class="make-vendor-readonly">
-                <div><dt>Category</dt><dd>{{ product.category|default:"—" }}</dd></div>
-                <div><dt>Sub-category</dt><dd>{{ product.sub_category|default:"—" }}</dd></div>
-                {% if product.class %}<div><dt>Class</dt><dd>{{ product.class }}</dd></div>{% endif %}
-                {% if product.size %}<div><dt>Size</dt><dd>{{ product.size }}</dd></div>{% endif %}
-                {% if product.unit %}<div><dt>Unit</dt><dd>{{ product.unit }}</dd></div>{% endif %}
-                {% if product.capacity %}<div><dt>Capacity</dt><dd>{{ product.capacity }}</dd></div>{% endif %}
-            </dl>
+            {% for product in line.products %}
+            <div
+                class="make-vendor-product-panel"
+                x-show="activeProduct === {{ product.product_index }}"
+                x-cloak
+            >
+            <section
+                class="make-vendor-card"
+                :class="{
+                    'make-vendor-card--no-make': {{ product.highlight_no_make|yesno:'true,false' }},
+                    'make-vendor-card--no-match': status === 'unmatched' && !{{ product.highlight_no_make|yesno:'true,false' }}
+                }"
+                role="tabpanel"
+                x-data="makeVendorForm({
+                    url: '{% url 'boq:make_vendor_select' boq.pk %}',
+                    rowId: '{{ line.row_id }}',
+                    productIndex: {{ product.product_index }},
+                    make: '{{ product.selected_make|default:''|escapejs }}',
+                    supplier: '{{ product.selected_supplier|default:''|escapejs }}',
+                    status: '{{ product.match_status|default:'not_searched'|escapejs }}',
+                    confidence: {{ product.confidence|default:'null' }},
+                    techKey: '{{ product.tech_key|default:''|escapejs }}',
+                    matchedSummary: '{{ product.matched_summary|default:''|escapejs }}',
+                    notes: '{{ product.notes|default:''|escapejs }}',
+                    materialRate: '{{ product.line_output.material_rate|default:''|escapejs }}',
+                    labourRate: '{{ product.line_output.labour_rate|default:''|escapejs }}',
+                    totalAmount: '{{ product.line_output.total_amount|default:''|escapejs }}'
+                })"
+            >
+                <div class="make-vendor-card__head">
+                    <div class="make-vendor-card__heading">
+                        <h4 class="make-vendor-card__title">{{ product.description_hint|default:product.summary }}</h4>
+                        <p class="make-vendor-card__taxonomy">
+                            <span class="make-vendor-card__taxonomy-label">Category / Sub-category</span>
+                            <span class="make-vendor-card__taxonomy-value">{{ product.taxonomy_label }}</span>
+                        </p>
+                        {% if product.highlight_no_make %}
+                        <p class="make-vendor-card__no-make-note">No Approved Make Found in Make List</p>
+                        {% endif %}
+                    </div>
+                    {% if product.highlight_no_make %}
+                    <span class="badge badge--red">Not found</span>
+                    {% else %}
+                    <span
+                        class="badge"
+                        :class="{
+                            'badge--green': status === 'matched',
+                            'badge--yellow': status === 'pending',
+                            'badge--red': status === 'unmatched',
+                            'badge--gray': status === 'not_searched'
+                        }"
+                        x-text="statusLabel"
+                    >{{ product.match_status }}</span>
+                    {% endif %}
+                </div>
 
-            <div class="make-vendor-fields">
-                <label class="extraction-field">
-                    <span class="extraction-field__label">Make</span>
-                    <select class="extraction-input" x-model="make">
-                        <option value="">Select make…</option>
-                        {% for option in product.make_options %}
-                        <option value="{{ option }}" {% if option == product.selected_make %}selected{% endif %}>{{ option }}</option>
-                        {% endfor %}
-                    </select>
-                </label>
-                <label class="extraction-field">
-                    <span class="extraction-field__label">Supplier</span>
-                    <select class="extraction-input" x-model="supplier">
-                        <option value="">Auto (lowest price)</option>
-                        {% for option in product.supplier_options %}
-                        <option value="{{ option }}" {% if option == product.selected_supplier %}selected{% endif %}>{{ option }}</option>
-                        {% endfor %}
-                    </select>
-                </label>
-                <div class="make-vendor-fields__actions">
-                    <button
-                        type="button"
-                        class="btn btn--small btn--boq-analyse"
-                        :disabled="saving || (!make && !supplier)"
-                        @click="findRates()"
-                    >
-                        <span x-show="!saving">Find rates</span>
-                        <span x-show="saving" x-cloak>Searching…</span>
-                    </button>
-                    <span class="extraction-save-hint extraction-save-hint--error" x-show="error" x-text="error" x-cloak></span>
-                </div>
-            </div>
+                <dl class="make-vendor-readonly">
+                    <div><dt>Category</dt><dd>{{ product.category|default:"—" }}</dd></div>
+                    <div><dt>Sub-category</dt><dd>{{ product.sub_category|default:"—" }}</dd></div>
+                    {% if product.class %}<div><dt>Class</dt><dd>{{ product.class }}</dd></div>{% endif %}
+                    {% if product.size %}<div><dt>Size</dt><dd>{{ product.size }}</dd></div>{% endif %}
+                    {% if product.unit %}<div><dt>Unit</dt><dd>{{ product.unit }}</dd></div>{% endif %}
+                    {% if product.capacity %}<div><dt>Capacity</dt><dd>{{ product.capacity }}</dd></div>{% endif %}
+                </dl>
 
-            <div class="make-vendor-result" x-show="status !== 'not_searched'" x-cloak>
-                <div class="make-vendor-result__meta">
-                    <p x-show="matchedSummary" x-text="'Matched: ' + matchedSummary"></p>
-                    <p x-show="techKey" x-text="'Tech key: ' + techKey"></p>
-                    <p x-show="confidence != null" x-text="'Confidence: ' + Math.round(confidence) + '%'"></p>
-                    <p class="make-vendor-result__notes" x-show="notes" x-text="notes"></p>
+                <div class="make-vendor-fields">
+                    <label class="extraction-field">
+                        <span class="extraction-field__label">Make</span>
+                        <select class="extraction-input" x-model="make">
+                            <option value="">Select make…</option>
+                            {% for option in product.make_options %}
+                            <option value="{{ option }}" {% if option == product.selected_make %}selected{% endif %}>{{ option }}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                    <label class="extraction-field">
+                        <span class="extraction-field__label">Supplier</span>
+                        <select class="extraction-input" x-model="supplier">
+                            <option value="">Auto (lowest price)</option>
+                            {% for option in product.supplier_options %}
+                            <option value="{{ option }}" {% if option == product.selected_supplier %}selected{% endif %}>{{ option }}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                    <div class="make-vendor-fields__actions">
+                        <button
+                            type="button"
+                            class="btn btn--small btn--boq-analyse"
+                            :disabled="saving || (!make && !supplier)"
+                            @click="findRates()"
+                        >
+                            <span x-show="!saving">Find rates</span>
+                            <span x-show="saving" x-cloak>Searching…</span>
+                        </button>
+                        <span class="extraction-save-hint extraction-save-hint--error" x-show="error" x-text="error" x-cloak></span>
+                    </div>
                 </div>
-                <div class="make-vendor-rates">
-                    <div><span>Material</span><strong x-text="materialRate || '—'"></strong></div>
-                    <div><span>Labour</span><strong x-text="labourRate || '—'"></strong></div>
-                    <div><span>Total</span><strong x-text="totalAmount || '—'"></strong></div>
+
+                <div class="make-vendor-result" x-show="status !== 'not_searched'" x-cloak>
+                    <div class="make-vendor-result__meta">
+                        <p x-show="matchedSummary" x-text="'Matched: ' + matchedSummary"></p>
+                        <p x-show="techKey" x-text="'Tech key: ' + techKey"></p>
+                        <p x-show="confidence != null" x-text="'Confidence: ' + Math.round(confidence) + '%'"></p>
+                        <p class="make-vendor-result__notes" x-show="notes" x-text="notes"></p>
+                    </div>
+                    <div class="make-vendor-rates">
+                        <div><span>Material</span><strong x-text="materialRate || '—'"></strong></div>
+                        <div><span>Labour</span><strong x-text="labourRate || '—'"></strong></div>
+                        <div><span>Total</span><strong x-text="totalAmount || '—'"></strong></div>
+                    </div>
                 </div>
+            </section>
             </div>
-        </section>
-        {% endfor %}
+            {% endfor %}
+        </div>
+        {% endif %}
     </article>
     {% empty %}
     <p class="panel__text">No product lines available for make/vendor selection.</p>
@@ -237,6 +292,47 @@ document.addEventListener('alpine:init', () => {
     const isLowestMake = (value) => {
         const text = String(value || '').trim().toLowerCase();
         return !text || text === LOWEST_LABEL.toLowerCase() || text === 'lowest price';
+    };
+
+    window.removeMakeVendorAppliedFilter = async function removeMakeVendorAppliedFilter(url, category, subCategory) {
+        if (!url || !category) {
+            return;
+        }
+        const confirmed = window.BOQConfirm
+            ? await window.BOQConfirm.ask('Remove this applied filter?', {
+                title: 'Remove filter',
+                confirmLabel: 'Remove',
+            })
+            : window.confirm('Remove this applied filter?');
+        if (!confirmed) {
+            return;
+        }
+        try {
+            const body = new FormData();
+            body.append('ajax', '1');
+            body.append('action', 'remove_subcategory_filter');
+            body.append('category', category);
+            body.append('sub_category', subCategory || '');
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRFToken': csrfToken(),
+                    'Accept': 'application/json',
+                },
+                credentials: 'same-origin',
+                body,
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || !data.ok) {
+                throw new Error(data.message || 'Failed to remove filter.');
+            }
+            window.location.assign(
+                '{% url "boq:detail" boq.pk %}?tab=make_vendor&_t=' + Date.now()
+            );
+        } catch (error) {
+            alert(error.message || 'Failed to remove filter.');
+        }
     };
 
     Alpine.data('makeVendorSubcategoryPanel', (config) => ({
@@ -263,27 +359,45 @@ document.addEventListener('alpine:init', () => {
             const row = (this.catalog.categories || []).find((item) => item.category === this.category);
             return row ? row.sub_categories || [] : [];
         },
+        get currentCategory() {
+            return (this.catalog.categories || []).find((item) => item.category === this.category) || null;
+        },
         get currentSubCategory() {
             return this.subCategories.find((item) => item.sub_category === this.subCategory) || null;
         },
+        get activeScope() {
+            return this.subCategory ? this.currentSubCategory : this.currentCategory;
+        },
+        get hasApprovedMakes() {
+            const row = this.activeScope;
+            if (!row) return false;
+            if (row.has_approved_makes === false) return false;
+            return (row.make_options || []).length > 0;
+        },
         get makeOptions() {
-            const row = this.currentSubCategory;
+            const row = this.activeScope;
             return row ? row.make_options || [] : [];
         },
         get supplierOptions() {
-            const row = this.currentSubCategory;
+            const row = this.activeScope;
             if (!row || isLowestMake(this.make)) return [];
             const byMake = row.suppliers_by_make || {};
             return byMake[this.make] || [];
         },
         onCategoryChange() {
             this.subCategory = '';
-            this.make = LOWEST_LABEL;
+            const row = this.currentCategory;
+            this.make = (row && row.make_options && row.make_options.length) ? LOWEST_LABEL : '';
             this.supplier = '';
         },
         onSubCategoryChange() {
-            const row = this.currentSubCategory;
-            this.make = (row && row.selected_make) ? row.selected_make : LOWEST_LABEL;
+            const row = this.activeScope;
+            if (row && row.has_approved_makes === false) {
+                this.make = '';
+                this.supplier = '';
+                return;
+            }
+            this.make = (row && row.selected_make) ? row.selected_make : (row && (row.make_options || []).length ? LOWEST_LABEL : '');
             this.supplier = (row && row.selected_supplier) ? row.selected_supplier : '';
         },
         onMakeChange() {
@@ -292,7 +406,7 @@ document.addEventListener('alpine:init', () => {
             }
         },
         async applySubcategory() {
-            if (this.saving || !this.category || !this.subCategory) return;
+            if (this.saving || !this.category || !this.hasApprovedMakes) return;
             this.saving = true;
             this.error = '';
             try {
@@ -300,7 +414,7 @@ document.addEventListener('alpine:init', () => {
                 body.append('ajax', '1');
                 body.append('action', 'apply_subcategory');
                 body.append('category', this.category);
-                body.append('sub_category', this.subCategory);
+                body.append('sub_category', this.subCategory || '');
                 body.append('make', this.make || LOWEST_LABEL);
                 body.append('supplier', this.supplier || '');
                 body.append('find_rates', '1');
@@ -316,13 +430,13 @@ document.addEventListener('alpine:init', () => {
                 });
                 const data = await response.json().catch(() => ({}));
                 if (!response.ok || !data.ok) {
-                    throw new Error(data.message || 'Failed to apply sub-category selection.');
+                    throw new Error(data.message || 'Failed to apply selection.');
                 }
                 window.location.assign(
                     '{% url "boq:detail" boq.pk %}?tab=make_vendor&_t=' + Date.now()
                 );
             } catch (error) {
-                this.error = error.message || 'Failed to apply sub-category selection.';
+                this.error = error.message || 'Failed to apply selection.';
                 this.saving = false;
             }
         },
@@ -390,6 +504,10 @@ document.addEventListener('alpine:init', () => {
                 this.materialRate = line.material_rate || '';
                 this.labourRate = line.labour_rate || '';
                 this.totalAmount = line.total_amount || '';
+                this.$dispatch('make-vendor-status', {
+                    productIndex: this.productIndex,
+                    status: this.status,
+                });
             } catch (error) {
                 this.error = error.message || 'Search failed.';
             } finally {

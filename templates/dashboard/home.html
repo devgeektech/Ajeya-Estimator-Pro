@@ -2,94 +2,645 @@
 {% block title %}Dashboard &middot; Ajeya Estimator Pro{% endblock %}
 {% block heading %}Dashboard{% endblock %}
 
+{% block head_extra %}
+<style>
+    /* Lock dashboard to one viewport — no page scroll */
+    html:has(.dash),
+    body:has(.dash) {
+        overflow: hidden;
+        height: 100%;
+    }
+    .main:has(.dash) {
+        height: 100vh;
+        max-height: 100vh;
+        overflow: hidden;
+    }
+    .content:has(.dash) {
+        padding: 18px 22px 16px;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        flex: 1;
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 <style>
-.dashboard-metrics {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 16px;
-    margin-bottom: 24px;
-}
-.d-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 16px 20px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-.d-card__value {
-    font-size: 1.5rem;
-    font-weight: 700;
-    color: var(--text);
-}
-.d-card__label {
-    font-size: 0.9rem;
-    color: var(--text-muted);
-}
-.d-panel {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 20px;
-}
-.d-panel__title {
-    margin: 0 0 16px 0;
-    font-size: 1.1rem;
-    font-weight: 600;
-}
+    .dash {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        width: 100%;
+        max-width: none;
+        height: 100%;
+        min-height: 0;
+        flex: 1;
+    }
+
+    /* Reference (image 2): open welcome, large title, muted subtitle */
+    .dash-hero {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+        flex-wrap: nowrap;
+        flex-shrink: 0;
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+    }
+
+    .dash-hero__title {
+        margin: 0 0 4px;
+        font-size: 1.56rem;
+        font-weight: 600;
+        letter-spacing: -0.03em;
+        line-height: 1.15;
+        color: var(--text, #1e293b);
+    }
+
+    .dash-hero__text {
+        margin: 0;
+        max-width: 38rem;
+        color: var(--text-muted, #64748b);
+        font-size: 0.88rem;
+        line-height: 1.4;
+        font-weight: 400;
+    }
+
+    .dash-hero__actions {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 10px;
+        flex-shrink: 0;
+        padding-top: 4px;
+    }
+
+    .dash-hero__actions .btn {
+        padding: 8px 14px;
+        font-size: 0.84rem;
+    }
+
+    .dash-metrics {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+        flex-shrink: 0;
+    }
+
+    /* Larger metric cards with colored left accent */
+    .dash-metric {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 14px;
+        padding: 20px 18px 20px 20px;
+        border-radius: 12px;
+        background: var(--surface, #fff);
+        border: 1px solid var(--border, #e2e8f0);
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+        position: relative;
+        overflow: hidden;
+        min-height: 92px;
+    }
+
+    .dash-metric::before {
+        content: "";
+        display: block;
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 4px;
+    }
+
+    .dash-metric--blue::before { background: #2563eb; }
+    .dash-metric--amber::before { background: #d97706; }
+    .dash-metric--green::before { background: #16a34a; }
+    .dash-metric--slate::before,
+    .dash-metric--red::before { background: #dc2626; }
+
+    .dash-metric__icon {
+        width: 44px;
+        height: 44px;
+        border-radius: 10px;
+        display: grid;
+        place-items: center;
+        font-size: 0.8rem;
+        font-weight: 800;
+        letter-spacing: 0.02em;
+        flex-shrink: 0;
+        margin-bottom: 0;
+    }
+
+    .dash-metric--blue .dash-metric__icon {
+        background: rgba(37, 99, 235, 0.12);
+        color: #2563eb;
+    }
+    .dash-metric--amber .dash-metric__icon {
+        background: rgba(217, 119, 6, 0.14);
+        color: #b45309;
+    }
+    .dash-metric--green .dash-metric__icon {
+        background: rgba(22, 163, 74, 0.12);
+        color: #15803d;
+    }
+    .dash-metric--slate .dash-metric__icon,
+    .dash-metric--red .dash-metric__icon {
+        background: rgba(220, 38, 38, 0.12);
+        color: #dc2626;
+    }
+
+    .dash-metric__body {
+        min-width: 0;
+        width: auto;
+        flex: 1;
+    }
+
+    .dash-metric__value {
+        font-size: 2rem;
+        font-weight: 600;
+        line-height: 1;
+        letter-spacing: -0.03em;
+        color: var(--text, #1e293b);
+    }
+
+    .dash-metric__label {
+        margin-top: 6px;
+        font-size: 0.92rem;
+        font-weight: 600;
+        color: var(--text-muted, #64748b);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    /* Lower panels fill remaining viewport (~70 / 30) */
+    .dash-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 7fr) minmax(240px, 3fr);
+        gap: 12px;
+        align-items: stretch;
+        flex: 1 1 auto;
+        min-height: 0;
+    }
+
+    .dash-section {
+        min-width: 0;
+        min-height: 0;
+        height: 100%;
+        background: var(--surface, #fff);
+        border: 1px solid var(--border, #e2e8f0);
+        border-radius: 12px;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+        padding: 14px 16px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+
+    .dash-section__head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 10px;
+        padding-bottom: 0;
+        border-bottom: 0;
+        flex-shrink: 0;
+    }
+
+    .dash-section__title {
+        margin: 0;
+        font-size: 1.08rem;
+        font-weight: 700;
+        color: var(--text, #1e293b);
+    }
+
+    /* Recent BOQs — clean table matching reference */
+    .dash-section--recent .dash-section__head {
+        margin-bottom: 8px;
+    }
+
+    .dash-section--recent .dash-section__title {
+        font-size: 1.12rem;
+        font-weight: 700;
+        color: #0f172a;
+    }
+
+    .dash-section--recent .btn--primary {
+        border-radius: 8px;
+        padding: 6px 12px;
+        font-size: 0.86rem;
+        font-weight: 600;
+    }
+
+    .dash-table-wrap {
+        flex: 1;
+        min-height: 0;
+        overflow-x: auto;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .dash-table {
+        width: 100%;
+        height: auto;
+        border-collapse: collapse;
+        table-layout: fixed;
+        margin: 0;
+    }
+
+    .dash-table thead th {
+        text-align: left;
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: #475569;
+        padding: 8px 10px 10px 0;
+        border-bottom: 1px solid #e2e8f0;
+        background: transparent;
+        white-space: nowrap;
+    }
+
+    .dash-table thead th:nth-child(1) { width: 34%; }
+    .dash-table thead th:nth-child(2) { width: 22%; }
+    .dash-table thead th:nth-child(3) { width: 26%; }
+    .dash-table thead th:nth-child(4) { width: 18%; }
+
+    .dash-table thead th:last-child,
+    .dash-table tbody td:last-child {
+        text-align: left;
+        padding-right: 0;
+    }
+
+    .dash-table tbody td {
+        text-align: left;
+        padding: 12px 12px 12px 0;
+        border-bottom: 1px solid #e2e8f0;
+        background: transparent;
+        vertical-align: middle;
+        font-size: 0.98rem;
+        color: #0f172a;
+        line-height: 1.3;
+    }
+
+    .dash-table tbody tr:last-child td {
+        border-bottom: 0;
+    }
+
+    .dash-table__name {
+        font-weight: 500;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .dash-table__meta {
+        color: #334155;
+        white-space: nowrap;
+        font-size: 0.95rem;
+    }
+
+    .dash-table .badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 12px;
+        border-radius: 999px;
+        font-size: 0.82rem;
+        font-weight: 600;
+    }
+
+    .dash-table .btn--open {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 6px 14px;
+        font-size: 0.86rem;
+        font-weight: 600;
+        color: #334155;
+        background: #fff;
+        border: 1px solid #d0d7e2;
+        border-radius: 8px;
+        text-decoration: none;
+        white-space: nowrap;
+    }
+
+    .dash-table .btn--open:hover {
+        background: #f8fafc;
+        color: #0f172a;
+    }
+
+    .dash-table__empty {
+        text-align: center !important;
+        color: #64748b;
+        font-size: 0.95rem;
+        padding: 28px 12px !important;
+    }
+
+    .dark-mode .dash-section--recent .dash-section__title {
+        color: var(--text);
+    }
+
+    .dark-mode .dash-table .btn--open {
+        background: var(--surface);
+        border-color: var(--border);
+        color: var(--text);
+    }
+
+    .dark-mode .dash-table thead th {
+        color: var(--text-muted);
+        border-bottom-color: var(--border);
+    }
+
+    .dark-mode .dash-table tbody td {
+        color: var(--text);
+        border-bottom-color: var(--border);
+    }
+
+    .dash-steps {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 0;
+        flex: 1;
+        min-height: 0;
+    }
+
+    .dash-step {
+        display: grid;
+        grid-template-columns: 34px minmax(0, 1fr);
+        gap: 10px;
+        align-items: start;
+        position: relative;
+        padding-bottom: clamp(6px, 1.2vh, 14px);
+        flex: 1 1 0;
+    }
+
+    .dash-step:last-child {
+        padding-bottom: 0;
+    }
+
+    .dash-step:not(:last-child)::before {
+        content: "";
+        position: absolute;
+        left: 16px;
+        top: 34px;
+        bottom: 0;
+        width: 2px;
+        background: rgba(37, 99, 235, 0.16);
+    }
+
+    .dash-step__icon {
+        width: 34px;
+        height: 34px;
+        border-radius: 10px;
+        display: grid;
+        place-items: center;
+        color: #fff;
+        background: #2563eb;
+        box-shadow: 0 3px 8px rgba(37, 99, 235, 0.22);
+        position: relative;
+        z-index: 1;
+        flex-shrink: 0;
+    }
+
+    .dash-step__icon svg {
+        width: 16px;
+        height: 16px;
+        display: block;
+    }
+
+    .dash-step__title {
+        display: block;
+        margin-top: 2px;
+        font-size: clamp(0.78rem, 1.15vh + 0.45rem, 0.95rem);
+        font-weight: 700;
+        color: var(--text, #1e293b);
+    }
+
+    .dash-step__text {
+        margin: 2px 0 0;
+        font-size: clamp(0.7rem, 0.9vh + 0.42rem, 0.84rem);
+        line-height: 1.35;
+        color: var(--text-muted, #64748b);
+    }
+
+    .dark-mode .dash-metric,
+    .dark-mode .dash-section {
+        background: var(--surface);
+        border-color: var(--border);
+        box-shadow: none;
+    }
+
+    .dark-mode .dash-step__icon {
+        box-shadow: none;
+    }
+
+    @media (max-width: 980px) {
+        .dash-metrics {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .dash-grid {
+            grid-template-columns: 1fr;
+        }
+        .dash-hero {
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        .dash-hero__actions {
+            width: 100%;
+            flex-wrap: wrap;
+        }
+        .dash-table-wrap {
+            overflow-x: auto;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        .dash-table {
+            height: auto;
+            min-width: 520px;
+        }
+        .dash-section {
+            height: auto;
+            min-height: 0;
+            overflow: visible;
+        }
+        .dash-section--recent {
+            max-height: min(480px, 58vh);
+            overflow: hidden;
+        }
+        html:has(.dash),
+        body:has(.dash),
+        .main:has(.dash) {
+            overflow: auto;
+            height: auto;
+            max-height: none;
+        }
+        .content:has(.dash) {
+            overflow: auto;
+            height: auto;
+        }
+    }
+
+    @media (max-width: 560px) {
+        .dash {
+            gap: 12px;
+        }
+        .dash-hero__title {
+            font-size: 1.28rem;
+        }
+        .dash-hero__text {
+            font-size: 0.84rem;
+        }
+        .dash-hero__actions {
+            flex-direction: column;
+        }
+        .dash-hero__actions .btn {
+            width: 100%;
+            justify-content: center;
+        }
+        .dash-metrics {
+            grid-template-columns: 1fr;
+        }
+        .dash-metric {
+            min-height: 80px;
+            padding: 16px;
+        }
+        .dash-metric__value {
+            font-size: 1.7rem;
+        }
+        .dash-table thead th,
+        .dash-table tbody td {
+            font-size: 0.88rem;
+            padding: 10px 8px 10px 0;
+        }
+        .content:has(.dash) {
+            padding: 12px;
+        }
+    }
 </style>
 
-<section class="welcome" style="margin-bottom: 16px;">
-    <h2 class="welcome__title" style="font-size: 1.5rem; margin-bottom: 4px;">Welcome, {{ greeting_name }}</h2>
-    <p class="welcome__text" style="color: var(--text-muted); margin: 0;">
-        {% if is_super_admin %}
-        Manage the master database and review uploaded BOQs across the team.
-        {% else %}
-        Upload BOQ workbooks for estimation. Your uploads are private to your account.
-        {% endif %}
-    </p>
-</section>
-
-<section class="dashboard-metrics">
-    {% for metric in metrics %}
-    <div class="d-card">
-        <div>
-            <div class="d-card__value">{{ metric.value }}</div>
-            <div class="d-card__label">{{ metric.label }}</div>
+<div class="dash">
+    <section class="dash-hero">
+        <div class="dash-hero__copy">
+            <h2 class="dash-hero__title">Welcome, {{ greeting_name }}</h2>
+            <p class="dash-hero__text">
+                {% if is_super_admin %}
+                Manage the master database and review uploaded BOQs across the team.
+                {% else %}
+                Upload BOQ workbooks for estimation. Your uploads are private to your account.
+                {% endif %}
+            </p>
         </div>
-    </div>
-    {% endfor %}
-</section>
-
-<section class="d-panel">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-        <h3 class="d-panel__title" style="margin:0;">Recent uploads</h3>
-        <div style="display:flex; gap:8px; align-items:center;">
-            <a href="{% url 'boq:list' %}" class="btn btn--small btn--ghost">View all</a>
-            <a href="{% url 'boq:upload' %}" class="btn btn--small btn--primary">Upload BOQ</a>
+        <div class="dash-hero__actions">
+            <a href="{% url 'boq:upload' %}" class="btn btn--primary">Upload BOQ</a>
         </div>
-    </div>
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Name</th>
-                <th>Status</th>
-                <th>Uploaded</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for boq in recent_boqs %}
-            <tr>
-                <td style="font-weight:500;">{{ boq.boq_name }}</td>
-                <td>{{ boq.get_status_display }}</td>
-                <td>{{ boq.created_at|date:"M d, H:i" }}</td>
-            </tr>
-            {% empty %}
-            <tr><td colspan="3" class="table__empty">No BOQs uploaded yet.</td></tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</section>
+    </section>
+
+    <section class="dash-metrics" aria-label="BOQ summary">
+        {% for metric in metrics %}
+        <article class="dash-metric dash-metric--{{ metric.tone }}">
+            <div class="dash-metric__icon" aria-hidden="true">
+                {% if metric.tone == "blue" %}BOQ{% elif metric.tone == "amber" %}AI{% elif metric.tone == "green" %}OK{% else %}✓{% endif %}
+            </div>
+            <div class="dash-metric__body">
+                <div class="dash-metric__value">{{ metric.value }}</div>
+                <div class="dash-metric__label">{{ metric.label }}</div>
+            </div>
+        </article>
+        {% endfor %}
+    </section>
+
+    <section class="dash-grid">
+        <div class="dash-section dash-section--recent">
+            <div class="dash-section__head">
+                <h3 class="dash-section__title">Recent BOQs</h3>
+                <a href="{% url 'boq:list' %}" class="btn btn--small btn--primary">View all</a>
+            </div>
+            <div class="dash-table-wrap">
+                <table class="dash-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Status</th>
+                            <th>Uploaded</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in recent_boqs %}
+                        <tr>
+                            <td class="dash-table__name" title="{{ item.boq.boq_name }}">{{ item.boq.boq_name }}</td>
+                            <td><span class="badge {{ item.status_display.badge }}">{{ item.status_display.label }}</span></td>
+                            <td class="dash-table__meta">{{ item.boq.created_at|date:"M d, H:i" }}</td>
+                            <td>
+                                <a href="{% url 'boq:detail' item.boq.pk %}" class="btn--open">Open</a>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="4" class="dash-table__empty">No BOQs uploaded yet. Start with Upload BOQ.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <aside class="dash-section dash-workflow">
+            <div class="dash-section__head">
+                <h3 class="dash-section__title">How it works</h3>
+            </div>
+            <ol class="dash-steps">
+                <li class="dash-step">
+                    <span class="dash-step__icon" aria-hidden="true">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    </span>
+                    <div>
+                        <strong class="dash-step__title">Upload</strong>
+                        <p class="dash-step__text">Upload BOQ workbook and optional make list.</p>
+                    </div>
+                </li>
+                <li class="dash-step">
+                    <span class="dash-step__icon" aria-hidden="true">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    </span>
+                    <div>
+                        <strong class="dash-step__title">Analyse</strong>
+                        <p class="dash-step__text">AI extracts products and maps Rate_Master taxonomy.</p>
+                    </div>
+                </li>
+                <li class="dash-step">
+                    <span class="dash-step__icon" aria-hidden="true">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+                    </span>
+                    <div>
+                        <strong class="dash-step__title">Make &amp; Vendor</strong>
+                        <p class="dash-step__text">Apply approved makes or lowest-price defaults.</p>
+                    </div>
+                </li>
+                <li class="dash-step">
+                    <span class="dash-step__icon" aria-hidden="true">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                    </span>
+                    <div>
+                        <strong class="dash-step__title">Match &amp; Export</strong>
+                        <p class="dash-step__text">Confirm matches and export when ready.</p>
+                    </div>
+                </li>
+            </ol>
+        </aside>
+    </section>
+</div>
 {% endblock %}

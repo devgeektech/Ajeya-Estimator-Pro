@@ -185,18 +185,79 @@ def align_product_taxonomy_from_db_labels(
     return snap_product_taxonomy(item, taxonomy)
 
 
+def _is_blank(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    return False
+
+
+def fill_product_core_fields_from_rate(
+    product: dict[str, Any],
+    rate: Rate_Master,
+    *,
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """
+    Copy core Rate_Master identity fields onto the extracted product.
+
+    Analysis owns product identity (not make). Blank fields are always filled.
+    When ``overwrite`` is True (confirmed DB match), replace AI values that
+    disagree with the matched Rate_Master row so experts need not Re-analyse
+    only to pick up DB class/size/unit/capacity.
+    """
+    item = dict(product)
+
+    def _as_text(raw: Any) -> str:
+        if raw in (None, ""):
+            return ""
+        if hasattr(raw, "normalize"):
+            try:
+                normalized = raw.normalize()
+                text = format(normalized, "f")
+                if "." in text:
+                    text = text.rstrip("0").rstrip(".")
+                return text
+            except Exception:
+                return str(raw).strip()
+        return str(raw).strip()
+
+    mappings = (
+        ("class", rate.Class),
+        ("size", rate.Size),
+        ("unit", rate.Unit),
+        ("capacity", rate.Capacity),
+    )
+    for field, raw in mappings:
+        value = _as_text(raw)
+        if not value:
+            continue
+        if overwrite or _is_blank(item.get(field)):
+            item[field] = value
+    # Make selection belongs to Make & Vendor — clear analysis make hints.
+    item["make_hint"] = None
+    return item
+
+
 def align_product_taxonomy_from_rate(
     product: dict[str, Any],
     rate: Rate_Master,
     *,
     taxonomy: dict[str, Any] | None = None,
+    overwrite_core_fields: bool = False,
 ) -> dict[str, Any]:
-    """Set product taxonomy from a matched / suggested Rate_Master row."""
-    return align_product_taxonomy_from_db_labels(
+    """Set product taxonomy (+ optional core fields) from a Rate_Master row."""
+    item = align_product_taxonomy_from_db_labels(
         product,
         category=rate.Category,
         sub_category=rate.Sub_Category,
         taxonomy=taxonomy,
+    )
+    return fill_product_core_fields_from_rate(
+        item,
+        rate,
+        overwrite=overwrite_core_fields,
     )
 
 
