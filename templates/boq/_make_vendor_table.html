@@ -213,7 +213,8 @@
                     materialRate: '{{ product.line_output.material_rate|default:''|escapejs }}',
                     labourRate: '{{ product.line_output.labour_rate|default:''|escapejs }}',
                     totalAmount: '{{ product.line_output.total_amount|default:''|escapejs }}',
-                    notFound: {{ product.highlight_no_make|yesno:'true,false' }}
+                    notFound: {{ product.highlight_no_make|yesno:'true,false' }},
+                    allowTypedEntry: {{ product.allow_typed_make_vendor|yesno:'true,false' }}
                 })"
             >
                 <div class="make-vendor-card__head">
@@ -224,7 +225,9 @@
                             <span class="make-vendor-card__taxonomy-value">{{ product.taxonomy_label }}</span>
                         </p>
                         {% if product.highlight_no_make %}
-                        <p class="make-vendor-card__no-make-note">No Approved Make Found in Make List — enter make and supplier below, then Find rates.</p>
+                        <p class="make-vendor-card__no-make-note">No Approved Make Found in Make List — enter make and supplier below, then Find rates. You can edit and retry anytime.</p>
+                        {% elif product.is_no_match %}
+                        <p class="make-vendor-card__no-make-note">No Rate_Master match — edit make/supplier and Find rates again.</p>
                         {% endif %}
                     </div>
                     <span
@@ -255,16 +258,24 @@
                 </dl>
 
                 <div class="make-vendor-fields">
-                    {% if product.highlight_no_make %}
+                    {% if product.allow_typed_make_vendor %}
                     <label class="extraction-field">
                         <span class="extraction-field__label">Make</span>
                         <input
                             type="text"
                             class="extraction-input"
                             x-model="make"
+                            list="make-options-{{ line.row_id }}-{{ product.product_index }}"
                             placeholder="Enter make…"
                             autocomplete="off"
                         >
+                        {% if product.make_options %}
+                        <datalist id="make-options-{{ line.row_id }}-{{ product.product_index }}">
+                            {% for option in product.make_options %}
+                            <option value="{{ option }}"></option>
+                            {% endfor %}
+                        </datalist>
+                        {% endif %}
                     </label>
                     <label class="extraction-field">
                         <span class="extraction-field__label">Supplier</span>
@@ -272,9 +283,17 @@
                             type="text"
                             class="extraction-input"
                             x-model="supplier"
+                            list="supplier-options-{{ line.row_id }}-{{ product.product_index }}"
                             placeholder="Enter supplier (optional)"
                             autocomplete="off"
                         >
+                        {% if product.supplier_options %}
+                        <datalist id="supplier-options-{{ line.row_id }}-{{ product.product_index }}">
+                            {% for option in product.supplier_options %}
+                            <option value="{{ option }}"></option>
+                            {% endfor %}
+                        </datalist>
+                        {% endif %}
                     </label>
                     {% else %}
                     <label class="extraction-field">
@@ -511,6 +530,7 @@ document.addEventListener('alpine:init', () => {
         labourRate: config.labourRate || '',
         totalAmount: config.totalAmount || '',
         notFound: Boolean(config.notFound),
+        allowTypedEntry: Boolean(config.allowTypedEntry),
         saving: false,
         error: '',
         get statusLabel() {
@@ -521,12 +541,12 @@ document.addEventListener('alpine:init', () => {
         },
         async findRates() {
             if (this.saving) return;
-            if (this.notFound && !String(this.make || '').trim()) {
+            if (this.allowTypedEntry && !String(this.make || '').trim()) {
                 this.error = 'Enter a make to continue.';
                 return;
             }
             if (!this.make && !this.supplier) {
-                this.error = this.notFound
+                this.error = this.allowTypedEntry
                     ? 'Enter a make or supplier.'
                     : 'Select a make or supplier.';
                 return;
@@ -542,7 +562,7 @@ document.addEventListener('alpine:init', () => {
                 body.append('product_index', String(this.productIndex));
                 body.append(
                     'make',
-                    this.notFound
+                    this.allowTypedEntry
                         ? String(this.make || '').trim()
                         : (this.make || 'Lowest price')
                 );
@@ -561,7 +581,7 @@ document.addEventListener('alpine:init', () => {
                 if (!response.ok || !data.ok) {
                     throw new Error(data.message || 'Search failed.');
                 }
-                // Reload so summary counts leave the not-found bucket.
+                // First leave from not-found: refresh summary counts; typed inputs stay.
                 if (wasNotFound) {
                     window.location.assign(
                         '{% url "boq:detail" boq.pk %}?tab=make_vendor&_t=' + Date.now()
@@ -574,10 +594,16 @@ document.addEventListener('alpine:init', () => {
                 this.techKey = selection.tech_key || '';
                 this.matchedSummary = selection.summary || '';
                 this.notes = selection.notes || '';
+                if (selection.make) this.make = selection.make;
+                if (selection.supplier != null) this.supplier = selection.supplier || '';
                 const line = selection.line_output || {};
                 this.materialRate = line.material_rate || '';
                 this.labourRate = line.labour_rate || '';
                 this.totalAmount = line.total_amount || '';
+                // Keep free-text editable after no-match / manual retries.
+                if (this.status === 'unmatched') {
+                    this.allowTypedEntry = true;
+                }
                 this.$dispatch('make-vendor-status', {
                     productIndex: this.productIndex,
                     status: this.status,

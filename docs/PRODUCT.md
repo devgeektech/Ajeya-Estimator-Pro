@@ -197,7 +197,9 @@ Step 3 — Match Results: Match → Calculate Price → Export
   (**Not found**), Make and Supplier become free-text inputs so the expert can type
   values and run **Find rates** against Rate_Master. The cascade panel also accepts
   typed make/supplier for that scope. After a manual entry, the product leaves the
-  not-found summary bucket (counts as filtered/manual).
+  not-found summary bucket (counts as filtered/manual). Free-text fields stay
+  editable so make/supplier can be changed and Find rates re-run (also for
+  **No match**).
 - **Sub-category makes:** top panel lists **category → sub-category → make → supplier**
   (only categories/sub-categories present in Analysis extraction). **Apply to sub-category**
   sets make/supplier on every product in that sub-category and loads rates. Default make is

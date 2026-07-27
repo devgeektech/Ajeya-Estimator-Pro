@@ -2,6 +2,12 @@
 
 Meaningful product and technical changes only. Older history is in git.
 
+## 2026-07-27 — Editable Make/Vendor on Not Found / No Match
+
+- Not found and No match keep Make/Supplier as editable text inputs (with
+  datalist suggestions) so values can be changed and Find rates re-run.
+- Make-list gap products keep typed entry after the first save, not one-shot.
+
 ## 2026-07-24 — Manual Make/Vendor for Not Found
 
 - Not-found products (no approved make in make list) show text inputs for Make

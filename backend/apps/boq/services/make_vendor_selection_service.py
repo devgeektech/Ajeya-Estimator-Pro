@@ -1224,6 +1224,16 @@ class MakeVendorSelectionService:
         else:
             make_status = "default"
 
+        # True when approved make exists but Rate_Master row was not found.
+        is_no_match = make_status != "not_found" and match_status == "unmatched"
+        # Keep Make/Supplier as free-text so experts can edit and retry Find rates
+        # (not-found, no-match, or make-list gap after a prior manual entry).
+        allow_typed_make_vendor = (
+            make_status == "not_found"
+            or is_no_match
+            or (self.has_make_list and not approved)
+        )
+
         return {
             "row_id": row_id,
             "product_index": int(product.get("product_index") or 0),
@@ -1254,8 +1264,8 @@ class MakeVendorSelectionService:
             "make_status": make_status,
             "approved_make_found": bool(approved_make_found),
             "highlight_no_make": make_status == "not_found",
-            # True when approved make exists but Rate_Master row was not found.
-            "is_no_match": make_status != "not_found" and match_status == "unmatched",
+            "is_no_match": is_no_match,
+            "allow_typed_make_vendor": allow_typed_make_vendor,
         }
 
     def _options_for_product(

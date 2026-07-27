@@ -34,6 +34,15 @@ run analysis → session confirmations → export Excel
 
 ## Session Log
 
+### 2026-07-27 — Editable Make/Vendor on Not Found / No Match
+
+Completed: Free-text Make/Supplier stays available for not-found, no-match, and
+make-list gap products so experts can edit and retry Find rates.
+Pending: Hard-refresh Make & Vendor; change make on a not-found/no-match card
+and Find rates again.
+Issues: None.
+Next: —
+
 ### 2026-07-24 — Manual Make/Vendor for Not Found
 
 Completed: Not-found Make & Vendor cards and cascade accept typed make/supplier;
