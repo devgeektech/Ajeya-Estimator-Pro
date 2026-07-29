@@ -212,7 +212,7 @@ def _shape_product(
         selected_confidence = _candidate_confidence_value(
             product.get("attribute_confidence")
         )
-    for item in (product.get("db_candidates") or [])[:5]:
+    for item in (product.get("db_candidates") or [])[:3]:
         cand_id = item.get("id")
         is_selected = False
         try:

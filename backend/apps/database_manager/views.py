@@ -4,7 +4,6 @@ import logging
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.files.storage import FileSystemStorage
-from django.db.models import Q
 from django.http import FileResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy
@@ -55,24 +54,7 @@ class DatabaseVersionListView(LoginRequiredMixin, ListView):
             "uploaded_by"
         )
 
-        query = (self.request.GET.get("q") or "").strip()
-        if query:
-            for token in query.split():
-                token_l = token.lower()
-                filters = (
-                    Q(name__icontains=token)
-                    | Q(source_filename__icontains=token)
-                    | Q(uploaded_by__first_name__icontains=token)
-                    | Q(uploaded_by__last_name__icontains=token)
-                    | Q(uploaded_by__email__icontains=token)
-                )
-                if token.isdigit():
-                    filters |= Q(version_number=int(token))
-                if len(token_l) >= 3 and "active".startswith(token_l):
-                    filters |= Q(is_active=True)
-                if len(token_l) >= 3 and "archived".startswith(token_l):
-                    filters |= Q(is_active=False)
-                qs = qs.filter(filters)
+        # Search is client-side over the retained upload window (same as BOQ list).
 
         sort_key = (self.request.GET.get("sort") or "status").strip().lower()
         direction = (self.request.GET.get("dir") or "desc").strip().lower()

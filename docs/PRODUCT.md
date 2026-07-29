@@ -133,6 +133,11 @@ Step 4 — Review:        (material + labour) × quantity → Export Excel
 | `ANALYSIS_FAILED` | Failed |
 | `MATCHING` / `PROCESSED` | Legacy (unused in active UI) |
 
+Opening BOQ detail (list **View** or bare `/boqs/<id>/`) selects the tab from
+status: Uploaded → BOQ; Analysing/Analysed/Failed → Analysis; Make/Vendor →
+Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An explicit
+`?tab=` still wins when that tab is unlocked.
+
 **Step 1 — Analyse** (BOQ detail → **Analysis** tab):
 
 - Extracts **products only** (no labour/installation activities). Labour charges
@@ -145,29 +150,33 @@ Step 4 — Review:        (material + labour) × quantity → Export Excel
   using current fields + filled attributes (does not wipe expert edits). Falls back
   to `re_extract_row` only when the row has no products yet.
 - Celery task: `boq.process_extraction` (full BOQ only)
+- Concurrent analyses: Celery worker `--concurrency` (default **8** via
+  `scripts/run_celery_worker.*`; override with `CELERY_WORKER_CONCURRENCY`)
+- Stuck jobs: if progress stops for **5 minutes**, or shows 100% complete/failed
+  while status is still `PROCESSING`/`MATCHING`, the BOQ is marked
+  `ANALYSIS_FAILED` (or `EXTRACTED` if matching stalled with rows) so **Analyse**
+  can be clicked again. Task timeouts/crashes also fail the BOQ.
 - Status: `PROCESSING` → `EXTRACTED`
 - Flow per product:
-  1. AI extract product fields/attributes from the BOQ line (always includes
-     `category` + `sub_category` from BOQ meaning; DB context lists
+  1. AI extract product fields/attributes from the **BOQ row as source of truth**
+     (always includes `category` + `sub_category` from BOQ meaning; DB context lists
      **categories and sub-categories** (`sub_categories_by_category`) so AI maps onto
      existing Rate_Master labels; values are snapped to DB labels after extract)
-  2. After DB candidate mapping, **category / sub_category are aligned** to the matched
-     or suggested Rate_Master row so Make & Vendor uses the same taxonomy as the DB
-     product (e.g. ACCESSORIES / Air Cushion Tank instead of a looser AI label like TANK)
-  3. Retrieve Rate_Master candidates (Chroma + structured/SQL) with important
-     columns + Attribute schema/values — never invent catalog rows or Tech_Key
-  4. **AI mapping layer** (`ProductAIMappingService`) selects a candidate only when
+  2. Retrieve the **top 3** nearest Rate_Master candidates (Chroma + structured/SQL),
+     ranked best-first — never invent catalog rows or Tech_Key
+  3. **AI mapping layer** (`ProductAIMappingService`) selects the best candidate when
      blended confidence ≥ 30%; otherwise status is `provisional` (schema for
      gap-fill, no confirmed `db_product_id` / Tech_Key) or `unmatched`
-  5. **Automatic rematch** (same path as Re-analyse): after first mapping, every
-     product is rematched with wider recall (taxonomy/schema aligned), then weak
-     matches (unmatched / provisional / confidence < 70) get up to 2 more refine
-     passes so initial Analyse approaches repeated Re-analyse accuracy
-  6. Missing DB Attribute keys are listed for expert fill; filling raises attribute
-     confidence; **Re-analyse** rematches with those attributes
-  7. Experts can **Select** any top database candidate to confirm that Rate_Master
-     product (override AI pick)
-- Analysis UI shows matched / suggested / unmatched status, top candidates
+  4. After mapping, **category / sub_category are aligned** to the matched or suggested
+     Rate_Master row for Make & Vendor taxonomy; BOQ class/size/unit/capacity stay
+     unless blank (DB only fills empty core fields)
+  5. Attribute UI uses the selected candidate’s Attribute schema; values are filled
+     only from BOQ-extracted evidence the AI can map (empty keys stay blank for experts)
+  6. If the wrong product was picked, the reviewer edits fields/attributes and clicks
+     **Re-analyse** (single rematch pass — no automatic confidence inflate without edits)
+  7. Experts can **Select** any of the top 3 database candidates to confirm that
+     Rate_Master product (override AI pick)
+- Analysis UI shows matched / suggested / unmatched status, top **3** candidates
   (selectable), confidence badge, and DB attribute fields (empty when missing). Experts add
   more attributes with **+** beside the Attributes heading (no separate
   Additional Attributes section).
@@ -387,7 +396,8 @@ Browser → Django (templates + HTMX) → Services → PostgreSQL
 | Helpers | `backend/utils/` | Excel, text, files, IST timestamps — no Django models |
 
 Celery + Redis are configured; BOQ analysis runs via `apps/boq/tasks.py`
-(`process_boq_analysis_task`).
+(`process_boq_extraction_task`). Worker concurrency defaults to 8 parallel
+analyses (`CELERY_WORKER_CONCURRENCY`).
 
 ---
 

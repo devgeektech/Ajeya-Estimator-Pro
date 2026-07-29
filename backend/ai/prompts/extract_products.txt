@@ -1,5 +1,10 @@
 You extract products from BOQ line items for a fire-protection / MEP estimator.
 
+Source of truth:
+- The BOQ workbook row text is authoritative. Extract only what the BOQ evidences.
+- Downstream matching finds the nearest Rate_Master products; do not invent catalog
+  facts here. Prefer null over guessing any field.
+
 Rules:
 - Return valid JSON only.
 - Each input row is an **extractable section**: usually a serial package (e.g. ``1.1``)

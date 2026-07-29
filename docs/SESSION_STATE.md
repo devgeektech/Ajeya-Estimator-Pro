@@ -34,6 +34,79 @@ run analysis → session confirmations → export Excel
 
 ## Session Log
 
+### 2026-07-29 — Open Detail Tab From Status
+
+Completed: Opening a BOQ from the list (or bare detail URL) lands on the tab
+matching status — Analysed→Analysis, Make/Vendor→Make & Vendor, Labour→Labour,
+Ready/Exported→Review; Uploaded keeps BOQ/Make list.
+Pending: —
+Issues: —
+Next: —
+
+### 2026-07-29 — Stuck Analysis Fail + Progress Reset + Concurrency
+
+Completed: Stuck Analyse fails after 5 min idle (or orphaned 100% progress);
+Celery timeout/crash also fails the BOQ for retry; fixed re-Analyse UI starting
+at 99% (file is progress source of truth; sessionStorage no longer keeps old %);
+worker concurrency default 4 → 8 (`CELERY_WORKER_CONCURRENCY`).
+Pending: Restart Celery worker to pick up concurrency=8.
+Issues: —
+Next: —
+
+### 2026-07-29 — Stale Analysis Job Heal
+
+Completed: BOQs stuck in PROCESSING after dead Celery now auto-heal to
+ANALYSIS_FAILED (or EXTRACTED if rows exist) after 10 min idle progress;
+status poll + detail page call heal; dispatch resets progress on re-queue.
+Pending: Keep Celery worker running (`scripts/run_celery_worker.ps1`); re-Analyse
+healed BOQs 77/78/80 once worker is up.
+Issues: Windows thread-pool Celery can hang silently — tasks pile up in Redis.
+Next: —
+
+### 2026-07-29 — Windows Log Rollover Fix
+
+Completed: SafeRotatingFileHandler skips rename when Django/Celery both hold
+`logs/application.log` (WinError 32), stopping console Logging error spam.
+Pending: —
+Issues: —
+Next: —
+
+### 2026-07-29 — Top-3 Candidates + BOQ Source of Truth
+
+Completed: Analysis keeps top 3 ranked DB candidates; single strong match pass on
+Analyse (no auto multi-refine); Re-analyse rematches once after expert edits;
+BOQ fields stay source of truth; attribute UI filled from BOQ-mapped schema keys;
+prompts updated.
+Pending: Restart Celery and re-Analyse a BOQ to verify confidence/candidates.
+Issues: —
+Next: —
+
+### 2026-07-29 — Concurrent Analysis Isolation + Database Column
+
+Completed: Fixed job-progress empty-JSON race (atomic write); pinned and
+snapshotted master DB on Analyse; BOQ list Database column (blank until
+analysed); isolation logging per boq_id / upload / make list.
+Pending: Confirm 5 concurrent analyses finish cleanly in logs.
+Issues: —
+Next: —
+
+### 2026-07-29 — List Search Filter Fix
+
+Completed: Fixed live list search (BOQ, Database, Notifications, Audit) — filter
+now watches `query` after x-model updates instead of racing `@input`; BOQ/
+Database keep full row sets client-side; paginated Clear reloads without `q`.
+Pending: —
+Issues: —
+Next: —
+
+### 2026-07-29 — Recent BOQs No Scroll
+
+Completed: Dashboard Recent BOQs shows at most 7 rows with tighter row spacing
+and overflow hidden (no in-card scrollbar); remaining BOQs via View all.
+Pending: —
+Issues: —
+Next: —
+
 ### 2026-07-28 — Labour Client Progress Report
 
 Completed: Wrote `docs/LABOUR_CLIENT_REPORT.md` summarising Labour capabilities,

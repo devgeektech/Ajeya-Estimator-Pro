@@ -429,15 +429,18 @@
                         this.matchProgress = Math.max(0, Math.min(100, pct));
                     } else {
                         const serverPct = Math.max(0, Math.min(data.ready ? 100 : 99, pct));
-                        this.analysisTargetPercent = Math.max(
-                            Number(this.analysisTargetPercent) || 0,
-                            serverPct
-                        );
-                        // Snap display up to server immediately so % tracks real work.
-                        this.analysisProgress = Math.max(
-                            Number(this.analysisProgress) || 0,
-                            serverPct
-                        );
+                        const prev = Number(this.analysisProgress) || 0;
+                        const prevTarget = Number(this.analysisTargetPercent) || 0;
+                        // Allow snap-down on re-queue (server resets to 1–8%).
+                        // Never keep a prior 99% while a new run is at the start.
+                        if (serverPct + 5 < prev || serverPct + 5 < prevTarget) {
+                            this.analysisProgress = serverPct;
+                            this.analysisTargetPercent = serverPct;
+                            this.analysisStartedAt = Date.now();
+                        } else {
+                            this.analysisTargetPercent = Math.max(prevTarget, serverPct);
+                            this.analysisProgress = Math.max(prev, serverPct);
+                        }
                         this.writeStoredProgress();
                     }
                 }
@@ -517,20 +520,30 @@
             if (this.analysing) {
                 this.tab = 'analysis';
                 this.syncTabUrl('analysis');
-                // Resume from server/session progress so leaving the page does not reset to 0.
+                // Resume only when session progress matches the live server run.
+                // Ignore stale 99% left from a previous Analyse / stalled heal.
                 const stored = this.readStoredProgress();
                 const serverPct = Number(this.analysisTargetPercent) || 0;
                 const storedPct = stored ? stored.percent : 0;
-                const resumePct = Math.max(serverPct, storedPct, Number(this.analysisProgress) || 0);
+                let resumePct = serverPct;
+                if (stored && storedPct <= serverPct + 5) {
+                    resumePct = Math.max(serverPct, storedPct, Number(this.analysisProgress) || 0);
+                } else {
+                    this.clearStoredProgress();
+                    resumePct = Math.max(serverPct, Number(this.analysisProgress) || 0, 2);
+                }
                 this.analysisProgress = Math.min(99, resumePct);
-                this.analysisTargetPercent = Math.max(
-                    Number(this.analysisTargetPercent) || 0,
-                    this.analysisProgress
+                this.analysisTargetPercent = Math.min(
+                    99,
+                    Math.max(serverPct, this.analysisProgress > serverPct + 5 ? serverPct : this.analysisProgress)
                 );
-                if (stored && stored.label && !this.analysisProgressLabel) {
+                if (this.analysisProgress > this.analysisTargetPercent + 5) {
+                    this.analysisProgress = this.analysisTargetPercent;
+                }
+                if (stored && stored.label && !this.analysisProgressLabel && storedPct <= serverPct + 5) {
                     this.analysisProgressLabel = stored.label;
                 }
-                if (stored && stored.startedAt) {
+                if (stored && stored.startedAt && storedPct <= serverPct + 5) {
                     this.analysisStartedAt = stored.startedAt;
                 } else if (!this.analysisStartedAt) {
                     this.analysisStartedAt = Date.now();
@@ -549,6 +562,7 @@
         },
         async startAnalyse() {
             if (this.analysing || this.matching) return;
+            this.clearStoredProgress();
             this.analysing = true;
             this.analysisEnabled = true;
             this.tab = 'analysis';

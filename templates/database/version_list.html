@@ -107,7 +107,6 @@
                 placeholder="Type to filter (word by word)…"
                 autocomplete="off"
                 x-model="query"
-                @input="applyFilter()"
             >
         </label>
         <button
@@ -115,7 +114,7 @@
             class="btn btn--small"
             x-show="query.trim()"
             x-cloak
-            @click="query = ''; applyFilter()"
+            @click="query = ''"
         >Clear</button>
         <span class="db-list-toolbar__hint muted" x-text="filterHint"></span>
     </div>
@@ -217,6 +216,7 @@ document.addEventListener('alpine:init', () => {
             return `${this.visibleCount} of ${this.totalCount}`;
         },
         init() {
+            this.$watch('query', () => this.applyFilter());
             this.$nextTick(() => this.applyFilter());
         },
         applyFilter() {

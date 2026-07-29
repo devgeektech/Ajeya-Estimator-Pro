@@ -39,6 +39,28 @@ PHASE_EXTRACTED = "extracted"
 PHASE_MATCHED = "matched"
 
 
+def _database_snapshot(version) -> dict[str, Any]:
+    """Stable id + display name for the master DB used by a BOQ job."""
+    if version is None:
+        return {"database_version_id": None, "database_name": ""}
+    name = (
+        str(getattr(version, "name", "") or "").strip()
+        or str(getattr(version, "source_filename", "") or "").strip()
+        or f"DB v{getattr(version, 'version_number', '')}".strip()
+    )
+    return {
+        "database_version_id": int(version.pk),
+        "database_name": name,
+    }
+
+
+def _upload_basename(field) -> str:
+    if not field:
+        return ""
+    name = str(getattr(field, "name", "") or "")
+    return name.replace("\\", "/").rsplit("/", 1)[-1]
+
+
 def _row_description(boq_data: dict, row_id: str) -> str:
     full_text = full_description_for_row(boq_data, row_id)
     if full_text:
@@ -149,8 +171,30 @@ class BOQAnalysisService:
         boq = self._get_boq()
         self._set_status(boq, BOQStatus.PROCESSING)
         set_boq_job_progress(boq.pk, percent=2, label="Starting analysis…", phase="extract")
+
+        # Pin active DB for this job so concurrent analyses stay on one version.
+        active_version = get_active_database_version()
+        db_snap = _database_snapshot(active_version)
+        logger.info(
+            "BOQ extraction start id=%s name=%s boq_file=%s make_list=%s "
+            "database_version_id=%s database_name=%s",
+            boq.pk,
+            boq.boq_name,
+            _upload_basename(boq.uploaded_file),
+            _upload_basename(boq.make_list_file),
+            db_snap.get("database_version_id"),
+            db_snap.get("database_name") or "(none)",
+        )
+
         try:
-            boq_payload, _make_list_payload = load_extract_data(boq)
+            # Always load this BOQ's own PostgreSQL / upload payloads (never shared).
+            boq_payload, make_list_payload = load_extract_data(boq)
+            logger.info(
+                "BOQ extraction inputs id=%s boq_rows=%s make_list_rows=%s",
+                boq.pk,
+                len((boq_payload or {}).get("rows") or []),
+                len((make_list_payload or {}).get("rows") or []),
+            )
             boq_data = structure_for_analysis(boq_payload)
             set_boq_job_progress(boq.pk, percent=8, label="Extracting products…", phase="extract")
 
@@ -190,8 +234,8 @@ class BOQAnalysisService:
 
             def _on_enrich_progress(done: int, total: int) -> None:
                 total = max(total, 1)
-                # First matching pass covers roughly 55% → 78%.
-                percent = 55 + int((done / total) * 23)
+                # Matching covers roughly 55% → 95%.
+                percent = 55 + int((done / total) * 40)
                 set_boq_job_progress(
                     boq.pk,
                     percent=percent,
@@ -199,32 +243,12 @@ class BOQAnalysisService:
                     phase="extract",
                 )
 
+            # One strong pass: rank top-3 Rate_Master neighbors and pick the best.
+            # Experts Re-analyse after editing attributes — no auto multi-pass refine.
             extracted_rows = self._enrich_extracted_attributes(
                 extracted_rows,
+                database_version_id=db_snap.get("database_version_id"),
                 progress_callback=_on_enrich_progress,
-            )
-
-            set_boq_job_progress(
-                boq.pk,
-                percent=80,
-                label="Refining product matches…",
-                phase="extract",
-            )
-
-            def _on_refine_progress(done: int, total: int) -> None:
-                total = max(total, 1)
-                # Refine passes cover roughly 80% → 95% (same path as Re-analyse).
-                percent = 80 + int((done / total) * 15)
-                set_boq_job_progress(
-                    boq.pk,
-                    percent=percent,
-                    label=f"Refining product matches ({done}/{total})…",
-                    phase="extract",
-                )
-
-            extracted_rows = self._refine_extracted_matches(
-                extracted_rows,
-                progress_callback=_on_refine_progress,
             )
 
             set_boq_job_progress(boq.pk, percent=98, label="Saving results…", phase="extract")
@@ -233,6 +257,7 @@ class BOQAnalysisService:
                 "phase": PHASE_EXTRACTED,
                 "boq_id": boq.pk,
                 "boq_name": boq.boq_name,
+                **db_snap,
                 "stats": _compute_extraction_stats(extracted_rows),
                 "extraction": {
                     "schema_version": extraction.get("schema_version"),
@@ -245,7 +270,12 @@ class BOQAnalysisService:
             }
             self._persist_analysis(boq, analysis_payload, BOQStatus.EXTRACTED)
             set_boq_job_progress(boq.pk, percent=100, label="Analysis complete", phase="extract")
-            logger.info("BOQ extraction completed for id=%s (%s)", boq.pk, boq.boq_name)
+            logger.info(
+                "BOQ extraction completed for id=%s (%s) database=%s",
+                boq.pk,
+                boq.boq_name,
+                db_snap.get("database_name") or db_snap.get("database_version_id"),
+            )
             self._audit(boq, "Analysed BOQ")
             self._notify_user(
                 boq,
@@ -310,6 +340,7 @@ class BOQAnalysisService:
                 pass
             else:
                 previous_status = boq.status
+                stored_db_id = int(existing.get("database_version_id") or 0) or None
                 try:
                     target = dict(target)
                     products = [
@@ -329,8 +360,9 @@ class BOQAnalysisService:
                         if selected is None:
                             raise ValidationError(f"Unknown product index: {product_index}")
                         stub = {**target, "products": [selected]}
-                        rematched = self._enrich_extracted_attributes([stub])
-                        rematched = self._refine_extracted_matches(rematched)
+                        rematched = self._enrich_extracted_attributes(
+                            [stub], database_version_id=stored_db_id
+                        )
                         updated_product = (rematched[0].get("products") or [selected])[0]
                         merged_products = []
                         for product in products:
@@ -342,8 +374,9 @@ class BOQAnalysisService:
                         rematched_rows = [target]
                     else:
                         target["products"] = products
-                        rematched_rows = self._enrich_extracted_attributes([target])
-                        rematched_rows = self._refine_extracted_matches(rematched_rows)
+                        rematched_rows = self._enrich_extracted_attributes(
+                            [target], database_version_id=stored_db_id
+                        )
 
                     updated_rows = _replace_rows(rows, rematched_rows)
                     analysis_payload = {
@@ -419,8 +452,10 @@ class BOQAnalysisService:
                     replacement["make_list"] = make_list
                 replacements.append(replacement)
 
-            replacements = self._enrich_extracted_attributes(replacements)
-            replacements = self._refine_extracted_matches(replacements)
+            replacements = self._enrich_extracted_attributes(
+                replacements,
+                database_version_id=int(existing.get("database_version_id") or 0) or None,
+            )
             updated_rows = _replace_rows(list(existing.get("rows") or []), replacements)
             analysis_payload = {
                 **existing,
@@ -493,7 +528,7 @@ class BOQAnalysisService:
                 "phase": PHASE_MATCHED,
                 "boq_id": boq.pk,
                 "boq_name": boq.boq_name,
-                "database_version_id": active_version.pk,
+                **_database_snapshot(active_version),
                 "stats": _compute_match_stats(analyzed_rows),
                 "extraction": existing.get("extraction") or {},
                 # Keep Make & Vendor unlock + cascade filters after Match.
@@ -581,7 +616,7 @@ class BOQAnalysisService:
                 "phase": PHASE_MATCHED,
                 "boq_id": boq.pk,
                 "boq_name": boq.boq_name,
-                "database_version_id": active_version.pk,
+                **_database_snapshot(active_version),
                 "stats": _compute_match_stats(updated_rows),
                 "extraction": existing.get("extraction") or {},
                 "pricing_ready": False,
@@ -663,15 +698,19 @@ class BOQAnalysisService:
     @staticmethod
     def _enrich_extracted_attributes(
         rows: list[dict[str, Any]],
+        database_version_id: int | None = None,
         progress_callback=None,
     ) -> list[dict[str, Any]]:
-        """AI-map extracted products to Rate_Master + attribute schemas after extract."""
-        active_version = get_active_database_version()
-        if active_version is None:
+        """Map BOQ-extracted products to top Rate_Master neighbors (single strong pass)."""
+        version_id = int(database_version_id or 0)
+        if not version_id:
+            active_version = get_active_database_version()
+            version_id = int(active_version.pk) if active_version else 0
+        if not version_id:
             logger.warning("Attribute enrichment skipped: no active master database")
             return rows
         try:
-            mapper = ProductAIMappingService(active_version.pk)
+            mapper = ProductAIMappingService(version_id)
             return mapper.map_rows(rows, progress_callback=progress_callback)
         except Exception:
             logger.exception("AI product mapping failed; keeping AI-extracted attributes")
@@ -680,47 +719,15 @@ class BOQAnalysisService:
     @staticmethod
     def _refine_extracted_matches(
         rows: list[dict[str, Any]],
+        database_version_id: int | None = None,
         progress_callback=None,
     ) -> list[dict[str, Any]]:
-        """
-        Rematch like Analysis Re-analyse after first-pass taxonomy/schema alignment.
-
-        1) Full rematch of every product (wider recall) — same path as Re-analyse
-        2) Extra weak-only refine passes for remaining low-confidence products
-        """
-        active_version = get_active_database_version()
-        if active_version is None:
-            return rows
-        try:
-            mapper = ProductAIMappingService(active_version.pk)
-
-            def _on_full(done: int, total: int) -> None:
-                if not progress_callback:
-                    return
-                # First half of refine progress = full rematch.
-                total = max(total, 1)
-                progress_callback(done, total * 2)
-
-            rematched = mapper.map_rows(
-                rows,
-                refine=True,
-                progress_callback=_on_full,
-            )
-
-            def _on_weak(done: int, total: int) -> None:
-                if not progress_callback:
-                    return
-                total = max(total, 1)
-                progress_callback(total + done, total * 2)
-
-            return mapper.refine_rows(
-                rematched,
-                passes=2,
-                progress_callback=_on_weak,
-            )
-        except Exception:
-            logger.exception("Product match refine failed; keeping first-pass matches")
-            return rows
+        """Deprecated multi-pass refine — kept as a single rematch for callers."""
+        return BOQAnalysisService._enrich_extracted_attributes(
+            rows,
+            database_version_id=database_version_id,
+            progress_callback=progress_callback,
+        )
 
     def ensure_attribute_enrichment(self) -> bool:
         """

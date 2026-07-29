@@ -89,6 +89,19 @@ def _dispatch_boq_job(
         )
 
     BOQ.objects.filter(pk=boq_id).update(status=pending_status)
+    # Clear prior 100%/stalled progress so the UI does not look finished while waiting.
+    try:
+        from apps.boq.services.boq_job_progress import set_boq_job_progress
+
+        phase = "match" if pending_status == BOQStatus.MATCHING else "extract"
+        set_boq_job_progress(
+            boq_id,
+            percent=1,
+            label=f"Queued {job_label}…",
+            phase=phase,
+        )
+    except Exception:
+        logger.exception("Failed resetting job progress for boq_id=%s", boq_id)
     try:
         getattr(task, "delay")(boq_id)
         logger.info("Queued BOQ %s for id=%s", job_label, boq_id)

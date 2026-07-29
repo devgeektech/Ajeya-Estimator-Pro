@@ -5,7 +5,7 @@ from typing import cast
 
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.db.models import Case, IntegerField, Q, Value, When
+from django.db.models import Case, IntegerField, Value, When
 from django.http import HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.template.loader import render_to_string
@@ -43,6 +43,7 @@ from .services.boq_status_display_service import (
     heal_make_vendor_unlock,
     is_export_ready,
     mark_exported_in_session,
+    resolve_boq_database_label,
     resolve_detail_tab,
     should_skip_attribute_enrichment,
 )
@@ -166,7 +167,14 @@ def _job_is_running(boq: BOQ) -> bool:
 
 def _status_payload(boq: BOQ, session, *, expect: str = "extract") -> dict:
     """JSON fields for polling Analyse / Match completion."""
-    from apps.boq.services.boq_job_progress import get_boq_job_progress
+    from apps.boq.services.boq_job_progress import (
+        get_boq_job_progress,
+        heal_stale_running_boq,
+    )
+
+    # Dead Celery/worker leaves PROCESSING forever — unblock on poll.
+    if heal_stale_running_boq(boq):
+        boq.refresh_from_db(fields=["status", "analysis_data"])
 
     expect_key = (expect or "extract").strip().lower()
     if expect_key == "match":
@@ -209,17 +217,9 @@ class BOQListView(LoginRequiredMixin, ListView):
         user = cast(User, self.request.user)
         qs = _boq_queryset_for_user(user)
 
-        query = (self.request.GET.get("q") or "").strip()
-        if query:
-            # Word-by-word: every token must match somewhere (name / owner / status).
-            for token in query.split():
-                qs = qs.filter(
-                    Q(boq_name__icontains=token)
-                    | Q(status__icontains=token)
-                    | Q(user__first_name__icontains=token)
-                    | Q(user__last_name__icontains=token)
-                    | Q(user__email__icontains=token)
-                )
+        # Search is client-side (live filter over the full list). Keep all rows
+        # so Clear / typing can restore matches without a reload; `q` is only
+        # echoed into the template for initialQuery + sort URL preservation.
 
         sort_key = (self.request.GET.get("sort") or "created").strip().lower()
         direction = (self.request.GET.get("dir") or "desc").strip().lower()
@@ -277,6 +277,7 @@ class BOQListView(LoginRequiredMixin, ListView):
             {
                 "boq": boq,
                 "status_display": build_boq_status_display(boq, session),
+                "database_label": resolve_boq_database_label(boq),
                 "detail_tab": default_detail_tab_for_boq(boq, session),
                 "needs_status_poll": boq.status
                 in {BOQStatus.PROCESSING, BOQStatus.MATCHING},
@@ -314,6 +315,13 @@ class BOQDetailView(LoginRequiredMixin, DetailView):
                 boq.refresh_from_db(fields=["analysis_data", "status"])
         except Exception:
             logger.exception("Make & Vendor unlock heal failed for BOQ id=%s", boq.pk)
+        try:
+            from apps.boq.services.boq_job_progress import heal_stale_running_boq
+
+            if heal_stale_running_boq(boq):
+                boq.refresh_from_db(fields=["analysis_data", "status"])
+        except Exception:
+            logger.exception("Stale job heal failed for BOQ id=%s", boq.pk)
         context["tab_access"] = build_boq_tab_access(boq)
         context["default_tab"] = resolve_detail_tab(
             boq,
@@ -1255,7 +1263,7 @@ class BOQAnalysisStatusView(LoginRequiredMixin, View):
 
     def get(self, request, pk: int):
         user = cast(User, request.user)
-        qs = BOQ.objects.only("pk", "status")
+        qs = BOQ.objects.only("pk", "status", "analysis_data", "boq_name", "user_id")
         if not user.is_super_admin:
             qs = qs.filter(user=user)
         boq = get_object_or_404(qs, pk=pk)

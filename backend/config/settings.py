@@ -252,14 +252,14 @@ LOGGING = {
             "formatter": "verbose",
         },
         "app_file": {
-            "class": "logging.handlers.RotatingFileHandler",
+            "class": "common.logging_handlers.SafeRotatingFileHandler",
             "filename": str(LOGS_DIR / "application.log"),
             "maxBytes": 5 * 1024 * 1024,
             "backupCount": 5,
             "formatter": "verbose",
         },
         "error_file": {
-            "class": "logging.handlers.RotatingFileHandler",
+            "class": "common.logging_handlers.SafeRotatingFileHandler",
             "filename": str(LOGS_DIR / "errors.log"),
             "maxBytes": 5 * 1024 * 1024,
             "backupCount": 5,
@@ -267,7 +267,7 @@ LOGGING = {
             "formatter": "verbose",
         },
         "instruction_file": {
-            "class": "logging.handlers.RotatingFileHandler",
+            "class": "common.logging_handlers.SafeRotatingFileHandler",
             "filename": str(LOGS_DIR / "instructions.log"),
             "maxBytes": 10 * 1024 * 1024,
             "backupCount": 5,

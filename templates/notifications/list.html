@@ -176,7 +176,6 @@
                     placeholder="Type to filter (word by word)…"
                     autocomplete="off"
                     x-model="query"
-                    @input="applyFilter()"
                 >
             </label>
             <button
@@ -184,7 +183,7 @@
                 class="btn btn--small"
                 x-show="query.trim()"
                 x-cloak
-                @click="query = ''; applyFilter()"
+                @click="clearFilter()"
             >Clear</button>
             <span class="badge{% if notifications_unread %} badge--blue{% endif %}">
                 {{ notifications_unread }} unread
@@ -342,7 +341,15 @@ document.addEventListener('alpine:init', () => {
             return `${this.visibleCount} of ${this.totalCount} on this page`;
         },
         init() {
+            this.$watch('query', () => this.applyFilter());
             this.$nextTick(() => this.applyFilter());
+        },
+        clearFilter() {
+            // Reload without q so server-paginated results restore the full set.
+            const url = new URL(window.location.href);
+            url.searchParams.delete('q');
+            url.searchParams.delete('page');
+            window.location.href = url.toString();
         },
         applyFilter() {
             const tokens = String(this.query || '')

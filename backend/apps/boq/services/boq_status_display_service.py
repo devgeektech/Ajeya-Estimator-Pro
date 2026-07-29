@@ -276,23 +276,34 @@ def build_boq_tab_access(boq: BOQ) -> dict[str, bool]:
 
 
 def default_detail_tab_for_boq(boq: BOQ, session) -> str:
-    """Default tab when opening BOQ detail (list View button, bare detail URL)."""
-    if boq.status == BOQStatus.EXPORTED or is_exported_in_session(boq.pk, session):
+    """
+    Default tab when opening BOQ detail (list View, bare detail URL).
+
+    Driven by ``BOQ.status`` so Analysed opens Analysis, Make/Vendor opens
+    Make & Vendor, etc. Session memory only applies for pre-analysis tabs
+    (BOQ / Make list).
+    """
+    status = boq.status
+    if status == BOQStatus.EXPORTED or is_exported_in_session(boq.pk, session):
         return "review"
-    if boq.status in {BOQStatus.READY_EXPORT, BOQStatus.PROCESSED, BOQStatus.MATCHING}:
+    if status in {BOQStatus.READY_EXPORT, BOQStatus.PROCESSED}:
         return "review"
-    if boq.status == BOQStatus.LABOUR:
+    if status == BOQStatus.LABOUR:
         return "labour"
-    if boq.status == BOQStatus.MAKE_VENDOR or (
-        boq.status == BOQStatus.EXTRACTED
-        and _has_make_vendor_defaults(boq.analysis_data or {})
-    ):
+    if status == BOQStatus.MAKE_VENDOR:
         return "make_vendor"
-    remembered = remembered_detail_tab(boq.pk, session)
-    if remembered:
-        return remembered
-    if boq.status in _ANALYSIS_STATUSES:
+    if status in {
+        BOQStatus.EXTRACTED,
+        BOQStatus.PROCESSING,
+        BOQStatus.MATCHING,
+        BOQStatus.ANALYSIS_FAILED,
+    }:
         return "analysis"
+
+    # UPLOADED (and unknown): stay on workbook tabs; remember BOQ vs Make list.
+    remembered = remembered_detail_tab(boq.pk, session)
+    if remembered in {"boq", "make_list"}:
+        return remembered
     return "boq"
 
 
@@ -333,3 +344,41 @@ def is_export_ready(boq: BOQ) -> bool:
     if boq.status in _EXPORT_READY_STATUSES:
         return True
     return bool((boq.analysis_data or {}).get("pricing_ready"))
+
+
+def resolve_boq_database_label(boq: BOQ) -> str:
+    """
+    Master database name used for this BOQ after analysis.
+
+    Blank until analysis has finished (upload / in-progress show nothing).
+    Prefers the name snapshotted into ``analysis_data`` at Analyse time.
+    """
+    if boq.status in {BOQStatus.UPLOADED, BOQStatus.PROCESSING}:
+        return ""
+
+    analysis = boq.analysis_data or {}
+    if not analysis.get("rows") and not analysis.get("database_version_id"):
+        return ""
+
+    stored_name = str(analysis.get("database_name") or "").strip()
+    if stored_name:
+        return stored_name
+
+    db_id = int(analysis.get("database_version_id") or 0)
+    if not db_id:
+        return ""
+
+    from apps.database_manager.models import DatabaseVersion
+
+    version = (
+        DatabaseVersion.objects.filter(pk=db_id)
+        .only("name", "source_filename", "version_number")
+        .first()
+    )
+    if version is None:
+        return f"DB #{db_id}"
+    return (
+        str(version.name or "").strip()
+        or str(version.source_filename or "").strip()
+        or f"DB v{version.version_number}"
+    )

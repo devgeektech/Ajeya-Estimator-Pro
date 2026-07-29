@@ -21,7 +21,6 @@
                 placeholder="Type to filter (word by word)…"
                 autocomplete="off"
                 x-model="query"
-                @input="applyFilter()"
             >
         </label>
         <button
@@ -29,7 +28,7 @@
             class="btn btn--small"
             x-show="query.trim()"
             x-cloak
-            @click="query = ''; applyFilter()"
+            @click="query = ''"
         >Clear</button>
         <span class="boq-list-toolbar__hint muted" x-text="filterHint"></span>
     </div>
@@ -62,6 +61,7 @@
                         title="Sort by Status"
                     >Status <span class="table-sort__arrows" aria-hidden="true"><span class="table-sort__up">▲</span><span class="table-sort__down">▼</span></span></a>
                 </th>
+                <th>Database</th>
                 <th>
                     <a
                         class="table-sort{% if sort == 'created' %} is-active is-{{ dir }}{% endif %}"
@@ -78,7 +78,7 @@
             {% for item in boq_items %}
             <tr
                 class="boq-list-row"
-                data-search="{{ item.boq.boq_name|lower }} {{ item.boq.user.full_name|lower }} {{ item.status_display.label|lower }} {{ item.boq.status|lower }}"
+                data-search="{{ item.boq.boq_name|lower }} {{ item.boq.user.full_name|lower }} {{ item.status_display.label|lower }} {{ item.boq.status|lower }} {{ item.database_label|lower }}"
                 {% if item.needs_status_poll %}
                 x-data="boqListStatus({
                     statusUrl: '{% url 'boq:status' item.boq.pk %}',
@@ -98,6 +98,7 @@
                     <span class="badge {{ item.status_display.badge }}">{{ item.status_display.label }}</span>
                     {% endif %}
                 </td>
+                <td class="muted">{% if item.database_label %}{{ item.database_label }}{% else %}—{% endif %}</td>
                 <td>{{ item.boq.created_at|date:"Y-m-d H:i" }}</td>
                 <td class="table__actions">
                     <a href="{% url 'boq:detail' item.boq.pk %}?tab={{ item.detail_tab }}" class="btn btn--small btn--primary">View</a>
@@ -105,11 +106,11 @@
             </tr>
             {% empty %}
             <tr class="boq-list-empty-static">
-                <td colspan="5" class="table__empty">No BOQs uploaded yet.</td>
+                <td colspan="6" class="table__empty">No BOQs uploaded yet.</td>
             </tr>
             {% endfor %}
             <tr class="boq-list-empty-filter" x-show="noMatches" x-cloak>
-                <td colspan="5" class="table__empty">No BOQs match the search.</td>
+                <td colspan="6" class="table__empty">No BOQs match the search.</td>
             </tr>
         </tbody>
     </table>
@@ -197,6 +198,8 @@ document.addEventListener('alpine:init', () => {
             return `${this.visibleCount} of ${this.totalCount}`;
         },
         init() {
+            // Watch query so filter runs after x-model updates (not on stale @input).
+            this.$watch('query', () => this.applyFilter());
             this.$nextTick(() => this.applyFilter());
         },
         applyFilter() {

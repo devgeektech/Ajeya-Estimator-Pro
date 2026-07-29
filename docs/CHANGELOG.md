@@ -2,6 +2,66 @@
 
 Meaningful product and technical changes only. Older history is in git.
 
+## 2026-07-29 — Open Detail Tab From Status
+
+- Opening a BOQ detail page defaults to the tab that matches status (Analysed →
+  Analysis, Make/Vendor → Make & Vendor, Labour → Labour, Ready/Exported →
+  Review) instead of a previously remembered tab.
+
+## 2026-07-29 — Stuck Analysis Fail + Progress Reset + Concurrency
+
+- Stuck Analyse/Match fails after 5 minutes without progress updates (or when
+  progress is already 100% complete/failed while status is still running), so
+  Analyse can be clicked again; Celery soft timeout / task crash also fails the BOQ.
+- Re-Analyse progress no longer starts near 99%: shared progress file is the
+  source of truth (stale LocMem cache ignored), and the UI snaps down when the
+  server resets percent on a new run.
+- Celery worker default concurrency increased from 4 to 8 (override with
+  `CELERY_WORKER_CONCURRENCY`); EC2 unit example updated to match.
+
+## 2026-07-29 — Stale Analysis Job Heal
+
+- If Analyse/Match progress stops updating for 10+ minutes while status is
+  PROCESSING/MATCHING, heal marks the BOQ failed (or EXTRACTED if rows exist)
+  so the UI unblocks; Analyse can be clicked again.
+- Dispatch resets shared job progress when a job is queued so the UI does not
+  keep showing a prior 100% / stalled label.
+
+## 2026-07-29 — Windows Log Rollover Fix
+
+- File logs use `SafeRotatingFileHandler` so Windows sharing locks between Django
+  and Celery no longer spam `PermissionError` on `application.log` rollover.
+
+## 2026-07-29 — Top-3 Candidates + BOQ Source of Truth
+
+- Analysis shows / stores only the top 3 ranked Rate_Master candidates (best first).
+- Initial Analyse uses one strong match pass; removed auto multi-pass refine that
+  made Re-analyse inflate confidence without input changes.
+- BOQ row remains source of truth for extract + core fields; attribute schema comes
+  from the selected candidate and values fill only from BOQ-mapped evidence.
+- Updated `extract_products` / `map_product_match` prompts accordingly.
+
+## 2026-07-29 — Concurrent Analysis Isolation + Database Column
+
+- Job progress files use atomic replace and ignore empty/partial JSON so concurrent
+  status polls no longer raise `JSONDecodeError`.
+- Analyse pins and stores `database_version_id` + `database_name` on the BOQ;
+  BOQ list shows a Database column only after analysis (blank on upload).
+- Extraction logs boq id/name, upload file, make-list file, and database used so
+  concurrent jobs can be verified as isolated.
+
+## 2026-07-29 — List Search Filter Fix
+
+- Live list search filters after the query updates (Alpine `$watch`), so typing
+  filters immediately instead of lagging/stalling on `@input` vs `x-model`.
+- BOQ and Database lists filter entirely client-side so Clear restores all rows;
+  Notifications/Audit Clear reloads without `q` for correct pagination.
+
+## 2026-07-29 — Recent BOQs No Scroll
+
+- Dashboard Recent BOQs lists up to 7 items with tighter row spacing and no
+  in-card scrollbar; full list remains on View all.
+
 ## 2026-07-28 — Labour Client Progress Report
 
 - Added `docs/LABOUR_CLIENT_REPORT.md` for stakeholder review of the Labour

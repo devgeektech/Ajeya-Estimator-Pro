@@ -119,6 +119,16 @@ Windows:
 .\scripts\run_celery_worker.ps1
 ```
 
+Default worker concurrency is **8** (up to 8 BOQs analysing at once). Override:
+
+```powershell
+$env:CELERY_WORKER_CONCURRENCY = "12"
+.\scripts\run_celery_worker.ps1
+```
+
+If progress stops updating for 5+ minutes while status is `PROCESSING`, the status
+endpoint marks the BOQ failed so Analyse can be started again.
+
 The BOQ detail page polls `GET /boqs/<id>/status/` while status is `PROCESSING` and
 reloads when analysis completes or fails.
 
@@ -239,7 +249,7 @@ User=boq_ai
 Group=www-data
 WorkingDirectory=/srv/boq_ai/backend
 EnvironmentFile=/srv/boq_ai/.env
-ExecStart=/srv/boq_ai/.venv/bin/celery -A config worker --loglevel=info --concurrency=2
+ExecStart=/srv/boq_ai/.venv/bin/celery -A config worker --loglevel=info --concurrency=8
 Restart=always
 
 [Install]
