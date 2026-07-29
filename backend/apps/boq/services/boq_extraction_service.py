@@ -409,15 +409,11 @@ def _consolidate_to_anchors(
         group_ids = [str(row_id) for row_id in (group.get("group_ids") or [anchor_id])]
 
         merged_products: list[dict[str, Any]] = []
-        merged_activities: list[str] = []
         for row_id in group_ids:
             row = extracted_by_id.get(row_id) or {}
             merged_products.extend(row.get("products") or [])
-            for activity in row.get("activities") or []:
-                if activity not in merged_activities:
-                    merged_activities.append(activity)
 
-        if not merged_products and not merged_activities:
+        if not merged_products:
             continue
 
         existing = extracted_by_id.get(anchor_id) or {}
@@ -426,7 +422,7 @@ def _consolidate_to_anchors(
             **existing,
             "row_id": anchor_id,
             "products": _filter_spec_products(merged_products, taxonomy=taxonomy),
-            "activities": merged_activities,
+            "activities": [],
             "skip_matching": not bool(merged_products),
         }
         anchor_row.pop("skip_reason", None)
@@ -522,7 +518,7 @@ def _compact_anchor_payload(group: dict[str, Any]) -> dict[str, Any]:
 
 
 class BOQExtractionService:
-    """Extract products and activities from grouped BOQ anchor rows via OpenAI."""
+    """Extract products from grouped BOQ anchor rows via OpenAI."""
 
     def __init__(self, boq_data: dict):
         self.boq_data = boq_data or {}
@@ -636,7 +632,7 @@ class BOQExtractionService:
         }
 
     def extract_anchor(self, row_id: str) -> dict[str, Any]:
-        """Extract products/activities for one anchor group (and its lineage stubs)."""
+        """Extract products for one anchor group (and its lineage stubs)."""
         if not self.ai.is_enabled():
             raise AIServiceError("OPENAI_API_KEY is not configured.")
 
@@ -749,7 +745,7 @@ class BOQExtractionService:
                 boq_rate=group.get("boq_rate"),
                 qty_rows=list(group.get("qty_rows") or []),
             )
-            row.setdefault("activities", [])
+            row["activities"] = []
             row.setdefault("skip_matching", not row.get("products"))
             normalized.append(row)
         return normalized

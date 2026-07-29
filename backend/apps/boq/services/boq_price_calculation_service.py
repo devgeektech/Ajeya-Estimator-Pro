@@ -1,4 +1,4 @@
-"""Calculate final row prices after Match and mark BOQ ready to export."""
+"""Calculate final row prices after Labour and mark BOQ ready to export."""
 from __future__ import annotations
 
 import logging
@@ -8,8 +8,8 @@ from typing import Any
 from django.db import transaction
 
 from apps.boq.models import BOQ
-from apps.boq.services.boq_analysis_display_service import BOQAnalysisDisplayService
 from apps.boq.services.boq_analysis_store import save_boq_analysis_json
+from apps.boq.services.boq_review_display_service import BOQReviewDisplayService
 from common.choices import BOQStatus
 from common.exceptions import BOQAIError, ValidationError
 from utils.json_safe import json_safe
@@ -94,20 +94,25 @@ class BOQPriceCalculationService:
             raise BOQAIError(f"BOQ id={self.boq_id} not found.") from exc
 
         if boq.status == BOQStatus.MATCHING:
-            raise ValidationError("Wait for matching to finish before calculating prices.")
+            raise ValidationError("Wait for the current job to finish before calculating prices.")
         if boq.status not in {
+            BOQStatus.LABOUR,
             BOQStatus.PROCESSED,
             BOQStatus.READY_EXPORT,
             BOQStatus.EXPORTED,
         }:
-            raise ValidationError("Run Match before calculating prices.")
+            raise ValidationError("Apply labour on the Labour tab before continuing.")
 
-        display = BOQAnalysisDisplayService(boq, self.confirmations).build()
+        analysis = boq.analysis_data or {}
+        if not (analysis.get("labour_config") or {}).get("labour_ready"):
+            raise ValidationError("Apply Auto or Manual labour before continuing.")
+
+        display = BOQReviewDisplayService(boq, self.confirmations).build()
         if not display.get("has_analysis"):
-            raise ValidationError("No match results available to price.")
+            raise ValidationError("No Make & Vendor products available to price.")
 
         row_pricing = build_row_pricing(display)
-        analysis = dict(boq.analysis_data or {})
+        analysis = dict(analysis)
         analysis["pricing_ready"] = True
         analysis["row_pricing"] = row_pricing
         analysis["pricing_calculated_at"] = now_local_iso()

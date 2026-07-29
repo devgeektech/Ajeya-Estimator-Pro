@@ -2,7 +2,9 @@
 <p class="panel__text">No analysed products yet. Run <strong>Analyse</strong> first, then select make and supplier here.</p>
 {% else %}
 <p class="make-vendor-hint panel__text panel__text--muted">
-    Products are prefilled with lowest approved make/vendor. Adjust from the cascade below, then click <strong>Match</strong> when ready.
+    Products are prefilled with lowest approved make/vendor. Adjust from the cascade below.
+    Make &amp; Vendor shows <strong>material rate only</strong> — labour is set on the Labour tab.
+    Same material rate with different make/supplier is highlighted for supplier confirmation.
 </p>
 
 {% if make_vendor_display.selection_catalog.categories %}
@@ -196,7 +198,8 @@
                 class="make-vendor-card"
                 :class="{
                     'make-vendor-card--no-make': notFound,
-                    'make-vendor-card--no-match': status === 'unmatched' && !notFound
+                    'make-vendor-card--no-match': status === 'unmatched' && !notFound,
+                    'make-vendor-card--supplier-review': supplierRateReview
                 }"
                 role="tabpanel"
                 x-data="makeVendorForm({
@@ -211,10 +214,9 @@
                     matchedSummary: '{{ product.matched_summary|default:''|escapejs }}',
                     notes: '{{ product.notes|default:''|escapejs }}',
                     materialRate: '{{ product.line_output.material_rate|default:''|escapejs }}',
-                    labourRate: '{{ product.line_output.labour_rate|default:''|escapejs }}',
-                    totalAmount: '{{ product.line_output.total_amount|default:''|escapejs }}',
                     notFound: {{ product.highlight_no_make|yesno:'true,false' }},
-                    allowTypedEntry: {{ product.allow_typed_make_vendor|yesno:'true,false' }}
+                    allowTypedEntry: {{ product.allow_typed_make_vendor|yesno:'true,false' }},
+                    supplierRateReview: {{ product.supplier_rate_review|yesno:'true,false' }}
                 })"
             >
                 <div class="make-vendor-card__head">
@@ -224,12 +226,23 @@
                             <span class="make-vendor-card__taxonomy-label">Category / Sub-category</span>
                             <span class="make-vendor-card__taxonomy-value">{{ product.taxonomy_label }}</span>
                         </p>
+                        {% if product.supplier_rate_review %}
+                        <p class="make-vendor-card__supplier-review-note">
+                            Same material rate appears with a different make/supplier elsewhere — confirm this supplier before continuing.
+                        </p>
+                        {% endif %}
                         {% if product.highlight_no_make %}
                         <p class="make-vendor-card__no-make-note">No Approved Make Found in Make List — enter make and supplier below, then Find rates. You can edit and retry anytime.</p>
                         {% elif product.is_no_match %}
                         <p class="make-vendor-card__no-make-note">No Rate_Master match — edit make/supplier and Find rates again.</p>
                         {% endif %}
                     </div>
+                    <span
+                        class="badge badge--yellow"
+                        x-show="supplierRateReview"
+                        x-cloak
+                        title="Confirm supplier — same material rate with different make/vendor"
+                    >Supplier review</span>
                     <span
                         class="badge badge--red"
                         x-show="notFound"
@@ -336,10 +349,8 @@
                         <p x-show="confidence != null" x-text="'Confidence: ' + Math.round(confidence) + '%'"></p>
                         <p class="make-vendor-result__notes" x-show="notes" x-text="notes"></p>
                     </div>
-                    <div class="make-vendor-rates">
-                        <div><span>Material</span><strong x-text="materialRate || '—'"></strong></div>
-                        <div><span>Labour</span><strong x-text="labourRate || '—'"></strong></div>
-                        <div><span>Total</span><strong x-text="totalAmount || '—'"></strong></div>
+                    <div class="make-vendor-rates make-vendor-rates--material-only">
+                        <div><span>Material rate</span><strong x-text="materialRate || '—'"></strong></div>
                     </div>
                 </div>
             </section>
@@ -527,10 +538,9 @@ document.addEventListener('alpine:init', () => {
         matchedSummary: config.matchedSummary || '',
         notes: config.notes || '',
         materialRate: config.materialRate || '',
-        labourRate: config.labourRate || '',
-        totalAmount: config.totalAmount || '',
         notFound: Boolean(config.notFound),
         allowTypedEntry: Boolean(config.allowTypedEntry),
+        supplierRateReview: Boolean(config.supplierRateReview),
         saving: false,
         error: '',
         get statusLabel() {
@@ -581,14 +591,15 @@ document.addEventListener('alpine:init', () => {
                 if (!response.ok || !data.ok) {
                     throw new Error(data.message || 'Search failed.');
                 }
-                // First leave from not-found: refresh summary counts; typed inputs stay.
-                if (wasNotFound) {
+                const selection = data.selection || {};
+                // Refresh when not-found clears or rates match — supplier-review
+                // highlights compare material rates across all products.
+                if (wasNotFound || selection.status === 'matched') {
                     window.location.assign(
                         '{% url "boq:detail" boq.pk %}?tab=make_vendor&_t=' + Date.now()
                     );
                     return;
                 }
-                const selection = data.selection || {};
                 this.status = selection.status || 'unmatched';
                 this.confidence = selection.confidence;
                 this.techKey = selection.tech_key || '';
@@ -598,8 +609,6 @@ document.addEventListener('alpine:init', () => {
                 if (selection.supplier != null) this.supplier = selection.supplier || '';
                 const line = selection.line_output || {};
                 this.materialRate = line.material_rate || '';
-                this.labourRate = line.labour_rate || '';
-                this.totalAmount = line.total_amount || '';
                 // Keep free-text editable after no-match / manual retries.
                 if (this.status === 'unmatched') {
                     this.allowTypedEntry = true;

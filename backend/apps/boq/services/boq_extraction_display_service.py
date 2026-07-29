@@ -1,4 +1,4 @@
-"""Shape extracted products/activities for the BOQ detail Analysis tab."""
+"""Shape extracted products for the BOQ detail Analysis tab."""
 from __future__ import annotations
 
 import json
@@ -14,7 +14,63 @@ from apps.boq.services.product_attribute_enrichment_service import (
     confidence_band,
     humanize_attribute_key,
 )
-from utils.attribute_parser import coerce_attributes_dict, normalize_attribute_key
+from apps.boq.services.product_matching_service import structured_match_score
+from apps.database_manager.models import Rate_Master
+from utils.attribute_parser import coerce_attributes_dict
+
+
+def _candidate_confidence_value(raw: Any) -> float | None:
+    """Normalize stored retrieval/match confidence for Analysis display."""
+    if raw in (None, ""):
+        return None
+    try:
+        return round(float(raw), 2)
+    except (TypeError, ValueError):
+        return None
+
+
+def _backfill_candidate_confidences(
+    product: dict[str, Any],
+    candidates: list[dict[str, Any]],
+    *,
+    database_version_id: int | None,
+) -> None:
+    """Fill missing candidate % from structured score (legacy wiped scores)."""
+    if not database_version_id:
+        return
+    missing_ids: list[int] = []
+    for item in candidates:
+        if item.get("confidence") is not None:
+            continue
+        try:
+            cand_id = int(item.get("id"))
+        except (TypeError, ValueError):
+            continue
+        missing_ids.append(cand_id)
+    if not missing_ids:
+        return
+    rates = {
+        rate.pk: rate
+        for rate in Rate_Master.objects.filter(
+            pk__in=missing_ids,
+            database_version_id=database_version_id,
+        )
+    }
+    product_only = dict(product)
+    product_only["make_hint"] = None
+    for item in candidates:
+        if item.get("confidence") is not None:
+            continue
+        try:
+            cand_id = int(item.get("id"))
+        except (TypeError, ValueError):
+            continue
+        rate = rates.get(cand_id)
+        if rate is None:
+            continue
+        score, _breakdown = structured_match_score(product_only, rate)
+        item["confidence"] = round(float(score), 2)
+
 
 _PRODUCT_FIELDS: tuple[tuple[str, str], ...] = (
     ("description_hint", "Product description"),
@@ -24,11 +80,6 @@ _PRODUCT_FIELDS: tuple[tuple[str, str], ...] = (
     ("size", "Size"),
     ("capacity", "Capacity"),
     ("unit", "Unit"),
-)
-
-# Product scalars shown in the card — never repeated under Additional Attributes.
-_PRODUCT_FIELD_KEYS: frozenset[str] = frozenset(key for key, _label in _PRODUCT_FIELDS) | frozenset(
-    ("make_hint", "quantity", "quantity_unit")
 )
 
 # All product property fields are optional — products differ in which apply.
@@ -49,8 +100,8 @@ def _attribute_label(key: str) -> str:
 
 def _shape_attribute_fields(product: dict[str, Any]) -> dict[str, Any]:
     """
-    Attributes grid = DB schema keys (filled when AI found a value, else empty).
-    Additional Attributes = AI keys not in the DB schema or product field grid.
+    Attributes grid = required DB schema keys only (filled when AI/expert found a value).
+    Experts can add more via the Attributes + control.
     """
     attrs = coerce_attributes_dict(product.get("attributes"))
     schema_keys = [
@@ -58,29 +109,18 @@ def _shape_attribute_fields(product: dict[str, Any]) -> dict[str, Any]:
         for key in (product.get("attribute_schema") or [])
         if str(key).strip()
     ]
-    schema_set = {normalize_attribute_key(key) for key in schema_keys}
-    exclude_keys = schema_set | {normalize_attribute_key(key) for key in _PRODUCT_FIELD_KEYS}
 
-    # Always render the full DB schema — empty inputs for keys AI did not find.
+    # Needed DB schema attributes only — never show free-form additional attributes.
     fields = [
         {
             "key": key,
             "label": _attribute_label(key),
             "value": "" if _is_blank(attrs.get(key)) else str(attrs.get(key)),
             "filled": not _is_blank(attrs.get(key)),
+            "removable": False,
         }
         for key in schema_keys
     ]
-
-    # AI-only attributes (not schema keys or product card fields).
-    extra = []
-    for key, value in sorted(attrs.items()):
-        if _is_blank(value):
-            continue
-        canon = normalize_attribute_key(str(key))
-        if canon in exclude_keys:
-            continue
-        extra.append({"key": key, "value": value})
 
     confidence = product.get("attribute_confidence")
     if confidence is None:
@@ -93,7 +133,7 @@ def _shape_attribute_fields(product: dict[str, Any]) -> dict[str, Any]:
     source = product.get("attribute_source") or ("database" if schema_keys else "extracted")
     return {
         "fields": fields,
-        "extra": extra,
+        "extra": [],
         "confidence": confidence,
         "confidence_band": confidence_band(confidence),
         "source": source,
@@ -107,6 +147,7 @@ def _shape_product(
     display_number: int,
     total: int,
     source_row_id: str,
+    database_version_id: int | None = None,
 ) -> dict[str, Any]:
     product = _normalize_product_fields(product)
     fields: list[dict[str, Any]] = []
@@ -163,15 +204,44 @@ def _shape_product(
         }
 
     candidates = []
+    selected_id = product.get("db_product_id") or product.get("suggested_db_product_id")
+    selected_confidence = _candidate_confidence_value(
+        product.get("db_match_confidence")
+    )
+    if selected_confidence is None:
+        selected_confidence = _candidate_confidence_value(
+            product.get("attribute_confidence")
+        )
     for item in (product.get("db_candidates") or [])[:5]:
+        cand_id = item.get("id")
+        is_selected = False
+        try:
+            if cand_id is not None and selected_id is not None:
+                is_selected = int(cand_id) == int(selected_id)
+        except (TypeError, ValueError):
+            is_selected = False
+        confidence = _candidate_confidence_value(item.get("confidence"))
+        # Older refine passes wiped retrieval scores; still show % for the
+        # selected/suggested row from the product-level match score.
+        if confidence is None and is_selected:
+            confidence = selected_confidence
         candidates.append(
             {
-                "id": item.get("id"),
+                "id": cand_id,
                 "summary": item.get("summary")
                 or _product_summary(item),
                 "tech_key": item.get("tech_key") or "",
-                "confidence": item.get("confidence"),
+                "confidence": confidence,
+                "is_selected": is_selected,
             }
+        )
+    # Skip invented scores after an expert pick — keep other candidates' stored %.
+    selection_source = str((product.get("ai_mapping") or {}).get("selection_source") or "")
+    if selection_source != "expert":
+        _backfill_candidate_confidences(
+            product,
+            candidates,
+            database_version_id=database_version_id,
         )
 
     return {
@@ -182,9 +252,13 @@ def _shape_product(
         "is_user_added": (product.get("source") or "").lower() == "user",
         "fields": fields,
         "attributes": attribute_fields,
-        "extra_attrs_json": json.dumps(attribute_fields.get("extra") or []),
+        "extra_attrs_json": json.dumps([]),
         "attribute_schema_json": json.dumps(
-            [field["key"] for field in attribute_fields.get("fields") or []]
+            [
+                field["key"]
+                for field in attribute_fields.get("fields") or []
+                if not field.get("removable")
+            ]
         ),
         "attribute_confidence": attribute_fields["confidence"],
         "attribute_confidence_band": attribute_fields["confidence_band"],
@@ -301,17 +375,8 @@ def _merge_lineage_analysis(
     for index, product in enumerate(products):
         product["product_index"] = index
 
-    activities: list[str] = []
-    for row_id in lineage_ids:
-        analysis_row = analysis_by_row.get(str(row_id), {})
-        for activity in analysis_row.get("activities") or []:
-            if activity not in activities:
-                activities.append(activity)
-
-    if not activities:
-        activities = list(anchor_analysis.get("activities") or [])
-
-    return products, activities, anchor_analysis
+    # Activities are retired — Analysis extracts products only.
+    return products, [], anchor_analysis
 
 
 def build_product_save_feedback(product: dict[str, Any]) -> dict[str, Any]:
@@ -321,6 +386,7 @@ def build_product_save_feedback(product: dict[str, Any]) -> dict[str, Any]:
         display_number=int(product.get("product_index") or 0) + 1,
         total=1,
         source_row_id=str(product.get("source_row_id") or ""),
+        database_version_id=None,
     )
     return {
         "missing_count": shaped["missing_count"],
@@ -332,7 +398,7 @@ def build_product_save_feedback(product: dict[str, Any]) -> dict[str, Any]:
 
 
 class BOQExtractionDisplayService:
-    """Build upload-order rows showing AI-extracted products and activities."""
+    """Build upload-order rows showing AI-extracted products."""
 
     def __init__(self, boq: BOQ, make_list_data: dict | None = None, *, has_make_list_file: bool = False):
         self.boq = boq
@@ -350,38 +416,56 @@ class BOQExtractionDisplayService:
 
         lines: list[dict[str, Any]] = []
         product_count = 0
-        activity_count = 0
         missing_field_count = 0
+        multiproduct_review_count = 0
+
+        db_version_id = int((analysis.get("database_version_id") or 0) or 0) or None
+        if not db_version_id:
+            from apps.database_manager.services.activation import get_active_database_version
+
+            active = get_active_database_version()
+            db_version_id = active.pk if active else None
 
         for group in grouped_anchor_rows(boq_data):
             row_id = group["row_id"]
-            products, activities, analysis_row = _merge_lineage_analysis(
+            products, _activities, analysis_row = _merge_lineage_analysis(
                 group["group_ids"],
                 analysis_by_row,
             )
             product_total = len(products)
+            qty_rows = list(group.get("qty_rows") or [])
+            qty_row_count = len(qty_rows)
+            # More products than Unit/Qty rows → expert should review (e.g. 1 qty, 2 products).
+            multiproduct_review = product_total >= 2 and product_total > qty_row_count
+
             shaped_products = [
                 _shape_product(
                     product,
                     display_number=index + 1,
                     total=product_total,
                     source_row_id=str(product.get("source_row_id") or row_id),
+                    database_version_id=db_version_id,
                 )
                 for index, product in enumerate(products)
             ]
             product_count += len(products)
-            activity_count += len(activities)
             missing_field_count += sum(product["missing_count"] for product in shaped_products)
+            if multiproduct_review:
+                multiproduct_review_count += 1
 
             category, sub_category = _primary_category(products)
-            if analysis_row.get("skip_matching") and not products and not activities:
+            if analysis_row.get("skip_matching") and not products:
                 status = "skipped"
-            elif products or activities:
+            elif products:
                 status = "extracted"
             elif analysis_row:
                 status = "empty"
             else:
                 status = "not_analyzed"
+
+            # Pure section headers (no products) are merged into product groups — hide them.
+            if status == "skipped" and analysis_row.get("skip_reason") != "ai_missing_row":
+                continue
 
             lines.append(
                 {
@@ -397,13 +481,15 @@ class BOQExtractionDisplayService:
                     "qty": group.get("qty"),
                     "unit": group.get("unit"),
                     "qty_status": group.get("qty_status"),
+                    "qty_row_count": qty_row_count,
                     "rate_only": bool(group.get("rate_only")),
                     "boq_rate": group.get("boq_rate"),
                     "status": status,
                     "skip_reason": analysis_row.get("skip_reason") or "",
                     "product_count": product_total,
+                    "multiproduct_review": multiproduct_review,
                     "products": shaped_products,
-                    "activities": activities,
+                    "activities": [],
                     "make_list": _shape_make_list(
                         full_description=group.get("full_description") or "",
                         stored=analysis_row.get("make_list"),
@@ -421,8 +507,9 @@ class BOQExtractionDisplayService:
             "phase": analysis.get("phase"),
             "stats": stats,
             "product_count": product_count,
-            "activity_count": activity_count,
+            "activity_count": 0,
             "missing_field_count": missing_field_count,
+            "multiproduct_review_count": multiproduct_review_count,
             "has_make_list": self.has_make_list_file and self.make_list_service.has_constraints,
             "lines": lines,
         }

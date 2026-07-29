@@ -14,7 +14,7 @@ from apps.boq.services.product_matching_service import (
     structured_match_score,
 )
 from apps.database_manager.models import Rate_Master
-from common.constants import MATCH_CONFIDENCE_THRESHOLD
+from common.constants import MATCH_CONFIDENCE_THRESHOLD, REFINE_MATCH_CONFIDENCE_TARGET
 from utils.attribute_parser import (
     normalize_attribute_key,
     normalize_attribute_value,
@@ -31,10 +31,29 @@ logger = logging.getLogger("boq_ai")
 
 _BATCH_SIZE = 4
 _CANDIDATE_LIMIT = 10
+_RECALL_CHROMA_LIMIT = 25
+_REFINE_CHROMA_LIMIT = 40
+_REFINE_PASSES = 2
 
 DB_MATCH_MATCHED = "matched"
 DB_MATCH_PROVISIONAL = "provisional"
 DB_MATCH_UNMATCHED = "unmatched"
+
+
+def product_needs_match_refine(
+    product: dict[str, Any],
+    *,
+    min_confidence: float = REFINE_MATCH_CONFIDENCE_TARGET,
+) -> bool:
+    """True when a second mapping pass (like Re-analyse) may improve the match."""
+    status = str(product.get("db_match_status") or "").strip().lower()
+    if status != DB_MATCH_MATCHED:
+        return True
+    try:
+        confidence = float(product.get("db_match_confidence") or 0.0)
+    except (TypeError, ValueError):
+        confidence = 0.0
+    return confidence < float(min_confidence)
 
 
 def _is_filled(value: Any) -> bool:
@@ -242,13 +261,127 @@ class ProductAIMappingService:
         results = self.map_products([product])
         return results[0] if results else self._fallback_without_match(product)
 
-    def map_products(self, products: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def apply_selected_candidate(
+        self,
+        product: dict[str, Any],
+        rate_master_id: int,
+    ) -> dict[str, Any]:
+        """
+        Expert override: confirm a Rate_Master candidate from the Analysis list.
+
+        Maps product attributes onto that row's Attribute schema and marks the
+        product as matched (user choice), keeping other candidates for re-pick.
+        """
+        rate = Rate_Master.objects.filter(
+            pk=int(rate_master_id),
+            database_version_id=self.database_version_id,
+        ).first()
+        if rate is None:
+            raise ValueError(f"Unknown Rate_Master id: {rate_master_id}")
+
+        snapshot = _candidate_snapshot(rate)
+        existing_candidates = list(product.get("db_candidates") or [])
+        # Keep original candidate order — only flip selection, do not reshuffle
+        # or mutate other candidate rows (that looked like “other candidates changed”).
+        candidates: list[dict[str, Any]] = []
+        selected_slim = _slim_candidate(snapshot)
+        seen_ids: set[int] = set()
+        selected_pk = int(rate.pk)
+        for item in existing_candidates:
+            if not isinstance(item, dict):
+                continue
+            try:
+                item_id = int(item.get("id"))
+            except (TypeError, ValueError):
+                continue
+            if item_id in seen_ids:
+                continue
+            seen_ids.add(item_id)
+            if item_id == selected_pk:
+                preserved = dict(item)
+                preserved.update(selected_slim)
+                # Keep prior retrieval % when present; blended score applied below.
+                if item.get("confidence") is not None and selected_slim.get("confidence") is None:
+                    preserved["confidence"] = item.get("confidence")
+                candidates.append(preserved)
+            else:
+                candidates.append(dict(item))
+            if len(candidates) >= _CANDIDATE_LIMIT:
+                break
+        if selected_pk not in seen_ids:
+            candidates.insert(0, selected_slim)
+            candidates = candidates[:_CANDIDATE_LIMIT]
+
+        extracted_attrs = coerce_attributes_dict(product.get("attributes"))
+        schema_keys = list(snapshot.get("attribute_schema") or [])
+        mapped_attributes, _unmapped, attribute_map = _map_attrs_onto_schema(
+            schema_keys=schema_keys,
+            extracted_attrs=extracted_attrs,
+            attribute_map={},
+            mapped_attributes={},
+            unmapped_attributes=dict(extracted_attrs),
+        )
+        schema_set = {normalize_attribute_key(key) for key in schema_keys}
+        attributes = {
+            key: value
+            for key, value in mapped_attributes.items()
+            if normalize_attribute_key(str(key)) in schema_set and _is_filled(value)
+        }
+        confidence = _compute_match_confidence(
+            product,
+            rate,
+            mapped_attributes=attributes,
+            schema_keys=schema_keys,
+            ai_confidence=None,
+        )
+        for item in candidates:
+            try:
+                if int(item.get("id") or 0) == selected_pk:
+                    item["confidence"] = confidence
+                    break
+            except (TypeError, ValueError):
+                continue
+        missing_keys = _missing_attribute_keys(schema_keys, attributes)
+
+        enriched = dict(product)
+        enriched["attributes"] = attributes
+        enriched["attribute_schema"] = schema_keys
+        enriched["missing_attribute_keys"] = missing_keys
+        enriched["attribute_confidence"] = confidence
+        enriched["attribute_source"] = "database" if schema_keys else "extracted"
+        enriched["db_match_status"] = DB_MATCH_MATCHED
+        enriched["db_product_id"] = rate.pk
+        enriched["db_product_make"] = ""
+        enriched["db_product_tech_key"] = rate.Tech_Key
+        enriched["db_match_confidence"] = confidence
+        enriched["db_product_summary"] = _product_summary(snapshot)
+        enriched["suggested_db_product_id"] = rate.pk
+        enriched["db_candidates"] = candidates
+        enriched["ai_mapping"] = {
+            "selected_id": rate.pk,
+            "selected_rate_master_id": rate.pk,
+            "attribute_map": attribute_map,
+            "notes": "Selected by expert from top database candidates.",
+            "ai_confidence": None,
+            "candidate_ids": [item.get("id") for item in candidates],
+            "match_status": DB_MATCH_MATCHED,
+            "selection_source": "expert",
+        }
+        return align_product_taxonomy_from_rate(enriched, rate, overwrite_core_fields=True)
+
+    def map_products(
+        self,
+        products: list[dict[str, Any]],
+        *,
+        refine: bool = False,
+    ) -> list[dict[str, Any]]:
         if not products:
             return []
 
+        chroma_limit = _REFINE_CHROMA_LIMIT if refine else _RECALL_CHROMA_LIMIT
         prepared: list[dict[str, Any]] = []
         for index, product in enumerate(products):
-            candidates = self._recall_candidates(product)
+            candidates = self._recall_candidates(product, chroma_limit=chroma_limit)
             prepared.append(
                 {
                     "product_ref": f"p{index}",
@@ -282,6 +415,9 @@ class ProductAIMappingService:
         rows: list[dict[str, Any]],
         *,
         only_missing: bool = False,
+        only_weak: bool = False,
+        refine: bool = False,
+        min_confidence: float = REFINE_MATCH_CONFIDENCE_TARGET,
         progress_callback=None,
     ) -> list[dict[str, Any]]:
         from .product_attribute_enrichment_service import product_needs_attribute_enrichment
@@ -290,6 +426,10 @@ class ProductAIMappingService:
         for row_index, row in enumerate(rows):
             for product_index, product in enumerate(row.get("products") or []):
                 if only_missing and not product_needs_attribute_enrichment(product):
+                    continue
+                if only_weak and not product_needs_match_refine(
+                    product, min_confidence=min_confidence
+                ):
                     continue
                 pending.append((row_index, product_index, product))
 
@@ -306,7 +446,9 @@ class ProductAIMappingService:
             progress_callback(0, total)
         for start in range(0, total, chunk_size):
             chunk = pending[start : start + chunk_size]
-            mapped_products.extend(self.map_products([item[2] for item in chunk]))
+            mapped_products.extend(
+                self.map_products([item[2] for item in chunk], refine=refine)
+            )
             if progress_callback:
                 progress_callback(min(total, start + len(chunk)), total)
 
@@ -317,32 +459,158 @@ class ProductAIMappingService:
             updated_rows[row_index] = {**updated_rows[row_index], "products": products}
         return updated_rows
 
+    def refine_rows(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        passes: int = _REFINE_PASSES,
+        min_confidence: float = REFINE_MATCH_CONFIDENCE_TARGET,
+        progress_callback=None,
+    ) -> list[dict[str, Any]]:
+        """
+        Re-run matching on weak products after taxonomy/schema alignment.
+
+        Same path as Analysis Re-analyse: uses updated category/sub-category/class
+        and attribute schema from the first pass to improve recall and confidence.
+        """
+        updated = rows
+        total_passes = max(1, int(passes or 1))
+        for pass_index in range(total_passes):
+            weak_before = sum(
+                1
+                for row in updated
+                for product in (row.get("products") or [])
+                if product_needs_match_refine(product, min_confidence=min_confidence)
+            )
+            if weak_before == 0:
+                if progress_callback:
+                    progress_callback(1, 1)
+                break
+
+            def _on_pass_progress(done: int, total: int, _pass=pass_index) -> None:
+                if not progress_callback:
+                    return
+                # Stretch each refine pass across the callback range.
+                span = max(total, 1)
+                overall_done = (_pass * span) + done
+                overall_total = total_passes * span
+                progress_callback(overall_done, overall_total)
+
+            updated = self.map_rows(
+                updated,
+                only_weak=True,
+                refine=True,
+                min_confidence=min_confidence,
+                progress_callback=_on_pass_progress,
+            )
+        return updated
+
     def rematch_rows(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Re-run DB candidate recall + AI mapping using current product fields/attrs."""
-        return self.map_rows(rows, only_missing=False)
+        mapped = self.map_rows(rows, only_missing=False)
+        return self.refine_rows(mapped, passes=1)
 
-    def _recall_candidates(self, product: dict[str, Any]) -> list[dict[str, Any]]:
+    def _seed_candidates(self, product: dict[str, Any]) -> list[tuple[int, Any]]:
+        """Prior match/suggested ids with any stored retrieval confidence."""
+        seeds: list[tuple[int, Any]] = []
+        seen: set[int] = set()
+        prior_confidence: dict[int, Any] = {}
+        for item in product.get("db_candidates") or []:
+            if not isinstance(item, dict):
+                continue
+            raw = item.get("id")
+            if raw in (None, ""):
+                continue
+            try:
+                rate_id = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if item.get("confidence") is not None:
+                prior_confidence[rate_id] = item.get("confidence")
+
+        def _add(rate_id: int) -> None:
+            if rate_id in seen:
+                return
+            seen.add(rate_id)
+            seeds.append((rate_id, prior_confidence.get(rate_id)))
+
+        for key in ("db_product_id", "suggested_db_product_id"):
+            raw = product.get(key)
+            if raw in (None, ""):
+                continue
+            try:
+                _add(int(raw))
+            except (TypeError, ValueError):
+                continue
+        for rate_id in prior_confidence:
+            _add(rate_id)
+            if len(seeds) >= _CANDIDATE_LIMIT:
+                break
+        # Also keep prior candidates that had no confidence stored.
+        for item in product.get("db_candidates") or []:
+            if not isinstance(item, dict):
+                continue
+            raw = item.get("id")
+            if raw in (None, ""):
+                continue
+            try:
+                _add(int(raw))
+            except (TypeError, ValueError):
+                continue
+            if len(seeds) >= _CANDIDATE_LIMIT:
+                break
+        return seeds
+
+    def _recall_candidates(
+        self,
+        product: dict[str, Any],
+        *,
+        chroma_limit: int = _RECALL_CHROMA_LIMIT,
+    ) -> list[dict[str, Any]]:
         # Analysis finds the product without make — Make & Vendor selects make later.
         product_for_recall = dict(product)
         product_for_recall["make_hint"] = None
-        match = self._matcher.match_product(product_for_recall, chroma_limit=25)
+        match = self._matcher.match_product(
+            product_for_recall,
+            chroma_limit=max(int(chroma_limit or _RECALL_CHROMA_LIMIT), _RECALL_CHROMA_LIMIT),
+        )
         snapshots: list[dict[str, Any]] = []
         seen: set[int] = set()
 
-        for item in match.get("candidates") or []:
-            rate_id = item.get("rate_master_id")
+        def _append_rate(rate_id: int, confidence: Any = None) -> None:
+            rate_id = int(rate_id)
             if rate_id in seen:
-                continue
+                # Seeds are added first without a fresh score; upgrade when recall
+                # returns the same id with a retrieval confidence.
+                if confidence is not None:
+                    for snap in snapshots:
+                        if int(snap.get("id") or 0) == rate_id:
+                            snap["confidence"] = confidence
+                            break
+                return
+            if len(snapshots) >= _CANDIDATE_LIMIT:
+                return
             rate = Rate_Master.objects.filter(
                 pk=rate_id,
                 database_version_id=self.database_version_id,
             ).first()
             if rate is None:
+                return
+            seen.add(rate_id)
+            snapshots.append(_candidate_snapshot(rate, confidence=confidence))
+
+        # Keep prior suggested/matched rows in the set (helps refine / Re-analyse).
+        for seed_id, seed_confidence in self._seed_candidates(product):
+            _append_rate(seed_id, confidence=seed_confidence)
+
+        for item in match.get("candidates") or []:
+            rate_id = item.get("rate_master_id")
+            if rate_id in (None, ""):
                 continue
-            seen.add(int(rate_id))
-            snapshots.append(
-                _candidate_snapshot(rate, confidence=item.get("confidence"))
-            )
+            try:
+                _append_rate(int(rate_id), confidence=item.get("confidence"))
+            except (TypeError, ValueError):
+                continue
             if len(snapshots) >= _CANDIDATE_LIMIT:
                 break
 
@@ -354,9 +622,20 @@ class ProductAIMappingService:
             rate = item.get("rate")
             if rate is None:
                 continue
+            rate_id = int(rate.pk)
+            if rate_id in seen:
+                if item.get("confidence") is not None:
+                    for snap in snapshots:
+                        if int(snap.get("id") or 0) == rate_id:
+                            snap["confidence"] = item.get("confidence")
+                            break
+                continue
+            seen.add(rate_id)
             snapshots.append(
                 _candidate_snapshot(rate, confidence=item.get("confidence"))
             )
+            if len(snapshots) >= _CANDIDATE_LIMIT:
+                break
         return snapshots
 
     def _run_ai_batches(self, prepared: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -511,16 +790,30 @@ class ProductAIMappingService:
             unmapped_attributes=unmapped_attributes,
         )
 
-        attributes = {**mapped_attributes, **unmapped_attributes}
+        # Persist only required DB schema attributes — never keep additional/unmapped keys.
+        schema_set = {normalize_attribute_key(key) for key in schema_keys}
+        attributes = {
+            key: value
+            for key, value in mapped_attributes.items()
+            if normalize_attribute_key(str(key)) in schema_set and _is_filled(value)
+        }
         confidence = _compute_match_confidence(
             enriched,
             rate,
-            mapped_attributes=mapped_attributes,
+            mapped_attributes=attributes,
             schema_keys=schema_keys,
             ai_confidence=ai_confidence,
         )
         summary_source = snapshot or _candidate_snapshot(rate, confidence=confidence)
         missing_keys = _missing_attribute_keys(schema_keys, attributes)
+        # Keep % visible on the selected row in Top database candidates.
+        for item in slim_candidates:
+            try:
+                if int(item.get("id") or 0) == int(rate.pk):
+                    item["confidence"] = confidence
+                    break
+            except (TypeError, ValueError):
+                continue
 
         # Confirm only when blended confidence clears the threshold — never stamp
         # Tech_Key from a weak / unrelated candidate.
@@ -531,7 +824,7 @@ class ProductAIMappingService:
                 snapshot=summary_source,
                 schema_keys=schema_keys,
                 attributes=attributes,
-                mapped_attributes=mapped_attributes,
+                mapped_attributes=attributes,
                 missing_keys=missing_keys,
                 confidence=confidence,
                 candidates=slim_candidates,
@@ -602,7 +895,15 @@ class ProductAIMappingService:
         enriched["db_match_confidence"] = confidence
         enriched["db_product_summary"] = f"Suggested: {_product_summary(snapshot)}"
         enriched["suggested_db_product_id"] = rate.pk
-        enriched["db_candidates"] = [_slim_candidate(item) for item in candidates]
+        slim = [_slim_candidate(item) for item in candidates]
+        for item in slim:
+            try:
+                if int(item.get("id") or 0) == int(rate.pk):
+                    item["confidence"] = confidence
+                    break
+            except (TypeError, ValueError):
+                continue
+        enriched["db_candidates"] = slim
         enriched["ai_mapping"] = {
             "selected_id": None,
             "selected_rate_master_id": None,
@@ -658,7 +959,13 @@ class ProductAIMappingService:
                     schema_keys=schema_keys,
                     extracted_attrs=attrs,
                 )
-                attrs = {**merged}
+                # Schema keys only — drop any leftover extracted extras.
+                schema_set = {normalize_attribute_key(key) for key in schema_keys}
+                attrs = {
+                    key: value
+                    for key, value in merged.items()
+                    if normalize_attribute_key(str(key)) in schema_set and _is_filled(value)
+                }
                 return ProductAIMappingService._provisional_from_candidate(
                     enriched,
                     attrs=attrs,
@@ -669,7 +976,7 @@ class ProductAIMappingService:
                     notes=notes,
                 )
 
-        enriched["attributes"] = attrs
+        enriched["attributes"] = {}
         enriched["attribute_schema"] = []
         enriched["missing_attribute_keys"] = []
         enriched["attribute_confidence"] = 0.0

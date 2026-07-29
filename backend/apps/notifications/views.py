@@ -1,6 +1,7 @@
 """Notification views (thin)."""
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.db.models import Q
 from django.shortcuts import redirect
 from django.views.generic import ListView, View
 
@@ -28,8 +29,48 @@ class NotificationListView(LoginRequiredMixin, ListView):
     context_object_name = "notifications"
     paginate_by = 30
 
+    _SORT_FIELDS = {
+        "title": "title",
+        "message": "message",
+        "when": "created_at",
+        "status": "is_read",
+    }
+
     def get_queryset(self):
-        return Notification.objects.filter(user=self.request.user)
+        qs = Notification.objects.filter(user=self.request.user)
+
+        query = (self.request.GET.get("q") or "").strip()
+        if query:
+            for token in query.split():
+                qs = qs.filter(
+                    Q(title__icontains=token)
+                    | Q(message__icontains=token)
+                )
+
+        sort_key = (self.request.GET.get("sort") or "when").strip().lower()
+        direction = (self.request.GET.get("dir") or "desc").strip().lower()
+        if sort_key not in self._SORT_FIELDS:
+            sort_key = "when"
+        if direction not in {"asc", "desc"}:
+            direction = "desc"
+
+        order_field = self._SORT_FIELDS[sort_key]
+        if direction == "desc":
+            order_field = f"-{order_field}"
+        return qs.order_by(order_field, "-id")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        sort_key = (self.request.GET.get("sort") or "when").strip().lower()
+        direction = (self.request.GET.get("dir") or "desc").strip().lower()
+        if sort_key not in self._SORT_FIELDS:
+            sort_key = "when"
+        if direction not in {"asc", "desc"}:
+            direction = "desc"
+        context["search_q"] = (self.request.GET.get("q") or "").strip()
+        context["sort"] = sort_key
+        context["dir"] = direction
+        return context
 
 
 class MarkAllReadView(LoginRequiredMixin, View):

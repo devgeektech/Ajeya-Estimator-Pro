@@ -1,0 +1,297 @@
+{% if not labour_display.has_products %}
+<p class="panel__text">No products yet. Finish Make &amp; Vendor, then open Labour.</p>
+{% else %}
+<section
+    class="labour-panel"
+    x-data="labourPanel({
+        url: '{% url 'boq:labour' boq.pk %}',
+        mode: '{{ labour_display.mode|default:'auto'|escapejs }}',
+        labourReady: {{ labour_display.labour_ready|yesno:'true,false' }},
+        canApply: {{ can_apply_labour|yesno:'true,false' }},
+        canComplete: {{ can_complete_labour|yesno:'true,false' }}
+    })"
+>
+    <div class="labour-toolbar labour-toolbar--bar">
+        <div class="labour-mode-toggle" role="group" aria-label="Labour mode">
+            <button
+                type="button"
+                class="btn btn--small"
+                :class="{ 'btn--primary': mode === 'auto' }"
+                @click="mode = 'auto'"
+            >Auto</button>
+            <button
+                type="button"
+                class="btn btn--small"
+                :class="{ 'btn--primary': mode === 'manual' }"
+                @click="mode = 'manual'"
+            >Manual</button>
+        </div>
+        <div class="labour-toolbar__spacer" aria-hidden="true"></div>
+        <div class="labour-toolbar__actions">
+            <button
+                type="button"
+                class="btn btn--small btn--boq-analyse"
+                :disabled="!canApply || saving"
+                @click="mode === 'auto' ? applyAuto() : applyManual()"
+            >
+                <span x-show="!saving">Apply labour</span>
+                <span x-show="saving" x-cloak>Applying…</span>
+            </button>
+            <button
+                type="button"
+                class="btn btn--small btn--primary"
+                x-show="canComplete || labourReady"
+                x-cloak
+                :disabled="saving || completing || !(canComplete || labourReady)"
+                @click="goNext()"
+            >
+                <span x-show="!completing">Next</span>
+                <span x-show="completing" x-cloak>Preparing…</span>
+            </button>
+        </div>
+    </div>
+
+    <div
+        class="make-vendor-selection-card labour-manual-card"
+        x-show="mode === 'manual'"
+        x-cloak
+    >
+        <div class="labour-category-grid">
+            {% for row in labour_display.category_rows %}
+            <label class="extraction-field labour-category-field">
+                <span class="extraction-field__label">
+                    {{ row.category }}
+                    <span class="badge badge--gray">{{ row.product_count }}</span>
+                </span>
+                <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    class="extraction-input"
+                    x-model="percents['{{ row.category|escapejs }}']"
+                    placeholder="%"
+                    value="{{ row.percent }}"
+                >
+            </label>
+            {% empty %}
+            <p class="panel__text">No categories found.</p>
+            {% endfor %}
+        </div>
+    </div>
+
+    <p class="extraction-save-hint extraction-save-hint--error" x-show="error" x-text="error" x-cloak></p>
+
+    <div class="make-vendor-lines labour-lines" id="labour-lines">
+        <h3 class="make-vendor-lines__title">Products</h3>
+        {% for line in labour_display.lines %}
+        <article class="make-vendor-line{% if forloop.counter|divisibleby:2 %} make-vendor-line--alt{% endif %}" id="labour-{{ line.row_id }}">
+            <header class="make-vendor-line__header">
+                <div class="make-vendor-line__title">
+                    <span class="make-vendor-line__serial">{{ line.serial|default:"—" }}</span>
+                    {% if line.qty %}<span>Qty: {{ line.qty }}{% if line.unit %} {{ line.unit }}{% endif %}</span>{% endif %}
+                    {% if line.products|length > 1 %}
+                    <span class="badge badge--dark">{{ line.products|length }} products</span>
+                    {% endif %}
+                </div>
+                <p class="make-vendor-line__description">{{ line.description }}</p>
+            </header>
+
+            {% if line.products %}
+            <div
+                class="make-vendor-products"
+                x-data="{ activeProduct: {{ line.products.0.product_index }} }"
+            >
+                <div class="make-vendor-product-tabs" role="tablist" aria-label="Products">
+                    {% for product in line.products %}
+                    <button
+                        type="button"
+                        class="make-vendor-product-tabs__btn"
+                        role="tab"
+                        :class="{ 'is-active': activeProduct === {{ product.product_index }} }"
+                        :aria-selected="activeProduct === {{ product.product_index }}"
+                        @click="activeProduct = {{ product.product_index }}"
+                    >Product {{ product.display_number }}</button>
+                    {% endfor %}
+                </div>
+
+                {% for product in line.products %}
+                <div
+                    class="make-vendor-product-panel"
+                    x-show="activeProduct === {{ product.product_index }}"
+                    x-cloak
+                >
+                    <section
+                        class="make-vendor-card{% if product.highlight_no_labour %} make-vendor-card--no-labour{% endif %}"
+                        role="tabpanel"
+                    >
+                        <div class="make-vendor-card__head">
+                            <div class="make-vendor-card__heading">
+                                <h4 class="make-vendor-card__title">{{ product.description_hint|default:product.summary }}</h4>
+                                <p class="make-vendor-card__taxonomy">
+                                    <span class="make-vendor-card__taxonomy-label">Category / Sub-category</span>
+                                    <span class="make-vendor-card__taxonomy-value">{{ product.taxonomy_label }}</span>
+                                </p>
+                                {% if product.highlight_no_labour %}
+                                <p class="make-vendor-card__no-make-note">No labour charge found for this product</p>
+                                {% endif %}
+                            </div>
+                            {% if product.highlight_no_labour %}
+                            <span class="badge badge--red">No labour</span>
+                            {% else %}
+                            <span class="badge badge--green">Labour set</span>
+                            {% endif %}
+                        </div>
+
+                        <dl class="make-vendor-readonly">
+                            <div><dt>Category</dt><dd>{{ product.category|default:"—" }}</dd></div>
+                            <div><dt>Sub-category</dt><dd>{{ product.sub_category|default:"—" }}</dd></div>
+                            {% if product.class %}<div><dt>Class</dt><dd>{{ product.class }}</dd></div>{% endif %}
+                            {% if product.size %}<div><dt>Size</dt><dd>{{ product.size }}</dd></div>{% endif %}
+                            {% if product.unit %}<div><dt>Unit</dt><dd>{{ product.unit }}</dd></div>{% endif %}
+                            {% if product.capacity %}<div><dt>Capacity</dt><dd>{{ product.capacity }}</dd></div>{% endif %}
+                            <div><dt>Make</dt><dd>{{ product.make|default:"—" }}</dd></div>
+                            <div><dt>Supplier</dt><dd>{{ product.supplier|default:"—" }}</dd></div>
+                            <div><dt>Tech Key</dt><dd>{{ product.tech_key|default:"—" }}</dd></div>
+                        </dl>
+
+                        <div class="make-vendor-rates labour-rates">
+                            <div><span>Material</span><strong>{{ product.material_rate|default:"—" }}</strong></div>
+                            <div><span>Labour</span><strong>{{ product.labour_rate|default:"—" }}</strong></div>
+                            <div><span>Total</span><strong>{{ product.total_amount|default:"—" }}</strong></div>
+                            <div><span>Mode</span><strong>{{ product.labour_mode|default:"—" }}{% if product.labour_percent != None %} ({{ product.labour_percent }}%){% endif %}</strong></div>
+                        </div>
+                    </section>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </article>
+        {% empty %}
+        <p class="panel__text">No labour rows.</p>
+        {% endfor %}
+    </div>
+</section>
+
+<script>
+document.addEventListener('alpine:init', () => {
+    const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+
+    Alpine.data('labourPanel', (config) => ({
+        url: config.url,
+        mode: config.mode || 'auto',
+        labourReady: Boolean(config.labourReady),
+        canApply: Boolean(config.canApply),
+        canComplete: Boolean(config.canComplete),
+        percents: {
+            {% for row in labour_display.category_rows %}
+            '{{ row.category|escapejs }}': '{{ row.percent|default:""|escapejs }}'{% if not forloop.last %},{% endif %}
+            {% endfor %}
+        },
+        saving: false,
+        completing: false,
+        error: '',
+        async applyAuto() {
+            if (this.saving || !this.canApply) return;
+            this.saving = true;
+            this.error = '';
+            try {
+                const body = new FormData();
+                body.append('ajax', '1');
+                body.append('action', 'apply_auto');
+                const response = await fetch(this.url, {
+                    method: 'POST',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-CSRFToken': csrfToken(),
+                        'Accept': 'application/json',
+                    },
+                    credentials: 'same-origin',
+                    body,
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || !data.ok) {
+                    throw new Error(data.message || 'Failed to apply auto labour.');
+                }
+                window.location.assign(
+                    '{% url "boq:detail" boq.pk %}?tab=labour&_t=' + Date.now()
+                );
+            } catch (error) {
+                this.error = error.message || 'Failed to apply auto labour.';
+                this.saving = false;
+            }
+        },
+        async applyManual() {
+            if (this.saving || !this.canApply) return;
+            this.saving = true;
+            this.error = '';
+            try {
+                const body = new FormData();
+                body.append('ajax', '1');
+                body.append('action', 'apply_manual');
+                Object.keys(this.percents || {}).forEach((category) => {
+                    const value = this.percents[category];
+                    if (value === '' || value == null) return;
+                    body.append('percent__' + category, String(value));
+                });
+                const response = await fetch(this.url, {
+                    method: 'POST',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-CSRFToken': csrfToken(),
+                        'Accept': 'application/json',
+                    },
+                    credentials: 'same-origin',
+                    body,
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || !data.ok) {
+                    throw new Error(data.message || 'Failed to apply manual labour.');
+                }
+                window.location.assign(
+                    '{% url "boq:detail" boq.pk %}?tab=labour&_t=' + Date.now()
+                );
+            } catch (error) {
+                this.error = error.message || 'Failed to apply manual labour.';
+                this.saving = false;
+            }
+        },
+        async goNext() {
+            if (this.saving || this.completing) return;
+            if (!(this.canComplete || this.labourReady)) return;
+            const root = this.$root;
+            if (root && typeof root.completeLabour === 'function') {
+                await root.completeLabour();
+                return;
+            }
+            this.completing = true;
+            this.error = '';
+            try {
+                const body = new FormData();
+                body.append('ajax', '1');
+                body.append('action', 'complete');
+                const response = await fetch(this.url, {
+                    method: 'POST',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-CSRFToken': csrfToken(),
+                        'Accept': 'application/json',
+                    },
+                    credentials: 'same-origin',
+                    body,
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || !data.ok) {
+                    throw new Error(data.message || 'Failed to complete labour.');
+                }
+                window.location.assign(
+                    data.redirect || ('{% url "boq:detail" boq.pk %}?tab=review&_t=' + Date.now())
+                );
+            } catch (error) {
+                this.error = error.message || 'Failed to complete labour.';
+                this.completing = false;
+            }
+        },
+    }));
+});
+</script>
+{% endif %}

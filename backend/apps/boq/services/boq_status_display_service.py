@@ -13,6 +13,16 @@ logger = logging.getLogger("boq_ai")
 EXPORT_SESSION_KEY = "boq_exported_{boq_id}"
 DETAIL_TAB_SESSION_KEY = "boq_detail_tab_{boq_id}"
 
+_VALID_TABS = {
+    "boq",
+    "make_list",
+    "analysis",
+    "make_vendor",
+    "labour",
+    "review",
+    "match_results",  # legacy alias → review
+}
+
 
 def export_session_key(boq_id: int) -> str:
     return EXPORT_SESSION_KEY.format(boq_id=boq_id)
@@ -40,12 +50,18 @@ def remember_detail_tab(boq_id: int, session, tab: str) -> None:
     """Remember last opened detail tab so hard refresh stays on it."""
     if not tab:
         return
-    session[detail_tab_session_key(boq_id)] = tab
+    # Persist canonical review tab, not the legacy alias.
+    session[detail_tab_session_key(boq_id)] = (
+        "review" if tab == "match_results" else tab
+    )
     session.modified = True
 
 
 def remembered_detail_tab(boq_id: int, session) -> str:
-    return str(session.get(detail_tab_session_key(boq_id)) or "").strip()
+    tab = str(session.get(detail_tab_session_key(boq_id)) or "").strip()
+    if tab == "match_results":
+        return "review"
+    return tab
 
 
 def _products_have_vendor_progress(analysis: dict) -> bool:
@@ -75,6 +91,11 @@ def _has_make_vendor_defaults(analysis: dict) -> bool:
     return _products_have_vendor_progress(analysis)
 
 
+def _labour_ready(analysis: dict) -> bool:
+    config = analysis.get("labour_config") or {}
+    return bool(config.get("labour_ready"))
+
+
 def heal_make_vendor_unlock(boq: BOQ) -> bool:
     """
     Persist Make & Vendor unlock when product vendor progress already exists.
@@ -89,6 +110,7 @@ def heal_make_vendor_unlock(boq: BOQ) -> bool:
         BOQStatus.PROCESSING,
         BOQStatus.MATCHING,
         BOQStatus.UPLOADED,
+        BOQStatus.LABOUR,
         BOQStatus.PROCESSED,
         BOQStatus.READY_EXPORT,
         BOQStatus.EXPORTED,
@@ -126,13 +148,11 @@ def build_boq_status_display(boq: BOQ, session) -> dict[str, str]:
     status = boq.status
     analysis = boq.analysis_data or {}
 
-    # Persisted export wins over session-only legacy flag.
     if status == BOQStatus.EXPORTED:
         return {"label": "Exported", "badge": "badge--green"}
     if is_exported_in_session(boq.pk, session) and status == BOQStatus.READY_EXPORT:
         return {"label": "Exported", "badge": "badge--green"}
 
-    # Older BOQs: EXTRACTED + Next already applied → show Make/Vendor selection.
     if status == BOQStatus.EXTRACTED and _has_make_vendor_defaults(analysis):
         return {"label": "Make/Vendor selection", "badge": "badge--blue"}
 
@@ -141,6 +161,7 @@ def build_boq_status_display(boq: BOQ, session) -> dict[str, str]:
         BOQStatus.PROCESSING: ("Analysing...", "badge--yellow"),
         BOQStatus.EXTRACTED: ("Analysed", "badge--blue"),
         BOQStatus.MAKE_VENDOR: ("Make/Vendor selection", "badge--blue"),
+        BOQStatus.LABOUR: ("Labour", "badge--blue"),
         BOQStatus.MATCHING: ("Matching", "badge--red"),
         BOQStatus.PROCESSED: ("Matched", "badge--green"),
         BOQStatus.READY_EXPORT: ("Ready to Export", "badge--green"),
@@ -159,6 +180,7 @@ _ANALYSIS_STATUSES = {
 
 _MAKE_VENDOR_STATUSES = {
     BOQStatus.MAKE_VENDOR,
+    BOQStatus.LABOUR,
     BOQStatus.MATCHING,
     BOQStatus.PROCESSED,
     BOQStatus.READY_EXPORT,
@@ -166,11 +188,19 @@ _MAKE_VENDOR_STATUSES = {
     BOQStatus.ANALYSIS_FAILED,
 }
 
-_MATCHING_STATUSES = {
+_LABOUR_STATUSES = {
+    BOQStatus.LABOUR,
     BOQStatus.MATCHING,
     BOQStatus.PROCESSED,
     BOQStatus.READY_EXPORT,
     BOQStatus.EXPORTED,
+}
+
+_REVIEW_STATUSES = {
+    BOQStatus.READY_EXPORT,
+    BOQStatus.EXPORTED,
+    BOQStatus.PROCESSED,  # legacy match complete
+    BOQStatus.MATCHING,
 }
 
 _EXPORT_READY_STATUSES = {
@@ -180,6 +210,7 @@ _EXPORT_READY_STATUSES = {
 
 _POST_ANALYSIS_PIPELINE = {
     BOQStatus.MAKE_VENDOR,
+    BOQStatus.LABOUR,
     BOQStatus.MATCHING,
     BOQStatus.PROCESSED,
     BOQStatus.READY_EXPORT,
@@ -201,11 +232,25 @@ def build_boq_tab_access(boq: BOQ) -> dict[str, bool]:
     analysis = boq.analysis_data or {}
     has_rows = bool(analysis.get("rows"))
     make_vendor_ready = _has_make_vendor_defaults(analysis)
-    # After Match, Make & Vendor must stay open even if older match runs dropped the flag.
-    if not make_vendor_ready and has_rows and status in _MATCHING_STATUSES:
+    if not make_vendor_ready and has_rows and status in _LABOUR_STATUSES:
         make_vendor_ready = True
     if status == BOQStatus.MAKE_VENDOR:
         make_vendor_ready = True
+
+    labour_ready = status in _LABOUR_STATUSES or (
+        has_rows and _labour_ready(analysis)
+    )
+    review_ready = (
+        status in _REVIEW_STATUSES
+        or bool(analysis.get("pricing_ready"))
+        or (status == BOQStatus.LABOUR and _labour_ready(analysis) and bool(analysis.get("pricing_ready")))
+    )
+    # Review opens after Labour → Next sets READY_EXPORT / pricing_ready.
+    if status in {BOQStatus.READY_EXPORT, BOQStatus.EXPORTED}:
+        review_ready = True
+    if status in {BOQStatus.PROCESSED, BOQStatus.MATCHING}:
+        review_ready = True
+
     return {
         "analysis": status in _ANALYSIS_STATUSES
         or status in _MAKE_VENDOR_STATUSES
@@ -216,22 +261,28 @@ def build_boq_tab_access(boq: BOQ) -> dict[str, bool]:
         in {
             BOQStatus.EXTRACTED,
             BOQStatus.MAKE_VENDOR,
+            BOQStatus.LABOUR,
             BOQStatus.PROCESSED,
             BOQStatus.READY_EXPORT,
             BOQStatus.EXPORTED,
             BOQStatus.ANALYSIS_FAILED,
             BOQStatus.MATCHING,
         },
-        "match_results": status in _MATCHING_STATUSES,
+        "labour": has_rows and labour_ready,
+        "review": has_rows and review_ready,
+        # Legacy key for older templates/JS.
+        "match_results": has_rows and review_ready,
     }
 
 
 def default_detail_tab_for_boq(boq: BOQ, session) -> str:
     """Default tab when opening BOQ detail (list View button, bare detail URL)."""
     if boq.status == BOQStatus.EXPORTED or is_exported_in_session(boq.pk, session):
-        return "match_results"
+        return "review"
     if boq.status in {BOQStatus.READY_EXPORT, BOQStatus.PROCESSED, BOQStatus.MATCHING}:
-        return "match_results"
+        return "review"
+    if boq.status == BOQStatus.LABOUR:
+        return "labour"
     if boq.status == BOQStatus.MAKE_VENDOR or (
         boq.status == BOQStatus.EXTRACTED
         and _has_make_vendor_defaults(boq.analysis_data or {})
@@ -249,14 +300,25 @@ def resolve_detail_tab(boq: BOQ, session, requested_tab: str | None) -> str:
     """Pick a valid tab, falling back when the request targets a locked tab."""
     access = build_boq_tab_access(boq)
     tab = (requested_tab or "").strip() or default_detail_tab_for_boq(boq, session)
-    if tab not in {"boq", "make_list", "analysis", "make_vendor", "match_results"}:
+    if tab == "match_results":
+        tab = "review"
+    if tab not in _VALID_TABS:
         tab = default_detail_tab_for_boq(boq, session)
     if tab == "analysis" and not access["analysis"]:
         tab = "boq"
     elif tab == "make_vendor" and not access["make_vendor"]:
         tab = "analysis" if access["analysis"] else "boq"
-    elif tab == "match_results" and not access["match_results"]:
+    elif tab == "labour" and not access["labour"]:
         if access["make_vendor"]:
+            tab = "make_vendor"
+        elif access["analysis"]:
+            tab = "analysis"
+        else:
+            tab = "boq"
+    elif tab == "review" and not access["review"]:
+        if access["labour"]:
+            tab = "labour"
+        elif access["make_vendor"]:
             tab = "make_vendor"
         elif access["analysis"]:
             tab = "analysis"
@@ -267,7 +329,7 @@ def resolve_detail_tab(boq: BOQ, session, requested_tab: str | None) -> str:
 
 
 def is_export_ready(boq: BOQ) -> bool:
-    """True when Calculate Price has completed (or BOQ already exported)."""
+    """True when Labour → Next has completed pricing (or BOQ already exported)."""
     if boq.status in _EXPORT_READY_STATUSES:
         return True
     return bool((boq.analysis_data or {}).get("pricing_ready"))

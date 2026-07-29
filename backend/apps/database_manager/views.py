@@ -4,6 +4,7 @@ import logging
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.files.storage import FileSystemStorage
+from django.db.models import Q
 from django.http import FileResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy
@@ -36,15 +37,93 @@ class DatabaseVersionListView(LoginRequiredMixin, ListView):
     template_name = "database/version_list.html"
     context_object_name = "versions"
 
+    _SORT_FIELDS = {
+        "name": "name",
+        "status": "is_active",
+        "uploader": "uploaded_by__first_name",
+        "uploaded": "uploaded_at",
+    }
+
     def get_queryset(self):
-        return DatabaseVersion.objects.order_by("-is_active", "-uploaded_at")[
-            :DATABASE_UPLOADS_TO_RETAIN
-        ]
+        # Retain newest uploads first, then filter/sort within that window.
+        retained_ids = list(
+            DatabaseVersion.objects.order_by("-uploaded_at", "-id").values_list(
+                "id", flat=True
+            )[:DATABASE_UPLOADS_TO_RETAIN]
+        )
+        qs = DatabaseVersion.objects.filter(id__in=retained_ids).select_related(
+            "uploaded_by"
+        )
+
+        query = (self.request.GET.get("q") or "").strip()
+        if query:
+            for token in query.split():
+                token_l = token.lower()
+                filters = (
+                    Q(name__icontains=token)
+                    | Q(source_filename__icontains=token)
+                    | Q(uploaded_by__first_name__icontains=token)
+                    | Q(uploaded_by__last_name__icontains=token)
+                    | Q(uploaded_by__email__icontains=token)
+                )
+                if token.isdigit():
+                    filters |= Q(version_number=int(token))
+                if len(token_l) >= 3 and "active".startswith(token_l):
+                    filters |= Q(is_active=True)
+                if len(token_l) >= 3 and "archived".startswith(token_l):
+                    filters |= Q(is_active=False)
+                qs = qs.filter(filters)
+
+        sort_key = (self.request.GET.get("sort") or "status").strip().lower()
+        direction = (self.request.GET.get("dir") or "desc").strip().lower()
+        if sort_key not in self._SORT_FIELDS:
+            sort_key = "status"
+        if direction not in {"asc", "desc"}:
+            direction = "desc"
+
+        if sort_key == "uploader":
+            if direction == "desc":
+                return qs.order_by(
+                    "-uploaded_by__first_name",
+                    "-uploaded_by__last_name",
+                    "-uploaded_by__email",
+                    "-id",
+                )
+            return qs.order_by(
+                "uploaded_by__first_name",
+                "uploaded_by__last_name",
+                "uploaded_by__email",
+                "-id",
+            )
+
+        if sort_key == "name":
+            if direction == "desc":
+                return qs.order_by("-name", "-source_filename", "-version_number", "-id")
+            return qs.order_by("name", "source_filename", "version_number", "-id")
+
+        if sort_key == "status":
+            if direction == "desc":
+                return qs.order_by("-is_active", "-uploaded_at", "-id")
+            return qs.order_by("is_active", "uploaded_at", "-id")
+
+        order_field = self._SORT_FIELDS[sort_key]
+        if direction == "desc":
+            order_field = f"-{order_field}"
+        return qs.order_by(order_field, "-id")
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         repaired = repair_duplicate_active_versions()
         context["repaired_duplicate_active"] = repaired > 0
+        sort_key = (self.request.GET.get("sort") or "status").strip().lower()
+        direction = (self.request.GET.get("dir") or "desc").strip().lower()
+        if sort_key not in self._SORT_FIELDS:
+            sort_key = "status"
+        if direction not in {"asc", "desc"}:
+            direction = "desc"
+        context["search_q"] = (self.request.GET.get("q") or "").strip()
+        context["sort"] = sort_key
+        context["dir"] = direction
         return context
 
 

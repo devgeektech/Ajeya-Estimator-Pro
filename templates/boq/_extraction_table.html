@@ -1,5 +1,5 @@
 {% if not extraction_display.has_extraction %}
-<p class="panel__text">No extracted products yet. Click <strong>Analyse</strong> to extract products and activities from this BOQ.</p>
+<p class="panel__text">No extracted products yet. Click <strong>Analyse</strong> to extract products from this BOQ.</p>
 {% else %}
 <div class="extraction-lines" id="extraction-lines">
     {% for line in extraction_display.lines %}
@@ -245,60 +245,34 @@ document.addEventListener('alpine:init', () => {
         }
     };
 
-    window.addExtractionActivity = async function addExtractionActivity(fromEl, editUrl, rowId) {
-        const name = window.BOQConfirm
-            ? await window.BOQConfirm.prompt('Enter the activity name to add to this row.', {
-                title: 'Add activity',
-                inputLabel: 'Activity name',
-                confirmLabel: 'Add',
-            })
-            : window.prompt('Activity name:');
-        if (!name || !String(name).trim()) {
-            return;
-        }
+    window.selectExtractionCandidate = async function selectExtractionCandidate(
+        fromEl,
+        editUrl,
+        rowId,
+        productIndex,
+        rateMasterId,
+    ) {
         const btn = fromEl;
         if (btn) {
             btn.disabled = true;
         }
         try {
             const data = await window.extractionAjaxPost(editUrl, {
-                action: 'add_activity',
+                action: 'select_candidate',
                 row_id: rowId,
-                activity: String(name).trim(),
+                product_index: String(productIndex),
+                rate_master_id: String(rateMasterId),
             });
-            window.refreshExtractionLine(data.row_id || rowId, data.line_html);
+            window.replaceExtractionProductPanel(
+                data.row_id || rowId,
+                data.product_index != null ? data.product_index : productIndex,
+                data.line_html,
+            );
         } catch (error) {
-            alert(error.message || 'Failed to add activity.');
-        } finally {
+            alert(error.message || 'Failed to select candidate.');
             if (btn) {
                 btn.disabled = false;
             }
-        }
-    };
-
-    window.removeExtractionActivity = async function removeExtractionActivity(fromEl, editUrl, rowId) {
-        const activity = fromEl.getAttribute('data-activity') || '';
-        if (!activity) {
-            return;
-        }
-        const confirmed = window.BOQConfirm
-            ? await window.BOQConfirm.ask(`Remove activity "${activity}" from this row?`, {
-                title: 'Remove activity',
-                confirmLabel: 'Remove',
-            })
-            : window.confirm(`Remove activity "${activity}" from this row?`);
-        if (!confirmed) {
-            return;
-        }
-        try {
-            const data = await window.extractionAjaxPost(editUrl, {
-                action: 'remove_activity',
-                row_id: rowId,
-                activity,
-            });
-            window.refreshExtractionLine(data.row_id || rowId, data.line_html);
-        } catch (error) {
-            alert(error.message || 'Failed to remove activity.');
         }
     };
 
@@ -332,20 +306,61 @@ document.addEventListener('alpine:init', () => {
             if (score > 50) return 'orange';
             return 'red';
         },
-        addExtra() {
-            const key = (this.newKey || '').trim();
-            const value = (this.newValue || '').trim();
-            if (!key || !value) {
+        _normalizeAttrKey(raw) {
+            return String(raw || '')
+                .trim()
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, '_')
+                .replace(/^_+|_+$/g, '');
+        },
+        async addExtra() {
+            const name = window.BOQConfirm
+                ? await window.BOQConfirm.prompt('Enter the attribute name to add.', {
+                    title: 'Add attribute',
+                    inputLabel: 'Attribute name',
+                    confirmLabel: 'Add',
+                })
+                : window.prompt('Attribute name:');
+            if (!name || !String(name).trim()) {
                 return;
             }
-            this.extraAttrs.push({ key, value });
-            this.newKey = '';
-            this.newValue = '';
+            const key = this._normalizeAttrKey(name);
+            if (!key) {
+                return;
+            }
+            const form = this.getForm();
+            if (form && form.querySelector(`[name="attr_${key}"]`)) {
+                alert('That attribute already exists on this product.');
+                return;
+            }
+            if (this.extraAttrs.some((item) => item.key === key)) {
+                alert('That attribute already exists on this product.');
+                return;
+            }
+            this.extraAttrs.push({
+                key,
+                label: String(name).trim(),
+                value: '',
+            });
             this.recalcAttributeConfidence();
             this.scheduleAutoSave();
+            this.$nextTick(() => {
+                const input = this.getForm()?.querySelector(`[name="attr_${key}"]`);
+                if (input) {
+                    input.focus();
+                }
+            });
         },
         removeExtra(index) {
             this.extraAttrs.splice(index, 1);
+            this.recalcAttributeConfidence();
+            this.scheduleAutoSave();
+        },
+        removeNamedAttr(btn) {
+            const field = btn && btn.closest ? btn.closest('.extraction-field') : null;
+            if (field) {
+                field.remove();
+            }
             this.recalcAttributeConfidence();
             this.scheduleAutoSave();
         },
@@ -392,10 +407,6 @@ document.addEventListener('alpine:init', () => {
             body.append('ajax', '1');
             body.delete('extra_attr_key');
             body.delete('extra_attr_value');
-            this.extraAttrs.forEach((item) => {
-                body.append('extra_attr_key', item.key);
-                body.append('extra_attr_value', item.value);
-            });
             this.saving = true;
             this.saved = false;
             this.saveError = '';

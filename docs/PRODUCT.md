@@ -110,12 +110,13 @@ Upload BOQ (+ optional make list) → parse to JSON → store files + hierarchy
 
 Entry point: `BOQCreationService` in `apps/boq/services/boq_service.py`.
 
-### BOQ analysis — three-step workflow
+### BOQ analysis — pipeline
 
 ```text
-Step 1 — Analyse:       rows → AI extract → attributes (Analysis tab)
-Step 2 — Make & Vendor: select Make + Supplier → exact Rate_Master match → rates via Tech_Key
-Step 3 — Match Results: Match → Calculate Price → Export
+Step 1 — Analyse:       rows → AI extract products only → attributes (Analysis tab)
+Step 2 — Make & Vendor: select Make + Supplier → exact Rate_Master + Tech_Key
+Step 3 — Labour:        Auto (Labour_Master by Tech_Key) or Manual (% of material by category)
+Step 4 — Review:        (material + labour) × quantity → Export Excel
 ```
 
 **Status pipeline** (persisted on `BOQ.status`):
@@ -126,14 +127,16 @@ Step 3 — Match Results: Match → Calculate Price → Export
 | `PROCESSING` | Analysing... |
 | `EXTRACTED` | Analysed |
 | `MAKE_VENDOR` | Make/Vendor selection (set when Analysis → Next applies defaults) |
-| `MATCHING` | Matching |
-| `PROCESSED` | Matched |
-| `READY_EXPORT` | Ready to Export (after Calculate Price) |
+| `LABOUR` | Labour (set when Make & Vendor → Next) |
+| `READY_EXPORT` | Ready to Export (after Labour → Next aggregates row pricing) |
 | `EXPORTED` | Exported |
 | `ANALYSIS_FAILED` | Failed |
+| `MATCHING` / `PROCESSED` | Legacy (unused in active UI) |
 
 **Step 1 — Analyse** (BOQ detail → **Analysis** tab):
 
+- Extracts **products only** (no labour/installation activities). Labour charges
+  come later from Labour_Master by Tech_Key on the Labour tab.
 - Button: **Analyse BOQ** (toolbar, first run only) → `POST /boqs/<id>/extract/`
   via `dispatch_boq_extraction`. Full-BOQ re-analyse is not offered in the toolbar;
   use per-row **Re-analyse**.
@@ -153,14 +156,25 @@ Step 3 — Match Results: Match → Calculate Price → Export
      product (e.g. ACCESSORIES / Air Cushion Tank instead of a looser AI label like TANK)
   3. Retrieve Rate_Master candidates (Chroma + structured/SQL) with important
      columns + Attribute schema/values — never invent catalog rows or Tech_Key
-  3. **AI mapping layer** (`ProductAIMappingService`) selects a candidate only when
+  4. **AI mapping layer** (`ProductAIMappingService`) selects a candidate only when
      blended confidence ≥ 30%; otherwise status is `provisional` (schema for
      gap-fill, no confirmed `db_product_id` / Tech_Key) or `unmatched`
-  4. Missing DB Attribute keys are listed for expert fill; filling raises attribute
+  5. **Automatic rematch** (same path as Re-analyse): after first mapping, every
+     product is rematched with wider recall (taxonomy/schema aligned), then weak
+     matches (unmatched / provisional / confidence < 70) get up to 2 more refine
+     passes so initial Analyse approaches repeated Re-analyse accuracy
+  6. Missing DB Attribute keys are listed for expert fill; filling raises attribute
      confidence; **Re-analyse** rematches with those attributes
-- Analysis UI shows matched / suggested / unmatched status, top candidates,
-  confidence badge, DB attribute fields (empty when missing), and AI-only keys under
-  **Additional Attributes**.
+  7. Experts can **Select** any top database candidate to confirm that Rate_Master
+     product (override AI pick)
+- Analysis UI shows matched / suggested / unmatched status, top candidates
+  (selectable), confidence badge, and DB attribute fields (empty when missing). Experts add
+  more attributes with **+** beside the Attributes heading (no separate
+  Additional Attributes section).
+- **Multi-product review:** when a group has more extracted products than rows
+  with Unit/Qty filled (e.g. 1 qty row → 2 products, or n qty rows → n+1 products),
+  the card is flagged **Multi-product review** for expert check. Section-only
+  header rows are hidden (products live with the Unit/Qty groups).
 - Attribute / match confidence badge colors: ≥80 green, >70 yellow, >50 orange,
   else red
 - Analysis confidence is **product-only** (category, sub-category, class, size,
@@ -178,7 +192,7 @@ Step 3 — Match Results: Match → Calculate Price → Export
   as ``boq_rate``. When several children have qty, each product gets its own.
 - **Class vs material:** product ``class`` maps to Rate_Master ``Class`` (often
   material: MS, SS, CI, GI, …). Material from BOQ goes into ``class``, not
-  Additional Attributes.
+  free-text attribute keys.
 
 **Step 2 — Make & Vendor** (BOQ detail → **Make & Vendor** tab, after Analyse):
 
@@ -209,28 +223,39 @@ Step 3 — Match Results: Match → Calculate Price → Export
 - Selection persisted per product as `selected_make`, `selected_supplier`, `vendor_selection`;
   sub-category choices stored in `analysis_data.subcategory_make_selections`.
 - AI does not choose make/supplier or calculate prices — rates are read from the master DB.
-- Toolbar **Match** (red) lives on this tab (not Analysis).
+- Make & Vendor UI shows **material rate only** (labour charges belong on the Labour tab).
+- When two or more matched products share the **same material rate** but use
+  **different make/supplier** pairs, those cards are highlighted for **supplier
+  review/confirmation** (summary count included).
+- Toolbar **Next** (on Make & Vendor) unlocks **Labour** (Match rematch is retired from the UI).
 - **Client approach (experimental):** full narrative, business rules, demo script, and
   decision checklist for stakeholder review — [`docs/MAKE_VENDOR_APPROACH.md`](MAKE_VENDOR_APPROACH.md).
 
-**Step 3 — Match + Calculate Price + Export** (Match Results tab):
+**Step 3 — Labour** (Labour tab, after Make & Vendor → Next):
 
-- Button: **Match** (Make & Vendor toolbar) → `POST /boqs/<id>/match/` → Match Results.
-  Status: `MATCHING` → `PROCESSED` (**Matched**). Export stays hidden.
-- Per-row: **Re-match** (Match Results, after Match) →
-  `POST /boqs/<id>/rows/<row_id>/match/` (`BOQAnalysisService.re_match_row`);
-  clears prior Calculate Price output.
-- Matching / DB search uses **only filled product properties** (null/blank fields and
-  empty attributes are omitted from Chroma query text, structured scoring, and SQL
-  fallback filters).
-- Celery task: `boq.process_matching` (full BOQ only)
-- **Calculate Price** (`POST /boqs/<id>/calculate-price/`) aggregates product
-  line amounts onto original BOQ rows (`analysis_data.row_pricing`,
-  `pricing_ready`), sets status `READY_EXPORT`, then shows **Export Excel**.
-- Export (`GET /boqs/<id>/export/`) writes rates/amounts into the original BOQ
-  sheet columns plus a Charge Breakdown sheet; sets status `EXPORTED`.
+- Status `LABOUR`. Tech_Key comes from Make & Vendor `vendor_selection` (exact product).
+- **Auto:** for each product, load Labour_Master by Tech_Key and fill labour rate/amount
+  (`BOQLabourService.apply_auto` → `LabourDetailRetrievalService`).
+- **Manual:** enter a percentage per extraction category; labour =
+  material × (percent / 100) for every product in that category
+  (`BOQLabourService.apply_manual`).
+- Line pricing: **(material + labour) × quantity** after Labour → Next
+  (`BOQPriceCalculationService`).
+- Persist `analysis_data.labour_config` (`mode`, `category_percentages`, `labour_ready`).
+- Toolbar **Next** runs row pricing aggregate and sets `READY_EXPORT`
+  (`BOQLabourService.complete` → `BOQPriceCalculationService`).
+- **Client progress report:** [`docs/LABOUR_CLIENT_REPORT.md`](LABOUR_CLIENT_REPORT.md)
+  (capabilities, UX delivered, demo script, confirmation checklist).
 
-Poll `GET /boqs/<id>/status/?expect=extract|match` while `PROCESSING` / `MATCHING`.
+**Step 4 — Review + Export** (Review tab):
+
+- Shows product details from Make & Vendor + Labour (`BOQReviewDisplayService`),
+  not fuzzy Match `product_matches`.
+- **Export Excel** (`GET /boqs/<id>/export/`) writes the original BOQ sheet columns
+  plus a **Charge Breakdown** sheet; sets status `EXPORTED`.
+- Gate: `READY_EXPORT` / `pricing_ready` after Labour → Next.
+
+Poll `GET /boqs/<id>/status/?expect=extract` while `PROCESSING`.
 
 **Output:** `media/extract_json/{boq_name}/boq_analysis.json` plus `BOQ.analysis_data`
 JSONField (`phase`: `extracted` | `matched`). After matching, a dedicated
@@ -250,7 +275,9 @@ live analysis is edited before re-match.
 | `MakeVendorSelectionService` | After Analyse: make/supplier pick → exact Rate_Master → rates by Tech_Key |
 | `ProductMatchingService` | Chroma recall + structured `Rate_Master` scoring |
 | `MakeListConstraintService` | Map BOQ lines to `approved_makes_list`; hard Make filter |
-| `BOQPriceCalculationService` | Map matched rates onto original rows; unlock export |
+| `BOQLabourService` | Auto/Manual labour charges; unlock Review |
+| `BOQReviewDisplayService` | Review/export lines from vendor_selection + labour |
+| `BOQPriceCalculationService` | Aggregate line amounts onto original rows; unlock export |
 | `BOQExportService` | Excel export (original BOQ format + breakdown) |
 | `BOQAnalysisService` | Orchestrator |
 | `utils/attribute_parser.py` | Parse/normalize dynamic `Attribute` key-value text |
@@ -319,10 +346,11 @@ rows (size-aware when multiple rows share a key). Per-unit labour uses precomput
 `Total_Labour_per_unit_with_labour_Multipler` → `Total_Labour_per_Unit` → `Labour_Rate_Per_unit`.
 Component breakdown (testing, scaffolding, consumables, painting, buffer) is exposed for export.
 
-**Export:** After **Calculate Price** (`READY_EXPORT`), `BOQExportService` → Excel
-download with two sheets: **BOQ** (original upload layout with rate/amount filled)
-and **Charge Breakdown** (detailed material/labour lines). Successful download sets
-`EXPORTED`. Applies session confirmations when present.
+**Export:** After Labour → Next (`READY_EXPORT`), `BOQExportService` → Excel
+download with two sheets: **BOQ** (original upload layout with rate/amount filled
+only on rows that already have quantity; top/left aligned, wrapped text, dark
+borders; blank row after each section) and **Charge Breakdown** (detailed
+material/labour lines). Successful download sets `EXPORTED`.
 
 ## Business Rules (stable)
 
@@ -330,8 +358,11 @@ and **Charge Breakdown** (detailed material/labour lines). Successful download s
   `Rate_Master` / `Labour_Master` when the pipeline returns.
 - **Session confirmation** on the Analysis tab before export (not stored in PostgreSQL).
 - **Confidence below 30%** → no auto product selection; user must pick a candidate and confirm.
-- **AI** may understand descriptions, extract products/activities, validate matches.
+- **AI** may understand descriptions, extract products, validate matches.
   AI must **not** calculate costs, profits, select suppliers, or set pricing.
+  Labour/installation activities are **not** extracted on Analysis — labour comes
+  from Labour_Master (or Manual %) on the Labour tab after Make & Vendor confirms
+  Tech_Key.
 - Do **not** use deprecated `match_key` / `source_key` for matching or imports.
 - Use **`Tech_Key`** for labour linkage; it is indexed but not globally unique
   (multi-supplier variants).
@@ -404,7 +435,9 @@ BOQ_AI/
 | `apps/boq/services/boq_analysis_service.py` | Analysis orchestrator |
 | `apps/boq/services/rate_detail_retrieval_service.py` | Rate_Master snapshot by id |
 | `apps/boq/services/labour_detail_retrieval_service.py` | Labour_Master by Tech_Key |
-| `apps/boq/services/boq_price_calculation_service.py` | Calculate Price → row pricing / ready to export |
+| `apps/boq/services/boq_labour_service.py` | Labour Auto/Manual + complete → Review |
+| `apps/boq/services/boq_review_display_service.py` | Review/export from vendor_selection |
+| `apps/boq/services/boq_price_calculation_service.py` | Labour → Next row pricing / ready to export |
 | `apps/boq/services/boq_export_service.py` | Excel export |
 | `ai/openai_client.py` | OpenAI client + API key check |
 | `ai/embeddings/` | Chroma product index |

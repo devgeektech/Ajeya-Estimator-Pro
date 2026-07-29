@@ -193,9 +193,13 @@
         tab: '{{ default_tab }}',
         analysisEnabled: {{ tab_access.analysis|yesno:'true,false' }},
         makeVendorEnabled: {{ tab_access.make_vendor|yesno:'true,false' }},
-        matchResultsEnabled: {{ tab_access.match_results|yesno:'true,false' }},
+        labourEnabled: {{ tab_access.labour|yesno:'true,false' }},
+        reviewEnabled: {{ tab_access.review|yesno:'true,false' }},
+        matchResultsEnabled: {{ tab_access.review|yesno:'true,false' }},
         analysing: {{ is_extracting|yesno:'true,false' }},
         matching: {{ is_matching|yesno:'true,false' }},
+        unlockingLabour: false,
+        completingLabour: false,
         analysisProgress: {{ analysis_progress_percent|default:0 }},
         analysisTargetPercent: {{ analysis_progress_percent|default:0 }},
         analysisProgressLabel: '{{ analysis_progress_label|default:""|escapejs }}',
@@ -205,14 +209,17 @@
         statusBadge: '{{ status_display.badge|escapejs }}',
         extractUrl: '{% url 'boq:extract' boq.pk %}',
         matchUrl: '{% url 'boq:match' boq.pk %}',
+        labourUrl: '{% url 'boq:labour' boq.pk %}',
         extractStatusUrl: '{% url 'boq:status' boq.pk %}?expect=extract',
         matchStatusUrl: '{% url 'boq:status' boq.pk %}?expect=match',
         detailAnalysisUrl: '{% url 'boq:detail' boq.pk %}?tab=analysis',
         detailMakeVendorUrl: '{% url 'boq:detail' boq.pk %}?tab=make_vendor',
-        detailMatchUrl: '{% url 'boq:detail' boq.pk %}?tab=match_results',
-        calculatePriceUrl: '{% url 'boq:calculate_price' boq.pk %}',
-        canCalculatePrice: {{ can_calculate_price|yesno:'true,false' }},
+        detailLabourUrl: '{% url 'boq:detail' boq.pk %}?tab=labour',
+        detailReviewUrl: '{% url 'boq:detail' boq.pk %}?tab=review',
+        detailMatchUrl: '{% url 'boq:detail' boq.pk %}?tab=review',
         canExport: {{ can_export|yesno:'true,false' }},
+        canUnlockLabour: {{ can_unlock_labour|yesno:'true,false' }},
+        canCompleteLabour: {{ can_complete_labour|yesno:'true,false' }},
         calculatingPrice: false,
         pollTimer: null,
         progressTicker: null,
@@ -396,7 +403,9 @@
         selectTab(name) {
             if (name === 'analysis' && !this.analysisEnabled) return;
             if (name === 'make_vendor' && !this.makeVendorEnabled) return;
-            if (name === 'match_results' && !this.matchResultsEnabled) return;
+            if (name === 'labour' && !this.labourEnabled) return;
+            if ((name === 'review' || name === 'match_results') && !this.reviewEnabled) return;
+            if (name === 'match_results') name = 'review';
             this.persistScroll(this.tab);
             this.scrollPositions[this.tab] = window.scrollY;
             this.tab = name;
@@ -530,8 +539,8 @@
                 this.startProgressTicker();
                 this.pollExtract();
             } else if (this.matching) {
-                this.tab = 'match_results';
-                this.syncTabUrl('match_results');
+                this.tab = 'review';
+                this.syncTabUrl('review');
                 this.pollMatch();
             } else {
                 this.clearStoredProgress();
@@ -569,58 +578,72 @@
                 alert(error.message || 'Failed to start analysis.');
             }
         },
-        async startMatch() {
-            if (this.analysing || this.matching || this.calculatingPrice) return;
-            this.matching = true;
-            this.matchResultsEnabled = true;
-            this.tab = 'match_results';
-            this.syncTabUrl('match_results');
-            this.statusLabel = 'Matching';
-            this.statusBadge = 'badge--red';
+        async goToLabour() {
+            if (this.analysing || this.matching || this.unlockingLabour) return;
+            this.unlockingLabour = true;
             try {
-                const data = await this.postJob(this.matchUrl);
-                this.applyStatus(data);
-                if (data.ready || data.mode === 'sync') {
-                    this.reloadWithCacheBust(this.detailMatchUrl);
-                    return;
-                }
-                this.startPolling();
-            } catch (error) {
-                this.matching = false;
-                alert(error.message || 'Failed to start matching.');
-            }
-        },
-        async startCalculatePrice() {
-            if (this.analysing || this.matching || this.calculatingPrice) return;
-            if (!this.canCalculatePrice) return;
-            this.calculatingPrice = true;
-            this.statusLabel = 'Calculating prices...';
-            this.statusBadge = 'badge--yellow';
-            try {
-                const response = await fetch(this.calculatePriceUrl, {
+                const body = new FormData();
+                body.append('ajax', '1');
+                body.append('action', 'unlock');
+                const response = await fetch(this.labourUrl, {
                     method: 'POST',
                     headers: {
-                        'X-CSRFToken': this.csrfToken(),
                         'X-Requested-With': 'XMLHttpRequest',
+                        'X-CSRFToken': this.csrfToken(),
                         'Accept': 'application/json',
                     },
                     credentials: 'same-origin',
+                    body,
                 });
                 const data = await response.json().catch(() => ({}));
-                if (!response.ok || !data.ok) {
-                    throw new Error(data.message || 'Failed to calculate prices.');
+                if (!response.ok || data.ok === false) {
+                    throw new Error(data.message || 'Failed to open Labour.');
                 }
-                this.canCalculatePrice = false;
+                this.labourEnabled = true;
+                this.reloadWithCacheBust(this.detailLabourUrl);
+            } catch (error) {
+                this.unlockingLabour = false;
+                alert(error.message || 'Failed to open Labour.');
+            }
+        },
+        async completeLabour() {
+            if (this.analysing || this.matching || this.completingLabour) return;
+            if (!this.canCompleteLabour) return;
+            this.completingLabour = true;
+            try {
+                const body = new FormData();
+                body.append('ajax', '1');
+                body.append('action', 'complete');
+                const response = await fetch(this.labourUrl, {
+                    method: 'POST',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-CSRFToken': this.csrfToken(),
+                        'Accept': 'application/json',
+                    },
+                    credentials: 'same-origin',
+                    body,
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || data.ok === false) {
+                    throw new Error(data.message || 'Failed to complete labour.');
+                }
+                this.reviewEnabled = true;
                 this.canExport = true;
                 this.statusLabel = 'Ready to Export';
                 this.statusBadge = 'badge--green';
-                this.reloadWithCacheBust(this.detailMatchUrl);
+                this.reloadWithCacheBust(data.redirect || this.detailReviewUrl);
             } catch (error) {
-                this.calculatingPrice = false;
-                this.statusLabel = 'Matched';
-                this.statusBadge = 'badge--green';
-                alert(error.message || 'Failed to calculate prices.');
+                this.completingLabour = false;
+                alert(error.message || 'Failed to complete labour.');
             }
+        },
+        async startMatch() {
+            // Match rematch retired — keep no-op for any leftover callers.
+            return;
+        },
+        async startCalculatePrice() {
+            return this.completeLabour();
         },
         syncTabUrl(name) {
             try {
@@ -687,18 +710,30 @@
             <button
                 type="button"
                 class="boq-tabs__btn"
-                :class="{ 'is-active': tab === 'match_results', 'is-disabled': !matchResultsEnabled }"
-                @click="selectTab('match_results')"
+                :class="{ 'is-active': tab === 'labour', 'is-disabled': !labourEnabled }"
+                @click="selectTab('labour')"
                 role="tab"
-                :aria-selected="tab === 'match_results'"
-                :aria-disabled="!matchResultsEnabled"
-                :tabindex="matchResultsEnabled ? 0 : -1"
+                :aria-selected="tab === 'labour'"
+                :aria-disabled="!labourEnabled"
+                :tabindex="labourEnabled ? 0 : -1"
             >
-                Match Results
+                Labour
+            </button>
+            <button
+                type="button"
+                class="boq-tabs__btn"
+                :class="{ 'is-active': tab === 'review', 'is-disabled': !reviewEnabled }"
+                @click="selectTab('review')"
+                role="tab"
+                :aria-selected="tab === 'review'"
+                :aria-disabled="!reviewEnabled"
+                :tabindex="reviewEnabled ? 0 : -1"
+            >
+                Review
             </button>
         </div>
 
-        <div class="boq-tab-context" :class="{ 'boq-tab-context--compact': tab === 'make_list' || tab === 'make_vendor' }">
+        <div class="boq-tab-context" :class="{ 'boq-tab-context--compact': tab === 'make_list' || tab === 'make_vendor' || tab === 'labour' }">
             <div class="boq-tab-context__status" x-show="tab !== 'make_list' && statusLabel" x-cloak>
                 <span
                     class="badge"
@@ -711,21 +746,29 @@
             <div class="boq-tab-context__summary" x-show="tab !== 'make_list' && tab !== 'make_vendor'" x-cloak>
                 {% if extraction_display.has_extraction %}
                 <span x-show="tab === 'analysis' && !analysing" x-cloak>
-                    {{ extraction_display.product_count }} product(s) and
-                    {{ extraction_display.activity_count }} activity line(s) extracted.
+                    <strong>{{ extraction_display.product_count }}</strong> product(s) extracted.
+                    {% if extraction_display.multiproduct_review_count %}
+                        <span class="extraction-missing-summary">{{ extraction_display.multiproduct_review_count }} multi-product review.</span>
+                    {% endif %}
                     {% if extraction_display.missing_field_count %}
                         <span class="extraction-missing-summary">{{ extraction_display.missing_field_count }} field(s) need review.</span>
                     {% endif %}
                     {% if can_edit_extraction %}
-                        Fill missing values below, then click <strong>Next</strong> to unlock Make &amp; Vendor
-                        (auto-fills lowest approved make/vendor on every product).
+                        Confirm products, then <strong>Next</strong> → Make &amp; Vendor.
                     {% endif %}
                 </span>
                 {% endif %}
-                {% if analysis_stats and analysis_display.has_analysis %}
-                <span x-show="tab === 'match_results' && !matching" x-cloak>
-                    Matched {{ analysis_stats.products_matched|default:0 }} / {{ analysis_stats.products_total }} products
-                    ({{ analysis_stats.products_pending }} pending).
+                {% if labour_display.has_products %}
+                <span x-show="tab === 'labour'" x-cloak>
+                    {{ labour_display.stats.product_count|default:0 }} product(s) ·
+                    {{ labour_display.stats.with_labour_count|default:0 }} with labour ·
+                    mode: {{ labour_display.mode|default:"auto" }}
+                </span>
+                {% endif %}
+                {% if analysis_display.has_analysis %}
+                <span x-show="tab === 'review'" x-cloak>
+                    {{ analysis_display.stats.products_matched|default:0 }} / {{ analysis_display.stats.products_total|default:0 }} products with rates
+                    · Export final BOQ + Charge Breakdown when ready.
                 </span>
                 {% endif %}
             </div>
@@ -765,18 +808,7 @@
                     >Make &amp; Vendor</button>
                 </span>
 
-                <span x-show="tab === 'match_results' && !matching" x-cloak>
-                    <button
-                        type="button"
-                        class="btn btn--small btn--primary"
-                        x-show="canCalculatePrice"
-                        x-cloak
-                        :disabled="calculatingPrice"
-                        @click="startCalculatePrice()"
-                    >
-                        <span x-show="!calculatingPrice">Calculate Price</span>
-                        <span x-show="calculatingPrice" x-cloak>Calculating…</span>
-                    </button>
+                <span x-show="tab === 'review'" x-cloak>
                     <a
                         href="{% url 'boq:export' boq.pk %}"
                         class="btn btn--small btn--boq-export"
@@ -799,24 +831,30 @@
                 · <span class="make-vendor-summary__filtered">{{ make_vendor_display.stats.filtered_count|default:0 }} filtered</span>
                 · <span class="make-vendor-summary__not-found">{{ make_vendor_display.stats.not_found_count|default:0 }} not found</span>
                 · <span class="make-vendor-summary__no-match">{{ make_vendor_display.stats.no_match_count|default:0 }} no match</span>
+                {% if make_vendor_display.stats.supplier_review_count %}
+                · <span class="make-vendor-summary__supplier-review">{{ make_vendor_display.stats.supplier_review_count }} supplier review</span>
+                {% endif %}
                 <span class="make-vendor-summary__muted">
                     ({{ make_vendor_display.stats.matched_count|default:0 }} matched with rates)
                 </span>
             </div>
             <div class="make-vendor-summary__actions">
-                {% if can_match and boq.status != "PROCESSED" and boq.status != "READY_EXPORT" and boq.status != "EXPORTED" and boq.status != "MATCHING" %}
+                {% if can_unlock_labour %}
                 <button
                     type="button"
-                    class="btn btn--small btn--boq-match"
-                    :class="{ 'btn--matching-loading': matching }"
-                    :disabled="matching"
-                    @click="startMatch()"
+                    class="btn btn--small btn--primary"
+                    :disabled="unlockingLabour"
+                    @click="goToLabour()"
                 >
-                    <span x-show="!matching">Match</span>
-                    <span x-show="matching" x-cloak>Matching...</span>
+                    <span x-show="!unlockingLabour">Next</span>
+                    <span x-show="unlockingLabour" x-cloak>Loading…</span>
                 </button>
-                {% elif is_matching %}
-                <button type="button" class="btn btn--small btn--matching-loading" disabled>Matching...</button>
+                {% elif labourEnabled %}
+                <button
+                    type="button"
+                    class="btn btn--small btn--primary"
+                    @click="selectTab('labour')"
+                >Labour</button>
                 {% endif %}
             </div>
         </div>
@@ -826,7 +864,7 @@
     <div
         class="panel"
         :class="{
-            'panel--analysis-flat': tab === 'analysis' || tab === 'make_list' || tab === 'make_vendor',
+            'panel--analysis-flat': tab === 'analysis' || tab === 'make_list' || tab === 'make_vendor' || tab === 'labour',
             'panel--make-list-flush': tab === 'make_list',
         }"
     >
@@ -870,24 +908,12 @@
             {% include "boq/_make_vendor_table.html" with make_vendor_display=make_vendor_display boq=boq %}
         </div>
 
-        <div x-show="tab === 'match_results'" x-cloak role="tabpanel">
-            <div x-show="matching" x-cloak class="analysis-loading-panel analysis-loading-panel--match">
-                <div class="analysis-loading-panel__header">
-                    <span class="analysis-loading-panel__dot analysis-loading-panel__dot--red"></span>
-                    <div>
-                        <strong>Matching products...</strong>
-                        <p>Comparing extracted products against the master database and fetching labour charges.</p>
-                    </div>
-                </div>
-                <div class="analysis-loading-progress" role="progressbar" aria-label="Matching in progress">
-                    <div class="analysis-loading-progress__track">
-                        <span class="analysis-loading-progress__bar"></span>
-                    </div>
-                </div>
-            </div>
-            <div x-show="!matching">
-                {% include "boq/_analysis_table.html" with analysis_display=analysis_display boq=boq can_rematch=can_rematch %}
-            </div>
+        <div x-show="tab === 'labour'" x-cloak role="tabpanel" class="labour-tab-canvas">
+            {% include "boq/_labour_table.html" with labour_display=labour_display boq=boq can_apply_labour=can_apply_labour %}
+        </div>
+
+        <div x-show="tab === 'review'" x-cloak role="tabpanel">
+            {% include "boq/_review_table.html" with analysis_display=analysis_display boq=boq %}
         </div>
     </div>
 </div>

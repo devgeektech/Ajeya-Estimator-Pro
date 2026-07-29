@@ -127,7 +127,6 @@ AI shall only:
 
 * Understand descriptions.
 * Extract products.
-* Extract activities.
 * Validate matches.
 
 AI shall never:

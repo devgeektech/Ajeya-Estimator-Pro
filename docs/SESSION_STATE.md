@@ -34,6 +34,179 @@ run analysis → session confirmations → export Excel
 
 ## Session Log
 
+### 2026-07-28 — Labour Client Progress Report
+
+Completed: Wrote `docs/LABOUR_CLIENT_REPORT.md` summarising Labour capabilities,
+UX work, demo script, and client confirmation checklist; linked from PRODUCT.md.
+Pending: Client walkthrough / UAT feedback on Labour Auto vs Manual.
+Issues: —
+Next: —
+
+### 2026-07-28 — Make & Vendor Material Rate + Supplier Review
+
+Completed: Make & Vendor shows material rate only; same material rate with
+different make/supplier highlights for supplier confirmation; candidate hover
+red; candidate select preserves other candidates (order + scores).
+Pending: —
+Issues: —
+Next: —
+
+### 2026-07-28 — Candidate Confidence % Visible
+
+Completed: Fixed Top database candidates % (refine had wiped retrieval
+confidence when re-seeding). Display backfills missing scores so existing
+Analysis rows show % without re-Analyse.
+Pending: —
+Issues: —
+Next: —
+
+### 2026-07-28 — Database List Search + Sort
+
+Completed: Live word-by-word filter and sortable Name / Status / Uploaded by /
+Uploaded at on the Database list (same pattern as BOQ / Notifications / Audit).
+Pending: —
+Issues: —
+Next: —
+
+### 2026-07-28 — Audit Log Search + Sort
+
+Completed: Live word-by-word filter and sortable headings on Audit Log (users
+list: Name / Recent Action / Datetime; per-user log: ID/Name / Action / Entity /
+When). Search query is preserved when sorting.
+Pending: —
+Issues: —
+Next: —
+
+### 2026-07-28 — Notifications List Search + Sort
+
+Completed: Live word-by-word filter and sortable Title/Message/When headings on
+Notifications (same pattern as BOQ list).
+Pending: Hard-refresh Notifications and try search + sort.
+Issues: None.
+Next: —
+
+### 2026-07-28 — BOQ List Live Search + Status Sort
+
+Completed: Real-time word-by-word BOQ list filter; Status sorts by pipeline order.
+Pending: Hard-refresh BOQs list and try typing + Status sort.
+Issues: None.
+Next: —
+
+### 2026-07-28 — BOQ List Search + Sort
+
+Completed: Added search filter and sortable headings on the BOQ list page.
+Pending: Open BOQs list; try search and column sort.
+Issues: None.
+Next: —
+
+### 2026-07-28 — Selectable Candidates + Full Initial Rematch
+
+Completed: Candidates selectable on Analysis; initial Analyse does full rematch
+(like Re-analyse) on all products then weak refine.
+Pending: Hard-refresh Analysis; try Select on a candidate; re-run Analyse for
+match quality.
+Issues: Analyse takes longer during "Refining product matches…".
+Next: —
+
+### 2026-07-28 — Schema-Only Attributes (No Additional)
+
+Completed: Persist/show only DB schema attributes; drop unmapped extras; softer
+label weight (600); prompts updated.
+Pending: Re-Analyse or rematch a product to clear old additional attributes from
+stored JSON.
+Issues: None.
+Next: —
+
+### 2026-07-28 — Multi-product Review Flag + Analysis UI Polish
+
+Completed: Lighter grey grouped badges; green-tint product cards; removed section
+tag/rows; Multi-product review when products > Unit/Qty rows.
+Pending: Hard-refresh Analysis and confirm badges/flag on multi-product groups.
+Issues: None.
+Next: —
+
+### 2026-07-28 — Initial Analyse Match Refine
+
+Completed: Initial Analyse now auto-refines weak product matches (same path as
+Re-analyse) so first-pass confidence is closer to repeated rematch; Re-analyse
+also auto-refines once.
+Pending: Re-run Analyse on a BOQ and compare confidence vs previous first pass.
+Issues: Analyse may take longer while refine runs (progress shows "Refining…").
+Next: —
+
+### 2026-07-28 — Attributes + Only (No Additional Attributes)
+
+Completed: Removed Additional Attributes; Attributes heading has + to add fields;
+needed DB schema attrs stay in one grid.
+Pending: Hard-refresh Analysis; try + add attribute and fill schema fields.
+Issues: None.
+Next: —
+
+### 2026-07-28 — Labour Text Size
+
+Completed: Applied the same dense typography to Labour as Make & Vendor / Analysis.
+Pending: Hard-refresh Labour and confirm text scale.
+Issues: None.
+Next: —
+
+### 2026-07-28 — Make & Vendor Text Size
+
+Completed: Reduced Make & Vendor page text ~1–2pt to align with Analysis density.
+Pending: Hard-refresh Make & Vendor and compare beside Analysis.
+Issues: None.
+Next: —
+
+### 2026-07-28 — Analysis Products Only (No Activities)
+
+Completed: Removed Activities from Analysis UI/instructions; AI extracts products
+only; Make & Vendor hint points to Labour Next; docs updated for
+Analysis → Make & Vendor → Labour ((material + labour) × qty).
+Pending: Hard-refresh Analysis on an existing BOQ; re-Analyse if old activity
+chips still appear in stored JSON (new saves clear activities).
+Issues: None.
+Next: —
+
+### 2026-07-28 — Labour Product Cards + % Step
+
+Completed: Percentage step=1; Labour products use Make & Vendor line/card layout;
+zero/missing labour highlighted in light orange.
+Pending: Hard-refresh Labour and confirm cards + steppers.
+Issues: None.
+Next: —
+
+### 2026-07-28 — Labour Toolbar + Category Field Layout
+
+Completed: Apply + Next on the right of Auto/Manual; category % inputs match
+Make & Vendor compact grid (not full-width rows).
+Pending: Hard-refresh Labour and confirm toolbar/category layout.
+Issues: None.
+Next: —
+
+### 2026-07-28 — Labour Page Layout Cleanup
+
+Completed: Labour help text removed; Auto/Manual left + Apply right; Manual
+category percentages laid out in one dynamic row.
+Pending: Hard-refresh Labour and confirm layout.
+Issues: None.
+Next: —
+
+### 2026-07-27 — Export Excel Formatting
+
+Completed: Export workbook uses top/left wrap alignment, dark borders, section
+blank rows, and rate/amount only where quantity is present.
+Pending: Re-export a priced BOQ and confirm sheet layout.
+Issues: None.
+Next: —
+
+### 2026-07-27 — Labour page + Review (remove Match)
+
+Completed: Added LABOUR status and Labour/Review tabs; BOQLabourService Auto/Manual;
+Review display from vendor_selection; export from Review after Labour → Next;
+Match rematch retired from active UI.
+Pending: Walk a BOQ through Make & Vendor → Labour (Auto and Manual) → Review → Export.
+Issues: None.
+Next: —
+
 ### 2026-07-27 — Editable Make/Vendor on Not Found / No Match
 
 Completed: Free-text Make/Supplier stays available for not-found, no-match, and

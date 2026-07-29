@@ -1,22 +1,21 @@
-    <article class="extraction-line extraction-line--{{ line.status }}" id="line-{{ line.row_id }}">
+    <article class="extraction-line extraction-line--{{ line.status }}{% if line.multiproduct_review %} extraction-line--multiproduct-review{% endif %}" id="line-{{ line.row_id }}">
         <header class="extraction-line__header">
             <div class="extraction-line__title">
                 <span class="extraction-line__serial">{{ line.serial|default:"—" }}</span>
                 {% if line.lineage_count > 1 %}
-                    <span class="badge badge--dark">{{ line.lineage_count }} lines grouped</span>
+                    <span class="badge badge--soft">{{ line.lineage_count }} lines grouped</span>
+                {% endif %}
+                {% if line.multiproduct_review %}
+                    <span class="badge badge--review" title="More products extracted than Unit/Qty rows in this group">Multi-product review</span>
                 {% endif %}
             </div>
             <div class="extraction-line__meta">
                 {% if line.qty %}<span>Qty: {{ line.qty }}{% if line.unit %} {{ line.unit }}{% endif %}</span>{% endif %}
                 {% if line.product_count > 1 %}
-                    <span class="badge badge--dark">{{ line.product_count }} products</span>
+                    <span class="badge badge--soft">{{ line.product_count }} products</span>
                 {% endif %}
-                {% if line.status == 'skipped' %}
-                    {% if line.skip_reason == 'ai_missing_row' %}
+                {% if line.status == 'skipped' and line.skip_reason == 'ai_missing_row' %}
                     <span class="badge badge--yellow">needs re-analyse</span>
-                    {% else %}
-                    <span class="badge badge--gray">section</span>
-                    {% endif %}
                 {% endif %}
             </div>
         </header>
@@ -42,39 +41,6 @@
             </details>
             {% endif %}
         </div>
-
-        {% if can_edit_extraction and line.status != 'skipped' or line.activities %}
-        <section class="extraction-activities">
-            <div class="extraction-activities__row">
-                <span class="extraction-activities__heading">Activities</span>
-                <ul class="extraction-activities__list">
-                    {% for activity in line.activities %}
-                    <li class="extraction-activities__chip">
-                        <span class="extraction-activities__chip-text">{{ activity }}</span>
-                        {% if can_edit_extraction and line.status != 'skipped' %}
-                        <button
-                            type="button"
-                            class="extraction-activities__remove"
-                            title="Remove activity"
-                            aria-label="Remove {{ activity }}"
-                            data-activity="{{ activity }}"
-                            @click="window.removeExtractionActivity($el, '{% url 'boq:extraction_edit' boq.pk %}', '{{ line.row_id }}')"
-                        >&times;</button>
-                        {% endif %}
-                    </li>
-                    {% endfor %}
-                </ul>
-                {% if can_edit_extraction and line.status != 'skipped' %}
-                <button
-                    type="button"
-                    class="btn btn--xsmall btn--primary extraction-activities__add"
-                    title="Add activity"
-                    @click="window.addExtractionActivity($el, '{% url 'boq:extraction_edit' boq.pk %}', '{{ line.row_id }}')"
-                >+</button>
-                {% endif %}
-            </div>
-        </section>
-        {% endif %}
 
         {% if can_edit_extraction and line.status != 'skipped' and not line.products %}
         <div class="extraction-line__actions">
@@ -262,11 +228,29 @@
                     <summary>Top database candidates ({{ product.db_candidates|length }})</summary>
                     <ul class="extraction-db-candidates__list">
                         {% for candidate in product.db_candidates %}
-                        <li>
+                        <li class="{% if candidate.is_selected %}is-selected{% endif %}">
+                            {% if can_edit_extraction and candidate.id and not candidate.is_selected %}
+                            <button
+                                type="button"
+                                class="extraction-db-candidates__link"
+                                title="Select this database product"
+                                @click="window.selectExtractionCandidate($el, '{% url 'boq:extraction_edit' boq.pk %}', '{{ line.row_id }}', {{ product.product_index }}, {{ candidate.id }})"
+                            >
+                                <span>{{ candidate.summary }}</span>
+                                {% if candidate.tech_key %}<span class="muted"> · {{ candidate.tech_key }}</span>{% endif %}
+                                {% if candidate.confidence is not None %}
+                                <span class="badge badge--gray extraction-db-candidates__pct">{{ candidate.confidence|floatformat:0 }}%</span>
+                                {% endif %}
+                            </button>
+                            {% else %}
                             <span>{{ candidate.summary }}</span>
                             {% if candidate.tech_key %}<span class="muted"> · {{ candidate.tech_key }}</span>{% endif %}
-                            {% if candidate.confidence != None %}
-                            <span class="badge badge--gray">{{ candidate.confidence|floatformat:0 }}%</span>
+                            {% if candidate.confidence is not None %}
+                            <span class="badge badge--gray extraction-db-candidates__pct">{{ candidate.confidence|floatformat:0 }}%</span>
+                            {% endif %}
+                            {% if candidate.is_selected %}
+                            <span class="badge badge--green">Selected</span>
+                            {% endif %}
                             {% endif %}
                         </li>
                         {% endfor %}
@@ -289,7 +273,7 @@
                             <textarea
                                 name="{{ field.key }}"
                                 class="extraction-input extraction-input--textarea extraction-input--wrap"
-                                rows="2"
+                                rows="1"
                                 placeholder="Optional — fill when known"
                             >{{ field.value }}</textarea>
                             {% else %}
@@ -308,11 +292,18 @@
                     <div class="extraction-attributes-block">
                         <div class="extraction-attributes-block__head">
                             <span class="extraction-section-label">Attributes</span>
+                            <button
+                                type="button"
+                                class="btn btn--xsmall btn--primary extraction-attributes-block__add"
+                                title="Add attribute"
+                                aria-label="Add attribute"
+                                @click="addExtra()"
+                            >+</button>
                             <span class="extraction-attributes-block__hint">
                                 {% if product.attributes.has_db_schema %}
-                                Attributes found in Database — AI-mapped values filled where found
+                                Fill attributes needed for matching — AI values filled where found
                                 {% else %}
-                                No matched database attribute schema yet
+                                No matched database attribute schema yet — use + to add attributes
                                 {% endif %}
                             </span>
                         </div>
@@ -320,6 +311,25 @@
                             {% for attr in product.attributes.fields %}
                             <label class="extraction-field{% if not attr.filled %} extraction-field--empty{% endif %}">
                                 <span class="extraction-field__label">{{ attr.label }}</span>
+                                {% if attr.removable %}
+                                <div class="extraction-attr-input-row">
+                                    <input
+                                        type="text"
+                                        name="attr_{{ attr.key }}"
+                                        value="{{ attr.value }}"
+                                        class="extraction-input"
+                                        placeholder="Optional"
+                                        @input="recalcAttributeConfidence()"
+                                    >
+                                    <button
+                                        type="button"
+                                        class="extraction-attr-remove"
+                                        title="Remove attribute"
+                                        aria-label="Remove {{ attr.label }}"
+                                        @click.prevent="removeNamedAttr($el)"
+                                    >&times;</button>
+                                </div>
+                                {% else %}
                                 <input
                                     type="text"
                                     name="attr_{{ attr.key }}"
@@ -328,32 +338,34 @@
                                     placeholder="{% if attr.filled %}{% else %}Not found in BOQ{% endif %}"
                                     @input="recalcAttributeConfidence()"
                                 >
+                                {% endif %}
                             </label>
-                            {% empty %}
-                            <p class="extraction-line__empty">None</p>
                             {% endfor %}
-                        </div>
-                        <div class="extraction-extra-attrs">
-                            <div class="extraction-extra-attrs__head">
-                                <span class="extraction-section-label">Additional Attributes</span>
-                                <div class="extraction-extra-attr-add">
-                                    <input type="text" x-model="newKey" class="extraction-input extraction-input--compact" placeholder="Name">
-                                    <input type="text" x-model="newValue" class="extraction-input extraction-input--compact" placeholder="Value" @keydown.enter.prevent="addExtra()">
-                                    <button type="button" class="btn btn--xsmall btn--primary" @click="addExtra()">+</button>
-                                </div>
-                                <span class="extraction-extra-attrs__hint">Additional attributes found in BOQ by AI analysis</span>
-                            </div>
-                            <div class="extraction-extra-attrs__chips-row">
-                                <ul class="extraction-extra-attr-list" x-show="extraAttrs.length" x-cloak>
-                                    <template x-for="(item, index) in extraAttrs" :key="index">
-                                        <li class="extraction-extra-attr-item">
-                                            <span class="extraction-extra-attr-item__text" x-text="item.key + ': ' + item.value"></span>
-                                            <button type="button" class="extraction-extra-attr-item__remove" @click="removeExtra(index)" aria-label="Remove attribute">&times;</button>
-                                        </li>
-                                    </template>
-                                </ul>
-                                <span class="extraction-extra-attrs__empty" x-show="!extraAttrs.length" x-cloak>None</span>
-                            </div>
+                            <template x-for="(item, index) in extraAttrs" :key="item.key + '-' + index">
+                                <label class="extraction-field">
+                                    <span class="extraction-field__label" x-text="item.label || item.key"></span>
+                                    <div class="extraction-attr-input-row">
+                                        <input
+                                            type="text"
+                                            class="extraction-input"
+                                            :name="'attr_' + item.key"
+                                            x-model="item.value"
+                                            placeholder="Optional"
+                                            @input="recalcAttributeConfidence(); scheduleAutoSave()"
+                                        >
+                                        <button
+                                            type="button"
+                                            class="extraction-attr-remove"
+                                            title="Remove attribute"
+                                            aria-label="Remove attribute"
+                                            @click.prevent="removeExtra(index)"
+                                        >&times;</button>
+                                    </div>
+                                </label>
+                            </template>
+                            {% if not product.attributes.fields %}
+                            <p class="extraction-line__empty" x-show="!extraAttrs.length">None — click + to add</p>
+                            {% endif %}
                         </div>
                     </div>
                 </form>
@@ -386,23 +398,6 @@
                             <li class="extraction-attr--empty">None</li>
                         {% endfor %}
                     </ul>
-                    <div class="extraction-extra-attrs extraction-extra-attrs--readonly">
-                        <div class="extraction-extra-attrs__head">
-                            <span class="extraction-section-label">Additional Attributes</span>
-                            <span class="extraction-extra-attrs__hint">Additional attributes found in BOQ by AI analysis</span>
-                        </div>
-                        <div class="extraction-extra-attrs__chips-row">
-                            <ul class="extraction-extra-attr-list">
-                                {% for extra in product.attributes.extra %}
-                                <li class="extraction-extra-attr-item">
-                                    <span class="extraction-extra-attr-item__text">{{ extra.key }}: {{ extra.value }}</span>
-                                </li>
-                                {% empty %}
-                                <li class="extraction-extra-attrs__empty">None</li>
-                                {% endfor %}
-                            </ul>
-                        </div>
-                    </div>
                 </div>
                 {% endif %}
             </section>

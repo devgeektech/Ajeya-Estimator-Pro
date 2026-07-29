@@ -54,6 +54,56 @@ def _normalize_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip().lower())
 
 
+def _normalize_material_rate_key(value: Any) -> str:
+    """Stable compare key for material rates shown on Make & Vendor."""
+    text = str(value or "").strip()
+    if not text or text in {"—", "-", "n/a", "N/A"}:
+        return ""
+    cleaned = re.sub(r"[^\d.-]", "", text.replace(",", ""))
+    if not cleaned or cleaned in {".", "-", "-."}:
+        return ""
+    try:
+        return f"{float(cleaned):.4f}"
+    except (TypeError, ValueError):
+        return _normalize_text(text)
+
+
+def _flag_same_material_rate_supplier_review(lines: list[dict[str, Any]]) -> int:
+    """
+    Highlight products that share the same material rate but use different
+    make/supplier pairs — expert must confirm the supplier choice.
+    """
+    buckets: dict[str, list[dict[str, Any]]] = {}
+    for line in lines:
+        for product in line.get("products") or []:
+            product["supplier_rate_review"] = False
+            line_output = product.get("line_output") or {}
+            rate_key = _normalize_material_rate_key(line_output.get("material_rate"))
+            if not rate_key:
+                continue
+            if str(product.get("match_status") or "") != "matched":
+                continue
+            buckets.setdefault(rate_key, []).append(product)
+
+    flagged = 0
+    for products in buckets.values():
+        if len(products) < 2:
+            continue
+        combos = {
+            (
+                _normalize_text(item.get("selected_make")),
+                _normalize_text(item.get("selected_supplier")),
+            )
+            for item in products
+        }
+        if len(combos) < 2:
+            continue
+        for item in products:
+            item["supplier_rate_review"] = True
+            flagged += 1
+    return flagged
+
+
 def _field_from_map(fields: dict[str, Any], keys: tuple[str, ...]) -> Any:
     for key in keys:
         value = fields.get(key)
@@ -217,6 +267,8 @@ class MakeVendorSelectionService:
                 }
             )
 
+        supplier_review_count = _flag_same_material_rate_supplier_review(lines)
+
         return {
             "has_products": product_count > 0,
             "database_version_id": database_version_id,
@@ -228,6 +280,7 @@ class MakeVendorSelectionService:
                 "filtered_count": filtered_count,
                 "not_found_count": not_found_count,
                 "no_match_count": no_match_count,
+                "supplier_review_count": supplier_review_count,
             },
             "selection_catalog": self._build_selection_catalog(analysis, database_version_id),
             "lines": lines,
@@ -735,6 +788,7 @@ class MakeVendorSelectionService:
             boq.analysis_data = safe
             # Next unlocks Make & Vendor — always persist pipeline status.
             if boq.status not in {
+                BOQStatus.LABOUR,
                 BOQStatus.MATCHING,
                 BOQStatus.PROCESSED,
                 BOQStatus.READY_EXPORT,
@@ -1266,6 +1320,7 @@ class MakeVendorSelectionService:
             "highlight_no_make": make_status == "not_found",
             "is_no_match": is_no_match,
             "allow_typed_make_vendor": allow_typed_make_vendor,
+            "supplier_rate_review": False,
         }
 
     def _options_for_product(

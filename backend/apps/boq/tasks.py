@@ -9,7 +9,7 @@ logger = logging.getLogger("boq_ai")
 
 
 def run_boq_extraction(boq_id: int) -> dict:
-    """Extract products and activities from BOQ rows (sync entry point)."""
+    """Extract products from BOQ rows (sync entry point)."""
     from apps.boq.services.boq_analysis_service import BOQAnalysisService
 
     logger.info("Starting BOQ extraction for id=%s", boq_id)

@@ -1529,3 +1529,85 @@ body {
         padding: 16px;
     }
 }
+
+/* Labour tab */
+.labour-panel {
+    display: grid;
+    gap: 14px;
+    width: 100%;
+    box-sizing: border-box;
+}
+.labour-toolbar,
+.labour-toolbar--bar {
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 12px;
+    width: 100% !important;
+    max-width: 100%;
+    box-sizing: border-box;
+    margin-bottom: 4px;
+}
+.labour-mode-toggle {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    gap: 8px;
+    flex: 0 0 auto;
+}
+.labour-toolbar__spacer {
+    flex: 1 1 auto;
+    min-width: 16px;
+}
+.labour-toolbar__actions {
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex: 0 0 auto;
+    margin-left: 0;
+}
+.labour-manual-card {
+    margin: 0;
+    padding: 12px 14px;
+}
+/* Flex wrap: compact for 2 inputs, wraps cleanly for 10–15. */
+.labour-category-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 12px;
+    align-items: end;
+}
+.labour-category-field {
+    flex: 0 1 170px;
+    width: 170px;
+    max-width: 100%;
+    min-width: 140px;
+    margin: 0;
+}
+.labour-category-field .extraction-field__label {
+    font-weight: 700;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+.labour-category-field .extraction-input {
+    width: 100%;
+    box-sizing: border-box;
+}
+.labour-missing { color: #b91c1c; }
+.labour-table-wrap { margin-top: 4px; }
+.labour-lines { margin-top: 4px; }
+
+@media (max-width: 560px) {
+    .labour-category-field {
+        flex: 1 1 100%;
+        width: 100%;
+    }
+}

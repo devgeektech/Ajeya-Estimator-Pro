@@ -2,6 +2,136 @@
 
 Meaningful product and technical changes only. Older history is in git.
 
+## 2026-07-28 — Labour Client Progress Report
+
+- Added `docs/LABOUR_CLIENT_REPORT.md` for stakeholder review of the Labour
+  module (Auto/Manual, pricing flow, UX delivered, demo script, open points).
+
+## 2026-07-28 — Make & Vendor Material Rate + Supplier Review
+
+- Make & Vendor shows material rate only (labour/total hidden; labour stays on
+  Labour tab).
+- Products that share the same material rate with different make/supplier are
+  highlighted for supplier confirmation (amber + summary count).
+- Top database candidate hover is red; selecting a candidate no longer reshuffles
+  or rewrites other candidates (panel-only refresh).
+
+## 2026-07-28 — Candidate Confidence % Visible
+
+- Top database candidates keep/show retrieval confidence (%). Refine no longer
+  wipes scores when re-seeding prior candidates; Analysis backfills missing %
+  from structured match for already-saved data.
+
+## 2026-07-28 — Database List Search + Sort
+
+- Database page has live word-by-word search and sortable Name / Status /
+  Uploaded by / Uploaded at headings with visible sort arrows.
+
+## 2026-07-28 — Audit Log Search + Sort
+
+- Audit Log user list and per-user log pages have live word-by-word search and
+  sortable column headings with visible sort arrows (same pattern as BOQ /
+  Notifications).
+
+## 2026-07-28 — Notifications List Search + Sort
+
+- Notifications page has the same live word-by-word search and sortable column
+  headings (Title, Message, When) with visible sort arrows.
+
+## 2026-07-28 — BOQ List Live Search + Status Sort
+
+- BOQ list search filters in real time as you type (each word must match).
+- Status column sorts by pipeline stage order (not raw status codes).
+
+## 2026-07-28 — BOQ List Search + Sort
+
+- BOQ list supports search (name / owner / status) and clickable column sorting
+  (Name, Owner, Status, Created).
+
+## 2026-07-28 — Selectable Candidates + Full Initial Rematch
+
+- Top database candidates on Analysis are clickable; selecting one confirms that
+  Rate_Master product (expert override).
+- Initial Analyse runs a full Re-analyse-style rematch on every product after the
+  first mapping pass, then extra weak-only refine passes.
+
+## 2026-07-28 — Schema-Only Attributes (No Additional)
+
+- Matching/display keep only required Rate_Master Attribute schema keys; unmapped
+  additional attributes are discarded.
+- Extraction/mapping prompts instruct AI not to invent free-form attribute keys.
+- Analysis field/section label weight softened (600).
+
+## 2026-07-28 — Multi-product Review Flag + Analysis UI Polish
+
+- "Lines grouped" / product-count badges use light grey; product cards use soft
+  transparent green background.
+- Removed standalone "section" tags (section-only rows hidden from Analysis).
+- Flag groups where extracted products exceed Unit/Qty-filled rows
+  (Multi-product review badge + summary count).
+
+## 2026-07-28 — Initial Analyse Match Refine
+
+- Initial Analyse runs the same rematch-quality refine path after first mapping:
+  weak products (unmatched / provisional / confidence < 70) are rematched up to
+  twice with wider candidate recall and prior suggested IDs seeded.
+- Per-row Re-analyse also auto-refines once after the first rematch.
+
+## 2026-07-28 — Attributes + Only (No Additional Attributes)
+
+- Removed the Additional Attributes section from Analysis.
+- Needed DB schema attributes show in the Attributes grid; experts add more
+  with **+** beside the Attributes heading.
+
+## 2026-07-28 — Labour Text Size
+
+- Labour typography reduced ~1–2pt to match Analysis / Make & Vendor dense scale.
+
+## 2026-07-28 — Make & Vendor Text Size
+
+- Make & Vendor typography reduced ~1–2pt to match Analysis dense scale
+  (labels, inputs, product cards, summary, cascade panel).
+
+## 2026-07-28 — Analysis Products Only (No Activities)
+
+- Analysis extracts and shows products only; Activities UI and add/remove actions removed.
+- AI prompt and database context no longer request labour/installation activities.
+- Pipeline copy: Analysis → Make & Vendor (exact product) → Labour by Tech_Key →
+  (material + labour) × quantity on Review/export.
+
+## 2026-07-28 — Labour Product Cards + % Step
+
+- Manual % steppers increment by 1 (not 0.01).
+- Labour product list uses Make & Vendor card/line structure.
+- Missing or zero labour rows are highlighted (light orange).
+
+## 2026-07-28 — Labour Toolbar + Category Field Layout
+
+- Auto/Manual stay left; Apply labour and Next sit together on the right.
+- Manual category % fields use the same compact 4-column grid as Make & Vendor.
+
+## 2026-07-28 — Labour Page Layout Cleanup
+
+- Removed instructional copy from the Labour tab.
+- Auto/Manual toggle sits left; Apply sits right on the same row.
+- Manual category % inputs share one dynamic row sized by category count.
+
+## 2026-07-27 — Export Excel Formatting
+
+- Exported BOQ/Charge Breakdown cells are top + left aligned with wrapped text
+  and dark borders.
+- Rate and Amount fill only on rows that already have Quantity.
+- Blank separator row inserted after each section (depth-0 boundary).
+
+## 2026-07-27 — Labour page + Review (remove Match)
+
+- Pipeline is now Analysis → Make & Vendor → Labour → Review → Export.
+- Match rematch CTA removed from the active UI; Tech_Key comes from Make & Vendor.
+- Labour tab supports Auto (Labour_Master by Tech_Key) and Manual (category % of
+  material). Labour → Next aggregates row pricing and unlocks Review/export.
+- Review shows vendor_selection product details; Export still writes BOQ + Charge
+  Breakdown.
+
 ## 2026-07-27 — Editable Make/Vendor on Not Found / No Match
 
 - Not found and No match keep Make/Supplier as editable text inputs (with

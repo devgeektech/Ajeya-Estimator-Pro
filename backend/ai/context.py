@@ -9,16 +9,6 @@ from apps.database_manager.models import Rate_Master
 from apps.database_manager.services.activation import get_active_database_version
 from utils.attribute_parser import learn_aliases_from_attributes, parse_attributes
 
-# Work activities for extraction — not Labour_Master.Labour_Type (ITEM_BASED / SIZE_BASED).
-_DEFAULT_ACTIVITIES = [
-    "Installation",
-    "Testing",
-    "Commissioning",
-    "Fixing",
-    "Fabrication",
-    "Supply and installation",
-]
-
 
 def _normalize_label(text: str) -> str:
     cleaned = re.sub(r"[^0-9a-zA-Z]+", " ", (text or "").lower())
@@ -271,7 +261,6 @@ def build_database_context() -> str:
                 "categories": [],
                 "sub_categories_by_category": {},
                 "attribute_keys": [],
-                "activities": list(_DEFAULT_ACTIVITIES),
             },
             ensure_ascii=False,
         )
@@ -291,6 +280,5 @@ def build_database_context() -> str:
         "categories": taxonomy.get("categories") or [],
         "sub_categories_by_category": taxonomy.get("sub_categories_by_category") or {},
         "attribute_keys": sorted(attribute_keys),
-        "activities": list(_DEFAULT_ACTIVITIES),
     }
     return json.dumps(payload, ensure_ascii=False)

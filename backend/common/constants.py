@@ -25,3 +25,7 @@ EMBEDDING_DIMENSION = 1536
 
 # Below this score (0-100), no product is auto-selected (pending item).
 MATCH_CONFIDENCE_THRESHOLD = 30
+
+# After first DB mapping, rematch weak products until this confidence (or unmatched).
+# Mirrors expert Re-analyse gains from taxonomy/schema alignment.
+REFINE_MATCH_CONFIDENCE_TARGET = 70

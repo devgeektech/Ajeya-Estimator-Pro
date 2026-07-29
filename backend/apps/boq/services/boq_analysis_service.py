@@ -78,11 +78,11 @@ def _compute_extraction_stats(rows: list[dict[str, Any]]) -> dict[str, int]:
         "activities_total": 0,
     }
     for row in rows:
+        row["activities"] = []
         stats["rows_total"] += 1
         if row.get("skip_matching"):
             stats["rows_skipped"] += 1
         stats["products_total"] += len(row.get("products") or [])
-        stats["activities_total"] += len(row.get("activities") or [])
     return stats
 
 
@@ -97,7 +97,6 @@ def _compute_match_stats(rows: list[dict[str, Any]]) -> dict[str, int]:
     }
     for row in rows:
         stats["rows_total"] += 1
-        stats["activities_total"] += len(row.get("activities") or [])
         if row.get("skip_matching"):
             stats["rows_skipped"] += 1
             continue
@@ -146,7 +145,7 @@ class BOQAnalysisService:
         self.boq_id = boq_id
 
     def run_extraction(self) -> dict[str, Any]:
-        """Extract products/activities, then enrich attributes from Rate_Master."""
+        """Extract products, then enrich attributes from Rate_Master."""
         boq = self._get_boq()
         self._set_status(boq, BOQStatus.PROCESSING)
         set_boq_job_progress(boq.pk, percent=2, label="Starting analysis…", phase="extract")
@@ -184,15 +183,15 @@ class BOQAnalysisService:
 
             set_boq_job_progress(
                 boq.pk,
-                percent=58,
+                percent=55,
                 label="Matching products to database…",
                 phase="extract",
             )
 
             def _on_enrich_progress(done: int, total: int) -> None:
                 total = max(total, 1)
-                # Enrichment covers roughly 58% → 95%.
-                percent = 58 + int((done / total) * 37)
+                # First matching pass covers roughly 55% → 78%.
+                percent = 55 + int((done / total) * 23)
                 set_boq_job_progress(
                     boq.pk,
                     percent=percent,
@@ -203,6 +202,29 @@ class BOQAnalysisService:
             extracted_rows = self._enrich_extracted_attributes(
                 extracted_rows,
                 progress_callback=_on_enrich_progress,
+            )
+
+            set_boq_job_progress(
+                boq.pk,
+                percent=80,
+                label="Refining product matches…",
+                phase="extract",
+            )
+
+            def _on_refine_progress(done: int, total: int) -> None:
+                total = max(total, 1)
+                # Refine passes cover roughly 80% → 95% (same path as Re-analyse).
+                percent = 80 + int((done / total) * 15)
+                set_boq_job_progress(
+                    boq.pk,
+                    percent=percent,
+                    label=f"Refining product matches ({done}/{total})…",
+                    phase="extract",
+                )
+
+            extracted_rows = self._refine_extracted_matches(
+                extracted_rows,
+                progress_callback=_on_refine_progress,
             )
 
             set_boq_job_progress(boq.pk, percent=98, label="Saving results…", phase="extract")
@@ -308,6 +330,7 @@ class BOQAnalysisService:
                             raise ValidationError(f"Unknown product index: {product_index}")
                         stub = {**target, "products": [selected]}
                         rematched = self._enrich_extracted_attributes([stub])
+                        rematched = self._refine_extracted_matches(rematched)
                         updated_product = (rematched[0].get("products") or [selected])[0]
                         merged_products = []
                         for product in products:
@@ -320,6 +343,7 @@ class BOQAnalysisService:
                     else:
                         target["products"] = products
                         rematched_rows = self._enrich_extracted_attributes([target])
+                        rematched_rows = self._refine_extracted_matches(rematched_rows)
 
                     updated_rows = _replace_rows(rows, rematched_rows)
                     analysis_payload = {
@@ -396,6 +420,7 @@ class BOQAnalysisService:
                 replacements.append(replacement)
 
             replacements = self._enrich_extracted_attributes(replacements)
+            replacements = self._refine_extracted_matches(replacements)
             updated_rows = _replace_rows(list(existing.get("rows") or []), replacements)
             analysis_payload = {
                 **existing,
@@ -422,7 +447,7 @@ class BOQAnalysisService:
             raise BOQAIError(f"BOQ row re-extraction failed: {exc}") from exc
 
     def run_matching(self) -> dict[str, Any]:
-        """Match extracted products/activities against the active master database."""
+        """Match extracted products against the active master database."""
         boq = self._get_boq()
         existing = boq.analysis_data or {}
         if not existing.get("rows"):
@@ -650,6 +675,51 @@ class BOQAnalysisService:
             return mapper.map_rows(rows, progress_callback=progress_callback)
         except Exception:
             logger.exception("AI product mapping failed; keeping AI-extracted attributes")
+            return rows
+
+    @staticmethod
+    def _refine_extracted_matches(
+        rows: list[dict[str, Any]],
+        progress_callback=None,
+    ) -> list[dict[str, Any]]:
+        """
+        Rematch like Analysis Re-analyse after first-pass taxonomy/schema alignment.
+
+        1) Full rematch of every product (wider recall) — same path as Re-analyse
+        2) Extra weak-only refine passes for remaining low-confidence products
+        """
+        active_version = get_active_database_version()
+        if active_version is None:
+            return rows
+        try:
+            mapper = ProductAIMappingService(active_version.pk)
+
+            def _on_full(done: int, total: int) -> None:
+                if not progress_callback:
+                    return
+                # First half of refine progress = full rematch.
+                total = max(total, 1)
+                progress_callback(done, total * 2)
+
+            rematched = mapper.map_rows(
+                rows,
+                refine=True,
+                progress_callback=_on_full,
+            )
+
+            def _on_weak(done: int, total: int) -> None:
+                if not progress_callback:
+                    return
+                total = max(total, 1)
+                progress_callback(total + done, total * 2)
+
+            return mapper.refine_rows(
+                rematched,
+                passes=2,
+                progress_callback=_on_weak,
+            )
+        except Exception:
+            logger.exception("Product match refine failed; keeping first-pass matches")
             return rows
 
     def ensure_attribute_enrichment(self) -> bool:

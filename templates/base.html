@@ -300,6 +300,18 @@
             border-color: transparent;
         }
 
+        .badge--soft {
+            background: #e8eef5;
+            color: #64748b;
+            border-color: #d8e0ea;
+        }
+
+        .badge--review {
+            background: #ffedd5;
+            color: #c2410c;
+            border-color: #fdba74;
+        }
+
         .badge--yellow {
             background: #fef3c7;
             color: #854d0e;
@@ -508,6 +520,16 @@
             border-top: 1px dashed var(--border);
         }
 
+        .extraction-product-panel > .extraction-product-card,
+        .extraction-products > .extraction-product-card {
+            margin-top: 8px;
+            padding: 10px 12px;
+            border: 1px solid rgba(34, 197, 94, 0.28);
+            border-top: 1px solid rgba(34, 197, 94, 0.28);
+            border-radius: 8px;
+            background: rgba(34, 197, 94, 0.08);
+        }
+
         .extraction-product-card__busy {
             position: absolute;
             inset: 0;
@@ -708,6 +730,11 @@
             gap: 6px;
         }
 
+        .analysis-tab-canvas .extraction-line--multiproduct-review {
+            border-color: #fdba74;
+            box-shadow: inset 3px 0 0 #f97316;
+        }
+
         .analysis-tab-canvas .extraction-line__description {
             margin-bottom: 4px;
         }
@@ -765,6 +792,7 @@
         .analysis-tab-canvas .extraction-section-label {
             font-size: .68rem;
             letter-spacing: .03em;
+            font-weight: 700;
         }
 
         .analysis-tab-canvas .extraction-products {
@@ -808,7 +836,10 @@
         }
 
         .analysis-tab-canvas .extraction-product-panel > .extraction-product-card {
-            padding-top: 6px;
+            padding-top: 8px;
+            background: rgba(34, 197, 94, 0.08);
+            border: 1px solid rgba(34, 197, 94, 0.28);
+            border-radius: 6px;
         }
 
         .analysis-tab-canvas .extraction-line {
@@ -876,9 +907,37 @@
             gap: 2px;
         }
 
+        .analysis-tab-canvas .extraction-field--full {
+            flex-direction: row;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .analysis-tab-canvas .extraction-field--full .extraction-field__label {
+            flex: 0 0 auto;
+            white-space: nowrap;
+            min-width: 7.5rem;
+        }
+
+        .analysis-tab-canvas .extraction-field--full .extraction-input {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+
+        .analysis-tab-canvas .extraction-field--full .extraction-input--wrap {
+            min-height: 1.7rem;
+            max-height: 2.4rem;
+        }
+
         .analysis-tab-canvas .extraction-field__label {
             font-size: .68rem;
             line-height: 1.2;
+            font-weight: 700;
+        }
+
+        .analysis-tab-canvas .extraction-attributes-block .extraction-field__label {
+            font-weight: 700;
+            color: var(--text);
         }
 
         .analysis-tab-canvas .extraction-input {
@@ -913,14 +972,55 @@
 
         .analysis-tab-canvas .extraction-attributes-block__head {
             margin-bottom: 4px;
-            gap: 8px;
+            gap: 6px 8px;
+            align-items: center;
+            justify-content: flex-start;
+            flex-wrap: wrap;
             position: static;
             background: transparent;
             padding-bottom: 0;
         }
 
+        .analysis-tab-canvas .extraction-attributes-block__add {
+            flex-shrink: 0;
+        }
+
         .analysis-tab-canvas .extraction-attributes-block__hint {
             font-size: .68rem;
+            margin-left: auto;
+        }
+
+        .analysis-tab-canvas .extraction-attr-input-row {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .analysis-tab-canvas .extraction-attr-input-row .extraction-input {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+
+        .analysis-tab-canvas .extraction-attr-remove {
+            flex-shrink: 0;
+            width: 1.4rem;
+            height: 1.4rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            background: var(--surface);
+            color: #b91c1c;
+            font-size: .9rem;
+            line-height: 1;
+            cursor: pointer;
+            padding: 0;
+        }
+
+        .analysis-tab-canvas .extraction-attr-remove:hover {
+            background: #fef2f2;
+            border-color: #fca5a5;
         }
 
         .analysis-tab-canvas .extraction-extra-attrs {
@@ -1048,6 +1148,110 @@
             padding: 0;
         }
 
+        /* Dense Make & Vendor / Labour: match Analysis text scale (~1–2pt smaller). */
+        .make-vendor-tab-canvas .make-vendor-hint,
+        .make-vendor-tab-canvas .panel__text,
+        .labour-tab-canvas .panel__text {
+            font-size: .82rem;
+        }
+
+        .make-vendor-tab-canvas .extraction-field__label,
+        .labour-tab-canvas .extraction-field__label {
+            font-size: .68rem;
+            line-height: 1.2;
+        }
+
+        .make-vendor-tab-canvas .extraction-input,
+        .labour-tab-canvas .extraction-input {
+            padding: 4px 7px;
+            font-size: .78rem;
+            border-radius: 4px;
+            line-height: 1.25;
+        }
+
+        .make-vendor-tab-canvas .make-vendor-lines__title,
+        .make-vendor-tab-canvas .make-vendor-categories__title,
+        .labour-tab-canvas .make-vendor-lines__title {
+            font-size: .86rem;
+        }
+
+        .make-vendor-tab-canvas .make-vendor-line__serial,
+        .labour-tab-canvas .make-vendor-line__serial {
+            font-size: .82rem;
+        }
+
+        .make-vendor-tab-canvas .make-vendor-line__description,
+        .labour-tab-canvas .make-vendor-line__description {
+            font-size: .78rem;
+            line-height: 1.3;
+        }
+
+        .make-vendor-tab-canvas .make-vendor-product-tabs__btn,
+        .labour-tab-canvas .make-vendor-product-tabs__btn {
+            height: 1.7rem;
+            padding: 0 .65rem;
+            font-size: .78rem;
+            border-radius: 5px;
+        }
+
+        .make-vendor-tab-canvas .make-vendor-card__title,
+        .labour-tab-canvas .make-vendor-card__title {
+            font-size: .85rem;
+        }
+
+        .make-vendor-tab-canvas .make-vendor-card__taxonomy,
+        .labour-tab-canvas .make-vendor-card__taxonomy {
+            font-size: .72rem;
+        }
+
+        .make-vendor-tab-canvas .make-vendor-card__taxonomy-label,
+        .make-vendor-tab-canvas .make-vendor-readonly dt,
+        .make-vendor-tab-canvas .make-vendor-rates span,
+        .labour-tab-canvas .make-vendor-card__taxonomy-label,
+        .labour-tab-canvas .make-vendor-readonly dt,
+        .labour-tab-canvas .make-vendor-rates span,
+        .labour-tab-canvas .labour-rates span {
+            font-size: .68rem;
+        }
+
+        .make-vendor-tab-canvas .make-vendor-readonly dd,
+        .labour-tab-canvas .make-vendor-readonly dd {
+            font-size: .78rem;
+        }
+
+        .make-vendor-tab-canvas .make-vendor-result__meta p {
+            font-size: .78rem;
+        }
+
+        .make-vendor-tab-canvas .make-vendor-rates strong,
+        .labour-tab-canvas .make-vendor-rates strong,
+        .labour-tab-canvas .labour-rates strong {
+            font-size: .85rem;
+        }
+
+        .make-vendor-tab-canvas .make-vendor-filter-preview__title {
+            font-size: .78rem;
+        }
+
+        .make-vendor-tab-canvas .make-vendor-filter-preview__grid dd {
+            font-size: .78rem;
+        }
+
+        .make-vendor-tab-canvas .make-vendor-applied-filters__item {
+            font-size: .76rem;
+        }
+
+        .make-vendor-tab-canvas .make-vendor-card__no-make-note,
+        .labour-tab-canvas .make-vendor-card__no-make-note {
+            font-size: .72rem;
+        }
+
+        .labour-tab-canvas .labour-mode-toggle .btn,
+        .labour-tab-canvas .labour-toolbar__actions .btn {
+            font-size: .78rem;
+            padding: 5px 9px;
+        }
+
         .make-vendor-hint {
             margin: 0 0 10px;
         }
@@ -1077,7 +1281,7 @@
             border-radius: 8px;
             background: var(--surface);
             box-shadow: var(--shadow, 0 1px 2px rgba(0, 0, 0, 0.04));
-            font-size: .92rem;
+            font-size: .82rem;
             color: var(--text);
         }
 
@@ -1110,6 +1314,7 @@
         .make-vendor-summary__filtered { color: #1d4ed8; font-weight: 600; }
         .make-vendor-summary__not-found { color: #c2410c; font-weight: 600; }
         .make-vendor-summary__no-match { color: #b91c1c; font-weight: 600; }
+        .make-vendor-summary__supplier-review { color: #a16207; font-weight: 600; }
         .make-vendor-summary__muted {
             color: var(--text-muted, #64748b);
             font-weight: 400;
@@ -1152,6 +1357,57 @@
             align-items: center;
             gap: 10px;
             margin-top: 12px;
+        }
+
+        /* Labour toolbar: Auto/Manual left, Apply + Next extreme right, one row. */
+        .labour-tab-canvas {
+            width: 100%;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        .labour-tab-canvas .labour-toolbar,
+        .labour-tab-canvas .labour-toolbar--bar {
+            display: flex !important;
+            flex-direction: row !important;
+            flex-wrap: nowrap !important;
+            align-items: center;
+            width: 100%;
+            box-sizing: border-box;
+            gap: 12px;
+        }
+        .labour-tab-canvas .labour-toolbar__spacer {
+            flex: 1 1 auto;
+            min-width: 16px;
+        }
+        .labour-tab-canvas .labour-mode-toggle,
+        .labour-tab-canvas .labour-toolbar__actions {
+            display: flex;
+            flex-direction: row;
+            flex-wrap: nowrap;
+            align-items: center;
+            gap: 8px;
+            flex: 0 0 auto;
+        }
+        .labour-tab-canvas .labour-panel {
+            gap: 14px;
+        }
+        .labour-tab-canvas .labour-toolbar {
+            margin-bottom: 2px;
+        }
+        .labour-tab-canvas .labour-manual-card {
+            margin-top: 0;
+        }
+        .labour-tab-canvas .labour-category-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px 12px;
+            align-items: end;
+        }
+        .labour-tab-canvas .labour-category-field {
+            flex: 0 1 170px;
+            width: 170px;
+            max-width: 100%;
+            min-width: 140px;
         }
 
         .make-vendor-filter-preview,
@@ -1436,6 +1692,55 @@
             padding-right: 10px;
             box-shadow: inset 3px 0 0 #ef4444;
         }
+        .make-vendor-card--supplier-review {
+            background: #fffbeb;
+            border-radius: 6px;
+            padding-left: 10px;
+            padding-right: 10px;
+            box-shadow: inset 3px 0 0 #f59e0b;
+        }
+        .make-vendor-card__supplier-review-note {
+            margin: 6px 0 0;
+            font-size: .78rem;
+            line-height: 1.35;
+            color: #92400e;
+            font-weight: 600;
+        }
+
+        .make-vendor-card--no-labour {
+            background: #fff7ed;
+            border-radius: 6px;
+            padding-left: 10px;
+            padding-right: 10px;
+            box-shadow: inset 3px 0 0 #f97316;
+        }
+
+        .labour-rates {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(100px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .labour-rates > div {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            padding: 8px 10px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--surface-alt, #f8fafc);
+        }
+        .labour-rates span {
+            font-size: .72rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: .03em;
+            color: #64748b;
+        }
+        .labour-rates strong {
+            font-size: .95rem;
+            color: var(--text);
+        }
 
         .make-vendor-card__no-make-note {
             margin: 6px 0 0;
@@ -1544,6 +1849,10 @@
             grid-template-columns: repeat(3, minmax(0, 1fr));
             gap: 8px;
             margin-top: 8px;
+        }
+        .make-vendor-rates--material-only {
+            grid-template-columns: minmax(0, 1fr);
+            max-width: 220px;
         }
 
         .make-vendor-rates div {
@@ -1722,7 +2031,7 @@
 
         .extraction-field__label {
             font-size: .75rem;
-            font-weight: 600;
+            font-weight: 700;
             color: var(--text);
         }
 
@@ -1830,8 +2139,36 @@
             align-items: center;
             gap: 6px;
         }
+        .extraction-db-candidates__link {
+            display: inline-flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 6px;
+            margin: 0;
+            padding: 0;
+            border: 0;
+            background: transparent;
+            color: inherit;
+            font: inherit;
+            text-align: left;
+            cursor: pointer;
+        }
+        .extraction-db-candidates__link:hover {
+            color: #b91c1c;
+        }
+        .extraction-db-candidates__link:hover .muted {
+            color: #dc2626;
+        }
+        .extraction-db-candidates__list li.is-selected {
+            color: var(--text);
+        }
         .extraction-db-candidates .muted {
             color: var(--text-muted);
+        }
+        .extraction-db-candidates__pct {
+            flex: 0 0 auto;
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
         }
 
         .extraction-input {
@@ -1943,15 +2280,54 @@
 
         .extraction-attributes-block__head {
             display: flex;
-            align-items: baseline;
-            justify-content: space-between;
-            gap: 12px;
+            align-items: center;
+            justify-content: flex-start;
+            flex-wrap: wrap;
+            gap: 8px 10px;
             margin-bottom: 8px;
+        }
+
+        .extraction-attributes-block__add {
+            flex-shrink: 0;
         }
 
         .extraction-attributes-block__hint {
             font-size: .75rem;
             color: var(--text-muted);
+            margin-left: auto;
+        }
+
+        .extraction-attr-input-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .extraction-attr-input-row .extraction-input {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+
+        .extraction-attr-remove {
+            flex-shrink: 0;
+            width: 1.5rem;
+            height: 1.5rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            background: var(--surface);
+            color: #b91c1c;
+            font-size: 1rem;
+            line-height: 1;
+            cursor: pointer;
+            padding: 0;
+        }
+
+        .extraction-attr-remove:hover {
+            background: #fef2f2;
+            border-color: #fca5a5;
         }
 
         .extraction-confidence-badge {
@@ -2184,8 +2560,13 @@
         }
         .dark-mode .boq-tabs__btn.is-active:hover { color: #fff; }
 
+        .dark-mode .extraction-product-panel > .extraction-product-card,
+        .dark-mode .extraction-products > .extraction-product-card {
+            background: rgba(34, 197, 94, 0.12);
+            border-color: rgba(34, 197, 94, 0.35);
+        }
+
         .dark-mode .extraction-line,
-        .dark-mode .extraction-product-card,
         .dark-mode .make-vendor-line {
             background: #111827;
             border-color: var(--border);
@@ -2204,6 +2585,18 @@
         .dark-mode .make-vendor-card--no-match {
             background: rgba(239, 68, 68, 0.14);
             box-shadow: inset 3px 0 0 #ef4444;
+        }
+        .dark-mode .make-vendor-card--supplier-review {
+            background: rgba(245, 158, 11, 0.16);
+            box-shadow: inset 3px 0 0 #f59e0b;
+        }
+        .dark-mode .make-vendor-card__supplier-review-note {
+            color: #fde68a;
+        }
+
+        .dark-mode .make-vendor-card--no-labour {
+            background: rgba(249, 115, 22, 0.16);
+            box-shadow: inset 3px 0 0 #f97316;
         }
 
         .dark-mode .make-vendor-card__title,

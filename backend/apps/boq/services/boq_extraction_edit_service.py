@@ -201,56 +201,64 @@ class BOQExtractionEditService:
 
         products.pop(position)
         row["products"] = _reindex_products(products)
-        if not row["products"] and not row.get("activities"):
+        if not row["products"]:
             row["skip_matching"] = True
         analysis["rows"] = rows
         self._persist(boq, analysis)
+
+    def select_candidate(
+        self,
+        *,
+        row_id: str,
+        product_index: int,
+        rate_master_id: int,
+    ) -> dict[str, Any]:
+        """Confirm a top Rate_Master candidate chosen by the expert on Analysis."""
+        from apps.boq.services.product_ai_mapping_service import ProductAIMappingService
+        from apps.database_manager.services.activation import get_active_database_version
+
+        boq = self._get_boq()
+        self._ensure_editable(boq)
+
+        active = get_active_database_version()
+        if active is None:
+            raise ValidationError("No active master database.")
+
+        analysis = dict(boq.analysis_data or {})
+        rows = list(analysis.get("rows") or [])
+        row = self._find_row(rows, row_id)
+        if row is None:
+            raise ValidationError(f"Unknown BOQ row: {row_id}")
+
+        products = list(row.get("products") or [])
+        product = self._find_product(products, product_index)
+        if product is None:
+            raise ValidationError(f"Unknown product index: {product_index}")
+
+        try:
+            updated = ProductAIMappingService(active.pk).apply_selected_candidate(
+                product,
+                int(rate_master_id),
+            )
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+
+        position = self._product_position(products, product_index)
+        if position is None:
+            raise ValidationError(f"Unknown product index: {product_index}")
+        products[position] = updated
+        row["products"] = products
+        row["skip_matching"] = not products
+        analysis["rows"] = rows
+        analysis["phase"] = PHASE_EXTRACTED
+        self._persist(boq, analysis)
+        return updated
 
     def add_activity(self, *, row_id: str, activity: str) -> list[str]:
-        boq = self._get_boq()
-        self._ensure_editable(boq)
-
-        text = (activity or "").strip()
-        if not text:
-            raise ValidationError("Enter an activity name.")
-
-        analysis = dict(boq.analysis_data or {})
-        rows = list(analysis.get("rows") or [])
-        row = self._find_row(rows, row_id)
-        if row is None:
-            raise ValidationError(f"Unknown BOQ row: {row_id}")
-
-        activities = list(row.get("activities") or [])
-        if text not in activities:
-            activities.append(text)
-        row["activities"] = activities
-        if row.get("skip_matching") and not row.get("products"):
-            row["skip_matching"] = False
-        analysis["rows"] = rows
-        self._persist(boq, analysis)
-        return activities
+        raise ValidationError("Activities are no longer used. Analysis extracts products only.")
 
     def remove_activity(self, *, row_id: str, activity: str) -> list[str]:
-        boq = self._get_boq()
-        self._ensure_editable(boq)
-
-        text = (activity or "").strip()
-        if not text:
-            raise ValidationError("Missing activity name.")
-
-        analysis = dict(boq.analysis_data or {})
-        rows = list(analysis.get("rows") or [])
-        row = self._find_row(rows, row_id)
-        if row is None:
-            raise ValidationError(f"Unknown BOQ row: {row_id}")
-
-        activities = [item for item in (row.get("activities") or []) if str(item) != text]
-        row["activities"] = activities
-        if not row.get("products") and not activities:
-            row["skip_matching"] = True
-        analysis["rows"] = rows
-        self._persist(boq, analysis)
-        return activities
+        raise ValidationError("Activities are no longer used. Analysis extracts products only.")
 
     def update_row_make(
         self,
@@ -389,17 +397,17 @@ class BOQExtractionEditService:
     def _persist(self, boq: BOQ, analysis: dict[str, Any]) -> None:
         stats = dict((analysis.get("stats") or {}))
         products_total = 0
-        activities_total = 0
         rows_skipped = 0
         for row in analysis.get("rows") or []:
+            # Keep empty activities list for backward-compatible JSON shape.
+            row["activities"] = []
             if row.get("skip_matching"):
                 rows_skipped += 1
             products_total += len(row.get("products") or [])
-            activities_total += len(row.get("activities") or [])
         stats.update(
             {
                 "products_total": products_total,
-                "activities_total": activities_total,
+                "activities_total": 0,
                 "rows_skipped": rows_skipped,
             }
         )
@@ -418,6 +426,7 @@ class BOQExtractionEditService:
                 BOQStatus.READY_EXPORT,
                 BOQStatus.EXPORTED,
                 BOQStatus.MAKE_VENDOR,
+                BOQStatus.LABOUR,
             }:
                 if analysis.get("make_vendor_defaults_applied"):
                     boq.status = BOQStatus.MAKE_VENDOR
