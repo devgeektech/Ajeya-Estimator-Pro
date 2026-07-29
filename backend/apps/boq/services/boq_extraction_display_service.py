@@ -463,9 +463,56 @@ class BOQExtractionDisplayService:
             else:
                 status = "not_analyzed"
 
-            # Pure section headers (no products) are merged into product groups — hide them.
-            if status == "skipped" and analysis_row.get("skip_reason") != "ai_missing_row":
+            # Analysis UI: show a left “confidence line” on the outer extraction card.
+            # - Green only when at least one extracted product has confidence band "green"
+            # - Otherwise red
+            # - Except multiproduct review where we keep the existing review styling
+            confidence_border: str | None
+            if multiproduct_review or not shaped_products:
+                confidence_border = None
+            else:
+                # Keep the section red until *all* extracted products in that section
+                # reach confidence band "green".
+                is_all_green = all(
+                    str(p.get("attribute_confidence_band") or "").strip() == "green"
+                    for p in shaped_products
+                )
+                confidence_border = "green" if is_all_green else "red"
+
+            # Hide pure chapter headers with no Unit/Qty slots and no products.
+            # Keep empty sections that have qty slots so experts can Add / Re-analyse.
+            if (
+                status == "skipped"
+                and analysis_row.get("skip_reason") != "ai_missing_row"
+                and qty_row_count == 0
+            ):
                 continue
+            if (
+                not products
+                and qty_row_count == 0
+                and status in {"skipped", "not_analyzed", "empty"}
+            ):
+                continue
+
+            qty = group.get("qty")
+            unit = group.get("unit")
+            qty_status = str(group.get("qty_status") or "empty")
+            # Fall back to first Unit/Qty slot when group header qty was missing.
+            if qty in (None, "") and qty_rows:
+                qty = qty_rows[0].get("qty")
+                unit = unit or qty_rows[0].get("unit")
+                qty_status = str(qty_rows[0].get("qty_status") or qty_status)
+            show_qty_unit = qty_status in {"numeric", "zero", "rate_only", "multi"} or qty not in (
+                None,
+                "",
+            )
+            if show_qty_unit and qty in (None, ""):
+                qty_display = "—"
+            elif show_qty_unit:
+                qty_display = str(qty)
+            else:
+                qty_display = ""
+            unit_display = str(unit).strip() if unit not in (None, "") else "—"
 
             lines.append(
                 {
@@ -478,18 +525,24 @@ class BOQExtractionDisplayService:
                     "lineage_count": group.get("lineage_count") or 1,
                     "primary_category": category,
                     "primary_sub_category": sub_category,
-                    "qty": group.get("qty"),
-                    "unit": group.get("unit"),
-                    "qty_status": group.get("qty_status"),
+                    "qty": qty,
+                    "unit": unit,
+                    "qty_display": qty_display,
+                    "unit_display": unit_display,
+                    "show_qty_unit": show_qty_unit,
+                    "qty_status": qty_status,
                     "qty_row_count": qty_row_count,
+                    "slot_count": int(group.get("slot_count") or qty_row_count),
                     "rate_only": bool(group.get("rate_only")),
                     "boq_rate": group.get("boq_rate"),
                     "status": status,
                     "skip_reason": analysis_row.get("skip_reason") or "",
                     "product_count": product_total,
                     "multiproduct_review": multiproduct_review,
+                    "needs_product": product_total == 0 and qty_row_count > 0,
                     "products": shaped_products,
                     "activities": [],
+                    "confidence_border": confidence_border,
                     "make_list": _shape_make_list(
                         full_description=group.get("full_description") or "",
                         stored=analysis_row.get("make_list"),

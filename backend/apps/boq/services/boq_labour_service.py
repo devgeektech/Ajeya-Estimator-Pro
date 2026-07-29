@@ -9,7 +9,10 @@ from django.db import transaction
 
 from apps.boq.models import BOQ
 from apps.boq.services.boq_analysis_store import save_boq_analysis_json
-from apps.boq.services.boq_line_output_service import BOQLineOutputService
+from apps.boq.services.boq_line_output_service import (
+    BOQLineOutputService,
+    quantity_is_rate_sum_only,
+)
 from apps.boq.services.labour_detail_retrieval_service import LabourDetailRetrievalService
 from apps.boq.services.serial_normalizer import analysis_fields
 from apps.database_manager.services.activation import get_active_database_version
@@ -170,10 +173,15 @@ class BOQLabourService:
                     is_pending = False
 
                 line_output = BOQLineOutputService.build(
-                    quantity=qty,
+                    quantity=(
+                        product.get("quantity")
+                        if product.get("quantity") not in (None, "")
+                        else qty
+                    ),
                     rate_detail=rate_detail,
                     labour_detail=labour_detail,
                     is_pending=not bool(rate_detail),
+                    rate_only=bool(product.get("rate_only")),
                 )
                 selection["labour_detail"] = labour_detail
                 selection["line_output"] = line_output
@@ -286,9 +294,20 @@ class BOQLabourService:
                         rate_detail.get("final_amount_excl_gst")
                         or rate_detail.get("net_material_rate")
                     )
-                qty_dec = _to_decimal(qty)
+                product_qty = (
+                    product.get("quantity")
+                    if product.get("quantity") not in (None, "")
+                    else qty
+                )
+                qty_dec = _to_decimal(product_qty)
+                use_rate_sum = quantity_is_rate_sum_only(
+                    product_qty,
+                    rate_only=bool(product.get("rate_only")),
+                )
                 material_amount = None
-                if qty_dec is not None and material_rate is not None:
+                if use_rate_sum and material_rate is not None:
+                    material_amount = material_rate
+                elif qty_dec is not None and material_rate is not None:
                     material_amount = qty_dec * material_rate
                 elif base_line.get("material_amount") not in (None, ""):
                     material_amount = _to_decimal(base_line.get("material_amount"))
@@ -297,9 +316,11 @@ class BOQLabourService:
                 labour_amount = None
                 if percent is not None and material_rate is not None:
                     labour_rate = material_rate * (percent / Decimal("100"))
-                if percent is not None and material_amount is not None:
+                if use_rate_sum and labour_rate is not None:
+                    labour_amount = labour_rate
+                elif percent is not None and material_amount is not None and not use_rate_sum:
                     labour_amount = material_amount * (percent / Decimal("100"))
-                elif labour_rate is not None and qty_dec is not None:
+                elif labour_rate is not None and qty_dec is not None and not use_rate_sum:
                     labour_amount = qty_dec * labour_rate
 
                 total_amount = None
@@ -309,7 +330,7 @@ class BOQLabourService:
                     )
 
                 line_output = {
-                    "quantity": qty,
+                    "quantity": product_qty,
                     "material_rate": _format_decimal(material_rate),
                     "labour_rate": _format_decimal(labour_rate),
                     "labour_components": {
@@ -326,6 +347,7 @@ class BOQLabourService:
                     "labour_amount": _format_decimal(labour_amount),
                     "total_amount": _format_decimal(total_amount),
                     "is_blank": material_rate is None and material_amount is None,
+                    "amount_is_rate_sum": use_rate_sum,
                 }
                 selection["labour_detail"] = {
                     "source": "manual",
@@ -401,6 +423,8 @@ class BOQLabourService:
 
     def build_display(self) -> dict[str, Any]:
         """Shape Labour tab: mode, category %, and per-product labour rows."""
+        from apps.boq.services.boq_row_grouping_service import grouped_anchor_rows
+
         boq = self._get_boq()
         analysis = boq.analysis_data or {}
         config = dict(analysis.get("labour_config") or {})
@@ -415,6 +439,10 @@ class BOQLabourService:
             if row.get("row_id")
         }
 
+        group_by_row: dict[str, dict[str, Any]] = {}
+        for group in grouped_anchor_rows(boq.boq_data or {}):
+            group_by_row[str(group.get("row_id") or "")] = group
+
         categories: dict[str, int] = {}
         lines: list[dict[str, Any]] = []
         product_count = 0
@@ -428,8 +456,6 @@ class BOQLabourService:
             boq_row = boq_by_id.get(row_id) or {}
             fields = analysis_fields(boq_row)
             description = _field_from_map(fields, _DESCRIPTION_KEYS) or ""
-            qty = _field_from_map(fields, _QTY_KEYS)
-            unit = _field_from_map(fields, _UNIT_KEYS)
             products_out: list[dict[str, Any]] = []
             for display_number, product in enumerate(
                 analysis_row.get("products") or [],
@@ -442,6 +468,29 @@ class BOQLabourService:
                 line_output = selection.get("line_output") or {}
                 labour_rate = line_output.get("labour_rate")
                 labour_amount = line_output.get("labour_amount")
+                material_rate = line_output.get("material_rate")
+                product_qty = (
+                    product.get("quantity")
+                    if product.get("quantity") not in (None, "")
+                    else line_output.get("quantity")
+                )
+                if product_qty in (None, ""):
+                    product_qty = _field_from_map(fields, _QTY_KEYS)
+                unit_total = None
+                material_dec = _to_decimal(material_rate)
+                labour_dec = _to_decimal(labour_rate)
+                if material_dec is not None or labour_dec is not None:
+                    unit_total = _format_decimal(
+                        (material_dec or Decimal("0")) + (labour_dec or Decimal("0"))
+                    )
+                labour_mode = product.get("labour_mode") or mode
+                labour_percent = product.get("labour_percent")
+                if labour_mode == "manual" and labour_percent not in (None, ""):
+                    mode_label = f"Manual ({labour_percent}%)"
+                elif labour_mode == "manual":
+                    mode_label = "Manual"
+                else:
+                    mode_label = "Auto"
                 tech_key = str(
                     selection.get("tech_key")
                     or ((selection.get("rate_detail") or {}).get("tech_key") or "")
@@ -472,13 +521,17 @@ class BOQLabourService:
                         or "",
                         "tech_key": tech_key,
                         "status": selection.get("status") or "not_searched",
-                        "labour_mode": product.get("labour_mode") or mode,
-                        "labour_percent": product.get("labour_percent"),
-                        "material_rate": line_output.get("material_rate"),
+                        "labour_mode": labour_mode,
+                        "labour_percent": labour_percent,
+                        "mode_label": mode_label,
+                        "quantity": product_qty if product_qty not in (None, "") else "",
+                        "material_rate": material_rate,
+                        "product_rate": material_rate,
                         "material_amount": line_output.get("material_amount"),
                         "labour_rate": labour_rate,
                         "labour_amount": labour_amount,
-                        "total_amount": line_output.get("total_amount"),
+                        "total_amount": unit_total,
+                        "final_amount": line_output.get("total_amount"),
                         "labour_components": line_output.get("labour_components") or {},
                         "notes": selection.get("notes") or "",
                         "has_labour": has_labour,
@@ -486,13 +539,57 @@ class BOQLabourService:
                     }
                 )
             if products_out:
+                group = group_by_row.get(row_id, {})
+                qty = group.get("qty")
+                unit = group.get("unit")
+                qty_status = str(group.get("qty_status") or "empty")
+                qty_rows = list(group.get("qty_rows") or [])
+                if qty in (None, "") and qty_rows:
+                    qty = qty_rows[0].get("qty")
+                    unit = unit or qty_rows[0].get("unit")
+                    qty_status = str(qty_rows[0].get("qty_status") or qty_status)
+                if qty in (None, "") and not qty_rows:
+                    qty = _field_from_map(fields, _QTY_KEYS)
+                    unit = unit or _field_from_map(fields, _UNIT_KEYS)
+                show_qty_unit = qty_status in {"numeric", "zero", "rate_only", "multi"} or qty not in (
+                    None,
+                    "",
+                )
+                if show_qty_unit and qty in (None, ""):
+                    qty_display = "—"
+                elif show_qty_unit:
+                    qty_display = str(qty)
+                else:
+                    qty_display = ""
+                unit_display = str(unit).strip() if unit not in (None, "") else "—"
+
+                for item in products_out:
+                    if item.get("quantity") in (None, ""):
+                        item["quantity"] = qty if qty not in (None, "") else ""
+
+                if any(item.get("highlight_no_labour") for item in products_out):
+                    line_status = "no_labour"
+                elif products_out:
+                    line_status = "matched"
+                else:
+                    line_status = "default"
+
                 lines.append(
                     {
                         "row_id": row_id,
                         "serial": boq_row.get("serial", ""),
-                        "description": description,
+                        "description": group.get("description") or description,
+                        "full_description": group.get("full_description") or description,
+                        "lineage_parts": group.get("lineage_parts") or [],
+                        "lineage_count": int(group.get("lineage_count") or 1),
+                        "slot_count": int(group.get("slot_count") or 0),
                         "qty": qty,
                         "unit": unit,
+                        "qty_display": qty_display,
+                        "unit_display": unit_display,
+                        "show_qty_unit": show_qty_unit,
+                        "product_count": len(products_out),
+                        "line_status": line_status,
                         "products": products_out,
                     }
                 )

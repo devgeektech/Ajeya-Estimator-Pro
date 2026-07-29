@@ -505,6 +505,11 @@
             justify-content: flex-end;
         }
 
+        .extraction-line__qty-unit {
+            white-space: nowrap;
+            font-variant-numeric: tabular-nums;
+        }
+
         .extraction-line__row-actions {
             display: inline-flex;
             flex-wrap: wrap;
@@ -733,6 +738,16 @@
         .analysis-tab-canvas .extraction-line--multiproduct-review {
             border-color: #fdba74;
             box-shadow: inset 3px 0 0 #f97316;
+        }
+
+        .analysis-tab-canvas .extraction-line--confidence-green {
+            border-color: rgba(34, 197, 94, 0.35);
+            box-shadow: inset 3px 0 0 #22c55e;
+        }
+
+        .analysis-tab-canvas .extraction-line--confidence-red {
+            border-color: rgba(239, 68, 68, 0.35);
+            box-shadow: inset 3px 0 0 #ef4444;
         }
 
         .analysis-tab-canvas .extraction-line__description {
@@ -1182,7 +1197,20 @@
 
         .make-vendor-tab-canvas .make-vendor-line__description,
         .labour-tab-canvas .make-vendor-line__description {
+            font-size: .82rem;
+            line-height: 1.3;
+            color: var(--text, #1e293b);
+        }
+
+        .make-vendor-tab-canvas .extraction-lineage,
+        .labour-tab-canvas .extraction-lineage {
             font-size: .78rem;
+            color: #1e293b;
+        }
+
+        .make-vendor-tab-canvas .extraction-lineage__list,
+        .labour-tab-canvas .extraction-lineage__list {
+            color: #1e293b;
             line-height: 1.3;
         }
 
@@ -1260,6 +1288,7 @@
             margin: 0 0 12px;
             padding: 12px 14px;
             border: 1px solid var(--border);
+            border-left: 4px solid var(--primary, #2563eb);
             border-radius: 8px;
             background: var(--surface);
             box-shadow: var(--shadow, 0 1px 2px rgba(0, 0, 0, 0.04));
@@ -1315,10 +1344,20 @@
         .make-vendor-summary__not-found { color: #c2410c; font-weight: 600; }
         .make-vendor-summary__no-match { color: #b91c1c; font-weight: 600; }
         .make-vendor-summary__supplier-review { color: #a16207; font-weight: 600; }
+        .make-vendor-summary__same-price { color: #a16207; font-weight: 600; }
         .make-vendor-summary__muted {
             color: var(--text-muted, #64748b);
             font-weight: 400;
             margin-left: 4px;
+        }
+        .make-vendor-summary__found-rates {
+            color: var(--text-muted, #64748b);
+            font-weight: 400;
+        }
+        .make-vendor-summary__found-rates strong {
+            color: var(--text, #0f172a);
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
         }
 
         .make-vendor-categories {
@@ -1593,6 +1632,26 @@
             background: #f1f5f9;
         }
 
+        .make-vendor-line--matched {
+            border-left: 4px solid #22c55e;
+        }
+
+        .make-vendor-line--not_found {
+            border-left: 4px solid #f59e0b;
+        }
+
+        .make-vendor-line--same_price {
+            border-left: 4px solid #eab308;
+        }
+
+        .make-vendor-line--no_match {
+            border-left: 4px solid #ef4444;
+        }
+
+        .make-vendor-line--no_labour {
+            border-left: 4px solid #f97316;
+        }
+
         .make-vendor-products {
             margin-top: 8px;
         }
@@ -1651,16 +1710,31 @@
         }
 
         .make-vendor-line__header {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 8px 12px;
             margin-bottom: 8px;
             padding-bottom: 6px;
             border-bottom: 1px solid var(--border);
+            align-items: start;
         }
 
         .make-vendor-line__title {
             display: flex;
-            gap: 12px;
+            flex-wrap: wrap;
+            gap: 8px 12px;
             align-items: baseline;
-            margin-bottom: 4px;
+            margin-bottom: 0;
+        }
+
+        .make-vendor-line__meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+            justify-content: flex-end;
+            color: var(--text-muted, #64748b);
+            font-size: .85rem;
         }
 
         .make-vendor-line__serial {
@@ -1668,8 +1742,15 @@
         }
 
         .make-vendor-line__description {
+            grid-column: 1 / -1;
             margin: 0;
-            color: var(--text-muted, #64748b);
+            color: var(--text, #1e293b);
+            font-size: .88rem;
+            line-height: 1.4;
+        }
+
+        .make-vendor-line__header .extraction-lineage {
+            grid-column: 1 / -1;
         }
 
         .make-vendor-card {
@@ -1690,14 +1771,16 @@
             border-radius: 6px;
             padding-left: 10px;
             padding-right: 10px;
-            box-shadow: inset 3px 0 0 #ef4444;
+            /* Outer card already shows the status line; keep inner clean. */
+            box-shadow: none;
         }
         .make-vendor-card--supplier-review {
             background: #fffbeb;
             border-radius: 6px;
             padding-left: 10px;
             padding-right: 10px;
-            box-shadow: inset 3px 0 0 #f59e0b;
+            /* Outer card already shows the status line; keep inner clean. */
+            box-shadow: none;
         }
         .make-vendor-card__supplier-review-note {
             margin: 6px 0 0;
@@ -1707,12 +1790,59 @@
             font-weight: 600;
         }
 
+        .make-vendor-card__same-price-note {
+            margin: 6px 0 0;
+            font-size: .78rem;
+            line-height: 1.35;
+            color: #854d0e;
+            font-weight: 600;
+        }
+
+        .make-vendor-same-price {
+            margin-top: 10px;
+            padding: 10px 12px;
+            border: 1px solid #fde68a;
+            border-radius: 8px;
+            background: #fffbeb;
+        }
+
+        .make-vendor-same-price__title {
+            margin: 0 0 8px;
+            font-size: .86rem;
+            font-weight: 700;
+            color: #854d0e;
+        }
+
+        .make-vendor-same-price__list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-bottom: 10px;
+        }
+
+        .make-vendor-same-price__option {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            margin: 0;
+            font-size: .84rem;
+            cursor: pointer;
+        }
+
+        .make-vendor-same-price__meta {
+            display: block;
+            color: var(--text-muted, #64748b);
+            font-size: .78rem;
+            margin-top: 2px;
+        }
+
         .make-vendor-card--no-labour {
             background: #fff7ed;
             border-radius: 6px;
             padding-left: 10px;
             padding-right: 10px;
-            box-shadow: inset 3px 0 0 #f97316;
+            /* Outer card already shows the status line; keep inner clean. */
+            box-shadow: none;
         }
 
         .labour-rates {
@@ -1819,6 +1949,23 @@
             grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
             gap: 10px;
             align-items: end;
+        }
+
+        .make-vendor-fields .extraction-input--readonly {
+            background: var(--surface-alt, #f8fafc);
+            color: var(--text);
+            font-weight: 600;
+            cursor: default;
+            opacity: 1;
+        }
+
+        .labour-rate-fields {
+            margin-top: 10px;
+        }
+
+        .labour-mode-badge {
+            margin-left: 4px;
+            align-self: center;
         }
 
         .make-vendor-fields__actions {
@@ -2584,11 +2731,13 @@
         .dark-mode .make-vendor-card--no-make,
         .dark-mode .make-vendor-card--no-match {
             background: rgba(239, 68, 68, 0.14);
-            box-shadow: inset 3px 0 0 #ef4444;
+            /* Outer card already shows the status line; keep inner clean. */
+            box-shadow: none;
         }
         .dark-mode .make-vendor-card--supplier-review {
             background: rgba(245, 158, 11, 0.16);
-            box-shadow: inset 3px 0 0 #f59e0b;
+            /* Outer card already shows the status line; keep inner clean. */
+            box-shadow: none;
         }
         .dark-mode .make-vendor-card__supplier-review-note {
             color: #fde68a;
@@ -2596,7 +2745,17 @@
 
         .dark-mode .make-vendor-card--no-labour {
             background: rgba(249, 115, 22, 0.16);
-            box-shadow: inset 3px 0 0 #f97316;
+            /* Outer card already shows the status line; keep inner clean. */
+            box-shadow: none;
+        }
+
+        .dark-mode .make-vendor-summary__found-rates strong {
+            color: #e2e8f0;
+        }
+
+        .dark-mode .make-vendor-fields .extraction-input--readonly {
+            background: #0f172a;
+            color: #e2e8f0;
         }
 
         .dark-mode .make-vendor-card__title,
@@ -2613,7 +2772,7 @@
         .dark-mode .make-vendor-result__notes,
         .dark-mode .make-vendor-rates span,
         .dark-mode .make-vendor-line__description {
-            color: #cbd5e1;
+            color: #e2e8f0;
         }
 
         .dark-mode .make-vendor-card__no-make-note {

@@ -58,6 +58,7 @@ def resolve_confirmed_line(
         rate_detail=rate_detail,
         labour_detail=labour_detail,
         is_pending=False,
+        rate_only=bool(extracted.get("rate_only") or item.get("rate_only")),
     )
     return {
         "rate_detail": rate_detail,

@@ -34,6 +34,93 @@ run analysis → session confirmations → export Excel
 
 ## Session Log
 
+### 2026-07-29 — Labour Rates: Product / Qty / Final + Mode Badge
+
+Completed: Labour fields are Product rate → Labour rate → Total amount → Qty →
+Final amount; mode badge sits after product tabs; "Material rate" renamed to
+"Product rate" on Labour and Make & Vendor.
+Pending: —
+Issues: —
+Next: —
+
+### 2026-07-29 — Labour UI Aligned with Analysis / MV
+
+Completed: Labour section cards now match Analysis/Make & Vendor — Quantity/Unit
++ product count on the right, status left border (green labour set / orange no
+labour), green/red product tabs, removed Category/Sub-category + Tech Key from
+card head, rates as view-only fields in the same row format.
+Pending: —
+Issues: —
+Next: —
+
+### 2026-07-29 — MV Header Qty/Count + Next Buttons
+
+Completed: Make & Vendor section headers match Analysis (Quantity/Unit right,
+product count always far-right). Analysis toolbar button is always "Next".
+Make & Vendor Next appears only until Labour is unlocked (no Labour fallback).
+Pending: —
+Issues: —
+Next: Align Labour section headers the same way when requested.
+
+### 2026-07-29 — Analysis Qty/Unit + Product Count Header
+
+Completed: Every Analysis section card shows product count on the far right;
+Quantity/Unit left of it as "Quantity: X, Unit: Y" (including qty 0 and
+multi-slot sections using the first Unit/Qty row).
+Pending: —
+Issues: —
+Next: —
+
+### 2026-07-29 — Make & Vendor Rate Layout Cleanup
+
+Completed: Summary text is now "Found rates for N products" with N highlighted;
+removed Matched/Tech key/Confidence from product cards; Material rate moved next
+to Supplier as a view-only field in the same row format.
+Pending: —
+Issues: —
+Next: —
+
+### 2026-07-29 — Same-Price Vendor Tie on Make & Vendor
+
+Completed: When lowest-price default (or auto supplier) finds multiple Rate_Master
+rows for the same make at the same amount, products are flagged "Multiple product
+detected in same price" with a radio picker to choose one vendor/product row.
+Also fixed No match cards to keep Make/Supplier dropdowns (typed entry only for
+Not found).
+Pending: Re-apply lowest defaults (Analysis Next) on existing BOQs to surface ties.
+Issues: —
+Next: —
+
+### 2026-07-29 — Text Size Swap: Description ↔ Lineage
+
+Completed: On Make & Vendor and Labour tabs, main section description is now
+darker (.88rem, text color) while grouped-lines lineage is light/faded/small
+(.78rem, muted color). Analysis page styles unchanged.
+Pending: —
+Issues: —
+Next: —
+
+### 2026-07-29 — Grouped Lines on Make & Vendor + Labour
+
+Completed: Make & Vendor and Labour tabs now show the same section format as
+Analysis — serial, "N lines grouped" badge, collapsible "View N grouped lines"
+with lineage parts, full description fallback. Services enriched with
+`grouped_anchor_rows` lineage data.
+Pending: —
+Issues: —
+Next: —
+
+### 2026-07-29 — Section Slots + Empty Re-analyse + 0/RO Pricing
+
+Completed: Section combining keeps single-qty packages (BOQ_2 1.04 panel) intact;
+slots = Unit/Qty rows; products bind qty_row_id/slot_index; detail rows are evidence;
+qty 0 / Rate Only / RO price as material_rate+labour_rate only; empty sections show
+Add product + Re-analyse; extract prompt updated for slots.
+Pending: Re-Analyse BOQ_2 (and other uploads) so existing analysis_data picks up
+new grouping.
+Issues: —
+Next: —
+
 ### 2026-07-29 — Open Detail Tab From Status
 
 Completed: Opening a BOQ from the list (or bare detail URL) lands on the tab
@@ -78,6 +165,17 @@ Analyse (no auto multi-refine); Re-analyse rematches once after expert edits;
 BOQ fields stay source of truth; attribute UI filled from BOQ-mapped schema keys;
 prompts updated.
 Pending: Restart Celery and re-Analyse a BOQ to verify confidence/candidates.
+Issues: —
+Next: —
+
+### 2026-07-29 — Confidence Colored Lines on Analysis
+
+Completed: Analysis cards now show a left confidence line:
+- green only when all extracted products in the section have
+  `attribute_confidence_band="green"`
+- otherwise red
+Multiproduct review keeps its existing review styling.
+Pending: —
 Issues: —
 Next: —
 

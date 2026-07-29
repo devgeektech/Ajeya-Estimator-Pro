@@ -1,4 +1,4 @@
-    <article class="extraction-line extraction-line--{{ line.status }}{% if line.multiproduct_review %} extraction-line--multiproduct-review{% endif %}" id="line-{{ line.row_id }}">
+    <article class="extraction-line extraction-line--{{ line.status }}{% if line.multiproduct_review %} extraction-line--multiproduct-review{% elif line.confidence_border %} extraction-line--confidence-{{ line.confidence_border }}{% endif %}" id="line-{{ line.row_id }}">
         <header class="extraction-line__header">
             <div class="extraction-line__title">
                 <span class="extraction-line__serial">{{ line.serial|default:"—" }}</span>
@@ -10,10 +10,10 @@
                 {% endif %}
             </div>
             <div class="extraction-line__meta">
-                {% if line.qty %}<span>Qty: {{ line.qty }}{% if line.unit %} {{ line.unit }}{% endif %}</span>{% endif %}
-                {% if line.product_count > 1 %}
-                    <span class="badge badge--soft">{{ line.product_count }} products</span>
+                {% if line.show_qty_unit %}
+                <span class="extraction-line__qty-unit">Quantity: {{ line.qty_display }}, Unit: {{ line.unit_display }}</span>
                 {% endif %}
+                <span class="badge badge--soft">{{ line.product_count }} product{{ line.product_count|pluralize }}</span>
                 {% if line.status == 'skipped' and line.skip_reason == 'ai_missing_row' %}
                     <span class="badge badge--yellow">needs re-analyse</span>
                 {% endif %}
@@ -42,15 +42,24 @@
             {% endif %}
         </div>
 
-        {% if can_edit_extraction and line.status != 'skipped' and not line.products %}
-        <div class="extraction-line__actions">
+        {% if can_edit_extraction and not line.products %}
+        <div class="extraction-line__actions extraction-line__actions--empty">
+            {% if line.needs_product or line.status == 'empty' or line.status == 'not_analyzed' or line.skip_reason == 'ai_missing_row' %}
+            <span class="badge badge--yellow">No product fetched</span>
+            {% endif %}
             <button
                 type="button"
                 class="btn btn--xsmall btn--primary"
                 title="Add product"
                 aria-label="Add product"
                 @click="window.extractionAjaxPost('{% url 'boq:extraction_edit' boq.pk %}', { action: 'add_product', row_id: '{{ line.row_id }}' }).then(() => { try { const el = document.getElementById('line-{{ line.row_id }}'); sessionStorage.setItem('boq-detail-scroll-{{ boq.pk }}-analysis', JSON.stringify({ y: window.scrollY, rowId: '{{ line.row_id }}', offset: el ? el.getBoundingClientRect().top : null })); } catch (e) {} window.location.reload(); })"
-            >+</button>
+            >+ Add product</button>
+            <button
+                type="button"
+                class="btn btn--xsmall btn--boq-analyse"
+                title="Re-analyse this section"
+                @click="window.reanalyseEmptyExtractionLine && window.reanalyseEmptyExtractionLine($el, '{% url "boq:row_extract" boq.pk line.row_id %}', '{{ line.row_id }}')"
+            >Re-analyse</button>
         </div>
         {% endif %}
 

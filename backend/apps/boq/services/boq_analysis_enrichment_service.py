@@ -49,6 +49,7 @@ class BOQAnalysisEnrichmentService:
             rate_detail=rate_detail,
             labour_detail=labour_detail,
             is_pending=is_pending,
+            rate_only=bool(extracted.get("rate_only")),
         )
 
         return {

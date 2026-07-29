@@ -3,7 +3,7 @@
 {% else %}
 <p class="make-vendor-hint panel__text panel__text--muted">
     Products are prefilled with lowest approved make/vendor. Adjust from the cascade below.
-    Make &amp; Vendor shows <strong>material rate only</strong> — labour is set on the Labour tab.
+    Make &amp; Vendor shows <strong>product rate only</strong> — labour is set on the Labour tab.
     Same material rate with different make/supplier is highlighted for supplier confirmation.
 </p>
 
@@ -87,7 +87,7 @@
         <div class="make-vendor-subcategory-panel__actions">
             <button
                 type="button"
-                class="btn btn--small btn--boq-analyse"
+                class="btn btn--small btn--primary"
                 :disabled="saving || !category || (!hasApprovedMakes && !String(make || '').trim())"
                 @click="applySubcategory()"
             >
@@ -134,16 +134,39 @@
 <div class="make-vendor-lines" id="make-vendor-lines">
     <h3 class="make-vendor-lines__title">Products</h3>
     {% for line in make_vendor_display.lines %}
-    <article class="make-vendor-line{% if forloop.counter|divisibleby:2 %} make-vendor-line--alt{% endif %}" id="make-vendor-{{ line.row_id }}">
+    <article class="make-vendor-line{% if forloop.counter|divisibleby:2 %} make-vendor-line--alt{% endif %} make-vendor-line--{{ line.line_status|default:'default' }}" id="make-vendor-{{ line.row_id }}">
         <header class="make-vendor-line__header">
             <div class="make-vendor-line__title">
                 <span class="make-vendor-line__serial">{{ line.serial|default:"—" }}</span>
-                {% if line.qty %}<span>Qty: {{ line.qty }}{% if line.unit %} {{ line.unit }}{% endif %}</span>{% endif %}
-                {% if line.products|length > 1 %}
-                <span class="badge badge--dark">{{ line.products|length }} products</span>
+                {% if line.lineage_count > 1 %}
+                    <span class="badge badge--soft">{{ line.lineage_count }} lines grouped</span>
                 {% endif %}
             </div>
+            <div class="make-vendor-line__meta">
+                {% if line.show_qty_unit %}
+                <span class="extraction-line__qty-unit">Quantity: {{ line.qty_display }}, Unit: {{ line.unit_display }}</span>
+                {% endif %}
+                <span class="badge badge--soft">{{ line.product_count }} product{{ line.product_count|pluralize }}</span>
+            </div>
             <p class="make-vendor-line__description">{{ line.description }}</p>
+            {% if line.lineage_count > 1 %}
+            <details class="extraction-lineage">
+                <summary>View {{ line.lineage_count }} grouped lines</summary>
+                <ul class="extraction-lineage__list">
+                    {% for part in line.lineage_parts %}
+                    <li>
+                        <span class="extraction-lineage__serial">{{ part.serial|default:"—" }}</span>
+                        {{ part.description }}
+                    </li>
+                    {% endfor %}
+                </ul>
+            </details>
+            {% elif line.full_description|length > 140 %}
+            <details class="extraction-lineage">
+                <summary>Full description</summary>
+                <p>{{ line.full_description }}</p>
+            </details>
+            {% endif %}
         </header>
 
         {% if line.products %}
@@ -199,7 +222,8 @@
                 :class="{
                     'make-vendor-card--no-make': notFound,
                     'make-vendor-card--no-match': status === 'unmatched' && !notFound,
-                    'make-vendor-card--supplier-review': supplierRateReview
+                    'make-vendor-card--supplier-review': supplierRateReview,
+                    'make-vendor-card--same-price': samePriceTie
                 }"
                 role="tabpanel"
                 x-data="makeVendorForm({
@@ -216,19 +240,23 @@
                     materialRate: '{{ product.line_output.material_rate|default:''|escapejs }}',
                     notFound: {{ product.highlight_no_make|yesno:'true,false' }},
                     allowTypedEntry: {{ product.allow_typed_make_vendor|yesno:'true,false' }},
-                    supplierRateReview: {{ product.supplier_rate_review|yesno:'true,false' }}
+                    supplierRateReview: {{ product.supplier_rate_review|yesno:'true,false' }},
+                    samePriceTie: {{ product.same_price_tie|yesno:'true,false' }},
+                    samePriceChoices: {{ product.same_price_choices_json|default:'[]'|safe }},
+                    rateMasterId: {{ product.rate_master_id|default:'null' }}
                 })"
             >
                 <div class="make-vendor-card__head">
                     <div class="make-vendor-card__heading">
                         <h4 class="make-vendor-card__title">{{ product.description_hint|default:product.summary }}</h4>
-                        <p class="make-vendor-card__taxonomy">
-                            <span class="make-vendor-card__taxonomy-label">Category / Sub-category</span>
-                            <span class="make-vendor-card__taxonomy-value">{{ product.taxonomy_label }}</span>
-                        </p>
                         {% if product.supplier_rate_review %}
                         <p class="make-vendor-card__supplier-review-note">
                             Same material rate appears with a different make/supplier elsewhere — confirm this supplier before continuing.
+                        </p>
+                        {% endif %}
+                        {% if product.same_price_tie %}
+                        <p class="make-vendor-card__same-price-note">
+                            Multiple product detected in same price — choose one vendor below.
                         </p>
                         {% endif %}
                         {% if product.highlight_no_make %}
@@ -237,6 +265,12 @@
                         <p class="make-vendor-card__no-make-note">No Rate_Master match — edit make/supplier and Find rates again.</p>
                         {% endif %}
                     </div>
+                    <span
+                        class="badge badge--yellow"
+                        x-show="samePriceTie"
+                        x-cloak
+                        title="Multiple Rate_Master rows share the lowest price"
+                    >Same price</span>
                     <span
                         class="badge badge--yellow"
                         x-show="supplierRateReview"
@@ -252,8 +286,8 @@
                         class="badge"
                         x-show="!notFound"
                         :class="{
-                            'badge--green': status === 'matched',
-                            'badge--yellow': status === 'pending',
+                            'badge--yellow': samePriceTie || status === 'pending',
+                            'badge--green': !samePriceTie && status === 'matched',
                             'badge--red': status === 'unmatched',
                             'badge--gray': status === 'not_searched'
                         }"
@@ -328,6 +362,17 @@
                         </select>
                     </label>
                     {% endif %}
+                    <label class="extraction-field">
+                        <span class="extraction-field__label">Product rate</span>
+                        <input
+                            type="text"
+                            class="extraction-input extraction-input--readonly"
+                            :value="materialRate || '—'"
+                            readonly
+                            tabindex="-1"
+                            aria-readonly="true"
+                        >
+                    </label>
                     <div class="make-vendor-fields__actions">
                         <button
                             type="button"
@@ -342,16 +387,34 @@
                     </div>
                 </div>
 
-                <div class="make-vendor-result" x-show="status !== 'not_searched'" x-cloak>
-                    <div class="make-vendor-result__meta">
-                        <p x-show="matchedSummary" x-text="'Matched: ' + matchedSummary"></p>
-                        <p x-show="techKey" x-text="'Tech key: ' + techKey"></p>
-                        <p x-show="confidence != null" x-text="'Confidence: ' + Math.round(confidence) + '%'"></p>
-                        <p class="make-vendor-result__notes" x-show="notes" x-text="notes"></p>
+                <div class="make-vendor-same-price" x-show="samePriceTie" x-cloak>
+                    <p class="make-vendor-same-price__title">Choose one product at this price</p>
+                    <div class="make-vendor-same-price__list">
+                        <template x-for="choice in samePriceChoices" :key="choice.rate_master_id">
+                            <label class="make-vendor-same-price__option">
+                                <input
+                                    type="radio"
+                                    name="same-price-{{ line.row_id }}-{{ product.product_index }}"
+                                    :value="choice.rate_master_id"
+                                    x-model.number="chosenRateMasterId"
+                                >
+                                <span>
+                                    <strong x-text="(choice.supplier || '—') + ' · ' + (choice.make || '—')"></strong>
+                                    <span class="make-vendor-same-price__meta"
+                                          x-text="'Rate ' + choice.amount + (choice.summary ? ' · ' + choice.summary : '')"></span>
+                                </span>
+                            </label>
+                        </template>
                     </div>
-                    <div class="make-vendor-rates make-vendor-rates--material-only">
-                        <div><span>Material rate</span><strong x-text="materialRate || '—'"></strong></div>
-                    </div>
+                    <button
+                        type="button"
+                        class="btn btn--small btn--primary"
+                        :disabled="saving || !chosenRateMasterId"
+                        @click="resolveSamePrice()"
+                    >
+                        <span x-show="!saving">Use selected vendor</span>
+                        <span x-show="saving" x-cloak>Saving…</span>
+                    </button>
                 </div>
             </section>
             </div>
@@ -541,13 +604,50 @@ document.addEventListener('alpine:init', () => {
         notFound: Boolean(config.notFound),
         allowTypedEntry: Boolean(config.allowTypedEntry),
         supplierRateReview: Boolean(config.supplierRateReview),
+        samePriceTie: Boolean(config.samePriceTie),
+        samePriceChoices: Array.isArray(config.samePriceChoices) ? config.samePriceChoices : [],
+        chosenRateMasterId: config.rateMasterId || null,
         saving: false,
         error: '',
         get statusLabel() {
+            if (this.samePriceTie) return 'Same price';
             if (this.status === 'matched') return 'Matched';
             if (this.status === 'pending') return 'Review';
             if (this.status === 'unmatched') return 'No match';
             return 'Select make';
+        },
+        async resolveSamePrice() {
+            if (this.saving || !this.chosenRateMasterId) return;
+            this.saving = true;
+            this.error = '';
+            try {
+                const body = new FormData();
+                body.append('ajax', '1');
+                body.append('action', 'resolve_same_price');
+                body.append('row_id', this.rowId);
+                body.append('product_index', String(this.productIndex));
+                body.append('rate_master_id', String(this.chosenRateMasterId));
+                const response = await fetch(this.url, {
+                    method: 'POST',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-CSRFToken': csrfToken(),
+                        'Accept': 'application/json',
+                    },
+                    credentials: 'same-origin',
+                    body,
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || !data.ok) {
+                    throw new Error(data.message || 'Failed to save choice.');
+                }
+                window.location.assign(
+                    '{% url "boq:detail" boq.pk %}?tab=make_vendor&_t=' + Date.now()
+                );
+            } catch (error) {
+                this.error = error.message || 'Failed to save choice.';
+                this.saving = false;
+            }
         },
         async findRates() {
             if (this.saving) return;
@@ -594,7 +694,7 @@ document.addEventListener('alpine:init', () => {
                 const selection = data.selection || {};
                 // Refresh when not-found clears or rates match — supplier-review
                 // highlights compare material rates across all products.
-                if (wasNotFound || selection.status === 'matched') {
+                if (wasNotFound || selection.status === 'matched' || selection.same_price_tie) {
                     window.location.assign(
                         '{% url "boq:detail" boq.pk %}?tab=make_vendor&_t=' + Date.now()
                     );
@@ -605,12 +705,17 @@ document.addEventListener('alpine:init', () => {
                 this.techKey = selection.tech_key || '';
                 this.matchedSummary = selection.summary || '';
                 this.notes = selection.notes || '';
+                this.samePriceTie = Boolean(selection.same_price_tie);
+                this.samePriceChoices = Array.isArray(selection.same_price_choices)
+                    ? selection.same_price_choices
+                    : [];
+                this.chosenRateMasterId = selection.rate_master_id || null;
                 if (selection.make) this.make = selection.make;
                 if (selection.supplier != null) this.supplier = selection.supplier || '';
                 const line = selection.line_output || {};
                 this.materialRate = line.material_rate || '';
-                // Keep free-text editable after no-match / manual retries.
-                if (this.status === 'unmatched') {
+                // Keep free-text editable after not-found retries only.
+                if (this.notFound || this.allowTypedEntry) {
                     this.allowTypedEntry = true;
                 }
                 this.$dispatch('make-vendor-status', {

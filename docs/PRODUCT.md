@@ -117,7 +117,21 @@ Step 1 — Analyse:       rows → AI extract products only → attributes (Anal
 Step 2 — Make & Vendor: select Make + Supplier → exact Rate_Master + Tech_Key
 Step 3 — Labour:        Auto (Labour_Master by Tech_Key) or Manual (% of material by category)
 Step 4 — Review:        (material + labour) × quantity → Export Excel
+                         (qty 0 / Rate Only / RO → material_rate + labour_rate only)
 ```
+
+**Section combining (Analyse):**
+
+- A **section** is a serial package (e.g. `1.04`, `1.1`) plus owned detail rows until
+  the next peer serial.
+- **Slots** = rows with Unit+Qty filled (`0`, numeric, Rate Only / RO). One slot →
+  one product; N slots → N products.
+- Detail/reference rows without qty are **evidence** for those products (not
+  separate priced lines). Single-qty packages (e.g. long panels) are never split
+  into blank-serial fragments.
+- Products keep `quantity`, `quantity_unit`, `qty_row_id`, `slot_index`, `rate_only`
+  in `analysis_data` through Make & Vendor → Labour → Review.
+- Empty sections with qty slots stay visible: **+ Add product** and **Re-analyse**.
 
 **Status pipeline** (persisted on `BOQ.status`):
 
@@ -196,9 +210,13 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
 - **Unit vs quantity_unit:** product ``unit`` is the Rate_Master measurement unit
   (mm, cm, NB, inch, …) used for matching; BOQ row UOM (Each, Nos, Mtr) maps to
   ``quantity`` / ``quantity_unit`` only — never into product ``unit``.
-  Quantity comes from filled Unit/Qty cells inside the lineage section
-  (including ``0`` and ``Rate Only``); for Rate Only the BOQ rate cell is stored
-  as ``boq_rate``. When several children have qty, each product gets its own.
+  Quantity comes from filled Unit/Qty **slots** inside the section
+  (including ``0`` and ``Rate Only`` / ``RO``); for Rate Only the BOQ rate cell is
+  stored as ``boq_rate``. Each product binds to its own slot.
+- **Pricing:** normal lines use ``(material_rate + labour_rate)`` via amounts
+  ``material_rate × qty`` and ``labour_rate × qty``. For qty ``0`` or Rate Only / RO,
+  Review/Export show the **sum of unit rates only** (no quantity multiply), flagged
+  with ``amount_is_rate_sum``.
 - **Class vs material:** product ``class`` maps to Rate_Master ``Class`` (often
   material: MS, SS, CI, GI, …). Material from BOQ goes into ``class``, not
   free-text attribute keys.
@@ -221,18 +239,23 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
   values and run **Find rates** against Rate_Master. The cascade panel also accepts
   typed make/supplier for that scope. After a manual entry, the product leaves the
   not-found summary bucket (counts as filtered/manual). Free-text fields stay
-  editable so make/supplier can be changed and Find rates re-run (also for
-  **No match**).
+  editable so make/supplier can be changed and Find rates re-run. **No match**
+  cards keep Make/Supplier dropdowns (approved options) for retry.
 - **Sub-category makes:** top panel lists **category → sub-category → make → supplier**
   (only categories/sub-categories present in Analysis extraction). **Apply to sub-category**
   sets make/supplier on every product in that sub-category and loads rates. Default make is
   **Lowest price** (approved-make constrained when a make list exists). Empty supplier also
-  picks the lowest-priced Rate_Master row for the chosen make. Applied filters list
+  picks the lowest-priced Rate_Master row for the chosen make. When two or more
+  Rate_Master rows for that make share the same lowest price (typically different
+  vendors), the product is flagged **Multiple product detected in same price** and
+  the expert must choose one. Applied filters list
   shows manual cascade applies.
 - Selection persisted per product as `selected_make`, `selected_supplier`, `vendor_selection`;
   sub-category choices stored in `analysis_data.subcategory_make_selections`.
 - AI does not choose make/supplier or calculate prices — rates are read from the master DB.
-- Make & Vendor UI shows **material rate only** (labour charges belong on the Labour tab).
+- Make & Vendor UI shows **product rate only** in a view-only field beside
+  Make/Supplier (labour charges belong on the Labour tab). Confidence / tech key
+  are not shown on this tab — tech_key stays on the product JSON for later steps.
 - When two or more matched products share the **same material rate** but use
   **different make/supplier** pairs, those cards are highlighted for **supplier
   review/confirmation** (summary count included).

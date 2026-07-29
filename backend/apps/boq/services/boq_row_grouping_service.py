@@ -33,7 +33,10 @@ _SPEC_QTY_LINE = re.compile(
     r"voltage\s*:|rpm\s*:|capacity\s*:",
     re.IGNORECASE,
 )
-_RATE_ONLY = re.compile(r"^\s*rate\s*only\s*$", re.IGNORECASE)
+_RATE_ONLY = re.compile(
+    r"^\s*(rate\s*only|r\.?\s*o\.?|ro)\s*$",
+    re.IGNORECASE,
+)
 _TOTAL_LABEL = re.compile(r"^\s*totals?\s*:?\s*$", re.IGNORECASE)
 _STRUCTURAL_SERIAL = re.compile(r"^(\d+(?:\.\d+)*)$")
 _DOTTED_STRUCTURAL = re.compile(r"^(\d+(?:\.\d+)+)$")
@@ -389,6 +392,63 @@ def _qty_rows_in_lineage(
     return found
 
 
+def build_slots_for_section(
+    index: dict[str, dict[str, Any]],
+    owned_ids: list[str],
+    qty_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """
+    One product slot per filled Unit/Qty row.
+
+    Context rows between the previous slot and this qty row are bound as local
+    evidence (specs, letter headers, size lines). Shared section text stays on
+    the section ``lineage_parts`` / ``full_description``.
+    """
+    if not qty_rows:
+        return []
+
+    qty_id_set = {str(item.get("row_id") or "") for item in qty_rows}
+    owned = [str(item) for item in owned_ids]
+    slots: list[dict[str, Any]] = []
+    cursor = 0
+
+    for slot_index, qty_row in enumerate(qty_rows):
+        qty_row_id = str(qty_row.get("row_id") or "")
+        try:
+            qty_pos = owned.index(qty_row_id)
+        except ValueError:
+            qty_pos = cursor
+
+        local_ids: list[str] = []
+        for row_id in owned[cursor : qty_pos + 1]:
+            if row_id == qty_row_id:
+                continue
+            if row_id in qty_id_set:
+                continue
+            local_ids.append(row_id)
+
+        evidence_ids = [*local_ids, qty_row_id] if qty_row_id else list(local_ids)
+        slots.append(
+            {
+                "slot_index": slot_index,
+                "slot_id": f"{qty_row_id or 'slot'}:{slot_index}",
+                "qty_row_id": qty_row_id,
+                "serial": qty_row.get("serial") or "",
+                "description": qty_row.get("description") or "",
+                "qty": qty_row.get("qty"),
+                "unit": qty_row.get("unit"),
+                "qty_status": qty_row.get("qty_status"),
+                "rate_only": bool(qty_row.get("rate_only")),
+                "boq_rate": qty_row.get("boq_rate"),
+                "context_row_ids": local_ids,
+                "evidence_text": combine_row_descriptions(index, evidence_ids),
+            }
+        )
+        cursor = qty_pos + 1
+
+    return slots
+
+
 def anchor_qty_unit(index: dict[str, dict[str, Any]], anchor_row_id: str) -> tuple[Any, Any]:
     """Prefer qty on the anchor; otherwise first descendant with a quantity cell."""
     row = index.get(anchor_row_id) or {}
@@ -438,6 +498,7 @@ def _emit_lineage_section(
     ]
     lineage_ids = [*ancestor_ids, *owned_ids]
     qty_rows = _qty_rows_in_lineage(index, owned_ids)
+    slots = build_slots_for_section(index, owned_ids, qty_rows)
 
     qty = None
     unit = None
@@ -454,7 +515,14 @@ def _emit_lineage_section(
         boq_rate = only.get("boq_rate")
         qty_row_id = only["row_id"]
     elif len(qty_rows) > 1:
+        # Header shows the first Unit/Qty slot; products bind to their own slots.
+        first = qty_rows[0]
+        qty = first["qty"]
+        unit = first["unit"]
         qty_status = "multi"
+        rate_only = bool(first.get("rate_only"))
+        boq_rate = first.get("boq_rate")
+        qty_row_id = first["row_id"]
 
     return {
         "row_id": root_id,
@@ -473,13 +541,24 @@ def _emit_lineage_section(
         "boq_rate": boq_rate,
         "qty_row_id": qty_row_id,
         "qty_rows": qty_rows,
+        "slots": slots,
+        "slot_count": len(slots),
         "has_children": len(owned_ids) > 1,
     }
 
 
 def _group_exceeds_budget(section: dict[str, Any]) -> bool:
-    lines = int(section.get("lineage_count") or len(section.get("group_ids") or []))
+    """
+    Oversized multi-product trees may split at structural/lettered children.
+
+    Single Unit/Qty packages (e.g. BOQ_2 ``1.04`` panel) must stay one section —
+    blank detail rows are evidence, not separate products.
+    """
     qty_count = len(section.get("qty_rows") or [])
+    if qty_count <= 1:
+        return False
+
+    lines = int(section.get("lineage_count") or len(section.get("group_ids") or []))
     chars = len(str(section.get("full_description") or ""))
     return (
         lines > MAX_LINEAGE_LINES
@@ -521,7 +600,12 @@ def _split_child_candidates(
     index: dict[str, dict[str, Any]],
     children: dict[str, list[str]],
 ) -> list[dict[str, Any]]:
-    """Prefer dotted structural packages (1.1, 2.1); else lettered; else plain kids."""
+    """
+    Prefer dotted structural packages (1.1 / 2.1); else lettered supply items.
+
+    Do not split on blank-serial plain text children — those are package details
+    (panel incomings/outgoings) that belong with the parent section.
+    """
     direct = [index[cid] for cid in children.get(root_id, []) if cid in index]
     structural = [
         row
@@ -533,9 +617,6 @@ def _split_child_candidates(
     lettered = [row for row in direct if _is_letter_product_child(row)]
     if lettered:
         return lettered
-    plain = [row for row in direct if _is_plain_product_child(row)]
-    if len(plain) >= 2:
-        return plain
     return []
 
 

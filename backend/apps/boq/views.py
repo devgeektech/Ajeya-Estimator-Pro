@@ -889,6 +889,43 @@ class BOQMakeVendorSelectView(LoginRequiredMixin, View):
                 messages.success(request, message)
                 return HttpResponseRedirect(redirect_url)
 
+            if action == "resolve_same_price":
+                row_id = (request.POST.get("row_id") or "").strip()
+                try:
+                    product_index = int(request.POST.get("product_index") or "0")
+                    rate_master_id = int(request.POST.get("rate_master_id") or "0")
+                except ValueError:
+                    message = "Invalid same-price selection."
+                    if ajax:
+                        return _extraction_edit_json_error(message)
+                    messages.error(request, message)
+                    return HttpResponseRedirect(redirect_url)
+                if not row_id or not rate_master_id:
+                    message = "Choose one of the same-price options."
+                    if ajax:
+                        return _extraction_edit_json_error(message)
+                    messages.error(request, message)
+                    return HttpResponseRedirect(redirect_url)
+                result = service.resolve_same_price_choice(
+                    row_id=row_id,
+                    product_index=product_index,
+                    rate_master_id=rate_master_id,
+                )
+                message = (
+                    f"Selected supplier {result.get('supplier') or '—'} "
+                    f"({result.get('make') or '—'}) for same-price tie."
+                )
+                if ajax:
+                    return _extraction_edit_json_ok(
+                        message,
+                        row_id=row_id,
+                        product_index=product_index,
+                        selection=result,
+                        reload=True,
+                    )
+                messages.success(request, message)
+                return HttpResponseRedirect(redirect_url)
+
             if action == "apply_category":
                 category = (request.POST.get("category") or "").strip()
                 make = (request.POST.get("make") or "").strip()

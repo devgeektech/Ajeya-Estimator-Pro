@@ -2,6 +2,54 @@
 
 Meaningful product and technical changes only. Older history is in git.
 
+## 2026-07-29 — Labour UI Aligned with Analysis / MV
+
+- Labour section headers match Analysis/Make & Vendor (Quantity/Unit + product
+  count). Outer status line green when labour is set, orange when missing.
+- Product tabs use green/red like Make & Vendor; Category/Sub-category and Tech
+  Key removed from card head; rates shown as view-only fields.
+
+## 2026-07-29 — Make & Vendor Rate Layout Cleanup
+
+- Summary: "Found rates for **N** products" (number highlighted).
+- Removed Matched / Tech key / Confidence from Make & Vendor product cards.
+- Material rate sits beside Supplier as a view-only field; tech_key remains on
+  product JSON for later pipeline steps.
+
+## 2026-07-29 — Same-Price Vendor Tie on Make & Vendor
+
+- Lowest-price defaults now detect when multiple Rate_Master rows for the same
+  make share the lowest amount; UI flags "Multiple product detected in same
+  price" and lets the expert pick one vendor/product.
+
+## 2026-07-29 — Text Styling: Darker Description + Faded Lineage
+
+- Make & Vendor / Labour: main description darker (.88rem, text color);
+  grouped-lines lineage light/faded/small (.78rem, muted). Analysis unchanged.
+
+## 2026-07-29 — Confidence Colored Lines on Analysis
+
+- Analysis cards now show a left confidence line:
+  - green only when all extracted products in the section have
+    `attribute_confidence_band="green"`
+  - otherwise red
+  Multiproduct review keeps the existing review styling.
+
+## 2026-07-29 — Grouped Lines on Make & Vendor + Labour
+
+- Make & Vendor and Labour tabs show the same section format as Analysis:
+  serial badge, "N lines grouped", collapsible "View N grouped lines" with
+  lineage parts, and full description fallback for long single-line sections.
+
+## 2026-07-29 — Section Slots + Empty Re-analyse + 0/RO Pricing
+
+- Section combining no longer splits single Unit/Qty packages on blank detail rows
+  (fixes BOQ_2 `1.04` panel); multi-qty trees still split at `1.1` / lettered kids.
+- Each filled Unit/Qty row is a product **slot** with bound evidence; products store
+  `qty_row_id` / `slot_index` / `rate_only` for Make & Vendor → Labour → Review.
+- Qty `0` and Rate Only / RO show material_rate + labour_rate only (no × qty).
+- Empty sections with slots keep **+ Add product** and **Re-analyse**.
+
 ## 2026-07-29 — Open Detail Tab From Status
 
 - Opening a BOQ detail page defaults to the tab that matches status (Analysed →

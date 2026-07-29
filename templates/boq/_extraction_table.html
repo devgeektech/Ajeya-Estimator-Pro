@@ -203,6 +203,45 @@ document.addEventListener('alpine:init', () => {
         }
     };
 
+    window.reanalyseEmptyExtractionLine = async function reanalyseEmptyExtractionLine(fromEl, rematchUrl, rowId) {
+        const btn = fromEl;
+        if (btn && btn.dataset.busy === '1') {
+            return;
+        }
+        if (btn) {
+            btn.dataset.busy = '1';
+            btn.disabled = true;
+            btn.dataset.prevLabel = btn.textContent;
+            btn.textContent = 'Re-analysing…';
+        }
+        try {
+            await window.extractionAjaxPost(rematchUrl, {});
+            try {
+                const el = rowId ? document.getElementById('line-' + rowId) : null;
+                const keyMatch = (rematchUrl || '').match(/\/boqs\/(\d+)\//);
+                const boqPk = keyMatch ? keyMatch[1] : '';
+                sessionStorage.setItem(
+                    'boq-detail-scroll-' + boqPk + '-analysis',
+                    JSON.stringify({
+                        y: window.scrollY,
+                        rowId: rowId || '',
+                        offset: el ? el.getBoundingClientRect().top : null,
+                    })
+                );
+            } catch (e) { /* ignore */ }
+            window.location.reload();
+        } catch (error) {
+            alert(error.message || 'Re-analyse failed.');
+            if (btn) {
+                btn.dataset.busy = '0';
+                btn.disabled = false;
+                if (btn.dataset.prevLabel) {
+                    btn.textContent = btn.dataset.prevLabel;
+                }
+            }
+        }
+    };
+
     window.removeActiveExtractionProduct = async function removeActiveExtractionProduct(fromEl, editUrl, boqPk) {
         const data = window.getActiveExtractionProductData(fromEl);
         if (!data) {

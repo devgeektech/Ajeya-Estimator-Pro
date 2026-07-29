@@ -171,24 +171,37 @@ def _apply_row_qty_unit(
     qty_status: str | None = None,
     boq_rate: Any = None,
     qty_rows: list[dict[str, Any]] | None = None,
+    slots: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """
-    Fill quantity / quantity_unit from BOQ qty row(s).
+    Fill quantity / quantity_unit from BOQ qty slots.
 
-    Single filled qty in the lineage → apply to all products (usual case).
-    Multiple filled qty rows → zip onto products in order so each child product
-    (1.1, 1.2, …) keeps its own amount / Rate Only / zero.
+    One Unit/Qty row = one product slot. Prefer binding by ``source_row_id`` /
+    ``qty_row_id`` when present; otherwise zip products to slots in order.
+    Persist ``slot_index`` / ``qty_row_id`` so Make & Vendor → Labour → Review
+    keep the same priced line identity.
     """
     if not products:
         return products
 
-    rows = list(qty_rows or [])
+    rows = list(slots or qty_rows or [])
     if len(rows) > 1:
+        by_qty_row = {
+            str(item.get("qty_row_id") or item.get("row_id") or ""): item
+            for item in rows
+            if item.get("qty_row_id") or item.get("row_id")
+        }
+        used_slot_ids: set[str] = set()
         filled: list[dict[str, Any]] = []
         for index, product in enumerate(products):
             item = _normalize_product_fields(product)
-            if index < len(rows):
+            qty_row = None
+            source_id = str(item.get("source_row_id") or item.get("qty_row_id") or "")
+            if source_id and source_id in by_qty_row:
+                qty_row = by_qty_row[source_id]
+            elif index < len(rows):
                 qty_row = rows[index]
+            if qty_row:
                 item = _apply_one_qty(
                     item,
                     qty=qty_row.get("qty"),
@@ -196,8 +209,13 @@ def _apply_row_qty_unit(
                     qty_status=qty_row.get("qty_status"),
                     boq_rate=qty_row.get("boq_rate"),
                 )
-                if qty_row.get("row_id") and _is_blank_value(item.get("source_row_id")):
-                    item["source_row_id"] = qty_row.get("row_id")
+                slot_row_id = str(qty_row.get("qty_row_id") or qty_row.get("row_id") or "")
+                if slot_row_id and _is_blank_value(item.get("source_row_id")):
+                    item["source_row_id"] = slot_row_id
+                item["qty_row_id"] = slot_row_id or item.get("qty_row_id")
+                item["slot_index"] = qty_row.get("slot_index", index)
+                item["slot_id"] = qty_row.get("slot_id") or item.get("slot_id")
+                used_slot_ids.add(slot_row_id)
             filled.append(item)
         return filled
 
@@ -207,6 +225,23 @@ def _apply_row_qty_unit(
         unit = only.get("unit", unit)
         qty_status = only.get("qty_status", qty_status)
         boq_rate = only.get("boq_rate", boq_rate)
+        slot_row_id = str(only.get("qty_row_id") or only.get("row_id") or "")
+        return [
+            {
+                **_apply_one_qty(
+                    _normalize_product_fields(product),
+                    qty=qty,
+                    unit=unit,
+                    qty_status=qty_status,
+                    boq_rate=boq_rate,
+                ),
+                "qty_row_id": slot_row_id or product.get("qty_row_id"),
+                "slot_index": only.get("slot_index", 0),
+                "slot_id": only.get("slot_id"),
+                "source_row_id": product.get("source_row_id") or slot_row_id,
+            }
+            for product in products
+        ]
 
     return [
         _apply_one_qty(
@@ -510,6 +545,8 @@ def _compact_anchor_payload(group: dict[str, Any]) -> dict[str, Any]:
         "rate_only": bool(group.get("rate_only")),
         "boq_rate": group.get("boq_rate"),
         "qty_rows": group.get("qty_rows") or [],
+        "slots": group.get("slots") or [],
+        "slot_count": int(group.get("slot_count") or len(group.get("slots") or [])),
         "heuristic_skip": should_skip_anchor_group(
             group,
             lineage_has_qty=bool(group.get("lineage_has_qty")),
@@ -744,6 +781,7 @@ class BOQExtractionService:
                 qty_status=group.get("qty_status"),
                 boq_rate=group.get("boq_rate"),
                 qty_rows=list(group.get("qty_rows") or []),
+                slots=list(group.get("slots") or []),
             )
             row["activities"] = []
             row.setdefault("skip_matching", not row.get("products"))

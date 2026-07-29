@@ -1,6 +1,7 @@
 """Make & supplier selection after Analysis — exact Rate_Master match + rates."""
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import Any
@@ -66,6 +67,61 @@ def _normalize_material_rate_key(value: Any) -> str:
         return f"{float(cleaned):.4f}"
     except (TypeError, ValueError):
         return _normalize_text(text)
+
+
+SAME_PRICE_TIE_LABEL = "Multiple product detected in same price"
+
+
+def _build_same_price_choices(
+    scored: list[tuple[float, Rate_Master, dict[str, Any], float]],
+) -> list[dict[str, Any]]:
+    """
+    When lowest-price pick has multiple Rate_Master rows at the same amount
+    for the winning make (typically different vendors), return selectable choices.
+    """
+    if len(scored) < 2:
+        return []
+    lowest_amount = float(scored[0][3])
+    winner_make = _normalize_text(scored[0][1].Make)
+    ties: list[dict[str, Any]] = []
+    seen_ids: set[int] = set()
+    for confidence, rate, _breakdown, amount in scored:
+        if abs(float(amount) - lowest_amount) > 0.0001:
+            continue
+        if winner_make and _normalize_text(rate.Make) != winner_make:
+            continue
+        rate_id = int(rate.pk)
+        if rate_id in seen_ids:
+            continue
+        seen_ids.add(rate_id)
+        ties.append(
+            {
+                "rate_master_id": rate_id,
+                "make": str(rate.Make or "").strip(),
+                "supplier": str(rate.Supplier or "").strip(),
+                "amount": round(float(amount), 4),
+                "tech_key": str(rate.Tech_Key or "").strip(),
+                "confidence": round(float(confidence), 2),
+                "summary": _product_summary(
+                    {
+                        "category": rate.Category,
+                        "sub_category": rate.Sub_Category,
+                        "class": rate.Class,
+                        "size": rate.Size,
+                        "unit": rate.Unit,
+                        "capacity": rate.Capacity,
+                    }
+                ),
+            }
+        )
+    # Need at least two distinct vendors (or product rows) at that price.
+    if len(ties) < 2:
+        return []
+    suppliers = {_normalize_text(item.get("supplier")) for item in ties}
+    # Flag when multiple vendors share the price, or multiple products same vendor.
+    if len(suppliers) >= 2 or len(ties) >= 2:
+        return ties
+    return []
 
 
 def _flag_same_material_rate_supplier_review(lines: list[dict[str, Any]]) -> int:
@@ -185,6 +241,8 @@ class MakeVendorSelectionService:
         return bool(self.make_list_service.has_constraints)
 
     def build_display(self) -> dict[str, Any]:
+        from apps.boq.services.boq_row_grouping_service import grouped_anchor_rows
+
         boq = self._get_boq()
         analysis = boq.analysis_data or {}
         if not analysis.get("rows"):
@@ -197,6 +255,12 @@ class MakeVendorSelectionService:
             if row.get("row_id")
         }
 
+        # Build lineage lookup from BOQ grouping so Make & Vendor shows the same
+        # section format as Analysis (grouped lines, description, slots).
+        group_by_row: dict[str, dict[str, Any]] = {}
+        for group in grouped_anchor_rows(boq.boq_data or {}):
+            group_by_row[str(group.get("row_id") or "")] = group
+
         lines: list[dict[str, Any]] = []
         selected_count = 0
         matched_count = 0
@@ -205,6 +269,7 @@ class MakeVendorSelectionService:
         filtered_count = 0
         not_found_count = 0
         no_match_count = 0
+        same_price_tie_count = 0
 
         for boq_row in _ordered_boq_rows(boq.boq_data or {}):
             row_id = str(boq_row.get("row_id") or "")
@@ -239,11 +304,6 @@ class MakeVendorSelectionService:
                 match_status = str(shaped.get("match_status") or "not_searched")
                 if match_status == "matched":
                     matched_count += 1
-                # Mutually exclusive summary buckets (sum == product_count):
-                # not_found → no approved makes in make list for this taxonomy
-                # no_match  → approved make available, but Rate_Master match failed
-                # filtered  → manual cascade apply
-                # default   → lowest-price / Next defaults (matched or still pending)
                 make_status = shaped.get("make_status") or "default"
                 if make_status == "not_found":
                     not_found_count += 1
@@ -253,17 +313,66 @@ class MakeVendorSelectionService:
                     filtered_count += 1
                 else:
                     default_count += 1
+                if shaped.get("same_price_tie"):
+                    same_price_tie_count += 1
                 shaped_products.append(shaped)
+
+            # Determine line-level status for border coloring.
+            if any(p.get("highlight_no_make") for p in shaped_products):
+                line_status = "not_found"
+            elif any(p.get("same_price_tie") for p in shaped_products):
+                line_status = "same_price"
+            elif any(str(p.get("match_status") or "") == "unmatched" for p in shaped_products):
+                line_status = "no_match"
+            elif all(str(p.get("match_status") or "") == "matched" for p in shaped_products) and shaped_products:
+                line_status = "matched"
+            else:
+                line_status = "default"
+
+            group = group_by_row.get(row_id, {})
+            # Prefer grouped Unit/Qty (same as Analysis), including qty 0 / Rate Only.
+            qty = group.get("qty")
+            unit = group.get("unit")
+            qty_status = str(group.get("qty_status") or "empty")
+            qty_rows = list(group.get("qty_rows") or [])
+            if qty in (None, "") and qty_rows:
+                qty = qty_rows[0].get("qty")
+                unit = unit or qty_rows[0].get("unit")
+                qty_status = str(qty_rows[0].get("qty_status") or qty_status)
+            if qty in (None, "") and not qty_rows:
+                # Fall back to the BOQ row cells when grouping has no qty slot.
+                qty = _field_from_map(fields, _QTY_KEYS)
+                unit = unit or _field_from_map(fields, _UNIT_KEYS)
+            show_qty_unit = qty_status in {"numeric", "zero", "rate_only", "multi"} or qty not in (
+                None,
+                "",
+            )
+            if show_qty_unit and qty in (None, ""):
+                qty_display = "—"
+            elif show_qty_unit:
+                qty_display = str(qty)
+            else:
+                qty_display = ""
+            unit_display = str(unit).strip() if unit not in (None, "") else "—"
 
             lines.append(
                 {
                     "row_id": row_id,
                     "serial": boq_row.get("serial") or "",
                     "depth": boq_row.get("depth") or 0,
-                    "description": description,
+                    "description": group.get("description") or description,
+                    "full_description": group.get("full_description") or description,
+                    "lineage_parts": group.get("lineage_parts") or [],
+                    "lineage_count": int(group.get("lineage_count") or 1),
+                    "slot_count": int(group.get("slot_count") or 0),
                     "qty": qty,
                     "unit": unit,
+                    "qty_display": qty_display,
+                    "unit_display": unit_display,
+                    "show_qty_unit": show_qty_unit,
                     "products": shaped_products,
+                    "product_count": len(shaped_products),
+                    "line_status": line_status,
                 }
             )
 
@@ -281,6 +390,7 @@ class MakeVendorSelectionService:
                 "not_found_count": not_found_count,
                 "no_match_count": no_match_count,
                 "supplier_review_count": supplier_review_count,
+                "same_price_tie_count": same_price_tie_count,
             },
             "selection_catalog": self._build_selection_catalog(analysis, database_version_id),
             "lines": lines,
@@ -1214,6 +1324,164 @@ class MakeVendorSelectionService:
         )
         return match_payload
 
+    def resolve_same_price_choice(
+        self,
+        *,
+        row_id: str,
+        product_index: int,
+        rate_master_id: int,
+    ) -> dict[str, Any]:
+        """Expert picks one Rate_Master row when lowest price ties across vendors."""
+        boq = self._get_boq()
+        self._ensure_editable(boq)
+
+        database_version_id = self._database_version_id(boq)
+        if not database_version_id:
+            raise ValidationError("No active master database. Upload a database first.")
+
+        analysis = dict(boq.analysis_data or {})
+        rows = list(analysis.get("rows") or [])
+        row = next((item for item in rows if str(item.get("row_id")) == str(row_id)), None)
+        if row is None:
+            raise ValidationError(f"Unknown BOQ row: {row_id}")
+
+        products = list(row.get("products") or [])
+        product = next(
+            (
+                item
+                for item in products
+                if int(item.get("product_index") or 0) == int(product_index)
+            ),
+            None,
+        )
+        if product is None and 0 <= product_index < len(products):
+            product = products[product_index]
+        if product is None:
+            raise ValidationError(f"Unknown product index: {product_index}")
+
+        selection = dict(product.get("vendor_selection") or {})
+        choices = list(selection.get("same_price_choices") or [])
+        chosen = next(
+            (
+                item
+                for item in choices
+                if int(item.get("rate_master_id") or 0) == int(rate_master_id)
+            ),
+            None,
+        )
+        if chosen is None:
+            raise ValidationError("Selected same-price option is no longer available.")
+
+        try:
+            rate = Rate_Master.objects.get(
+                pk=int(rate_master_id),
+                database_version_id=database_version_id,
+            )
+        except Rate_Master.DoesNotExist as exc:
+            raise ValidationError("Rate_Master row not found for this choice.") from exc
+
+        boq_row = next(
+            (
+                item
+                for item in _ordered_boq_rows(boq.boq_data or {})
+                if str(item.get("row_id")) == str(row_id)
+            ),
+            {},
+        )
+        qty = _field_from_map(analysis_fields(boq_row), _QTY_KEYS)
+        extracted = _normalize_product_fields(dict(product))
+        qty_value = (
+            extracted.get("quantity")
+            if extracted.get("quantity") not in (None, "")
+            else qty
+        )
+
+        rate_service = RateDetailRetrievalService(database_version_id)
+        labour_service = LabourDetailRetrievalService(database_version_id)
+        rate_detail = rate_service.get_by_id(rate.pk)
+        labour_detail = labour_service.get_by_tech_key(
+            rate.Tech_Key,
+            size=extracted.get("size"),
+        )
+        structured, breakdown = structured_match_score(extracted, rate)
+        status = "matched" if structured >= MATCH_CONFIDENCE_THRESHOLD else "pending"
+        line_output = BOQLineOutputService.build(
+            quantity=qty_value,
+            rate_detail=rate_detail,
+            labour_detail=labour_detail,
+            is_pending=status != "matched",
+            rate_only=bool(extracted.get("rate_only")),
+        )
+        match_payload = {
+            "make": str(rate.Make or chosen.get("make") or "").strip(),
+            "supplier": str(rate.Supplier or chosen.get("supplier") or "").strip(),
+            "status": status,
+            "confidence": round(float(structured), 2),
+            "rate_master_id": rate.pk,
+            "tech_key": rate.Tech_Key or "",
+            "summary": _product_summary(
+                {
+                    "category": rate.Category,
+                    "sub_category": rate.Sub_Category,
+                    "class": rate.Class,
+                    "size": rate.Size,
+                    "unit": rate.Unit,
+                    "capacity": rate.Capacity,
+                }
+            )
+            + (f" / {rate.Make}" if rate.Make else ""),
+            "score_breakdown": breakdown,
+            "rate_detail": rate_detail,
+            "labour_detail": labour_detail,
+            "line_output": line_output,
+            "notes": "",
+            "prefer_lowest_price": bool(selection.get("prefer_lowest_price")),
+            "same_price_tie": False,
+            "same_price_choices": choices,
+            "same_price_resolved": True,
+            "matched_at": now_local_iso(),
+        }
+
+        updated = dict(product)
+        updated["selected_make"] = match_payload["make"] or None
+        updated["selected_supplier"] = match_payload["supplier"] or None
+        if match_payload["make"]:
+            updated["make_hint"] = match_payload["make"]
+        updated["vendor_selection"] = match_payload
+        updated["vendor_selection_source"] = "manual"
+        updated["approved_make_found"] = True
+
+        position = next(
+            (
+                index
+                for index, item in enumerate(products)
+                if int(item.get("product_index") or 0) == int(product_index)
+            ),
+            product_index if 0 <= product_index < len(products) else None,
+        )
+        if position is None:
+            raise ValidationError(f"Unknown product index: {product_index}")
+        products[position] = updated
+        row["products"] = products
+        analysis["rows"] = rows
+        analysis["database_version_id"] = database_version_id
+
+        with transaction.atomic():
+            safe = json_safe(analysis)
+            save_boq_analysis_json(boq.boq_name, safe)
+            boq.analysis_data = safe
+            boq.save(update_fields=["analysis_data"])
+
+        logger.info(
+            "Same-price choice resolved boq=%s row=%s product=%s rate_master_id=%s supplier=%s",
+            boq.pk,
+            row_id,
+            product_index,
+            rate.pk,
+            match_payload.get("supplier"),
+        )
+        return match_payload
+
     def _shape_product(
         self,
         product: dict[str, Any],
@@ -1280,13 +1548,17 @@ class MakeVendorSelectionService:
 
         # True when approved make exists but Rate_Master row was not found.
         is_no_match = make_status != "not_found" and match_status == "unmatched"
-        # Keep Make/Supplier as free-text so experts can edit and retry Find rates
-        # (not-found, no-match, or make-list gap after a prior manual entry).
+        # Free-text Make/Supplier only when the make list has no approved make.
+        # No-match cards keep dropdowns so experts can pick another make/supplier.
         allow_typed_make_vendor = (
             make_status == "not_found"
-            or is_no_match
             or (self.has_make_list and not approved)
         )
+
+        same_price_choices = list(selection.get("same_price_choices") or [])
+        same_price_tie = bool(selection.get("same_price_tie")) and bool(same_price_choices)
+        if same_price_tie and not notes:
+            notes = SAME_PRICE_TIE_LABEL
 
         return {
             "row_id": row_id,
@@ -1321,6 +1593,9 @@ class MakeVendorSelectionService:
             "is_no_match": is_no_match,
             "allow_typed_make_vendor": allow_typed_make_vendor,
             "supplier_rate_review": False,
+            "same_price_tie": same_price_tie,
+            "same_price_choices": same_price_choices,
+            "same_price_choices_json": json.dumps(same_price_choices),
         }
 
     def _options_for_product(
@@ -1484,8 +1759,14 @@ class MakeVendorSelectionService:
                     is_pending=True,
                 ),
                 "notes": "No Rate_Master row found for this product with the selected make/supplier.",
+                "same_price_tie": False,
+                "same_price_choices": [],
                 "matched_at": now_local_iso(),
             }
+
+        same_price_choices: list[dict[str, Any]] = []
+        if prefer_lowest_price and not supplier:
+            same_price_choices = _build_same_price_choices(scored)
 
         confidence, rate, breakdown, _amount = scored[0]
         rate_service = RateDetailRetrievalService(database_version_id)
@@ -1496,16 +1777,27 @@ class MakeVendorSelectionService:
             size=extracted.get("size"),
         )
         status = "matched" if confidence >= MATCH_CONFIDENCE_THRESHOLD else "pending"
+        qty_value = (
+            extracted.get("quantity")
+            if extracted.get("quantity") not in (None, "")
+            else quantity
+        )
         line_output = BOQLineOutputService.build(
-            quantity=quantity,
+            quantity=qty_value,
             rate_detail=rate_detail,
             labour_detail=labour_detail,
             is_pending=status != "matched",
+            rate_only=bool(extracted.get("rate_only")),
         )
         resolved_make = MakeListConstraintService.resolve_canonical_make(
             make or (rate.Make or ""),
             approved_makes,
         )
+        notes = ""
+        if same_price_choices:
+            notes = SAME_PRICE_TIE_LABEL
+        elif status != "matched":
+            notes = "Closest Rate_Master row found — review make/supplier or product fields."
         return {
             "make": resolved_make or make or (rate.Make or ""),
             "supplier": supplier or (rate.Supplier or ""),
@@ -1528,10 +1820,10 @@ class MakeVendorSelectionService:
             "rate_detail": rate_detail,
             "labour_detail": labour_detail,
             "line_output": line_output,
-            "notes": ""
-            if status == "matched"
-            else "Closest Rate_Master row found — review make/supplier or product fields.",
+            "notes": notes,
             "prefer_lowest_price": prefer_lowest_price,
+            "same_price_tie": bool(same_price_choices),
+            "same_price_choices": same_price_choices,
             "matched_at": now_local_iso(),
         }
 
