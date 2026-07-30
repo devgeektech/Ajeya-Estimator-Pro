@@ -146,10 +146,18 @@
                         type="button"
                         class="btn btn--xsmall btn--boq-analyse"
                         :disabled="activeIsReanalysing"
+                        title="Rematch this product against Rate_Master using current fields"
                         @click="window.reanalyseActiveExtractionProduct($el, '{% url "boq:row_extract" boq.pk line.row_id %}')"
                     >
                         <span x-text="activeIsReanalysing ? 'Re-analysing…' : 'Re-analyse'"></span>
                     </button>
+                    <button
+                        type="button"
+                        class="btn btn--xsmall btn--ghost"
+                        :disabled="activeIsReanalysing"
+                        title="Re-run AI extraction from the BOQ workbook text for this section"
+                        @click="window.reextractExtractionLine && window.reextractExtractionLine($el, '{% url "boq:row_extract" boq.pk line.row_id %}', '{{ line.row_id }}')"
+                    >Re-extract</button>
                     <button
                         type="button"
                         class="btn btn--xsmall btn--danger"

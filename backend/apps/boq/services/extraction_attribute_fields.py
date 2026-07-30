@@ -13,6 +13,4 @@ COMMON_ATTRIBUTE_FIELDS: tuple[tuple[str, str], ...] = (
     ("fire_rating", "Fire rating"),
 )
 
-COMMON_ATTRIBUTE_KEYS = {key for key, _label in COMMON_ATTRIBUTE_FIELDS}
-
 COMMON_ATTRIBUTE_LABELS = {key: label for key, label in COMMON_ATTRIBUTE_FIELDS}

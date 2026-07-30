@@ -207,6 +207,11 @@ CELERY_BROKER_URL=redis://localhost:6379/0
 CELERY_RESULT_BACKEND=redis://localhost:6379/1
 OPENAI_MODEL=gpt-4o-mini
 OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+# Full prompt/response dumps to logs/instructions.log (set False in production)
+AI_INSTRUCTION_LOGGING=True
+# Sections per extract_products call / products per map_product_match call
+AI_ROW_EXTRACTION_BATCH_SIZE=5
+AI_PRODUCT_MAPPING_BATCH_SIZE=4
 CHROMA_PATH=media/chroma
 CHROMA_COLLECTION=rate_master_products
 ```

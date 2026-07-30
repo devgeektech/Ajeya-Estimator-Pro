@@ -54,8 +54,11 @@ def generate_embeddings(texts: list[str]) -> list[list[float]]:
         if any(vector is None for vector in ordered):
             raise AIServiceError("Embedding response missing one or more vectors.")
         instruction_text = "\n\n---\n\n".join(
-            f"[{index + 1}] {text}" for index, text in enumerate(texts)
+            f"[{index + 1}] {text[:240]}{'…' if len(text) > 240 else ''}"
+            for index, text in enumerate(texts[:20])
         )
+        if len(texts) > 20:
+            instruction_text += f"\n\n…and {len(texts) - 20} more inputs"
         log_instruction(
             template_name="embedding",
             model=model,
@@ -68,7 +71,8 @@ def generate_embeddings(texts: list[str]) -> list[list[float]]:
         raise
     except Exception as exc:  # noqa: BLE001 - normalise provider errors
         instruction_text = "\n\n---\n\n".join(
-            f"[{index + 1}] {text}" for index, text in enumerate(texts)
+            f"[{index + 1}] {text[:240]}{'…' if len(text) > 240 else ''}"
+            for index, text in enumerate(texts[:20])
         )
         log_instruction(
             template_name="embedding",

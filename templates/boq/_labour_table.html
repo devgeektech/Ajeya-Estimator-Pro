@@ -31,8 +31,10 @@
             <button
                 type="button"
                 class="btn btn--small btn--boq-analyse"
+                x-show="mode === 'manual'"
+                x-cloak
                 :disabled="!canApply || saving"
-                @click="mode === 'auto' ? applyAuto() : applyManual()"
+                @click="applyManual()"
             >
                 <span x-show="!saving">Apply labour</span>
                 <span x-show="saving" x-cloak>Applying…</span>
@@ -111,10 +113,10 @@
                         {% endfor %}
                     </ul>
                 </details>
-                {% elif line.full_description|length > 140 %}
+                {% elif line.full_description|length > 140 or line.description|length > 140 %}
                 <details class="extraction-lineage">
                     <summary>Full description</summary>
-                    <p>{{ line.full_description }}</p>
+                    <p>{{ line.full_description|default:line.description }}</p>
                 </details>
                 {% endif %}
             </header>

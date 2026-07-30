@@ -70,13 +70,6 @@ def save_boq_match_results_json(boq_name: str, payload: dict[str, Any]) -> Path:
     return path
 
 
-def read_boq_match_results_json(boq_name: str) -> dict[str, Any] | None:
-    path = boq_extract_dir(boq_name) / MATCH_RESULTS_FILENAME
-    if not path.is_file():
-        return None
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
 def match_results_json_relative_path(boq_name: str) -> str:
     path = boq_extract_dir(boq_name) / MATCH_RESULTS_FILENAME
     return str(path.relative_to(Path(settings.MEDIA_ROOT))).replace("\\", "/")

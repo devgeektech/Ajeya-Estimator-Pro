@@ -17,7 +17,6 @@ urlpatterns = [
     path("<int:pk>/extraction/edit/", views.BOQExtractionEditView.as_view(), name="extraction_edit"),
     path("<int:pk>/make-vendor/", views.BOQMakeVendorSelectView.as_view(), name="make_vendor_select"),
     path("<int:pk>/labour/", views.BOQLabourView.as_view(), name="labour"),
-    path("<int:pk>/process/", views.BOQProcessView.as_view(), name="process"),
     path("<int:pk>/match/", views.BOQMatchView.as_view(), name="match"),
     path("<int:pk>/match-results/", views.BOQMatchResultsView.as_view(), name="match_results"),
     path("<int:pk>/calculate-price/", views.BOQCalculatePriceView.as_view(), name="calculate_price"),

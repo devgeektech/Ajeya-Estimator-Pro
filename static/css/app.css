@@ -1124,14 +1124,23 @@ body {
 
 /* ---------- Table ---------- */
 .table { width: 100%; border-collapse: collapse; }
-.table th, .table td { text-align: center; padding: 12px 14px; border-bottom: 1px solid var(--border); font-size: .9rem; }
-.table th { color: #000 !important; font-weight: 800 !important; text-transform: uppercase; font-size: .75rem; letter-spacing: .04em; }
+.table th, .table td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--border); font-size: .9rem; }
+.table th {
+    color: var(--text) !important;
+    font-weight: 700 !important;
+    text-transform: uppercase;
+    font-size: .72rem !important;
+    letter-spacing: .04em;
+}
+.table th.table__actions, .table td.table__actions, .table__empty {
+    text-align: center;
+}
 .table tbody tr:nth-child(odd) td { background-color: #ffffff; }
 .table tbody tr:nth-child(even) td { background-color: #e2e8f0; }
 .table.table--plain tbody tr td,
 .table.table--plain tbody tr:nth-child(odd) td,
 .table.table--plain tbody tr:nth-child(even) td {
-    background-color: transparent;
+    background-color: transparent !important;
 }
 .table__actions { text-align: center; white-space: nowrap; }
 .table__actions > * { margin-left: 6px; }
@@ -1356,7 +1365,7 @@ body {
     border-radius: var(--radius); box-shadow: 0 24px 64px rgba(15, 23, 42, .28);
     padding: 22px;
 }
-.confirm-modal__title { margin: 0 0 8px; font-size: 1.1rem; }
+.confirm-modal__title { margin: 0 0 8px; color: var(--text); font-size: 1.1rem; }
 .confirm-modal__message { margin: 0; color: var(--text-muted); }
 .confirm-modal__field {
     display: grid;

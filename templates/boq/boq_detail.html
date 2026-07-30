@@ -203,7 +203,6 @@
         makeVendorEnabled: {{ tab_access.make_vendor|yesno:'true,false' }},
         labourEnabled: {{ tab_access.labour|yesno:'true,false' }},
         reviewEnabled: {{ tab_access.review|yesno:'true,false' }},
-        matchResultsEnabled: {{ tab_access.review|yesno:'true,false' }},
         analysing: {{ is_extracting|yesno:'true,false' }},
         matching: {{ is_matching|yesno:'true,false' }},
         unlockingLabour: false,
@@ -216,7 +215,6 @@
         statusLabel: '{{ status_display.label|escapejs }}',
         statusBadge: '{{ status_display.badge|escapejs }}',
         extractUrl: '{% url 'boq:extract' boq.pk %}',
-        matchUrl: '{% url 'boq:match' boq.pk %}',
         labourUrl: '{% url 'boq:labour' boq.pk %}',
         extractStatusUrl: '{% url 'boq:status' boq.pk %}?expect=extract',
         matchStatusUrl: '{% url 'boq:status' boq.pk %}?expect=match',
@@ -660,10 +658,6 @@
                 alert(error.message || 'Failed to complete labour.');
             }
         },
-        async startMatch() {
-            // Match rematch retired — keep no-op for any leftover callers.
-            return;
-        },
         async startCalculatePrice() {
             return this.completeLabour();
         },
@@ -756,7 +750,7 @@
         </div>
 
         <div class="boq-tab-context" :class="{ 'boq-tab-context--compact': tab === 'make_list' || tab === 'make_vendor' || tab === 'labour' }">
-            <div class="boq-tab-context__status" x-show="tab !== 'make_list' && statusLabel" x-cloak>
+            <div class="boq-tab-context__status" x-show="tab !== 'make_list' && tab !== 'make_vendor' && statusLabel" x-cloak>
                 <span
                     class="badge"
                     :class="statusBadge"
@@ -782,9 +776,8 @@
                 {% endif %}
                 {% if labour_display.has_products %}
                 <span x-show="tab === 'labour'" x-cloak>
-                    <strong>{{ labour_display.stats.product_count|default:0 }}</strong> Products.
-                    Labour Charged Found for <strong>{{ labour_display.stats.with_labour_count|default:0 }}</strong>.
-                    <strong>Mode</strong>: {{ labour_display.mode|default:"auto" }}
+                    Labour Charges found for <strong>{{ labour_display.stats.with_labour_count|default:0 }}</strong> Products
+                    · Mode: <strong>{{ labour_display.mode|default:"auto" }}</strong>
                 </span>
                 {% endif %}
                 {% if analysis_display.has_analysis %}
@@ -864,6 +857,13 @@
                 </span>
             </div>
             <div class="make-vendor-summary__actions">
+                <span
+                    class="badge"
+                    :class="statusBadge"
+                    x-show="statusLabel"
+                    x-cloak
+                    x-text="statusLabel"
+                >{% if status_display.label %}{{ status_display.label }}{% endif %}</span>
                 {% if can_unlock_labour %}
                 <button
                     type="button"

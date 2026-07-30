@@ -161,10 +161,10 @@
                     {% endfor %}
                 </ul>
             </details>
-            {% elif line.full_description|length > 140 %}
+            {% elif line.full_description|length > 140 or line.description|length > 140 %}
             <details class="extraction-lineage">
                 <summary>Full description</summary>
-                <p>{{ line.full_description }}</p>
+                <p>{{ line.full_description|default:line.description }}</p>
             </details>
             {% endif %}
         </header>

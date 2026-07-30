@@ -29,7 +29,13 @@ from .product_attribute_enrichment_service import (
 
 logger = logging.getLogger("boq_ai")
 
-_BATCH_SIZE = 4
+
+def _mapping_batch_size() -> int:
+    from django.conf import settings
+
+    return max(1, int(getattr(settings, "AI_PRODUCT_MAPPING_BATCH_SIZE", 4) or 4))
+
+
 # Analysis UI + AI payload: only the best few Rate_Master neighbors.
 _CANDIDATE_LIMIT = 3
 # Chroma recall pool before ranking down to _CANDIDATE_LIMIT.
@@ -391,7 +397,7 @@ class ProductAIMappingService:
             "match_status": DB_MATCH_MATCHED,
             "selection_source": "expert",
         }
-        return align_product_taxonomy_from_rate(enriched, rate, overwrite_core_fields=True)
+        return align_product_taxonomy_from_rate(enriched, rate, overwrite_core_fields=False)
 
     def map_products(
         self,
@@ -403,9 +409,20 @@ class ProductAIMappingService:
             return []
 
         chroma_limit = _RECALL_CHROMA_LIMIT
+        # Batch embedding recall — one OpenAI embeddings call for the whole chunk.
+        recall_inputs = []
+        for product in products:
+            product_for_recall = dict(product)
+            product_for_recall["make_hint"] = None
+            recall_inputs.append(product_for_recall)
+        matches = self._matcher.match_products_batch(
+            recall_inputs,
+            chroma_limit=max(int(chroma_limit or _RECALL_CHROMA_LIMIT), _RECALL_CHROMA_LIMIT),
+        )
+
         prepared: list[dict[str, Any]] = []
-        for index, product in enumerate(products):
-            candidates = self._recall_candidates(product, chroma_limit=chroma_limit)
+        for index, (product, match) in enumerate(zip(products, matches, strict=False)):
+            candidates = self._snapshots_from_match(match, product)
             prepared.append(
                 {
                     "product_ref": f"p{index}",
@@ -462,8 +479,8 @@ class ProductAIMappingService:
                 progress_callback(1, 1)
             return rows
 
-        # Map in small chunks so progress can advance during long enrichments.
-        chunk_size = max(_BATCH_SIZE, 4)
+        # Map in chunks so progress advances; embeddings are batched inside each chunk.
+        chunk_size = max(_mapping_batch_size(), 4)
         mapped_products: list[dict[str, Any]] = []
         total = len(pending)
         if progress_callback:
@@ -601,6 +618,13 @@ class ProductAIMappingService:
             product_for_recall,
             chroma_limit=max(int(chroma_limit or _RECALL_CHROMA_LIMIT), _RECALL_CHROMA_LIMIT),
         )
+        return self._snapshots_from_match(match, product)
+
+    def _snapshots_from_match(
+        self,
+        match: dict[str, Any],
+        product: dict[str, Any],
+    ) -> list[dict[str, Any]]:
         snapshots: list[dict[str, Any]] = []
         seen: set[int] = set()
 
@@ -610,49 +634,51 @@ class ProductAIMappingService:
             except (TypeError, ValueError):
                 return 0.0
 
-        def _append_rate(rate_id: int, confidence: Any = None) -> None:
-            rate_id = int(rate_id)
-            if rate_id in seen:
-                if confidence is not None:
-                    for snap in snapshots:
-                        if int(snap.get("id") or 0) == rate_id:
-                            # Keep the stronger retrieval score when the same id repeats.
-                            if _confidence_value(confidence) >= _confidence_value(
-                                snap.get("confidence")
-                            ):
-                                snap["confidence"] = confidence
-                            break
-                return
-            rate = Rate_Master.objects.filter(
-                pk=rate_id,
-                database_version_id=self.database_version_id,
-            ).first()
-            if rate is None:
-                return
-            seen.add(rate_id)
-            snapshots.append(_candidate_snapshot(rate, confidence=confidence))
-
-        # Fresh ranked recall only — do not pin prior seeds ahead of better neighbors.
-        # That kept weaker first-pass picks sticky and inflated Re-analyse confidence.
+        rate_ids: list[int] = []
+        confidences: dict[int, Any] = {}
         for item in match.get("candidates") or []:
             rate_id = item.get("rate_master_id")
             if rate_id in (None, ""):
                 continue
             try:
-                _append_rate(int(rate_id), confidence=item.get("confidence"))
+                rid = int(rate_id)
             except (TypeError, ValueError):
                 continue
+            if rid in seen:
+                if _confidence_value(item.get("confidence")) >= _confidence_value(
+                    confidences.get(rid)
+                ):
+                    confidences[rid] = item.get("confidence")
+                continue
+            seen.add(rid)
+            rate_ids.append(rid)
+            confidences[rid] = item.get("confidence")
+            if len(rate_ids) >= _CANDIDATE_LIMIT:
+                break
+
+        rate_map = {
+            rate.pk: rate
+            for rate in Rate_Master.objects.filter(
+                pk__in=rate_ids,
+                database_version_id=self.database_version_id,
+            )
+        }
+        for rid in rate_ids:
+            rate = rate_map.get(rid)
+            if rate is None:
+                continue
+            snapshots.append(_candidate_snapshot(rate, confidence=confidences.get(rid)))
 
         if not snapshots:
-            # SQL-only path when Chroma returns nothing.
             for item in self._matcher._sql_fallback_candidates(product):
                 rate = item.get("rate")
                 if rate is None:
                     continue
-                try:
-                    _append_rate(int(rate.pk), confidence=item.get("confidence"))
-                except (TypeError, ValueError):
-                    continue
+                snapshots.append(
+                    _candidate_snapshot(rate, confidence=item.get("confidence"))
+                )
+                if len(snapshots) >= _CANDIDATE_LIMIT:
+                    break
 
         snapshots.sort(
             key=lambda item: _confidence_value(item.get("confidence")),
@@ -669,8 +695,9 @@ class ProductAIMappingService:
         """
         template = AIService.load_prompt("map_product_match.txt")
         by_ref: dict[str, dict[str, Any]] = {}
-        for start in range(0, len(prepared), _BATCH_SIZE):
-            batch = prepared[start : start + _BATCH_SIZE]
+        batch_size = _mapping_batch_size()
+        for start in range(0, len(prepared), batch_size):
+            batch = prepared[start : start + batch_size]
             payload = [
                 {
                     "product_ref": item["product_ref"],
@@ -1010,7 +1037,7 @@ class ProductAIMappingService:
                     notes=notes,
                 )
 
-        enriched["attributes"] = {}
+        enriched["attributes"] = attrs
         enriched["attribute_schema"] = []
         enriched["missing_attribute_keys"] = []
         enriched["attribute_confidence"] = 0.0

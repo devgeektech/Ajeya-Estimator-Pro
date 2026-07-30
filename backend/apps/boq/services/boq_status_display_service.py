@@ -134,7 +134,7 @@ def heal_make_vendor_unlock(boq: BOQ) -> bool:
 
     with transaction.atomic():
         boq.save(update_fields=list(dict.fromkeys(changed_fields)))
-    logger.info(
+    logger.debug(
         "Healed Make & Vendor unlock for BOQ id=%s status=%s fields=%s",
         boq.pk,
         boq.status,

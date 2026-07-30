@@ -6,156 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Ajeya Estimator Pro{% endblock %}</title>
     <meta name="csrf-token" content="{{ csrf_token }}">
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=54">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=55">
     <style>
-        .confirm-modal {
-            position: fixed;
-            inset: 0;
-            z-index: 200;
-            display: grid;
-            place-items: center;
-            padding: 24px;
-        }
-
-        .confirm-modal[hidden] { display: none; }
-
-        .confirm-modal__backdrop {
-            position: absolute;
-            inset: 0;
-            background: rgba(15, 23, 42, .58);
-        }
-
-        .confirm-modal__dialog {
-            position: relative;
-            width: min(420px, 100%);
-            background: #fff;
-            border: 1px solid #e2e8f0;
-            border-radius: 12px;
-            box-shadow: 0 24px 64px rgba(15, 23, 42, .28);
-            padding: 22px;
-        }
-
-        .confirm-modal__title {
-            margin: 0 0 8px;
-            color: #1e293b;
-            font-size: 1.1rem;
-        }
-
-        .confirm-modal__message {
-            margin: 0;
-            color: #64748b;
-        }
-
-        .confirm-modal__field {
-            display: grid;
-            gap: 6px;
-            margin-top: 14px;
-        }
-
-        .confirm-modal__field[hidden] {
-            display: none !important;
-        }
-
-        .confirm-modal__field-label {
-            font-size: 0.85rem;
-            font-weight: 600;
-            color: var(--text-muted);
-        }
-
-        .confirm-modal__input {
-            width: 100%;
-            box-sizing: border-box;
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 10px 12px;
-            font: inherit;
-            background: var(--surface);
-            color: var(--text);
-        }
-
-        .confirm-modal__error {
-            margin: 10px 0 0;
-            color: var(--red, #b91c1c);
-            font-size: 0.88rem;
-        }
-
-        .confirm-modal__error[hidden] {
-            display: none !important;
-        }
-
-        .confirm-modal__actions {
-            display: flex;
-            justify-content: flex-end;
-            gap: 10px;
-            margin-top: 22px;
-        }
-
-        /* Enforce bold table headings everywhere */
-        .table th { 
-            color: var(--text) !important; 
-            font-weight: 700 !important; 
-            text-transform: uppercase; 
-            font-size: .72rem !important; 
-            letter-spacing: .04em; 
-        }
-
-        /* Fix column alignment across all pages */
-        .table th, .table td {
-            text-align: left;
-        }
-        .table th.table__actions, .table td.table__actions, .table__empty {
-            text-align: center;
-        }
-
-        /* Make List: stretch across the panel so Approved Makes uses the right side. */
-        .boq-sheet-wrap--make-list {
-            width: 100% !important;
-        }
-        .table.boq-sheet.boq-sheet--make-list {
-            width: 100% !important;
-            min-width: 100% !important;
-            max-width: 100% !important;
-            table-layout: fixed !important;
-        }
-        .table.boq-sheet.boq-sheet--make-list th,
-        .table.boq-sheet.boq-sheet--make-list td {
-            text-align: left !important;
-            white-space: normal !important;
-            vertical-align: top;
-        }
-        .table.boq-sheet.boq-sheet--make-list th.boq-sheet__col-makes,
-        .table.boq-sheet.boq-sheet--make-list td.boq-sheet__col-makes {
-            text-align: right !important;
-            padding-right: 4.5rem !important;
-        }
-        .table.boq-sheet.boq-sheet--make-list col:nth-child(1),
-        .table.boq-sheet.boq-sheet--make-list .boq-sheet__col-sno {
-            width: 5% !important;
-        }
-        .table.boq-sheet.boq-sheet--make-list col:nth-child(2),
-        .table.boq-sheet.boq-sheet--make-list .boq-sheet__col-desc {
-            width: 30% !important;
-        }
-        .table.boq-sheet.boq-sheet--make-list col:nth-child(3),
-        .table.boq-sheet.boq-sheet--make-list .boq-sheet__col-makes {
-            width: 65% !important;
-        }
-
-        /* White / grey zebra rows (same as Analysis cards) */
-        .table tbody tr:nth-child(odd) td { background-color: #ffffff; }
-        .table tbody tr:nth-child(even) td { background-color: #e2e8f0; }
-        .table.table--plain tbody tr td,
-        .table.table--plain tbody tr:nth-child(odd) td,
-        .table.table--plain tbody tr:nth-child(even) td {
-            background-color: transparent !important;
-        }
-
-        .field__required {
-            color: var(--red, #dc2626);
-            margin-left: 3px;
-            font-weight: 800;
-        }
-
         [x-cloak] { display: none !important; }
         .sidebar-backdrop { display: none; }
 
@@ -1200,6 +1052,12 @@
             font-size: .82rem;
             line-height: 1.3;
             color: var(--text, #1e293b);
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 1;
+            overflow: hidden;
+            white-space: normal;
+            word-break: break-word;
         }
 
         .make-vendor-tab-canvas .extraction-lineage,
@@ -1747,6 +1605,12 @@
             color: var(--text, #1e293b);
             font-size: .88rem;
             line-height: 1.4;
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 2;
+            overflow: hidden;
+            white-space: normal;
+            word-break: break-word;
         }
 
         .make-vendor-line__header .extraction-lineage {

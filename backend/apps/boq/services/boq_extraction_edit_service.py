@@ -220,11 +220,16 @@ class BOQExtractionEditService:
         boq = self._get_boq()
         self._ensure_editable(boq)
 
-        active = get_active_database_version()
-        if active is None:
-            raise ValidationError("No active master database.")
-
         analysis = dict(boq.analysis_data or {})
+        stored_db_id = int(analysis.get("database_version_id") or 0) or None
+        if stored_db_id:
+            version_id = stored_db_id
+        else:
+            active = get_active_database_version()
+            if active is None:
+                raise ValidationError("No active master database.")
+            version_id = int(active.pk)
+
         rows = list(analysis.get("rows") or [])
         row = self._find_row(rows, row_id)
         if row is None:
@@ -236,7 +241,7 @@ class BOQExtractionEditService:
             raise ValidationError(f"Unknown product index: {product_index}")
 
         try:
-            updated = ProductAIMappingService(active.pk).apply_selected_candidate(
+            updated = ProductAIMappingService(version_id).apply_selected_candidate(
                 product,
                 int(rate_master_id),
             )
@@ -253,12 +258,6 @@ class BOQExtractionEditService:
         analysis["phase"] = PHASE_EXTRACTED
         self._persist(boq, analysis)
         return updated
-
-    def add_activity(self, *, row_id: str, activity: str) -> list[str]:
-        raise ValidationError("Activities are no longer used. Analysis extracts products only.")
-
-    def remove_activity(self, *, row_id: str, activity: str) -> list[str]:
-        raise ValidationError("Activities are no longer used. Analysis extracts products only.")
 
     def update_row_make(
         self,

@@ -215,7 +215,7 @@ document.addEventListener('alpine:init', () => {
             btn.textContent = 'Re-analysing…';
         }
         try {
-            await window.extractionAjaxPost(rematchUrl, {});
+            await window.extractionAjaxPost(rematchUrl, { mode: 'reextract' });
             try {
                 const el = rowId ? document.getElementById('line-' + rowId) : null;
                 const keyMatch = (rematchUrl || '').match(/\/boqs\/(\d+)\//);
@@ -233,13 +233,20 @@ document.addEventListener('alpine:init', () => {
         } catch (error) {
             alert(error.message || 'Re-analyse failed.');
             if (btn) {
-                btn.dataset.busy = '0';
                 btn.disabled = false;
+                btn.dataset.busy = '0';
                 if (btn.dataset.prevLabel) {
                     btn.textContent = btn.dataset.prevLabel;
                 }
             }
         }
+    };
+
+    window.reextractExtractionLine = async function reextractExtractionLine(fromEl, rematchUrl, rowId) {
+        if (!window.confirm('Re-extract this section from the BOQ workbook? Current products on this section will be replaced.')) {
+            return;
+        }
+        return window.reanalyseEmptyExtractionLine(fromEl, rematchUrl, rowId);
     };
 
     window.removeActiveExtractionProduct = async function removeActiveExtractionProduct(fromEl, editUrl, boqPk) {

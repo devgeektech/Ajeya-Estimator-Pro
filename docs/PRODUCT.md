@@ -8,22 +8,24 @@ or architecture changes.
 
 ## Overview
 
-BOQ_AI is an AI-assisted BOQ estimation platform for Fire Protection and MEP
-work. It imports a client master workbook, stores uploaded BOQ files, and will
-rebuild processing (matching, review, export) on a fresh design.
+BOQ_AI is an AI-assisted BOQ estimation platform for Fire Protection and MEP.
+It imports a client master workbook, uploads BOQ/make-list files, runs AI
+analysis, Make & Vendor / Labour selection, review, and Excel export.
 
-**Current scope (2026-07-10):**
+**Current scope (2026-07-30):**
 
 | Feature | Status |
 | --- | --- |
 | User auth, roles, dashboard | Active |
 | Master database upload / history / embeddings | Active |
-| Product embeddings (Chroma) after DB import | Active |
-| BOQ workbook + make-list upload | Active |
-| BOQ parsing, processing, matching, review, export | Phase 1–2 active (analysis, review, export); pending-products flow pending |
+| BOQ upload, parse, Analysis, Make & Vendor, Labour, Review, Export | Active |
+| Pending-products Super Admin approval flow | Not built |
 
-**Planned BOQ pipeline (not implemented):** parse workbook → AI extraction →
-product matching → rate/labour retrieval → expert review → Excel export.
+**Active BOQ pipeline:**
+
+```text
+Upload → Analyse (extract + map) → Make & Vendor → Labour → Review → Export
+```
 
 ---
 
@@ -162,7 +164,9 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
 - Per-row: **Re-analyse** (Analysis tab) → `POST /boqs/<id>/rows/<row_id>/extract/`
   (`BOQAnalysisService.rematch_row`) rematches existing products against Rate_Master
   using current fields + filled attributes (does not wipe expert edits). Falls back
-  to `re_extract_row` only when the row has no products yet.
+  to `re_extract_row` when the row has no products yet.
+- Per-section: **Re-extract** → same URL with `mode=reextract` forces workbook
+  AI extraction again for that section (replaces products), then remaps to Rate_Master.
 - Celery task: `boq.process_extraction` (full BOQ only)
 - Concurrent analyses: Celery worker `--concurrency` (default **8** via
   `scripts/run_celery_worker.*`; override with `CELERY_WORKER_CONCURRENCY`)

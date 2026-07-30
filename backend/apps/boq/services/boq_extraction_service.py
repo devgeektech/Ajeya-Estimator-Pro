@@ -22,8 +22,14 @@ from apps.boq.services.serial_normalizer import analysis_fields, letter_from_ser
 logger = logging.getLogger("boq_ai")
 
 _QTY_KEYS = ("qty", "quantity", "qnty", "nos")
-_BATCH_SIZE = 4
 _MAX_BATCH_CHARS = 14000
+
+
+def _extract_batch_size() -> int:
+    from django.conf import settings
+
+    return max(1, int(getattr(settings, "AI_ROW_EXTRACTION_BATCH_SIZE", 5) or 5))
+
 
 _SPEC_KEYWORDS = frozenset(
     {
@@ -119,7 +125,7 @@ def _iter_extract_batches(groups: list[dict[str, Any]]) -> list[list[dict[str, A
         would_overflow = (
             current
             and (
-                len(current) >= _BATCH_SIZE
+                len(current) >= _extract_batch_size()
                 or current_chars + size > _MAX_BATCH_CHARS
             )
         )
@@ -560,10 +566,26 @@ class BOQExtractionService:
     def __init__(self, boq_data: dict):
         self.boq_data = boq_data or {}
         self.ai = AIService()
+        self._database_context: str | None = None
+        self._taxonomy: dict[str, Any] | None = None
+
+    def _database_context_text(self) -> str:
+        if self._database_context is None:
+            self._database_context = build_database_context()
+        return self._database_context
+
+    def _rate_master_taxonomy(self) -> dict[str, Any]:
+        if self._taxonomy is None:
+            self._taxonomy = load_rate_master_taxonomy()
+        return self._taxonomy
 
     def extract(self, progress_callback=None) -> dict[str, Any]:
         if not self.ai.is_enabled():
             raise AIServiceError("OPENAI_API_KEY is not configured.")
+
+        # Build once for the whole extract job (not once per AI batch).
+        self._database_context_text()
+        self._rate_master_taxonomy()
 
         flat_rows = self.boq_data.get("rows") or []
         anchor_groups = _build_anchor_groups(self.boq_data)
@@ -755,7 +777,7 @@ class BOQExtractionService:
         template = AIService.load_prompt("extract_products.txt")
         payload = [_compact_anchor_payload(group) for group in groups]
         prompt = (
-            template.replace("{{DATABASE_CONTEXT}}", build_database_context())
+            template.replace("{{DATABASE_CONTEXT}}", self._database_context_text())
             .replace("{{ROWS_PAYLOAD}}", json.dumps(payload, ensure_ascii=False, default=str))
         )
         response = self.ai.complete_json(prompt, template_name="extract_products.txt")
@@ -764,7 +786,7 @@ class BOQExtractionService:
             raise AIServiceError("Extraction response missing rows list.")
 
         by_id = {row.get("row_id"): row for row in rows if row.get("row_id")}
-        taxonomy = load_rate_master_taxonomy()
+        taxonomy = self._rate_master_taxonomy()
         normalized: list[dict[str, Any]] = []
         for group in groups:
             row_id = group.get("row_id")

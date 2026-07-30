@@ -19,12 +19,10 @@ from common.exceptions import AIServiceError, BOQAIError, ValidationError
 
 from .forms import BOQUploadForm
 from .models import BOQ
-from .services.boq_analysis_display_service import BOQAnalysisDisplayService
 from .services.boq_analysis_dispatch import dispatch_boq_extraction, dispatch_boq_matching
 from .services.boq_confirmation_service import BOQConfirmationService
 from .services.boq_export_service import BOQExportService
 from .services.boq_labour_service import BOQLabourService
-from .services.boq_price_calculation_service import BOQPriceCalculationService
 from .services.boq_review_display_service import BOQReviewDisplayService
 from .services.boq_extract_service import load_extract_data
 from .services.boq_analysis_service import BOQAnalysisService, _row_description
@@ -382,7 +380,6 @@ class BOQDetailView(LoginRequiredMixin, DetailView):
         context["can_export"] = is_export_ready(boq) and bool(boq.analysis_data)
         context["can_rematch"] = False
         context["can_match"] = False
-        context["can_calculate_price"] = False
         context["can_edit_extraction"] = boq.status in {
             BOQStatus.EXTRACTED,
             BOQStatus.MAKE_VENDOR,
@@ -572,9 +569,19 @@ class BOQRowExtractView(LoginRequiredMixin, View):
                     return _extraction_edit_json_error(message)
                 messages.error(request, message)
                 return HttpResponseRedirect(redirect_url)
+        mode = (request.POST.get("mode") or "").strip().lower()
+        force_reextract = mode in {"reextract", "re-extract", "extract"}
         try:
-            BOQAnalysisService(boq.pk).rematch_row(row_id, product_index=product_index)
-            message = "Row re-analysed against the database."
+            BOQAnalysisService(boq.pk).rematch_row(
+                row_id,
+                product_index=None if force_reextract else product_index,
+                force_reextract=force_reextract,
+            )
+            message = (
+                "Section re-extracted from the BOQ workbook."
+                if force_reextract
+                else "Row re-analysed against the database."
+            )
             if ajax:
                 line_html = _render_extraction_line_html(request, boq, row_id)
                 return _extraction_edit_json_ok(
@@ -722,12 +729,6 @@ class BOQExtractionEditView(LoginRequiredMixin, View):
                         line_html=line_html,
                     )
                 messages.success(request, message)
-            elif action in {"add_activity", "remove_activity"}:
-                message = "Activities are no longer used. Analysis extracts products only."
-                if ajax:
-                    return _extraction_edit_json_error(message)
-                messages.error(request, message)
-                return HttpResponseRedirect(redirect_url)
             elif action == "update_make":
                 selected_make = (request.POST.get("selected_make") or "").strip()
                 custom_make = (request.POST.get("custom_make") or "").strip()
@@ -1460,8 +1461,3 @@ class BOQNameCheckView(LoginRequiredMixin, View):
                 }
             )
         return JsonResponse({"available": True, "message": "Name is available."})
-
-
-# Backward-compatible alias.
-class BOQProcessView(BOQExtractView):
-    """Deprecated — use BOQExtractView."""

@@ -30,7 +30,7 @@ def log_instruction(
     metadata: dict[str, Any] | None = None,
 ) -> None:
     """Append one AI exchange to ``logs/instructions.log``."""
-    if not getattr(settings, "AI_INSTRUCTION_LOGGING", True):
+    if not getattr(settings, "AI_INSTRUCTION_LOGGING", False):
         return
 
     timestamp = now_local_iso()
@@ -68,4 +68,4 @@ def log_instruction(
     if error:
         logger.error("%s error=%s", summary, error)
     else:
-        logger.info("%s", summary)
+        logger.debug("%s", summary)

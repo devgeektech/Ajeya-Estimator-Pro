@@ -560,7 +560,7 @@ class MakeVendorSelectionService:
             boq.analysis_data = safe
             boq.save(update_fields=["analysis_data"])
 
-        logger.info(
+        logger.debug(
             "Sub-category make applied boq=%s category=%s sub_category=%s make=%s supplier=%s products=%s matched=%s",
             boq.pk,
             category_text,
@@ -745,7 +745,7 @@ class MakeVendorSelectionService:
         # Fresh stats for summary bar after filter removal.
         stats = self.build_display().get("stats") or {}
 
-        logger.info(
+        logger.debug(
             "Sub-category filter removed boq=%s category=%s sub_category=%s cleared=%s",
             boq.pk,
             category_text,
@@ -1313,7 +1313,7 @@ class MakeVendorSelectionService:
             boq.analysis_data = safe
             boq.save(update_fields=["analysis_data"])
 
-        logger.info(
+        logger.debug(
             "Make/vendor selection saved boq=%s row=%s product=%s make=%s supplier=%s status=%s",
             boq.pk,
             row_id,
@@ -1472,7 +1472,7 @@ class MakeVendorSelectionService:
             boq.analysis_data = safe
             boq.save(update_fields=["analysis_data"])
 
-        logger.info(
+        logger.debug(
             "Same-price choice resolved boq=%s row=%s product=%s rate_master_id=%s supplier=%s",
             boq.pk,
             row_id,

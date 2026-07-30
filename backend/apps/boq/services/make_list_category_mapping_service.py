@@ -80,12 +80,6 @@ def _token_set(text: str) -> set[str]:
     return {token for token in _normalize(text).split() if len(token) > 1}
 
 
-def list_rate_master_categories(database_version_id: int | None = None) -> list[str]:
-    """Distinct Category values from the active (or given) Rate_Master."""
-    taxonomy = load_rate_master_taxonomy(database_version_id)
-    return list(taxonomy.get("categories") or [])
-
-
 def _heuristic_sub_category(
     description: str,
     *,

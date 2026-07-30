@@ -50,11 +50,6 @@ def dispatch_boq_matching(boq_id: int) -> AnalysisDispatchResult:
     )
 
 
-def dispatch_boq_analysis(boq_id: int) -> AnalysisDispatchResult:
-    """Backward-compatible alias for extraction dispatch."""
-    return dispatch_boq_extraction(boq_id)
-
-
 def _dispatch_boq_job(
     boq_id: int,
     *,

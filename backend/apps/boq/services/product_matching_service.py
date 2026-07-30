@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any
+from typing import Any, cast
 
 from ai.embeddings.chroma_store import ChromaEmbeddingStore, rate_document, selection_amount
-from ai.embeddings.generator import generate_embedding
+from ai.embeddings.generator import generate_embedding, generate_embeddings
 from apps.database_manager.models import Rate_Master
 from common.constants import MATCH_CONFIDENCE_THRESHOLD
 from common.exceptions import AIServiceError
@@ -169,14 +169,17 @@ class ProductMatchingService:
         approved_makes: list[str] | None = None,
         prefer_lowest_price: bool = False,
         chroma_limit: int = 25,
+        embedding: list[float] | None = None,
     ) -> dict[str, Any]:
         query_text = build_match_query_text(extracted)
         candidates: list[dict[str, Any]] = []
 
         try:
-            embedding = generate_embedding(query_text or rate_document_placeholder(extracted))
+            vector = embedding
+            if vector is None:
+                vector = generate_embedding(query_text or rate_document_placeholder(extracted))
             hits = self._store.query_similar(
-                embedding,
+                vector,
                 limit=chroma_limit,
                 database_version_id=self.database_version_id,
             )
@@ -184,6 +187,51 @@ class ProductMatchingService:
             logger.warning("Chroma query skipped; falling back to structured SQL filter")
             hits = []
 
+        return self._rank_candidates(
+            extracted,
+            hits=hits,
+            approved_makes=approved_makes,
+            prefer_lowest_price=prefer_lowest_price,
+        )
+
+    def match_products_batch(
+        self,
+        extracted_list: list[dict[str, Any]],
+        *,
+        chroma_limit: int = 25,
+    ) -> list[dict[str, Any]]:
+        """Match many products with one embedding API round-trip when possible."""
+        if not extracted_list:
+            return []
+        texts = [
+            build_match_query_text(item) or rate_document_placeholder(item)
+            for item in extracted_list
+        ]
+        embeddings: list[list[float] | None]
+        try:
+            embeddings = cast(list[list[float] | None], generate_embeddings(texts))
+        except AIServiceError:
+            logger.warning("Batch embedding failed; falling back to per-product recall")
+            embeddings = [None] * len(extracted_list)
+
+        return [
+            self.match_product(
+                extracted,
+                chroma_limit=chroma_limit,
+                embedding=vector,
+            )
+            for extracted, vector in zip(extracted_list, embeddings, strict=False)
+        ]
+
+    def _rank_candidates(
+        self,
+        extracted: dict[str, Any],
+        *,
+        hits: list[dict[str, Any]],
+        approved_makes: list[str] | None = None,
+        prefer_lowest_price: bool = False,
+    ) -> dict[str, Any]:
+        candidates: list[dict[str, Any]] = []
         rate_map = self._load_rates([hit["rate_master_id"] for hit in hits])
         for hit in hits:
             rate = rate_map.get(hit["rate_master_id"])

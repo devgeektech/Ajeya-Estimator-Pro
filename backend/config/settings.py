@@ -189,6 +189,10 @@ OPENAI_EMBEDDING_BATCH_SIZE = env.int("OPENAI_EMBEDDING_BATCH_SIZE", default=500
 OPENAI_TIMEOUT_SECONDS = env.int("OPENAI_TIMEOUT_SECONDS", default=120)
 OPENAI_MAX_RETRIES = env.int("OPENAI_MAX_RETRIES", default=1)
 AI_INSTRUCTION_LOGGING = env.bool("AI_INSTRUCTION_LOGGING", default=True)
+# How many BOQ sections to send per extract_products AI call.
+AI_ROW_EXTRACTION_BATCH_SIZE = env.int("AI_ROW_EXTRACTION_BATCH_SIZE", default=5)
+# How many products to map per map_product_match AI call.
+AI_PRODUCT_MAPPING_BATCH_SIZE = env.int("AI_PRODUCT_MAPPING_BATCH_SIZE", default=4)
 
 # --- Chroma -----------------------------------------------------------------
 
