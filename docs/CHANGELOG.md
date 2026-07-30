@@ -7,6 +7,10 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ## 2026-07-30
 
+**UAT / smoke**
+- Local full-stack smoke: Django check, Redis, Celery ping, pages, status JSON;
+  live Re-analyse + Re-extract on BOQ `hg` OK (status preserved).
+
 **Docs**
 - Compacted `SESSION_STATE.md`, `CHANGELOG.md`, and `MAKE_VENDOR_APPROACH.md`;
   refreshed stale `PRODUCT.md` overview to the active pipeline.

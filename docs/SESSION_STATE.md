@@ -58,12 +58,13 @@ uploads kept for view/download; only the active upload retains master rows.
 
 Keep only the latest entry below. Older work is in `docs/CHANGELOG.md`.
 
-### 2026-07-30 — Docs Compacted + Extract/Re-analyse Optimizations
+### 2026-07-30 — Full App Smoke / UAT Pass
 
-Completed: `SESSION_STATE` / `CHANGELOG` / `MAKE_VENDOR_APPROACH` compacted;
-`PRODUCT` overview updated to active pipeline. Extraction/Re-analyse: AI logging
-on; batched embeddings; rematch without long DB lock; Re-extract UI; cached
-extract context; Select candidate keeps BOQ core fields.
-Pending: Tests restore; EC2 migrate; live UAT of Analyse paths.
-Issues: —
-Next: User UAT; remaining go-live fixes as requested.
+Completed: Local smoke of stack + key pages + live **Re-analyse** and
+**Re-extract** on BOQ 82 (`hg`). Django check clean; Redis/Celery ping OK;
+active DB `14_July_DB`. Pages 200: login, dashboard, BOQs, upload, database,
+notifications, users, audit, profile; BOQ 81/82 detail tabs + status JSON.
+Pending: Restore tests; EC2 migrate; restart Celery after code changes before
+full Analyse jobs; Export needs Labour→Review complete (blocked as designed).
+Issues: None blocking found in this pass.
+Next: Restart Celery worker; optional full Analyse Celery job UAT.
