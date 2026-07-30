@@ -1,7 +1,6 @@
 """Authentication models.
 
-Defines the email-based custom User and roles (docs/PRD.md - User Roles,
-docs/DATABASE_ARCHITECTURE.md - User).
+Defines the email-based custom User and roles (docs/PRODUCT.md).
 """
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.db import models
@@ -17,7 +16,7 @@ class UserManager(BaseUserManager):
     def _create_user(self, email, password, **extra_fields):
         if not email:
             raise ValueError("Users must have an email address.")
-        email = self.normalize_email(email).lower()
+        email = BaseUserManager.normalize_email(email).lower()
         user = self.model(email=email, **extra_fields)
         user.set_password(password)
         user.save(using=self._db)
@@ -72,7 +71,7 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def save(self, *args, **kwargs):
         if self.email:
-            self.email = self.__class__.objects.normalize_email(self.email).lower()
+            self.email = BaseUserManager.normalize_email(self.email).lower()
         if self.role == UserRole.ADMIN:
             self.allow_db_access = True
             update_fields = kwargs.get("update_fields")

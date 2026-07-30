@@ -1,7 +1,7 @@
 """Audit service (Phase 11, Sprint 20).
 
 Records significant user/admin actions for auditability
-(docs/PRD.md - Security Requirements). Secrets/passwords are never logged.
+(docs/PRODUCT.md). Secrets/passwords are never logged.
 Defensive so audit failures never break core flows.
 """
 from __future__ import annotations

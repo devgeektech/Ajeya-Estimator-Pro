@@ -1,16 +1,14 @@
 """User management views, restricted to Admin role (thin)."""
 from django.contrib import messages
-from django.contrib.auth import get_user_model
 from django.urls import reverse_lazy
 from django.views.generic import CreateView, ListView, UpdateView, View
 from django.shortcuts import get_object_or_404, redirect
 
+from apps.accounts.models import User
 from common.choices import UserRole
 from common.mixins import SuperAdminRequiredMixin
 
 from .forms import UserCreateForm, UserEditForm
-
-User = get_user_model()
 
 
 def platform_users():
@@ -39,7 +37,7 @@ class UserCreateView(SuperAdminRequiredMixin, CreateView):
         user.created_by = self.request.user
         user.save()
         messages.success(self.request, f"User '{user.email}' created successfully.")
-        return redirect(self.success_url)
+        return super().form_valid(form)
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)

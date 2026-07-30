@@ -1,54 +1,272 @@
 {% extends "base.html" %}
-{% block title %}BOQs &middot; BOQ_AI{% endblock %}
+{% block title %}BOQs &middot; Ajeya Estimator Pro{% endblock %}
 {% block heading %}BOQs{% endblock %}
+{% block topbar_actions %}
+<div class="topbar__actions">
+    <a href="{% url 'boq:upload' %}" class="btn btn--primary">Upload</a>
+</div>
+{% endblock %}
 
 {% block content %}
-<div class="toolbar">
-    <p class="toolbar__info">{{ paginator.count }} BOQ{{ paginator.count|pluralize }}</p>
-    <a href="{% url 'boq:upload' %}" class="btn btn--primary">+ Upload BOQ</a>
-</div>
+<div
+    class="panel"
+    x-data="boqListFilter({ initialQuery: '{{ search_q|escapejs }}' })"
+>
+    <div class="boq-list-toolbar">
+        <label class="boq-list-toolbar__search">
+            <span class="boq-list-toolbar__label">Search</span>
+            <input
+                type="search"
+                class="extraction-input"
+                placeholder="Type to filter (word by word)…"
+                autocomplete="off"
+                x-model="query"
+            >
+        </label>
+        <button
+            type="button"
+            class="btn btn--small"
+            x-show="query.trim()"
+            x-cloak
+            @click="query = ''"
+        >Clear</button>
+        <span class="boq-list-toolbar__hint muted" x-text="filterHint"></span>
+    </div>
 
-<div class="panel">
-    <table class="table">
+    <table class="table" id="boq-list-table">
         <thead>
             <tr>
-                <th>Name</th>
-                {% if user.is_super_admin %}<th>Owner</th>{% endif %}
-                <th>Status</th>
-                <th>Created</th>
+                {% with base=request.path %}
+                <th>
+                    <a
+                        class="table-sort{% if sort == 'name' %} is-active is-{{ dir }}{% endif %}"
+                        href="{{ base }}?sort=name&dir={% if sort == 'name' and dir == 'asc' %}desc{% else %}asc{% endif %}"
+                        @click.prevent="goSort($event.currentTarget.href)"
+                        title="Sort by Name"
+                    >Name <span class="table-sort__arrows" aria-hidden="true"><span class="table-sort__up">▲</span><span class="table-sort__down">▼</span></span></a>
+                </th>
+                <th>
+                    <a
+                        class="table-sort{% if sort == 'owner' %} is-active is-{{ dir }}{% endif %}"
+                        href="{{ base }}?sort=owner&dir={% if sort == 'owner' and dir == 'asc' %}desc{% else %}asc{% endif %}"
+                        @click.prevent="goSort($event.currentTarget.href)"
+                        title="Sort by Owner"
+                    >Owner <span class="table-sort__arrows" aria-hidden="true"><span class="table-sort__up">▲</span><span class="table-sort__down">▼</span></span></a>
+                </th>
+                <th>
+                    <a
+                        class="table-sort{% if sort == 'status' %} is-active is-{{ dir }}{% endif %}"
+                        href="{{ base }}?sort=status&dir={% if sort == 'status' and dir == 'asc' %}desc{% else %}asc{% endif %}"
+                        @click.prevent="goSort($event.currentTarget.href)"
+                        title="Sort by Status"
+                    >Status <span class="table-sort__arrows" aria-hidden="true"><span class="table-sort__up">▲</span><span class="table-sort__down">▼</span></span></a>
+                </th>
+                <th>Database</th>
+                <th>
+                    <a
+                        class="table-sort{% if sort == 'created' %} is-active is-{{ dir }}{% endif %}"
+                        href="{{ base }}?sort=created&dir={% if sort == 'created' and dir == 'asc' %}desc{% else %}asc{% endif %}"
+                        @click.prevent="goSort($event.currentTarget.href)"
+                        title="Sort by Created"
+                    >Created <span class="table-sort__arrows" aria-hidden="true"><span class="table-sort__up">▲</span><span class="table-sort__down">▼</span></span></a>
+                </th>
+                {% endwith %}
                 <th class="table__actions">Actions</th>
             </tr>
         </thead>
         <tbody>
-            {% for boq in boqs %}
-            <tr>
-                <td>{{ boq.boq_name }}</td>
-                {% if user.is_super_admin %}<td>{{ boq.user.full_name }}</td>{% endif %}
+            {% for item in boq_items %}
+            <tr
+                class="boq-list-row"
+                data-search="{{ item.boq.boq_name|lower }} {{ item.boq.user.full_name|lower }} {{ item.status_display.label|lower }} {{ item.boq.status|lower }} {{ item.database_label|lower }}"
+                {% if item.needs_status_poll %}
+                x-data="boqListStatus({
+                    statusUrl: '{% url 'boq:status' item.boq.pk %}',
+                    label: '{{ item.status_display.label|escapejs }}',
+                    badge: '{{ item.status_display.badge|escapejs }}',
+                    expect: '{% if item.boq.status == 'MATCHING' %}match{% else %}extract{% endif %}'
+                })"
+                x-init="start()"
+                {% endif %}
+            >
+                <td style="font-weight: 500;">{{ item.boq.boq_name }}</td>
+                <td>{{ item.boq.user.full_name }}</td>
                 <td>
-                    <span class="badge
-                        {% if boq.status == 'APPROVED' or boq.status == 'EXPORTED' %}badge--green
-                        {% elif boq.status == 'UNDER_REVIEW' %}badge--yellow
-                        {% elif boq.status == 'PROCESSING' %}badge--orange
-                        {% elif boq.status == 'COMPLETED' %}badge--warn
-                        {% endif %}">{{ boq.get_status_display }}</span>
+                    {% if item.needs_status_poll %}
+                    <span class="badge" :class="badge" x-text="label">{{ item.status_display.label }}</span>
+                    {% else %}
+                    <span class="badge {{ item.status_display.badge }}">{{ item.status_display.label }}</span>
+                    {% endif %}
                 </td>
-                <td>{{ boq.created_at|date:"Y-m-d H:i" }}</td>
+                <td class="muted">{% if item.database_label %}{{ item.database_label }}{% else %}—{% endif %}</td>
+                <td>{{ item.boq.created_at|date:"Y-m-d H:i" }}</td>
                 <td class="table__actions">
-                    <a href="{% url 'boq:detail' boq.pk %}" class="btn btn--small">Open</a>
+                    <a href="{% url 'boq:detail' item.boq.pk %}?tab={{ item.detail_tab }}" class="btn btn--small btn--primary">View</a>
                 </td>
             </tr>
             {% empty %}
-            <tr><td colspan="5" class="table__empty">No BOQs yet. Upload your first BOQ to get started.</td></tr>
+            <tr class="boq-list-empty-static">
+                <td colspan="6" class="table__empty">No BOQs uploaded yet.</td>
+            </tr>
             {% endfor %}
+            <tr class="boq-list-empty-filter" x-show="noMatches" x-cloak>
+                <td colspan="6" class="table__empty">No BOQs match the search.</td>
+            </tr>
         </tbody>
     </table>
 </div>
 
-{% if is_paginated %}
-<div class="pagination">
-    {% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}" class="btn btn--small">Previous</a>{% endif %}
-    <span class="pagination__info">Page {{ page_obj.number }} of {{ paginator.num_pages }}</span>
-    {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}" class="btn btn--small">Next</a>{% endif %}
-</div>
-{% endif %}
+<style>
+    .boq-list-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: end;
+        gap: 10px;
+        margin: 0 0 14px;
+    }
+    .boq-list-toolbar__search {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: min(280px, 100%);
+        flex: 1 1 220px;
+    }
+    .boq-list-toolbar__label {
+        font-size: .75rem;
+        font-weight: 700;
+        color: var(--text);
+    }
+    .boq-list-toolbar .extraction-input {
+        width: 100%;
+    }
+    .boq-list-toolbar__hint {
+        font-size: .8rem;
+        margin-left: auto;
+    }
+    .table-sort {
+        color: inherit;
+        text-decoration: none;
+        white-space: nowrap;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        cursor: pointer;
+    }
+    .table-sort:hover,
+    .table-sort.is-active {
+        color: #1d4ed8;
+    }
+    .table-sort__arrows {
+        display: inline-flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        line-height: 0.7;
+        gap: 1px;
+        font-size: 0.55rem;
+        color: #94a3b8;
+        vertical-align: middle;
+    }
+    .table-sort:hover .table-sort__arrows {
+        color: #64748b;
+    }
+    .table-sort.is-active.is-asc .table-sort__up,
+    .table-sort.is-active.is-desc .table-sort__down {
+        color: #1d4ed8;
+    }
+    .table-sort.is-active.is-asc .table-sort__down,
+    .table-sort.is-active.is-desc .table-sort__up {
+        color: #cbd5e1;
+    }
+    .boq-list-row.is-filtered-out {
+        display: none;
+    }
+</style>
+
+<script>
+document.addEventListener('alpine:init', () => {
+    Alpine.data('boqListFilter', (config) => ({
+        query: config.initialQuery || '',
+        visibleCount: 0,
+        totalCount: 0,
+        noMatches: false,
+        get filterHint() {
+            if (!this.totalCount) return '';
+            if (!String(this.query || '').trim()) {
+                return `${this.totalCount} BOQ${this.totalCount === 1 ? '' : 's'}`;
+            }
+            return `${this.visibleCount} of ${this.totalCount}`;
+        },
+        init() {
+            // Watch query so filter runs after x-model updates (not on stale @input).
+            this.$watch('query', () => this.applyFilter());
+            this.$nextTick(() => this.applyFilter());
+        },
+        applyFilter() {
+            const tokens = String(this.query || '')
+                .toLowerCase()
+                .trim()
+                .split(/\s+/)
+                .filter(Boolean);
+            const rows = Array.from(this.$el.querySelectorAll('tr.boq-list-row'));
+            this.totalCount = rows.length;
+            let visible = 0;
+            rows.forEach((row) => {
+                const haystack = (row.getAttribute('data-search') || '').toLowerCase();
+                const match = tokens.every((token) => haystack.includes(token));
+                row.classList.toggle('is-filtered-out', !match);
+                if (match) visible += 1;
+            });
+            this.visibleCount = visible;
+            this.noMatches = this.totalCount > 0 && visible === 0;
+
+            const url = new URL(window.location.href);
+            if (String(this.query || '').trim()) {
+                url.searchParams.set('q', String(this.query).trim());
+            } else {
+                url.searchParams.delete('q');
+            }
+            window.history.replaceState({}, '', url);
+        },
+        goSort(href) {
+            const next = new URL(href, window.location.origin);
+            const q = String(this.query || '').trim();
+            if (q) {
+                next.searchParams.set('q', q);
+            } else {
+                next.searchParams.delete('q');
+            }
+            window.location.href = next.toString();
+        },
+    }));
+
+    Alpine.data('boqListStatus', (config) => ({
+        statusUrl: config.statusUrl + (config.statusUrl.includes('?') ? '&' : '?') + 'expect=' + (config.expect || 'extract'),
+        label: config.label,
+        badge: config.badge,
+        timer: null,
+        start() {
+            this.poll();
+        },
+        poll() {
+            fetch(this.statusUrl, {
+                headers: { 'Accept': 'application/json' },
+                credentials: 'same-origin',
+            })
+                .then((response) => response.json())
+                .then((data) => {
+                    if (data.label) this.label = data.label;
+                    if (data.badge) this.badge = data.badge;
+                    if (data.polling) {
+                        this.timer = setTimeout(() => this.poll(), 2500);
+                        return;
+                    }
+                })
+                .catch(() => {
+                    this.timer = setTimeout(() => this.poll(), 5000);
+                });
+        },
+    }));
+});
+</script>
 {% endblock %}

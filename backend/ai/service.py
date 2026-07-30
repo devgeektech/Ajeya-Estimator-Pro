@@ -1,33 +1,23 @@
-"""AI service.
-
-Single entry point for OpenAI-backed text understanding. Prompts live in
-ai/prompts/ and are formatted with caller-supplied context; business rules are
-never hardcoded here (docs/AGENTS.md - OpenAI Rules). AI is used only for
-understanding/extraction/validation, never pricing or vendor selection
-(docs/AGENTS.md - AI Rules).
-
-The service degrades gracefully: when no real API key is configured it reports
-``is_enabled() == False`` so callers (e.g. the processing pipeline) can skip AI
-work instead of failing.
-"""
+"""OpenAI chat completion wrapper for BOQ analysis."""
 from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 from typing import Any
 
 from django.conf import settings
 
+from ai.instruction_log import log_instruction
+from ai.openai_client import get_client, is_configured
 from common.exceptions import AIServiceError
-
-from .openai_client import get_client, is_configured, load_prompt
 
 logger = logging.getLogger("boq_ai")
 
+_PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
+
 
 class AIService:
-    """Thin wrapper over the OpenAI Chat Completions API."""
-
     def __init__(self, model: str | None = None):
         self.model = model or settings.OPENAI_MODEL
 
@@ -35,50 +25,74 @@ class AIService:
     def is_enabled() -> bool:
         return is_configured()
 
-    def complete(self, prompt: str, *, json_mode: bool = False) -> str:
-        """Send a single-prompt chat completion and return the raw content."""
+    @staticmethod
+    def _supports_custom_temperature(model: str) -> bool:
+        model_name = model.lower()
+        return not model_name.startswith(("gpt-5", "o1", "o3", "o4"))
+
+    def complete_json(
+        self,
+        prompt: str,
+        *,
+        template_name: str = "",
+    ) -> dict[str, Any]:
+        content = self.complete(prompt, json_mode=True, template_name=template_name)
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError as exc:
+            raise AIServiceError(f"AI returned invalid JSON: {exc}") from exc
+
+    def complete(
+        self,
+        prompt: str,
+        *,
+        json_mode: bool = False,
+        template_name: str = "",
+    ) -> str:
         if not self.is_enabled():
-            raise AIServiceError("AI is disabled: configure OPENAI_API_KEY.")
+            raise AIServiceError("OPENAI_API_KEY is not configured.")
 
         client = get_client()
         kwargs: dict[str, Any] = {
             "model": str(self.model),
             "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0,
         }
+        if self._supports_custom_temperature(str(self.model)):
+            kwargs["temperature"] = 0
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
 
         try:
             response = client.chat.completions.create(**kwargs)
-            content = response.choices[0].message.content or ""  # type: ignore[attr-defined]
-            logger.info("AI completion ok (model=%s, chars=%s)", self.model, len(content))
+            content = response.choices[0].message.content or ""
+            log_instruction(
+                template_name=template_name,
+                model=str(self.model),
+                prompt=prompt,
+                response=content,
+            )
+            logger.info(
+                "AI completion ok (model=%s, template=%s, chars=%s)",
+                self.model,
+                template_name or "-",
+                len(content),
+            )
             return content
         except AIServiceError:
             raise
-        except Exception as exc:  # noqa: BLE001 - normalise provider errors
+        except Exception as exc:  # noqa: BLE001
+            log_instruction(
+                template_name=template_name,
+                model=str(self.model),
+                prompt=prompt,
+                error=str(exc),
+            )
             logger.exception("AI completion failed")
             raise AIServiceError(f"AI request failed: {exc}") from exc
 
-    def run_prompt(self, template_name: str, **context) -> str:
-        """Load a prompt template, format it with context, and run it."""
-        template = load_prompt(template_name)
-        try:
-            prompt = template.format(**context)
-        except KeyError as exc:
-            raise AIServiceError(f"Missing prompt variable: {exc}") from exc
-        return self.complete(prompt)
-
-    def run_json_prompt(self, template_name: str, **context) -> dict:
-        """Run a prompt expecting a JSON object response and parse it."""
-        template = load_prompt(template_name)
-        try:
-            prompt = template.format(**context)
-        except KeyError as exc:
-            raise AIServiceError(f"Missing prompt variable: {exc}") from exc
-
-        raw = self.complete(prompt, json_mode=True)
-        try:
-            return json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise AIServiceError(f"AI returned invalid JSON: {exc}") from exc
+    @staticmethod
+    def load_prompt(name: str) -> str:
+        path = _PROMPTS_DIR / name
+        if not path.is_file():
+            raise AIServiceError(f"Prompt file not found: {path}")
+        return path.read_text(encoding="utf-8")

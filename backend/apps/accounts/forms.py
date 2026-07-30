@@ -2,9 +2,9 @@
 from django import forms
 from django.contrib.auth import authenticate
 from django.contrib.auth.forms import PasswordChangeForm, PasswordResetForm
-from django.contrib.auth import get_user_model
+from django.contrib.auth.models import BaseUserManager
 
-User = get_user_model()
+from apps.accounts.models import User
 
 
 class EmailLoginForm(forms.Form):
@@ -26,10 +26,12 @@ class EmailLoginForm(forms.Form):
 
     def clean(self):
         cleaned = super().clean()
+        if cleaned is None:
+            return cleaned
         email = cleaned.get("email")
         password = cleaned.get("password")
         if email and password:
-            email = User.objects.normalize_email(email).lower()
+            email = BaseUserManager.normalize_email(email).lower()
             cleaned["email"] = email
             self.user = authenticate(self.request, username=email, password=password)
             if self.user is None:
@@ -50,7 +52,7 @@ class RegisteredEmailPasswordResetForm(PasswordResetForm):
     )
 
     def clean_email(self):
-        email = User.objects.normalize_email(self.cleaned_data["email"]).lower()
+        email = BaseUserManager.normalize_email(self.cleaned_data["email"]).lower()
         if not User.objects.filter(email__iexact=email, is_active=True).exists():
             raise forms.ValidationError("This email is not registered.")
         return email

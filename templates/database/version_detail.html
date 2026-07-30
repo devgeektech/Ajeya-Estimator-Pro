@@ -4,7 +4,7 @@
 
 {% block content %}
 <div class="toolbar">
-    <a href="{% url 'database:list' %}" class="btn btn--ghost">&larr; Back to Versions</a>
+    <a href="{% url 'database:list' %}" class="btn btn--ghost">&larr; Back to Uploads</a>
     {% if version.file %}
     <a href="{% url 'database:download' version.pk %}" class="btn btn--primary">Download File</a>
     {% endif %}
@@ -12,7 +12,7 @@
 
 <div class="panel panel--narrow">
     <h2 class="panel__title">Version Summary</h2>
-    <table class="table">
+    <table class="table table--plain">
         <tbody>
             <tr>
                 <th style="text-align: left;">Name</th>
@@ -48,7 +48,13 @@
     </table>
     
     <h3 style="margin-top: 24px;" class="panel__title">Data Statistics</h3>
-    <table class="table">
+    {% if not version.is_active %}
+    <p class="panel__text" style="margin-bottom: 12px;">
+        Archived uploads keep the workbook for download. Master sheet rows are stored
+        only for the active database.
+    </p>
+    {% endif %}
+    <table class="table table--plain">
         <tbody>
             <tr>
                 <th style="text-align: left;">Rate Master Items</th>

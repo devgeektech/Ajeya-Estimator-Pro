@@ -1,89 +1,939 @@
 {% extends "base.html" %}
-{% block title %}{{ boq.boq_name }} &middot; BOQ_AI{% endblock %}
+{% block title %}{{ boq.boq_name }} &middot; Ajeya Estimator Pro{% endblock %}
+
+{% block topbar_leading %}
+<a href="{% url 'boq:list' %}" class="topbar-back" aria-label="Back to BOQs">
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <line x1="20" y1="12" x2="5" y2="12"/>
+        <polyline points="11 18 5 12 11 6"/>
+    </svg>
+</a>
+{% endblock %}
+
 {% block heading %}{{ boq.boq_name }}{% endblock %}
 
 {% block content %}
-<div class="toolbar">
-    <a href="{% url 'boq:list' %}" class="btn btn--ghost btn--small">&larr; Back to BOQs</a>
-    <div style="display:flex; align-items:center; gap:12px;">
-        <span class="badge">{{ boq.get_status_display }}</span>
-        {% if latest_run and latest_run.status == 'COMPLETED' %}
-        <a href="{% url 'review:detail' boq.pk %}" class="btn btn--small">Review results</a>
-        {% endif %}
-        {% if latest_run.status == 'PROCESSING' or latest_run.status == 'QUEUED' %}
-        <button class="btn btn--small" disabled>Processing&hellip;</button>
-        {% else %}
-        <form method="post" action="{% url 'processing:start' boq.pk %}" class="inline-form">
-            {% csrf_token %}
-            <button type="submit" class="btn btn--primary btn--small">
-                {% if latest_run and latest_run.status == 'COMPLETED' %}Reprocess{% else %}Process BOQ{% endif %}
+<style>
+    /* Pull tab bar flush under the topbar (cancel .content padding-top). */
+    .boq-view {
+        margin-top: -28px;
+    }
+    .boq-detail-header {
+        position: sticky !important;
+        top: 63px !important;
+        z-index: 20 !important;
+        background: var(--surface-alt) !important;
+        padding-top: 0 !important;
+        padding-bottom: 2px !important;
+        margin-top: 0 !important;
+        margin-bottom: 4px !important;
+        gap: 4px !important;
+    }
+    .boq-detail-header .boq-tabs {
+        margin-top: 0 !important;
+        margin-bottom: 0 !important;
+        flex-wrap: wrap !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+        border-radius: 0 0 10px 10px !important;
+        border-top: none !important;
+    }
+    .boq-detail-header .boq-tabs__btn {
+        flex: 1 1 auto !important;
+        min-width: max-content !important;
+    }
+    .boq-tab-context {
+        display: flex;
+        align-items: center;
+        gap: 8px 12px;
+        width: 100%;
+        min-height: 0;
+        padding: 2px 0 4px;
+    }
+    .boq-tab-context--compact {
+        padding: 0;
+        min-height: 0;
+        gap: 0;
+    }
+    .boq-tab-context--compact .boq-tab-context__actions {
+        margin-left: auto;
+    }
+    .boq-tab-context__status {
+        flex-shrink: 0;
+    }
+    .boq-tab-context__summary {
+        flex: 1 1 auto;
+        min-width: 0;
+        font-size: .8rem;
+        line-height: 1.35;
+        color: var(--text-muted);
+    }
+    .boq-tab-context__summary strong {
+        color: var(--text);
+        font-weight: 600;
+    }
+    .boq-tab-context__actions {
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+    .dark-mode .boq-detail-header {
+        background: var(--surface-alt) !important;
+    }
+
+    @media (max-width: 980px) {
+        .boq-view {
+            margin-top: -14px;
+        }
+        .boq-detail-header {
+            top: 56px !important;
+        }
+        .boq-tab-context {
+            flex-wrap: wrap;
+            align-items: flex-start;
+        }
+        .boq-tab-context__summary {
+            flex: 1 1 100%;
+            order: 3;
+            font-size: .78rem;
+        }
+        .boq-tab-context__actions {
+            flex: 1 1 auto;
+            justify-content: flex-start;
+            width: 100%;
+        }
+        .boq-tab-context__actions .btn {
+            min-height: 40px;
+        }
+    }
+
+    @media (max-width: 560px) {
+        .boq-tab-context__actions {
+            display: flex;
+            flex-wrap: wrap;
+            width: 100%;
+        }
+        .boq-tab-context__actions .btn {
+            flex: 1 1 calc(50% - 4px);
+            min-width: 140px;
+            width: auto;
+        }
+    }
+    /* Distinct alternating card colors - Light Mode */
+    .extraction-line:nth-child(odd) {
+        background-color: #ffffff !important;
+    }
+    .extraction-line:nth-child(even) {
+        background-color: #e2e8f0 !important;
+    }
+    .dark-mode .extraction-line:nth-child(odd) {
+        background-color: #111827 !important;
+    }
+    .dark-mode .extraction-line:nth-child(even) {
+        background-color: #334155 !important;
+    }
+    .extraction-product-card {
+        background-color: transparent !important;
+    }
+    .dark-mode .extraction-product-card {
+        background-color: transparent !important;
+    }
+
+    /* Analysis loading — centered spinner (inline page CSS so cache cannot hide it) */
+    .analysis-tab-canvas {
+        position: relative;
+        min-height: 420px;
+    }
+    .analysis-loading-center.analysis-loading-center--active {
+        display: flex !important;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        min-height: 420px;
+        width: 100%;
+        padding: 64px 20px;
+        text-align: center;
+        box-sizing: border-box;
+    }
+    .analysis-loading-center[x-cloak] {
+        display: none !important;
+    }
+    .analysis-loading-center__spinner {
+        display: block !important;
+        flex-shrink: 0;
+        box-sizing: border-box;
+        width: 56px !important;
+        height: 56px !important;
+        margin: 0 auto;
+        border-radius: 50% !important;
+        border: 5px solid #bfdbfe !important;
+        border-top-color: #2563eb !important;
+        animation: boqAnalysisSpin 0.7s linear infinite !important;
+    }
+    .analysis-loading-center__percent {
+        margin: 0;
+        font-size: 1.75rem;
+        font-weight: 700;
+        color: var(--text, #0f172a);
+        line-height: 1;
+        font-variant-numeric: tabular-nums;
+    }
+    .analysis-loading-center__title {
+        margin: 0;
+        max-width: 24rem;
+        font-size: 1.05rem;
+        font-weight: 600;
+        color: var(--text, #0f172a);
+        line-height: 1.35;
+    }
+    @keyframes boqAnalysisSpin {
+        to { transform: rotate(360deg); }
+    }
+</style>
+<div
+    class="boq-view"
+    x-data="{
+        tab: '{{ default_tab }}',
+        analysisEnabled: {{ tab_access.analysis|yesno:'true,false' }},
+        makeVendorEnabled: {{ tab_access.make_vendor|yesno:'true,false' }},
+        labourEnabled: {{ tab_access.labour|yesno:'true,false' }},
+        reviewEnabled: {{ tab_access.review|yesno:'true,false' }},
+        analysing: {{ is_extracting|yesno:'true,false' }},
+        matching: {{ is_matching|yesno:'true,false' }},
+        unlockingLabour: false,
+        completingLabour: false,
+        analysisProgress: {{ analysis_progress_percent|default:0 }},
+        analysisTargetPercent: {{ analysis_progress_percent|default:0 }},
+        analysisProgressLabel: '{{ analysis_progress_label|default:""|escapejs }}',
+        matchProgress: {{ is_matching|yesno:'3,0' }},
+        matchProgressLabel: '',
+        statusLabel: '{{ status_display.label|escapejs }}',
+        statusBadge: '{{ status_display.badge|escapejs }}',
+        extractUrl: '{% url 'boq:extract' boq.pk %}',
+        labourUrl: '{% url 'boq:labour' boq.pk %}',
+        extractStatusUrl: '{% url 'boq:status' boq.pk %}?expect=extract',
+        matchStatusUrl: '{% url 'boq:status' boq.pk %}?expect=match',
+        detailAnalysisUrl: '{% url 'boq:detail' boq.pk %}?tab=analysis',
+        detailMakeVendorUrl: '{% url 'boq:detail' boq.pk %}?tab=make_vendor',
+        detailLabourUrl: '{% url 'boq:detail' boq.pk %}?tab=labour',
+        detailReviewUrl: '{% url 'boq:detail' boq.pk %}?tab=review',
+        detailMatchUrl: '{% url 'boq:detail' boq.pk %}?tab=review',
+        canExport: {{ can_export|yesno:'true,false' }},
+        canUnlockLabour: {{ can_unlock_labour|yesno:'true,false' }},
+        canCompleteLabour: {{ can_complete_labour|yesno:'true,false' }},
+        calculatingPrice: false,
+        pollTimer: null,
+        progressTicker: null,
+        progressStorageKey: 'boq-analysis-progress-{{ boq.pk }}',
+        analysisStartedAt: {{ is_extracting|yesno:'Date.now(),null' }},
+        prefillingMakeVendor: false,
+        scrollPositions: {},
+        readStoredProgress() {
+            try {
+                const raw = sessionStorage.getItem(this.progressStorageKey);
+                if (!raw) return null;
+                const data = JSON.parse(raw);
+                const pct = Number(data && data.percent);
+                if (!Number.isFinite(pct)) return null;
+                return {
+                    percent: Math.max(0, Math.min(99, Math.round(pct))),
+                    label: (data && data.label) ? String(data.label) : '',
+                    startedAt: Number(data && data.startedAt) || null,
+                };
+            } catch (e) {
+                return null;
+            }
+        },
+        writeStoredProgress() {
+            try {
+                if (!this.analysing) {
+                    sessionStorage.removeItem(this.progressStorageKey);
+                    return;
+                }
+                sessionStorage.setItem(this.progressStorageKey, JSON.stringify({
+                    percent: Math.max(0, Math.min(99, Number(this.analysisProgress) || 0)),
+                    label: this.analysisProgressLabel || '',
+                    startedAt: this.analysisStartedAt || Date.now(),
+                }));
+            } catch (e) { /* ignore */ }
+        },
+        clearStoredProgress() {
+            try { sessionStorage.removeItem(this.progressStorageKey); } catch (e) { /* ignore */ }
+        },
+        startProgressTicker() {
+            this.stopProgressTicker();
+            // Smooth toward server target; soft-creep while real progress is lagging
+            // (LocMem/cache miss used to pin the UI at the 3% polling fallback).
+            this.progressTicker = setInterval(() => {
+                if (!this.analysing) {
+                    this.stopProgressTicker();
+                    return;
+                }
+                const current = Number(this.analysisProgress) || 0;
+                const target = Math.max(
+                    0,
+                    Math.min(99, Number(this.analysisTargetPercent) || 0)
+                );
+                if (current >= 99) {
+                    this.writeStoredProgress();
+                    return;
+                }
+                if (target > current) {
+                    const gap = target - current;
+                    const step = gap >= 8 ? 3 : (gap >= 3 ? 2 : 1);
+                    this.analysisProgress = Math.min(99, current + step);
+                    this.writeStoredProgress();
+                    return;
+                }
+                // Soft creep up to 90% while waiting for the next real server tick
+                // (sync Analyse POST, or worker progress not yet visible).
+                const started = Number(this.analysisStartedAt) || Date.now();
+                const elapsedSec = Math.max(0, (Date.now() - started) / 1000);
+                const softCap = Math.min(90, 3 + Math.floor(elapsedSec / 1.5));
+                if (softCap > current) {
+                    this.analysisProgress = Math.min(90, current + 1);
+                    this.writeStoredProgress();
+                }
+            }, 700);
+        },
+        stopProgressTicker() {
+            if (this.progressTicker) {
+                clearInterval(this.progressTicker);
+                this.progressTicker = null;
+            }
+        },
+        finishAnalysisProgress() {
+            this.analysisProgress = 100;
+            this.analysisTargetPercent = 100;
+            this.stopProgressTicker();
+            this.analysisStartedAt = null;
+            this.clearStoredProgress();
+        },
+        scrollStorageKey(tabName) {
+            return 'boq-detail-scroll-{{ boq.pk }}-' + (tabName || this.tab || 'analysis');
+        },
+        persistScroll(tabName) {
+            try {
+                sessionStorage.setItem(this.scrollStorageKey(tabName || this.tab), String(window.scrollY));
+            } catch (e) { /* ignore */ }
+        },
+        restoreScroll(tabName) {
+            try {
+                const key = this.scrollStorageKey(tabName || this.tab);
+                const raw = sessionStorage.getItem(key);
+                if (raw == null || raw === '') return;
+                let payload = null;
+                try {
+                    payload = JSON.parse(raw);
+                } catch (e) {
+                    payload = { y: Number(raw) };
+                }
+                const y = Number(payload && payload.y);
+                if (!Number.isFinite(y) || y < 0) return;
+                const rowId = payload && payload.rowId ? String(payload.rowId) : '';
+                const offset = Number(payload && payload.offset);
+                const apply = () => {
+                    if (rowId && Number.isFinite(offset)) {
+                        const el = document.getElementById('line-' + rowId)
+                            || document.getElementById('make-vendor-' + rowId);
+                        if (el) {
+                            const top = el.getBoundingClientRect().top + window.scrollY;
+                            window.scrollTo(0, Math.max(0, top - offset));
+                            return;
+                        }
+                    }
+                    window.scrollTo(0, y);
+                };
+                this.$nextTick(() => {
+                    apply();
+                    requestAnimationFrame(apply);
+                    setTimeout(apply, 50);
+                    setTimeout(apply, 200);
+                    setTimeout(apply, 500);
+                });
+            } catch (e) { /* ignore */ }
+        },
+        persistScrollForRow(rowId, tabName) {
+            try {
+                const el = rowId
+                    ? (document.getElementById('line-' + rowId) || document.getElementById('make-vendor-' + rowId))
+                    : null;
+                const payload = {
+                    y: window.scrollY,
+                    rowId: rowId || '',
+                    offset: el ? el.getBoundingClientRect().top : null,
+                };
+                sessionStorage.setItem(
+                    this.scrollStorageKey(tabName || this.tab),
+                    JSON.stringify(payload)
+                );
+            } catch (e) { /* ignore */ }
+        },
+        async goToMakeVendor() {
+            if (this.analysing || this.matching || this.prefillingMakeVendor) return;
+            this.prefillingMakeVendor = true;
+            try {
+                const body = new FormData();
+                body.append('ajax', '1');
+                body.append('action', 'apply_lowest_defaults');
+                body.append('find_rates', '1');
+                const response = await fetch('{% url "boq:make_vendor_select" boq.pk %}', {
+                    method: 'POST',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-CSRFToken': this.csrfToken(),
+                        'Accept': 'application/json',
+                    },
+                    credentials: 'same-origin',
+                    body,
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || data.ok === false) {
+                    throw new Error(data.message || 'Failed to prefill lowest make/vendor.');
+                }
+                this.makeVendorEnabled = true;
+                this.reloadWithCacheBust(this.detailMakeVendorUrl);
+            } catch (error) {
+                this.prefillingMakeVendor = false;
+                alert(error.message || 'Failed to open Make & Vendor.');
+            }
+        },
+        csrfToken() {
+            return document.querySelector('meta[name=csrf-token]')?.getAttribute('content') || '';
+        },
+        selectTab(name) {
+            if (name === 'analysis' && !this.analysisEnabled) return;
+            if (name === 'make_vendor' && !this.makeVendorEnabled) return;
+            if (name === 'labour' && !this.labourEnabled) return;
+            if ((name === 'review' || name === 'match_results') && !this.reviewEnabled) return;
+            if (name === 'match_results') name = 'review';
+            this.persistScroll(this.tab);
+            this.scrollPositions[this.tab] = window.scrollY;
+            this.tab = name;
+            this.syncTabUrl(name);
+            this.$nextTick(() => {
+                const saved = this.scrollPositions[name];
+                if (typeof saved === 'number') {
+                    window.scrollTo(0, saved);
+                } else {
+                    this.restoreScroll(name);
+                }
+            });
+        },
+        applyStatus(data) {
+            if (data.label) this.statusLabel = data.label;
+            if (data.badge) this.statusBadge = data.badge;
+            if (data.progress_percent != null && data.progress_percent !== '') {
+                const pct = Number(data.progress_percent);
+                if (Number.isFinite(pct)) {
+                    if (data.expect === 'match' || this.matching) {
+                        this.matchProgress = Math.max(0, Math.min(100, pct));
+                    } else {
+                        const serverPct = Math.max(0, Math.min(data.ready ? 100 : 99, pct));
+                        const prev = Number(this.analysisProgress) || 0;
+                        const prevTarget = Number(this.analysisTargetPercent) || 0;
+                        // Allow snap-down on re-queue (server resets to 1–8%).
+                        // Never keep a prior 99% while a new run is at the start.
+                        if (serverPct + 5 < prev || serverPct + 5 < prevTarget) {
+                            this.analysisProgress = serverPct;
+                            this.analysisTargetPercent = serverPct;
+                            this.analysisStartedAt = Date.now();
+                        } else {
+                            this.analysisTargetPercent = Math.max(prevTarget, serverPct);
+                            this.analysisProgress = Math.max(prev, serverPct);
+                        }
+                        this.writeStoredProgress();
+                    }
+                }
+            }
+            if (data.progress_label) {
+                if (data.expect === 'match' || this.matching) {
+                    this.matchProgressLabel = data.progress_label;
+                } else {
+                    this.analysisProgressLabel = data.progress_label;
+                    this.writeStoredProgress();
+                }
+            }
+            if (data.ready && data.expect === 'extract') {
+                this.analysisEnabled = true;
+                this.finishAnalysisProgress();
+                // Make & Vendor stays locked until Next prefills lowest prices.
+            }
+            if (data.ready && data.expect === 'match') {
+                this.matchProgress = 100;
+            }
+        },
+        reloadWithCacheBust(url) {
+            const sep = url.includes('?') ? '&' : '?';
+            window.location.href = url + sep + '_t=' + Date.now();
+        },
+        async postJob(url) {
+            const body = new FormData();
+            body.append('ajax', '1');
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRFToken': this.csrfToken(),
+                    'Accept': 'application/json',
+                },
+                credentials: 'same-origin',
+                body,
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || data.ok === false) {
+                throw new Error(data.message || 'Request failed.');
+            }
+            return data;
+        },
+        pollExtract() {
+            fetch(this.extractStatusUrl, { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
+                .then((response) => response.json())
+                .then((data) => {
+                    this.applyStatus(data);
+                    if (data.ready) {
+                        // Stay on Analysis so the expert can review before Make & Vendor.
+                        this.reloadWithCacheBust(this.detailAnalysisUrl);
+                        return;
+                    }
+                    this.pollTimer = setTimeout(() => this.pollExtract(), 800);
+                })
+                .catch(() => { this.pollTimer = setTimeout(() => this.pollExtract(), 5000); });
+        },
+        pollMatch() {
+            fetch(this.matchStatusUrl, { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
+                .then((response) => response.json())
+                .then((data) => {
+                    this.applyStatus(data);
+                    if (data.ready) {
+                        this.reloadWithCacheBust(this.detailMatchUrl);
+                        return;
+                    }
+                    this.pollTimer = setTimeout(() => this.pollMatch(), 2500);
+                })
+                .catch(() => { this.pollTimer = setTimeout(() => this.pollMatch(), 5000); });
+        },
+        startPolling() {
+            if (this.pollTimer) {
+                clearTimeout(this.pollTimer);
+                this.pollTimer = null;
+            }
+            if (this.analysing) {
+                this.tab = 'analysis';
+                this.syncTabUrl('analysis');
+                // Resume only when session progress matches the live server run.
+                // Ignore stale 99% left from a previous Analyse / stalled heal.
+                const stored = this.readStoredProgress();
+                const serverPct = Number(this.analysisTargetPercent) || 0;
+                const storedPct = stored ? stored.percent : 0;
+                let resumePct = serverPct;
+                if (stored && storedPct <= serverPct + 5) {
+                    resumePct = Math.max(serverPct, storedPct, Number(this.analysisProgress) || 0);
+                } else {
+                    this.clearStoredProgress();
+                    resumePct = Math.max(serverPct, Number(this.analysisProgress) || 0, 2);
+                }
+                this.analysisProgress = Math.min(99, resumePct);
+                this.analysisTargetPercent = Math.min(
+                    99,
+                    Math.max(serverPct, this.analysisProgress > serverPct + 5 ? serverPct : this.analysisProgress)
+                );
+                if (this.analysisProgress > this.analysisTargetPercent + 5) {
+                    this.analysisProgress = this.analysisTargetPercent;
+                }
+                if (stored && stored.label && !this.analysisProgressLabel && storedPct <= serverPct + 5) {
+                    this.analysisProgressLabel = stored.label;
+                }
+                if (stored && stored.startedAt && storedPct <= serverPct + 5) {
+                    this.analysisStartedAt = stored.startedAt;
+                } else if (!this.analysisStartedAt) {
+                    this.analysisStartedAt = Date.now();
+                }
+                this.writeStoredProgress();
+                this.startProgressTicker();
+                this.pollExtract();
+            } else if (this.matching) {
+                this.tab = 'review';
+                this.syncTabUrl('review');
+                this.pollMatch();
+            } else {
+                this.clearStoredProgress();
+                this.syncTabUrl(this.tab);
+            }
+        },
+        async startAnalyse() {
+            if (this.analysing || this.matching) return;
+            this.clearStoredProgress();
+            this.analysing = true;
+            this.analysisEnabled = true;
+            this.tab = 'analysis';
+            this.syncTabUrl('analysis');
+            this.statusLabel = 'Analysing...';
+            this.statusBadge = 'badge--yellow';
+            this.analysisProgress = 2;
+            this.analysisTargetPercent = 2;
+            this.analysisProgressLabel = 'Starting analysis…';
+            this.analysisStartedAt = Date.now();
+            this.writeStoredProgress();
+            this.startProgressTicker();
+            try {
+                const data = await this.postJob(this.extractUrl);
+                this.applyStatus(data);
+                if (data.ready || data.mode === 'sync') {
+                    this.finishAnalysisProgress();
+                    this.reloadWithCacheBust(this.detailAnalysisUrl);
+                    return;
+                }
+                this.startPolling();
+            } catch (error) {
+                this.analysing = false;
+                this.stopProgressTicker();
+                this.analysisStartedAt = null;
+                this.clearStoredProgress();
+                alert(error.message || 'Failed to start analysis.');
+            }
+        },
+        async goToLabour() {
+            if (this.analysing || this.matching || this.unlockingLabour) return;
+            this.unlockingLabour = true;
+            try {
+                const body = new FormData();
+                body.append('ajax', '1');
+                body.append('action', 'unlock');
+                const response = await fetch(this.labourUrl, {
+                    method: 'POST',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-CSRFToken': this.csrfToken(),
+                        'Accept': 'application/json',
+                    },
+                    credentials: 'same-origin',
+                    body,
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || data.ok === false) {
+                    throw new Error(data.message || 'Failed to open Labour.');
+                }
+                this.labourEnabled = true;
+                this.reloadWithCacheBust(this.detailLabourUrl);
+            } catch (error) {
+                this.unlockingLabour = false;
+                alert(error.message || 'Failed to open Labour.');
+            }
+        },
+        async completeLabour() {
+            if (this.analysing || this.matching || this.completingLabour) return;
+            if (!this.canCompleteLabour) return;
+            this.completingLabour = true;
+            try {
+                const body = new FormData();
+                body.append('ajax', '1');
+                body.append('action', 'complete');
+                const response = await fetch(this.labourUrl, {
+                    method: 'POST',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-CSRFToken': this.csrfToken(),
+                        'Accept': 'application/json',
+                    },
+                    credentials: 'same-origin',
+                    body,
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || data.ok === false) {
+                    throw new Error(data.message || 'Failed to complete labour.');
+                }
+                this.reviewEnabled = true;
+                this.canExport = true;
+                this.statusLabel = 'Ready to Export';
+                this.statusBadge = 'badge--green';
+                this.reloadWithCacheBust(data.redirect || this.detailReviewUrl);
+            } catch (error) {
+                this.completingLabour = false;
+                alert(error.message || 'Failed to complete labour.');
+            }
+        },
+        async startCalculatePrice() {
+            return this.completeLabour();
+        },
+        syncTabUrl(name) {
+            try {
+                const url = new URL(window.location.href);
+                if (url.searchParams.get('tab') === name && !url.searchParams.has('_t')) return;
+                url.searchParams.set('tab', name);
+                url.searchParams.delete('_t');
+                window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+            } catch (e) { /* ignore */ }
+        }
+    }"
+    x-init="
+        startPolling();
+        restoreScroll();
+        window.addEventListener('beforeunload', () => persistScroll());
+    "
+>
+    <div class="boq-detail-header">
+        <div class="boq-tabs" role="tablist">
+            <button
+                type="button"
+                class="boq-tabs__btn"
+                :class="{ 'is-active': tab === 'boq' }"
+                @click="selectTab('boq')"
+                role="tab"
+                :aria-selected="tab === 'boq'"
+            >
+                BOQ
             </button>
-        </form>
+            <button
+                type="button"
+                class="boq-tabs__btn"
+                :class="{ 'is-active': tab === 'make_list' }"
+                @click="selectTab('make_list')"
+                role="tab"
+                :aria-selected="tab === 'make_list'"
+            >
+                Make List
+            </button>
+            <button
+                type="button"
+                class="boq-tabs__btn"
+                :class="{ 'is-active': tab === 'analysis', 'is-disabled': !analysisEnabled }"
+                @click="selectTab('analysis')"
+                role="tab"
+                :aria-selected="tab === 'analysis'"
+                :aria-disabled="!analysisEnabled"
+                :tabindex="analysisEnabled ? 0 : -1"
+            >
+                Analysis
+            </button>
+            <button
+                type="button"
+                class="boq-tabs__btn"
+                :class="{ 'is-active': tab === 'make_vendor', 'is-disabled': !makeVendorEnabled }"
+                @click="selectTab('make_vendor')"
+                role="tab"
+                :aria-selected="tab === 'make_vendor'"
+                :aria-disabled="!makeVendorEnabled"
+                :tabindex="makeVendorEnabled ? 0 : -1"
+            >
+                Make &amp; Vendor
+            </button>
+            <button
+                type="button"
+                class="boq-tabs__btn"
+                :class="{ 'is-active': tab === 'labour', 'is-disabled': !labourEnabled }"
+                @click="selectTab('labour')"
+                role="tab"
+                :aria-selected="tab === 'labour'"
+                :aria-disabled="!labourEnabled"
+                :tabindex="labourEnabled ? 0 : -1"
+            >
+                Labour
+            </button>
+            <button
+                type="button"
+                class="boq-tabs__btn"
+                :class="{ 'is-active': tab === 'review', 'is-disabled': !reviewEnabled }"
+                @click="selectTab('review')"
+                role="tab"
+                :aria-selected="tab === 'review'"
+                :aria-disabled="!reviewEnabled"
+                :tabindex="reviewEnabled ? 0 : -1"
+            >
+                Review
+            </button>
+        </div>
+
+        <div class="boq-tab-context" :class="{ 'boq-tab-context--compact': tab === 'make_list' || tab === 'make_vendor' || tab === 'labour' }">
+            <div class="boq-tab-context__status" x-show="tab !== 'make_list' && tab !== 'make_vendor' && statusLabel" x-cloak>
+                <span
+                    class="badge"
+                    :class="statusBadge"
+                    x-show="!(analysing && tab === 'analysis')"
+                    x-text="statusLabel"
+                >{% if not is_extracting and status_display.label %}{{ status_display.label }}{% endif %}</span>
+            </div>
+
+            <div class="boq-tab-context__summary" x-show="tab !== 'make_list' && tab !== 'make_vendor'" x-cloak>
+                {% if extraction_display.has_extraction %}
+                <span x-show="tab === 'analysis' && !analysing" x-cloak>
+                    <strong>{{ extraction_display.product_count }}</strong> product(s) extracted.
+                    {% if extraction_display.multiproduct_review_count %}
+                        <span class="extraction-missing-summary">{{ extraction_display.multiproduct_review_count }} multi-product review.</span>
+                    {% endif %}
+                    {% if extraction_display.missing_field_count %}
+                        <span class="extraction-missing-summary">{{ extraction_display.missing_field_count }} field(s) need review.</span>
+                    {% endif %}
+                    {% if can_edit_extraction %}
+                        Confirm products, then <strong>Next</strong> → Make &amp; Vendor.
+                    {% endif %}
+                </span>
+                {% endif %}
+                {% if labour_display.has_products %}
+                <span x-show="tab === 'labour'" x-cloak>
+                    Labour Charges found for <strong>{{ labour_display.stats.with_labour_count|default:0 }}</strong> Products
+                    · Mode: <strong>{{ labour_display.mode|default:"auto" }}</strong>
+                </span>
+                {% endif %}
+                {% if analysis_display.has_analysis %}
+                <span x-show="tab === 'review'" x-cloak>
+                    {{ analysis_display.stats.products_matched|default:0 }} / {{ analysis_display.stats.products_total|default:0 }} products with rates
+                    · Export final BOQ + Charge Breakdown when ready.
+                </span>
+                {% endif %}
+            </div>
+
+            <div class="boq-tab-context__actions">
+                {% if can_analyse and not extraction_display.has_extraction %}
+                    <button
+                        type="button"
+                        class="btn btn--small btn--boq-analyse"
+                        :class="{ 'btn--analysis-loading': analysing }"
+                        :disabled="analysing"
+                        @click="startAnalyse()"
+                    >
+                        <span x-show="!analysing">Analyse BOQ</span>
+                        <span x-show="analysing" x-cloak>Analysing...</span>
+                    </button>
+                {% elif is_extracting %}
+                    <button type="button" class="btn btn--small btn--analysis-loading" disabled>Analysing...</button>
+                {% endif %}
+
+                <span x-show="tab === 'analysis' && !analysing && analysisEnabled && !makeVendorEnabled" x-cloak>
+                    <button
+                        type="button"
+                        class="btn btn--small btn--primary"
+                        :disabled="prefillingMakeVendor"
+                        @click="goToMakeVendor()"
+                    >
+                        <span x-show="!prefillingMakeVendor">Next</span>
+                        <span x-show="prefillingMakeVendor" x-cloak>Loading…</span>
+                    </button>
+                </span>
+                <span x-show="tab === 'analysis' && !analysing && makeVendorEnabled" x-cloak>
+                    <button
+                        type="button"
+                        class="btn btn--small btn--primary"
+                        @click="selectTab('make_vendor')"
+                    >Next</button>
+                </span>
+
+                <span x-show="tab === 'review'" x-cloak>
+                    <a
+                        href="{% url 'boq:export' boq.pk %}"
+                        class="btn btn--small btn--boq-export"
+                        x-show="canExport"
+                        x-cloak
+                    >Export Excel</a>
+                </span>
+            </div>
+        </div>
+
+        {% if make_vendor_display.has_products %}
+        <div
+            class="make-vendor-summary make-vendor-summary--card make-vendor-summary--pinned"
+            x-show="tab === 'make_vendor'"
+            x-cloak
+        >
+            <div class="make-vendor-summary__counts">
+                <strong>{{ make_vendor_display.stats.product_count|default:0 }}</strong> products
+                · <span class="make-vendor-summary__default">{{ make_vendor_display.stats.default_count|default:0 }} default</span>
+                · <span class="make-vendor-summary__filtered">{{ make_vendor_display.stats.filtered_count|default:0 }} filtered</span>
+                · <span class="make-vendor-summary__not-found">{{ make_vendor_display.stats.not_found_count|default:0 }} not found</span>
+                · <span class="make-vendor-summary__no-match">{{ make_vendor_display.stats.no_match_count|default:0 }} no match</span>
+                {% if make_vendor_display.stats.supplier_review_count %}
+                · <span class="make-vendor-summary__supplier-review">{{ make_vendor_display.stats.supplier_review_count }} supplier review</span>
+                {% endif %}
+                {% if make_vendor_display.stats.same_price_tie_count %}
+                · <span class="make-vendor-summary__same-price">{{ make_vendor_display.stats.same_price_tie_count }} same price</span>
+                {% endif %}
+                · <span class="make-vendor-summary__found-rates">
+                    Found rates for <strong>{{ make_vendor_display.stats.matched_count|default:0 }}</strong> products
+                </span>
+            </div>
+            <div class="make-vendor-summary__actions">
+                <span
+                    class="badge"
+                    :class="statusBadge"
+                    x-show="statusLabel"
+                    x-cloak
+                    x-text="statusLabel"
+                >{% if status_display.label %}{{ status_display.label }}{% endif %}</span>
+                {% if can_unlock_labour %}
+                <button
+                    type="button"
+                    class="btn btn--small btn--primary"
+                    :disabled="unlockingLabour"
+                    @click="goToLabour()"
+                >
+                    <span x-show="!unlockingLabour">Next</span>
+                    <span x-show="unlockingLabour" x-cloak>Loading…</span>
+                </button>
+                {% endif %}
+            </div>
+        </div>
         {% endif %}
     </div>
-</div>
 
-{% if latest_run %}
-<div class="panel" style="margin-bottom:24px;">
-    <h3 class="panel__title">Processing status</h3>
-    {% include "processing/_status.html" with run=latest_run job=latest_run.processing_job %}
-</div>
-{% endif %}
+    <div
+        class="panel"
+        :class="{
+            'panel--analysis-flat': tab === 'analysis' || tab === 'make_list' || tab === 'make_vendor' || tab === 'labour',
+            'panel--make-list-flush': tab === 'make_list',
+        }"
+    >
+        <div x-show="tab === 'boq'" x-cloak role="tabpanel">
+            {% include "boq/_sheet_table.html" with structure=boq_structure %}
+        </div>
 
-<section class="metrics" style="margin-bottom:24px;">
-    <div class="metric-card">
-        <span class="metric-card__value">{{ items|length }}</span>
-        <span class="metric-card__label">BOQ items</span>
-    </div>
-    <div class="metric-card">
-        <span class="metric-card__value">{{ make_entries|length }}</span>
-        <span class="metric-card__label">Approved makes</span>
-    </div>
-    <div class="metric-card">
-        <span class="metric-card__value">{% if latest_run %}{{ latest_run.run_number }}{% else %}&mdash;{% endif %}</span>
-        <span class="metric-card__label">Latest run</span>
-    </div>
-    <div class="metric-card">
-        <span class="metric-card__value" style="font-size:1rem;">{% if latest_run %}{{ latest_run.get_status_display }}{% else %}&mdash;{% endif %}</span>
-        <span class="metric-card__label">Run status</span>
-    </div>
-</section>
+        <div x-show="tab === 'make_list'" x-cloak role="tabpanel" class="make-list-tab-canvas">
+            {% if has_make_list %}
+                {% include "boq/_sheet_table.html" with structure=make_list_structure sheet_variant="make_list" %}
+            {% else %}
+                <p class="panel__text">No make list uploaded for this BOQ.</p>
+            {% endif %}
+        </div>
 
-{% if make_entries %}
-<div class="panel" style="margin-bottom:24px;">
-    <h3 class="panel__title">Approved makes</h3>
-    <p class="panel__text">
-        {% for m in make_entries %}<span class="badge" style="margin:2px;">{{ m.make }}</span>{% endfor %}
-    </p>
-</div>
-{% endif %}
+        <div x-show="tab === 'analysis'" x-cloak role="tabpanel" class="analysis-tab-canvas">
+            {# Server-rendered when mid-job so the spinner shows even before Alpine boots. #}
+            <div
+                class="analysis-loading-center{% if is_extracting %} analysis-loading-center--active{% endif %}"
+                :class="{ 'analysis-loading-center--active': analysing }"
+                x-show="analysing"
+                {% if not is_extracting %}x-cloak{% endif %}
+            >
+                <div
+                    class="analysis-loading-center__spinner"
+                    aria-hidden="true"
+                    style="width:56px;height:56px;border-radius:50%;border:5px solid #bfdbfe;border-top-color:#2563eb;box-sizing:border-box;display:block;margin:0 auto;animation:boqAnalysisSpin 0.7s linear infinite;"
+                ></div>
+                <p
+                    class="analysis-loading-center__percent"
+                    x-text="Math.round(analysisProgress) + '%'"
+                >{% if is_extracting %}1%{% else %}0%{% endif %}</p>
+                <p class="analysis-loading-center__title">Analysing BOQ And Extracting Products</p>
+            </div>
+            <div x-show="!analysing" {% if is_extracting %}style="display:none"{% endif %}>
+                {% include "boq/_extraction_table.html" with extraction_display=extraction_display can_edit_extraction=can_edit_extraction boq=boq %}
+            </div>
+        </div>
 
-<div class="panel">
-    <h3 class="panel__title">BOQ items</h3>
-    <table class="table">
-        <thead>
-            <tr>
-                <th>#</th>
-                <th>Description</th>
-                <th>Quantity</th>
-                <th>Unit</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for item in items %}
-            <tr>
-                <td>{{ item.row_number }}</td>
-                <td>{{ item.description }}</td>
-                <td>{{ item.quantity|floatformat:"-2" }}</td>
-                <td>{{ item.unit }}</td>
-            </tr>
-            {% empty %}
-            <tr><td colspan="4" class="table__empty">
-                No rows were captured from the workbook. Ensure it has a
-                "Description" column.
-            </td></tr>
-            {% endfor %}
-        </tbody>
-    </table>
+        <div x-show="tab === 'make_vendor'" x-cloak role="tabpanel" class="make-vendor-tab-canvas">
+            {% include "boq/_make_vendor_table.html" with make_vendor_display=make_vendor_display boq=boq %}
+        </div>
+
+        <div x-show="tab === 'labour'" x-cloak role="tabpanel" class="labour-tab-canvas">
+            {% include "boq/_labour_table.html" with labour_display=labour_display boq=boq can_apply_labour=can_apply_labour %}
+        </div>
+
+        <div x-show="tab === 'review'" x-cloak role="tabpanel">
+            {% include "boq/_review_table.html" with analysis_display=analysis_display boq=boq %}
+        </div>
+    </div>
 </div>
 {% endblock %}

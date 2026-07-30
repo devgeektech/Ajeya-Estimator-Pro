@@ -1,29 +1,19 @@
 {
   "include": ["backend"],
-  "venvPath": ".",
-  "venv": ".venv",
   "exclude": [
     "**/__pycache__",
     "**/.pytest_cache",
-    "**/.venv",
-    "**/venv",
+    "**/migrations",
+    ".venv",
+    "venv",
     "media",
     "staticfiles"
   ],
+  "venvPath": ".",
+  "venv": ".venv",
   "extraPaths": ["backend"],
+  "djangoSettingsModule": "config.settings",
   "typeCheckingMode": "basic",
   "reportMissingTypeStubs": false,
-  "reportMissingModuleSource": false,
-  "reportUnknownMemberType": false,
-  "reportUnknownVariableType": false,
-  "reportUnknownArgumentType": false,
-  "reportOptionalMemberAccess": false,
-  "reportAttributeAccessIssue": false,
-  "reportAssignmentType": false,
-  "reportArgumentType": false,
-  "reportCallIssue": false,
-  "reportGeneralTypeIssues": false,
-  "reportIndexIssue": false,
-  "reportOperatorIssue": false,
-  "reportReturnType": false
+  "reportMissingModuleSource": false
 }

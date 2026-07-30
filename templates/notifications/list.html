@@ -3,35 +3,417 @@
 {% block heading %}Notifications{% endblock %}
 
 {% block content %}
-<div class="toolbar">
-    <span class="badge">{{ notifications_unread }} unread</span>
-    {% if notifications_unread %}
-    <form method="post" action="{% url 'notifications:read' %}" class="inline-form">
-        {% csrf_token %}
-        <button type="submit" class="btn btn--small btn--primary">Mark all read</button>
-    </form>
-    {% endif %}
-</div>
+<style>
+    .notif-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-bottom: 16px;
+    }
+    .notif-toolbar__left {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+    .notif-list-search {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: min(280px, 100%);
+        flex: 1 1 220px;
+        max-width: 360px;
+    }
+    .notif-list-search__label {
+        font-size: .75rem;
+        font-weight: 700;
+        color: var(--text);
+    }
+    .notif-list-search .extraction-input {
+        width: 100%;
+    }
+    .notif-list-hint {
+        font-size: .8rem;
+    }
+    .btn--clear-yellow {
+        background: rgba(202, 138, 4, 0.18);
+        border: 1px solid rgba(202, 138, 4, 0.42);
+        color: #a16207;
+        font-weight: 600;
+    }
+    .btn--clear-yellow:hover {
+        background: rgba(202, 138, 4, 0.28);
+        border-color: rgba(202, 138, 4, 0.55);
+        color: #854d0e;
+    }
+    .dark-mode .btn--clear-yellow {
+        background: rgba(234, 179, 8, 0.16);
+        border-color: rgba(234, 179, 8, 0.35);
+        color: #fde68a;
+    }
+    .dark-mode .btn--clear-yellow:hover {
+        background: rgba(234, 179, 8, 0.26);
+        color: #fef3c7;
+    }
+    .notif-check {
+        position: relative;
+        display: inline-flex;
+        width: 20px;
+        height: 20px;
+        margin: 0;
+        cursor: pointer;
+        vertical-align: middle;
+    }
+    .notif-check input {
+        position: absolute;
+        opacity: 0;
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        cursor: pointer;
+        z-index: 1;
+    }
+    .notif-check__circle {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        border: 2px solid #94a3b8;
+        background: transparent;
+        display: grid;
+        place-items: center;
+        box-sizing: border-box;
+        transition: background .15s, border-color .15s;
+    }
+    .notif-check__circle::after {
+        content: "";
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: transparent;
+        transition: background .15s;
+    }
+    .notif-check input:checked + .notif-check__circle {
+        border-color: #2563eb;
+        background: rgba(37, 99, 235, 0.12);
+    }
+    .notif-check input:checked + .notif-check__circle::after {
+        background: #2563eb;
+    }
+    .notif-check input:focus-visible + .notif-check__circle {
+        outline: 2px solid rgba(37, 99, 235, 0.45);
+        outline-offset: 2px;
+    }
+    .dark-mode .notif-check__circle {
+        border-color: #64748b;
+    }
+    .table th.notif-col-check,
+    .table td.notif-col-check {
+        width: 44px;
+        text-align: center;
+        vertical-align: middle;
+    }
+    .table-sort {
+        color: inherit;
+        text-decoration: none;
+        white-space: nowrap;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        cursor: pointer;
+    }
+    .table-sort:hover,
+    .table-sort.is-active {
+        color: #1d4ed8;
+    }
+    .table-sort__arrows {
+        display: inline-flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        line-height: 0.7;
+        gap: 1px;
+        font-size: 0.55rem;
+        color: #94a3b8;
+        vertical-align: middle;
+    }
+    .table-sort:hover .table-sort__arrows {
+        color: #64748b;
+    }
+    .table-sort.is-active.is-asc .table-sort__up,
+    .table-sort.is-active.is-desc .table-sort__down {
+        color: #1d4ed8;
+    }
+    .table-sort.is-active.is-asc .table-sort__down,
+    .table-sort.is-active.is-desc .table-sort__up {
+        color: #cbd5e1;
+    }
+    .notif-list-row.is-filtered-out {
+        display: none;
+    }
+</style>
 
-<div class="panel">
-    <table class="table">
-        <thead>
-            <tr><th>Title</th><th>Message</th><th>When</th></tr>
-        </thead>
-        <tbody>
-            {% for n in notifications %}
-            <tr>
-                <td>
-                    {{ n.title }}
-                    {% if not n.is_read %}<span class="badge badge--green" style="margin-left: 8px;">New</span>{% endif %}
-                </td>
-                <td>{{ n.message }}</td>
-                <td>{{ n.created_at|date:"M d, H:i" }}</td>
-            </tr>
-            {% empty %}
-            <tr><td colspan="4" class="table__empty">No notifications yet.</td></tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
+<form
+    method="post"
+    action="{% url 'notifications:clear' %}"
+    id="notif-clear-form"
+    x-data="notifListPage({
+        allIds: [{% for n in notifications %}{{ n.pk }}{% if not forloop.last %},{% endif %}{% endfor %}],
+        initialQuery: '{{ search_q|escapejs }}',
+        unreadCount: {{ notifications_unread|default:0 }}
+    })"
+    x-ref="clearForm"
+>
+    {% csrf_token %}
+    <div class="notif-toolbar">
+        <div class="notif-toolbar__left">
+            <label class="notif-list-search">
+                <span class="notif-list-search__label">Search</span>
+                <input
+                    type="search"
+                    class="extraction-input"
+                    placeholder="Type to filter (word by word)…"
+                    autocomplete="off"
+                    x-model="query"
+                >
+            </label>
+            <button
+                type="button"
+                class="btn btn--small"
+                x-show="query.trim()"
+                x-cloak
+                @click="clearFilter()"
+            >Clear</button>
+            <span class="badge{% if notifications_unread %} badge--blue{% endif %}">
+                {{ notifications_unread }} unread
+            </span>
+            <span class="notif-list-hint muted" x-text="filterHint"></span>
+            <span class="muted" style="font-size: 0.85rem;" x-show="selectedCount > 0" x-cloak>
+                <span x-text="selectedCount"></span> selected
+            </span>
+        </div>
+        <div class="topbar__actions" style="margin-left: 0;">
+            {% if notifications %}
+            <button
+                type="submit"
+                formaction="{% url 'notifications:read' %}"
+                class="btn btn--small btn--primary"
+                x-show="selectedCount > 0 || unreadCount > 0"
+                x-cloak
+            >
+                <span x-text="selectedCount > 0 ? 'Mark read' : 'Mark all read'"></span>
+            </button>
+            <button
+                type="button"
+                class="btn btn--small btn--clear-yellow"
+                @click="clearSelected()"
+            >
+                <span x-text="selectedCount > 0 ? 'Clear selected' : 'Clear all'"></span>
+            </button>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="panel">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th class="notif-col-check">
+                        {% if notifications %}
+                        <label class="notif-check" title="Select all visible">
+                            <input
+                                type="checkbox"
+                                :checked="allVisibleSelected"
+                                @change="toggleAllVisible($event.target.checked)"
+                                aria-label="Select all visible notifications"
+                            >
+                            <span class="notif-check__circle" aria-hidden="true"></span>
+                        </label>
+                        {% endif %}
+                    </th>
+                    {% with base=request.path %}
+                    <th style="text-align: left;">
+                        <a
+                            class="table-sort{% if sort == 'title' %} is-active is-{{ dir }}{% endif %}"
+                            href="{{ base }}?sort=title&dir={% if sort == 'title' and dir == 'asc' %}desc{% else %}asc{% endif %}"
+                            @click.prevent="goSort($event.currentTarget.href)"
+                            title="Sort by Title"
+                        >Title <span class="table-sort__arrows" aria-hidden="true"><span class="table-sort__up">▲</span><span class="table-sort__down">▼</span></span></a>
+                    </th>
+                    <th style="text-align: left;">
+                        <a
+                            class="table-sort{% if sort == 'message' %} is-active is-{{ dir }}{% endif %}"
+                            href="{{ base }}?sort=message&dir={% if sort == 'message' and dir == 'asc' %}desc{% else %}asc{% endif %}"
+                            @click.prevent="goSort($event.currentTarget.href)"
+                            title="Sort by Message"
+                        >Message <span class="table-sort__arrows" aria-hidden="true"><span class="table-sort__up">▲</span><span class="table-sort__down">▼</span></span></a>
+                    </th>
+                    <th>
+                        <a
+                            class="table-sort{% if sort == 'when' %} is-active is-{{ dir }}{% endif %}"
+                            href="{{ base }}?sort=when&dir={% if sort == 'when' and dir == 'asc' %}desc{% else %}asc{% endif %}"
+                            @click.prevent="goSort($event.currentTarget.href)"
+                            title="Sort by When"
+                        >When <span class="table-sort__arrows" aria-hidden="true"><span class="table-sort__up">▲</span><span class="table-sort__down">▼</span></span></a>
+                    </th>
+                    {% endwith %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for n in notifications %}
+                <tr
+                    class="notif-list-row"
+                    data-id="{{ n.pk }}"
+                    data-search="{{ n.title|lower }} {{ n.message|lower }}{% if not n.is_read %} new unread{% endif %}"
+                >
+                    <td class="notif-col-check">
+                        <label class="notif-check" title="Select">
+                            <input
+                                type="checkbox"
+                                name="ids"
+                                value="{{ n.pk }}"
+                                x-model="selected[{{ n.pk }}]"
+                                aria-label="Select notification {{ n.title|escape }}"
+                            >
+                            <span class="notif-check__circle" aria-hidden="true"></span>
+                        </label>
+                    </td>
+                    <td style="text-align: left;">
+                        {{ n.title }}
+                        {% if not n.is_read %}<span class="badge badge--green" style="margin-left: 8px;">New</span>{% endif %}
+                    </td>
+                    <td style="text-align: left;">{{ n.message|default:"—" }}</td>
+                    <td>{{ n.created_at|date:"M d, H:i" }}</td>
+                </tr>
+                {% empty %}
+                <tr class="notif-list-empty-static">
+                    <td colspan="4" class="table__empty">No notifications yet.</td>
+                </tr>
+                {% endfor %}
+                <tr class="notif-list-empty-filter" x-show="noMatches" x-cloak>
+                    <td colspan="4" class="table__empty">No notifications match the search.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</form>
+
+{% if page_obj.has_other_pages %}
+<nav class="pagination" style="margin-top: 16px;">
+    {% if page_obj.has_previous %}
+    <a class="btn btn--small" href="?page={{ page_obj.previous_page_number }}&sort={{ sort }}&dir={{ dir }}&q={{ search_q|urlencode }}">Previous</a>
+    {% endif %}
+    <span class="muted" style="margin: 0 10px;">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+    {% if page_obj.has_next %}
+    <a class="btn btn--small" href="?page={{ page_obj.next_page_number }}&sort={{ sort }}&dir={{ dir }}&q={{ search_q|urlencode }}">Next</a>
+    {% endif %}
+</nav>
+{% endif %}
+
+<script>
+document.addEventListener('alpine:init', () => {
+    Alpine.data('notifListPage', (config) => ({
+        selected: {},
+        allIds: Array.isArray(config.allIds) ? config.allIds : [],
+        query: config.initialQuery || '',
+        unreadCount: Number(config.unreadCount || 0),
+        visibleCount: 0,
+        totalCount: 0,
+        noMatches: false,
+        get selectedCount() {
+            return Object.values(this.selected).filter(Boolean).length;
+        },
+        get visibleIds() {
+            return Array.from(this.$el.querySelectorAll('tr.notif-list-row:not(.is-filtered-out)'))
+                .map((row) => Number(row.getAttribute('data-id')))
+                .filter((id) => Number.isFinite(id));
+        },
+        get allVisibleSelected() {
+            const ids = this.visibleIds;
+            return ids.length > 0 && ids.every((id) => this.selected[id]);
+        },
+        get filterHint() {
+            if (!this.totalCount) return '';
+            if (!String(this.query || '').trim()) {
+                return `${this.totalCount} on this page`;
+            }
+            return `${this.visibleCount} of ${this.totalCount} on this page`;
+        },
+        init() {
+            this.$watch('query', () => this.applyFilter());
+            this.$nextTick(() => this.applyFilter());
+        },
+        clearFilter() {
+            // Reload without q so server-paginated results restore the full set.
+            const url = new URL(window.location.href);
+            url.searchParams.delete('q');
+            url.searchParams.delete('page');
+            window.location.href = url.toString();
+        },
+        applyFilter() {
+            const tokens = String(this.query || '')
+                .toLowerCase()
+                .trim()
+                .split(/\s+/)
+                .filter(Boolean);
+            const rows = Array.from(this.$el.querySelectorAll('tr.notif-list-row'));
+            this.totalCount = rows.length;
+            let visible = 0;
+            rows.forEach((row) => {
+                const haystack = (row.getAttribute('data-search') || '').toLowerCase();
+                const match = tokens.every((token) => haystack.includes(token));
+                row.classList.toggle('is-filtered-out', !match);
+                if (match) {
+                    visible += 1;
+                } else {
+                    const id = Number(row.getAttribute('data-id'));
+                    if (Number.isFinite(id)) {
+                        this.selected[id] = false;
+                    }
+                }
+            });
+            this.visibleCount = visible;
+            this.noMatches = this.totalCount > 0 && visible === 0;
+
+            const url = new URL(window.location.href);
+            if (String(this.query || '').trim()) {
+                url.searchParams.set('q', String(this.query).trim());
+            } else {
+                url.searchParams.delete('q');
+            }
+            window.history.replaceState({}, '', url);
+        },
+        toggleAllVisible(checked) {
+            this.visibleIds.forEach((id) => {
+                this.selected[id] = checked;
+            });
+        },
+        goSort(href) {
+            const next = new URL(href, window.location.origin);
+            const q = String(this.query || '').trim();
+            if (q) {
+                next.searchParams.set('q', q);
+            } else {
+                next.searchParams.delete('q');
+            }
+            window.location.href = next.toString();
+        },
+        async clearSelected() {
+            const count = this.selectedCount;
+            const msg = count
+                ? `Clear ${count} selected notification${count === 1 ? '' : 's'}? This cannot be undone.`
+                : 'Clear all notifications? This cannot be undone.';
+            let ok = true;
+            if (window.BOQConfirm && window.BOQConfirm.ask) {
+                ok = await window.BOQConfirm.ask(msg, { confirmLabel: 'Clear' });
+            } else {
+                ok = confirm(msg);
+            }
+            if (!ok) return;
+            this.$refs.clearForm.submit();
+        },
+    }));
+});
+</script>
 {% endblock %}

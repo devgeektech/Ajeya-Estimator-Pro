@@ -1,7 +1,4 @@
-"""Shared enumerations / choices.
-
-Sourced from docs/PRD.md, docs/DATABASE_ARCHITECTURE.md and docs/SESSION_STATE.md.
-"""
+"""Shared enumerations / choices."""
 from django.db import models
 
 
@@ -13,27 +10,12 @@ class UserRole(models.TextChoices):
 
 class BOQStatus(models.TextChoices):
     UPLOADED = "UPLOADED", "Uploaded"
-    PROCESSING = "PROCESSING", "Processing"
-    COMPLETED = "COMPLETED", "Completed"
-    UNDER_REVIEW = "UNDER_REVIEW", "Under Review"
-    APPROVED = "APPROVED", "Approved"
+    PROCESSING = "PROCESSING", "Analysing..."
+    EXTRACTED = "EXTRACTED", "Analysed"
+    MAKE_VENDOR = "MAKE_VENDOR", "Make/Vendor selection"
+    LABOUR = "LABOUR", "Labour"
+    MATCHING = "MATCHING", "Matching"  # legacy (unused in active UI)
+    PROCESSED = "PROCESSED", "Matched"  # legacy (unused in active UI)
+    READY_EXPORT = "READY_EXPORT", "Ready to Export"
     EXPORTED = "EXPORTED", "Exported"
-
-
-class RunStatus(models.TextChoices):
-    QUEUED = "QUEUED", "Queued"
-    PROCESSING = "PROCESSING", "Processing"
-    COMPLETED = "COMPLETED", "Completed"
-    FAILED = "FAILED", "Failed"
-
-
-class PendingProductStatus(models.TextChoices):
-    PENDING = "PENDING", "Pending"
-    APPROVED = "APPROVED", "Approved"
-    REJECTED = "REJECTED", "Rejected"
-
-
-class VendorSelectionMode(models.TextChoices):
-    LOWEST_COST = "LOWEST_COST", "Lowest Cost"
-    PREFERRED = "PREFERRED", "Preferred Vendor"
-    CUSTOM = "CUSTOM", "Custom Selection"
+    ANALYSIS_FAILED = "ANALYSIS_FAILED", "Analysis Failed"

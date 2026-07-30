@@ -1,9 +1,4 @@
-"""Notification service (Phase 11, Sprint 20).
-
-Creates and queries user notifications for key events: processing completion /
-failure, ready-for-review and export completion (docs/PRD.md - Notifications).
-Kept defensive so notification failures never break core flows.
-"""
+"""Notification service — create and query in-app user notifications."""
 from __future__ import annotations
 
 import logging
@@ -34,3 +29,26 @@ def unread_count(user) -> int:
 
 def mark_all_read(user) -> int:
     return Notification.objects.filter(user=user, is_read=False).update(is_read=True)
+
+
+def mark_selected_read(user, ids: list[int]) -> int:
+    """Mark selected notifications as read. Returns updated count."""
+    if not ids:
+        return 0
+    return Notification.objects.filter(
+        user=user, pk__in=ids, is_read=False
+    ).update(is_read=True)
+
+
+def clear_all(user) -> int:
+    """Delete all notifications for the user. Returns deleted count."""
+    deleted, _ = Notification.objects.filter(user=user).delete()
+    return deleted
+
+
+def clear_selected(user, ids: list[int]) -> int:
+    """Delete selected notifications owned by the user. Returns deleted count."""
+    if not ids:
+        return 0
+    deleted, _ = Notification.objects.filter(user=user, pk__in=ids).delete()
+    return deleted

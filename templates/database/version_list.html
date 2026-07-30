@@ -1,28 +1,170 @@
 {% extends "base.html" %}
-{% block title %}Database Versions &middot; BOQ_AI{% endblock %}
-{% block heading %}Database Management{% endblock %}
-
-{% block content %}
+{% block title %}Database &middot; BOQ_AI{% endblock %}
+{% block heading %}Database{% endblock %}
+{% block topbar_actions %}
 {% if user.is_super_admin or user.allow_db_access %}
-<div class="toolbar" style="justify-content: flex-end;">
-    <a href="{% url 'database:upload' %}" class="btn btn--primary">+ Upload database</a>
+<div class="topbar__actions">
+    <a href="{% url 'database:upload' %}" class="btn btn--primary">Upload</a>
 </div>
 {% endif %}
+{% endblock %}
 
-<div class="panel">
+{% block content %}
+<style>
+    .db-list-actions .btn--ghost {
+        background: #ffffff !important;
+        border: 1px solid #d0d7e2 !important;
+        color: #334155 !important;
+        border-radius: 8px;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+    }
+    .db-list-actions .btn--ghost:hover {
+        background: #f8fafc !important;
+        color: #0f172a !important;
+    }
+    .db-list-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: end;
+        gap: 10px;
+        margin: 0 0 14px;
+    }
+    .db-list-toolbar__search {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: min(280px, 100%);
+        flex: 1 1 220px;
+    }
+    .db-list-toolbar__label {
+        font-size: .75rem;
+        font-weight: 700;
+        color: var(--text);
+    }
+    .db-list-toolbar .extraction-input {
+        width: 100%;
+    }
+    .db-list-toolbar__hint {
+        font-size: .8rem;
+        margin-left: auto;
+    }
+    .table-sort {
+        color: inherit;
+        text-decoration: none;
+        white-space: nowrap;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        cursor: pointer;
+    }
+    .table-sort:hover,
+    .table-sort.is-active {
+        color: #1d4ed8;
+    }
+    .table-sort__arrows {
+        display: inline-flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        line-height: 0.7;
+        gap: 1px;
+        font-size: 0.55rem;
+        color: #94a3b8;
+        vertical-align: middle;
+    }
+    .table-sort:hover .table-sort__arrows {
+        color: #64748b;
+    }
+    .table-sort.is-active.is-asc .table-sort__up,
+    .table-sort.is-active.is-desc .table-sort__down {
+        color: #1d4ed8;
+    }
+    .table-sort.is-active.is-asc .table-sort__down,
+    .table-sort.is-active.is-desc .table-sort__up {
+        color: #cbd5e1;
+    }
+    .db-list-row.is-filtered-out {
+        display: none;
+    }
+</style>
+{% if repaired_duplicate_active %}
+<p class="muted" style="margin: 0 0 16px;">
+    Multiple active databases were detected and repaired automatically. Only the
+    highest version number remains active.
+</p>
+{% endif %}
+
+<div
+    class="panel"
+    x-data="dbListFilter({ initialQuery: '{{ search_q|escapejs }}' })"
+>
+    <div class="db-list-toolbar">
+        <label class="db-list-toolbar__search">
+            <span class="db-list-toolbar__label">Search</span>
+            <input
+                type="search"
+                class="extraction-input"
+                placeholder="Type to filter (word by word)…"
+                autocomplete="off"
+                x-model="query"
+            >
+        </label>
+        <button
+            type="button"
+            class="btn btn--small"
+            x-show="query.trim()"
+            x-cloak
+            @click="query = ''"
+        >Clear</button>
+        <span class="db-list-toolbar__hint muted" x-text="filterHint"></span>
+    </div>
+
     <table class="table">
         <thead>
             <tr>
-                <th>Name</th>
-                <th>Status</th>
-                <th>Uploaded by</th>
-                <th>Uploaded at</th>
+                {% with base=request.path %}
+                <th>
+                    <a
+                        class="table-sort{% if sort == 'name' %} is-active is-{{ dir }}{% endif %}"
+                        href="{{ base }}?sort=name&dir={% if sort == 'name' and dir == 'asc' %}desc{% else %}asc{% endif %}"
+                        @click.prevent="goSort($event.currentTarget.href)"
+                        title="Sort by Name"
+                    >Name <span class="table-sort__arrows" aria-hidden="true"><span class="table-sort__up">▲</span><span class="table-sort__down">▼</span></span></a>
+                </th>
+                <th>
+                    <a
+                        class="table-sort{% if sort == 'status' %} is-active is-{{ dir }}{% endif %}"
+                        href="{{ base }}?sort=status&dir={% if sort == 'status' and dir == 'asc' %}desc{% else %}asc{% endif %}"
+                        @click.prevent="goSort($event.currentTarget.href)"
+                        title="Sort by Status"
+                    >Status <span class="table-sort__arrows" aria-hidden="true"><span class="table-sort__up">▲</span><span class="table-sort__down">▼</span></span></a>
+                </th>
+                <th>
+                    <a
+                        class="table-sort{% if sort == 'uploader' %} is-active is-{{ dir }}{% endif %}"
+                        href="{{ base }}?sort=uploader&dir={% if sort == 'uploader' and dir == 'asc' %}desc{% else %}asc{% endif %}"
+                        @click.prevent="goSort($event.currentTarget.href)"
+                        title="Sort by Uploaded by"
+                    >Uploaded by <span class="table-sort__arrows" aria-hidden="true"><span class="table-sort__up">▲</span><span class="table-sort__down">▼</span></span></a>
+                </th>
+                <th>
+                    <a
+                        class="table-sort{% if sort == 'uploaded' %} is-active is-{{ dir }}{% endif %}"
+                        href="{{ base }}?sort=uploaded&dir={% if sort == 'uploaded' and dir == 'asc' %}desc{% else %}asc{% endif %}"
+                        @click.prevent="goSort($event.currentTarget.href)"
+                        title="Sort by Uploaded at"
+                    >Uploaded at <span class="table-sort__arrows" aria-hidden="true"><span class="table-sort__up">▲</span><span class="table-sort__down">▼</span></span></a>
+                </th>
+                {% endwith %}
                 <th class="table__actions" style="text-align: left;">Actions</th>
             </tr>
         </thead>
         <tbody>
             {% for v in versions %}
-            <tr>
+            <tr
+                class="db-list-row"
+                data-search="{{ v.name|default:v.source_filename|lower }} {{ v.source_filename|lower }} v{{ v.version_number }} {% if v.is_active %}active{% else %}archived{% endif %} {{ v.uploaded_by.full_name|default:''|lower }} {{ v.uploaded_at|date:'Y-m-d H:i'|lower }}"
+            >
                 <td>
                     <div style="font-weight: 500;">{{ v.name|default:v.source_filename }}</div>
                     <div style="font-size: 0.8em; color: var(--text-muted);">v{{ v.version_number }}</div>
@@ -37,29 +179,83 @@
                 <td>{{ v.uploaded_by.full_name|default:"&mdash;" }}</td>
                 <td>{{ v.uploaded_at|date:"Y-m-d H:i" }}</td>
                 <td class="table__actions" style="text-align: left;">
-                    <div style="display: flex; gap: 8px; align-items: center; justify-content: flex-start;">
+                    <div class="db-list-actions" style="display: flex; gap: 8px; align-items: center; justify-content: flex-start;">
                         <a href="{% url 'database:version_detail' v.pk %}" class="btn btn--small btn--ghost" aria-label="View" title="View">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                         </a>
                         <a href="{% url 'database:download' v.pk %}" class="btn btn--small btn--ghost" aria-label="Download" title="Download">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                         </a>
-                        
-                        {% if v.can_rollback and user.is_super_admin or v.can_rollback and user.allow_db_access %}
-                        <form method="post" action="{% url 'database:rollback' v.pk %}" class="inline-form" style="margin: 0;" data-confirm="Are you sure you want to rollback to this version?" onsubmit="return window.BOQConfirm ? window.BOQConfirm.submit(event, this) : true;">
-                            {% csrf_token %}
-                            <button type="submit" class="btn btn--small btn--classy-red" title="Roll back to this version" style="background-color: #d9534f; color: white; border-color: #d43f3a;">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
-                            </button>
-                        </form>
-                        {% endif %}
                     </div>
                 </td>
             </tr>
             {% empty %}
-            <tr><td colspan="6" class="table__empty">No database uploaded yet.</td></tr>
+            <tr class="db-list-empty-static">
+                <td colspan="5" class="table__empty">No database uploaded yet.</td>
+            </tr>
             {% endfor %}
+            <tr class="db-list-empty-filter" x-show="noMatches" x-cloak>
+                <td colspan="5" class="table__empty">No databases match the search.</td>
+            </tr>
         </tbody>
     </table>
 </div>
+
+<script>
+document.addEventListener('alpine:init', () => {
+    Alpine.data('dbListFilter', (config) => ({
+        query: config.initialQuery || '',
+        visibleCount: 0,
+        totalCount: 0,
+        noMatches: false,
+        get filterHint() {
+            if (!this.totalCount) return '';
+            if (!String(this.query || '').trim()) {
+                return `${this.totalCount} database${this.totalCount === 1 ? '' : 's'}`;
+            }
+            return `${this.visibleCount} of ${this.totalCount}`;
+        },
+        init() {
+            this.$watch('query', () => this.applyFilter());
+            this.$nextTick(() => this.applyFilter());
+        },
+        applyFilter() {
+            const tokens = String(this.query || '')
+                .toLowerCase()
+                .trim()
+                .split(/\s+/)
+                .filter(Boolean);
+            const rows = Array.from(this.$el.querySelectorAll('tr.db-list-row'));
+            this.totalCount = rows.length;
+            let visible = 0;
+            rows.forEach((row) => {
+                const haystack = (row.getAttribute('data-search') || '').toLowerCase();
+                const match = tokens.every((token) => haystack.includes(token));
+                row.classList.toggle('is-filtered-out', !match);
+                if (match) visible += 1;
+            });
+            this.visibleCount = visible;
+            this.noMatches = this.totalCount > 0 && visible === 0;
+
+            const url = new URL(window.location.href);
+            if (String(this.query || '').trim()) {
+                url.searchParams.set('q', String(this.query).trim());
+            } else {
+                url.searchParams.delete('q');
+            }
+            window.history.replaceState({}, '', url);
+        },
+        goSort(href) {
+            const next = new URL(href, window.location.origin);
+            const q = String(this.query || '').trim();
+            if (q) {
+                next.searchParams.set('q', q);
+            } else {
+                next.searchParams.delete('q');
+            }
+            window.location.href = next.toString();
+        },
+    }));
+});
+</script>
 {% endblock %}

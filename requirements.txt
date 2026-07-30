@@ -19,7 +19,7 @@ dj-database-url==3.1.2
 # Database
 psycopg==3.3.4
 psycopg-binary==3.3.4
-pgvector==0.4.2
+chromadb==1.5.9
 
 # Background processing
 celery==5.6.3
@@ -28,7 +28,9 @@ redis==8.0.1
 # File processing
 pandas==3.0.3
 openpyxl==3.1.5
+xlrd==2.0.2
 numpy==2.5.0
+pypdf==5.3.0
 
 # AI
 openai==2.44.0

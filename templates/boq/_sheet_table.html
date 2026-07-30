@@ -1,0 +1,46 @@
+{% if structure.error %}
+<div class="alert alert--error" style="margin-bottom: 16px;">
+    Could not parse this file: {{ structure.error }}
+</div>
+{% endif %}
+
+{% if structure.rows %}
+<div class="boq-sheet-wrap{% if sheet_variant == 'make_list' %} boq-sheet-wrap--make-list{% endif %}">
+    <table
+        class="table boq-sheet{% if sheet_variant == 'make_list' %} boq-sheet--make-list{% endif %}"
+        {% if sheet_variant == 'make_list' %}style="width:100%;table-layout:fixed;"{% endif %}
+    >
+        {% if sheet_variant == 'make_list' %}
+        <colgroup>
+            <col style="width:5%;">
+            <col style="width:30%;">
+            <col style="width:65%;">
+        </colgroup>
+        {% endif %}
+        <thead>
+            <tr>
+                {% for header in structure.headers %}
+                <th class="{% if sheet_variant == 'make_list' %}{% if forloop.first %}boq-sheet__col-sno{% elif forloop.last %}boq-sheet__col-makes{% else %}boq-sheet__col-desc{% endif %}{% endif %}"
+                    {% if sheet_variant == 'make_list' %}style="text-align:{% if forloop.last %}right{% else %}left{% endif %};{% if forloop.last %}padding-right:4.5rem;{% endif %}"{% endif %}>
+                    {{ header.label }}
+                </th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in structure.rows %}
+            <tr class="boq-sheet__row boq-sheet__row--depth-{{ row.depth|default:0 }}">
+                {% for cell in row.cells %}
+                <td class="boq-sheet__cell{% if sheet_variant == 'make_list' %}{% if forloop.first %} boq-sheet__col-sno{% elif forloop.last %} boq-sheet__col-makes{% else %} boq-sheet__col-desc{% endif %}{% endif %}"
+                    style="--row-depth: {{ row.depth|default:0 }};{% if sheet_variant == 'make_list' %}text-align:{% if forloop.last %}right{% else %}left{% endif %};{% if forloop.last %}padding-right:4.5rem;{% endif %}{% endif %}">
+                    {{ cell }}
+                </td>
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<p class="panel__text">No rows parsed yet.</p>
+{% endif %}

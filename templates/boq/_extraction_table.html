@@ -1,0 +1,573 @@
+{% if not extraction_display.has_extraction %}
+<p class="panel__text">No extracted products yet. Click <strong>Analyse</strong> to extract products from this BOQ.</p>
+{% else %}
+<div class="extraction-lines" id="extraction-lines">
+    {% for line in extraction_display.lines %}
+    {% include "boq/_extraction_line.html" %}
+    {% endfor %}
+</div>
+
+{% if can_edit_extraction %}
+<script>
+document.addEventListener('alpine:init', () => {
+    const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+
+    window.extractionAjaxPost = async function extractionAjaxPost(url, fields) {
+        const body = new FormData();
+        body.append('ajax', '1');
+        Object.entries(fields || {}).forEach(([key, value]) => body.append(key, value));
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRFToken': csrfToken(),
+            },
+            credentials: 'same-origin',
+            body,
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.ok) {
+            throw new Error(data.message || 'Request failed.');
+        }
+        return data;
+    };
+
+    window.replaceExtractionLine = function replaceExtractionLine(rowId, lineHtml, options) {
+        if (!rowId || !lineHtml) {
+            return false;
+        }
+        const current = document.getElementById('line-' + rowId);
+        if (!current) {
+            return false;
+        }
+        const scrollY = window.scrollY;
+        const preferredProduct = options && options.activeProduct != null
+            ? Number(options.activeProduct)
+            : null;
+        const holder = document.createElement('div');
+        holder.innerHTML = String(lineHtml).trim();
+        const next = holder.firstElementChild;
+        if (!next) {
+            return false;
+        }
+        if (window.Alpine && typeof Alpine.destroyTree === 'function') {
+            Alpine.destroyTree(current);
+        }
+        current.replaceWith(next);
+        if (window.Alpine && typeof Alpine.initTree === 'function') {
+            Alpine.initTree(next);
+        }
+        if (Number.isFinite(preferredProduct) && window.Alpine) {
+            const productsRoot = next.querySelector('.extraction-products');
+            if (productsRoot) {
+                try {
+                    const data = Alpine.$data(productsRoot);
+                    if (data && 'activeProduct' in data) {
+                        data.activeProduct = preferredProduct;
+                    }
+                } catch (e) { /* ignore */ }
+            }
+        }
+        // Keep viewport stable — avoid scroll correction that causes page blink/shift.
+        window.scrollTo(0, scrollY);
+        return true;
+    };
+
+    // Swap one product panel only so other tabs stay interactive and the page does not blink.
+    window.replaceExtractionProductPanel = function replaceExtractionProductPanel(rowId, productIndex, lineHtml, options) {
+        if (!rowId || lineHtml == null || productIndex == null || productIndex === '') {
+            return false;
+        }
+        const line = document.getElementById('line-' + rowId);
+        if (!line) {
+            return false;
+        }
+        const scrollY = window.scrollY;
+        const index = Number(productIndex);
+        const holder = document.createElement('div');
+        holder.innerHTML = String(lineHtml).trim();
+        const nextLine = holder.firstElementChild;
+        if (!nextLine) {
+            return false;
+        }
+        const productId = 'product-' + rowId + '-' + index;
+        const nextCard = nextLine.querySelector('#' + productId);
+        const currentCard = line.querySelector('#' + productId);
+        if (!nextCard || !currentCard) {
+            return window.replaceExtractionLine(rowId, lineHtml, {
+                activeProduct: Number.isFinite(index) ? index : null,
+                ...(options || {}),
+            });
+        }
+        const nextPanel = nextCard.closest('.extraction-product-panel') || nextCard;
+        const currentPanel = currentCard.closest('.extraction-product-panel') || currentCard;
+        if (window.Alpine && typeof Alpine.destroyTree === 'function') {
+            Alpine.destroyTree(currentPanel);
+        }
+        currentPanel.replaceWith(nextPanel);
+        if (window.Alpine && typeof Alpine.initTree === 'function') {
+            Alpine.initTree(nextPanel);
+        }
+        const forceActive = !(options && options.preserveActiveTab);
+        if (window.Alpine) {
+            const productsRoot = line.querySelector('.extraction-products');
+            if (productsRoot) {
+                try {
+                    const data = Alpine.$data(productsRoot);
+                    if (forceActive && Number.isFinite(index) && data && 'activeProduct' in data) {
+                        data.activeProduct = index;
+                    }
+                    if (data && data.reanalysingByProduct && Number.isFinite(index)) {
+                        const nextBusy = { ...data.reanalysingByProduct };
+                        delete nextBusy[index];
+                        data.reanalysingByProduct = nextBusy;
+                    }
+                } catch (e) { /* ignore */ }
+            }
+        }
+        window.scrollTo(0, scrollY);
+        return true;
+    };
+
+    window.getActiveExtractionProductData = function getActiveExtractionProductData(fromEl) {
+        const root = fromEl && fromEl.closest('.extraction-products');
+        if (!root || !window.Alpine) {
+            return null;
+        }
+        const panels = root.querySelectorAll('.extraction-product-panel');
+        let activePanel = null;
+        panels.forEach((panel) => {
+            if (window.getComputedStyle(panel).display === 'none') {
+                return;
+            }
+            activePanel = panel;
+        });
+        const card = activePanel && activePanel.querySelector('.extraction-product-card');
+        if (!card) {
+            return null;
+        }
+        try {
+            return Alpine.$data(card);
+        } catch (e) {
+            return null;
+        }
+    };
+
+    window.reanalyseActiveExtractionProduct = async function reanalyseActiveExtractionProduct(fromEl, rematchUrl) {
+        const productsRoot = fromEl && fromEl.closest('.extraction-products');
+        const data = window.getActiveExtractionProductData(fromEl);
+        if (!data || typeof data.reanalyseRow !== 'function') {
+            alert('Select a product tab first.');
+            return;
+        }
+        let lineData = null;
+        if (productsRoot && window.Alpine) {
+            try {
+                lineData = Alpine.$data(productsRoot);
+            } catch (e) {
+                lineData = null;
+            }
+        }
+        const productIndex = Number(data.productIndex);
+        if (lineData) {
+            if (!lineData.reanalysingByProduct) {
+                lineData.reanalysingByProduct = {};
+            }
+            if (lineData.reanalysingByProduct[productIndex]) {
+                return;
+            }
+            lineData.reanalysingByProduct = {
+                ...lineData.reanalysingByProduct,
+                [productIndex]: true,
+            };
+        }
+        try {
+            await data.reanalyseRow(rematchUrl, productIndex);
+        } catch (e) {
+            /* errors surfaced in reanalyseRow */
+        } finally {
+            // Prefer the live Alpine root — panel swap may have replaced the card.
+            let liveLineData = lineData;
+            if (productsRoot && window.Alpine) {
+                try {
+                    liveLineData = Alpine.$data(productsRoot);
+                } catch (e) {
+                    liveLineData = lineData;
+                }
+            }
+            if (liveLineData && liveLineData.reanalysingByProduct) {
+                const next = { ...liveLineData.reanalysingByProduct };
+                delete next[productIndex];
+                liveLineData.reanalysingByProduct = next;
+            }
+        }
+    };
+
+    window.reanalyseEmptyExtractionLine = async function reanalyseEmptyExtractionLine(fromEl, rematchUrl, rowId) {
+        const btn = fromEl;
+        if (btn && btn.dataset.busy === '1') {
+            return;
+        }
+        if (btn) {
+            btn.dataset.busy = '1';
+            btn.disabled = true;
+            btn.dataset.prevLabel = btn.textContent;
+            btn.textContent = 'Re-analysing…';
+        }
+        try {
+            await window.extractionAjaxPost(rematchUrl, { mode: 'reextract' });
+            try {
+                const el = rowId ? document.getElementById('line-' + rowId) : null;
+                const keyMatch = (rematchUrl || '').match(/\/boqs\/(\d+)\//);
+                const boqPk = keyMatch ? keyMatch[1] : '';
+                sessionStorage.setItem(
+                    'boq-detail-scroll-' + boqPk + '-analysis',
+                    JSON.stringify({
+                        y: window.scrollY,
+                        rowId: rowId || '',
+                        offset: el ? el.getBoundingClientRect().top : null,
+                    })
+                );
+            } catch (e) { /* ignore */ }
+            window.location.reload();
+        } catch (error) {
+            alert(error.message || 'Re-analyse failed.');
+            if (btn) {
+                btn.disabled = false;
+                btn.dataset.busy = '0';
+                if (btn.dataset.prevLabel) {
+                    btn.textContent = btn.dataset.prevLabel;
+                }
+            }
+        }
+    };
+
+    window.reextractExtractionLine = async function reextractExtractionLine(fromEl, rematchUrl, rowId) {
+        if (!window.confirm('Re-extract this section from the BOQ workbook? Current products on this section will be replaced.')) {
+            return;
+        }
+        return window.reanalyseEmptyExtractionLine(fromEl, rematchUrl, rowId);
+    };
+
+    window.removeActiveExtractionProduct = async function removeActiveExtractionProduct(fromEl, editUrl, boqPk) {
+        const data = window.getActiveExtractionProductData(fromEl);
+        if (!data) {
+            alert('Select a product tab first.');
+            return;
+        }
+        const confirmed = window.BOQConfirm
+            ? await window.BOQConfirm.ask('Remove this product from the row?', {
+                title: 'Remove product',
+                confirmLabel: 'Remove',
+            })
+            : window.confirm('Remove this product from the row?');
+        if (!confirmed) {
+            return;
+        }
+        try {
+            await window.extractionAjaxPost(editUrl, {
+                action: 'remove_product',
+                row_id: data.productRowId,
+                product_index: String(data.productIndex),
+            });
+            try {
+                const lineEl = document.getElementById('line-' + (data.productRowId || ''));
+                sessionStorage.setItem('boq-detail-scroll-' + boqPk + '-analysis', JSON.stringify({
+                    y: window.scrollY,
+                    rowId: data.productRowId || '',
+                    offset: lineEl ? lineEl.getBoundingClientRect().top : null,
+                }));
+            } catch (e) { /* ignore */ }
+            window.location.reload();
+        } catch (error) {
+            alert(error.message || 'Failed to remove product.');
+        }
+    };
+
+    window.refreshExtractionLine = function refreshExtractionLine(rowId, lineHtml) {
+        const replaced = window.replaceExtractionLine(rowId, lineHtml);
+        if (!replaced) {
+            window.location.reload();
+        }
+    };
+
+    window.selectExtractionCandidate = async function selectExtractionCandidate(
+        fromEl,
+        editUrl,
+        rowId,
+        productIndex,
+        rateMasterId,
+    ) {
+        const btn = fromEl;
+        if (btn) {
+            btn.disabled = true;
+        }
+        try {
+            const data = await window.extractionAjaxPost(editUrl, {
+                action: 'select_candidate',
+                row_id: rowId,
+                product_index: String(productIndex),
+                rate_master_id: String(rateMasterId),
+            });
+            window.replaceExtractionProductPanel(
+                data.row_id || rowId,
+                data.product_index != null ? data.product_index : productIndex,
+                data.line_html,
+            );
+        } catch (error) {
+            alert(error.message || 'Failed to select candidate.');
+            if (btn) {
+                btn.disabled = false;
+            }
+        }
+    };
+
+    Alpine.data('extractionProductForm', (config) => ({
+        url: config.url,
+        rowId: config.rowId,
+        productRowId: config.productRowId,
+        productIndex: config.productIndex,
+        missingCount: config.missingCount,
+        attributeConfidence: Number(config.attributeConfidence || 0),
+        attributeSchema: Array.isArray(config.attributeSchema) ? config.attributeSchema : [],
+        extraAttrs: Array.isArray(config.extraAttrs) ? config.extraAttrs : [],
+        newKey: '',
+        newValue: '',
+        saving: false,
+        saved: false,
+        saveError: '',
+        reanalysing: false,
+        autoSaveTimer: null,
+        emitSaveStatus(phase, message = '') {
+            this.$dispatch('extraction-save-status', {
+                productIndex: this.productIndex,
+                phase,
+                message,
+            });
+        },
+        get attributeConfidenceBand() {
+            const score = Number(this.attributeConfidence || 0);
+            if (score >= 80) return 'green';
+            if (score > 70) return 'yellow';
+            if (score > 50) return 'orange';
+            return 'red';
+        },
+        _normalizeAttrKey(raw) {
+            return String(raw || '')
+                .trim()
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, '_')
+                .replace(/^_+|_+$/g, '');
+        },
+        async addExtra() {
+            const name = window.BOQConfirm
+                ? await window.BOQConfirm.prompt('Enter the attribute name to add.', {
+                    title: 'Add attribute',
+                    inputLabel: 'Attribute name',
+                    confirmLabel: 'Add',
+                })
+                : window.prompt('Attribute name:');
+            if (!name || !String(name).trim()) {
+                return;
+            }
+            const key = this._normalizeAttrKey(name);
+            if (!key) {
+                return;
+            }
+            const form = this.getForm();
+            if (form && form.querySelector(`[name="attr_${key}"]`)) {
+                alert('That attribute already exists on this product.');
+                return;
+            }
+            if (this.extraAttrs.some((item) => item.key === key)) {
+                alert('That attribute already exists on this product.');
+                return;
+            }
+            this.extraAttrs.push({
+                key,
+                label: String(name).trim(),
+                value: '',
+            });
+            this.recalcAttributeConfidence();
+            this.scheduleAutoSave();
+            this.$nextTick(() => {
+                const input = this.getForm()?.querySelector(`[name="attr_${key}"]`);
+                if (input) {
+                    input.focus();
+                }
+            });
+        },
+        removeExtra(index) {
+            this.extraAttrs.splice(index, 1);
+            this.recalcAttributeConfidence();
+            this.scheduleAutoSave();
+        },
+        removeNamedAttr(btn) {
+            const field = btn && btn.closest ? btn.closest('.extraction-field') : null;
+            if (field) {
+                field.remove();
+            }
+            this.recalcAttributeConfidence();
+            this.scheduleAutoSave();
+        },
+        recalcAttributeConfidence() {
+            const form = this.$el.querySelector('form') || this.$el.closest('form') || this.$root;
+            const schema = this.attributeSchema;
+            if (!schema.length) {
+                return;
+            }
+            let found = 0;
+            schema.forEach((key) => {
+                const input = form.querySelector(`[name="attr_${key}"]`);
+                if (input && String(input.value || '').trim()) {
+                    found += 1;
+                }
+            });
+            this.attributeConfidence = Math.round((100 * found) / schema.length);
+        },
+        scheduleAutoSave() {
+            this.recalcAttributeConfidence();
+            if (this.autoSaveTimer) {
+                clearTimeout(this.autoSaveTimer);
+            }
+            this.autoSaveTimer = setTimeout(() => {
+                this.persistProduct({ silent: true });
+            }, 700);
+        },
+        getForm() {
+            return this.$el.querySelector('form') || this.$el.closest('form');
+        },
+        async persistProduct({ silent = false } = {}) {
+            while (this.saving) {
+                await new Promise((resolve) => setTimeout(resolve, 50));
+            }
+            const form = this.getForm();
+            if (!form) {
+                return;
+            }
+            if (this.autoSaveTimer) {
+                clearTimeout(this.autoSaveTimer);
+                this.autoSaveTimer = null;
+            }
+            const body = new FormData(form);
+            body.append('ajax', '1');
+            body.delete('extra_attr_key');
+            body.delete('extra_attr_value');
+            this.saving = true;
+            this.saved = false;
+            this.saveError = '';
+            this.emitSaveStatus('saving');
+            try {
+                const response = await fetch(this.url, {
+                    method: 'POST',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-CSRFToken': csrfToken(),
+                    },
+                    credentials: 'same-origin',
+                    body,
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || !data.ok) {
+                    throw new Error(data.message || 'Failed to save product.');
+                }
+                if (data.product) {
+                    this.missingCount = data.product.missing_count || 0;
+                    if (data.product.attribute_confidence != null) {
+                        this.attributeConfidence = Number(data.product.attribute_confidence || 0);
+                    }
+                }
+                this.recalcAttributeConfidence();
+                this.saved = true;
+                this.emitSaveStatus('ok');
+                setTimeout(() => { this.saved = false; }, silent ? 1500 : 2000);
+            } catch (error) {
+                this.saveError = error.message;
+                this.emitSaveStatus('error', error.message);
+                throw error;
+            } finally {
+                this.saving = false;
+            }
+        },
+        async saveProduct(event) {
+            event.preventDefault();
+            try {
+                await this.persistProduct({ silent: false });
+            } catch (error) {
+                /* saveError already set */
+            }
+        },
+        async reanalyseRow(rematchUrl, productIndex) {
+            if (this.reanalysing) {
+                return;
+            }
+            this.reanalysing = true;
+            this.saveError = '';
+            const activeIndex = productIndex != null ? Number(productIndex) : Number(this.productIndex);
+            const scrollY = window.scrollY;
+            const productsRoot = this.$el && this.$el.closest
+                ? this.$el.closest('.extraction-products')
+                : null;
+            try {
+                await this.persistProduct({ silent: true });
+                const data = await window.extractionAjaxPost(rematchUrl, {
+                    product_index: String(activeIndex),
+                });
+                const rowId = data.row_id || this.rowId;
+                const preferred = data.product_index != null ? Number(data.product_index) : activeIndex;
+                // If the user switched tabs while this rematch ran, keep their current tab.
+                let viewingIndex = preferred;
+                const liveRoot = document.getElementById('line-' + rowId)
+                    && document.getElementById('line-' + rowId).querySelector('.extraction-products');
+                if (liveRoot && window.Alpine) {
+                    try {
+                        const lineData = Alpine.$data(liveRoot);
+                        if (lineData && lineData.activeProduct != null) {
+                            viewingIndex = Number(lineData.activeProduct);
+                        }
+                    } catch (e) { /* ignore */ }
+                } else if (productsRoot && window.Alpine) {
+                    try {
+                        const lineData = Alpine.$data(productsRoot);
+                        if (lineData && lineData.activeProduct != null) {
+                            viewingIndex = Number(lineData.activeProduct);
+                        }
+                    } catch (e) { /* ignore */ }
+                }
+                const preserveActiveTab = Number.isFinite(viewingIndex) && viewingIndex !== preferred;
+                const replaced = window.replaceExtractionProductPanel(
+                    rowId,
+                    preferred,
+                    data.line_html,
+                    { preserveActiveTab }
+                ) || window.replaceExtractionLine(rowId, data.line_html, {
+                    activeProduct: preserveActiveTab ? viewingIndex : preferred,
+                });
+                if (!replaced) {
+                    try {
+                        sessionStorage.setItem(
+                            'boq-detail-scroll-{{ boq.pk }}-analysis',
+                            JSON.stringify({
+                                y: scrollY,
+                                rowId: rowId,
+                                productIndex: preferred,
+                            })
+                        );
+                    } catch (e) { /* ignore */ }
+                    window.location.assign('{% url "boq:detail" boq.pk %}?tab=analysis&_t=' + Date.now());
+                    return;
+                }
+                window.scrollTo(0, scrollY);
+            } catch (error) {
+                this.reanalysing = false;
+                this.saveError = error.message || 'Re-analyse failed.';
+                this.emitSaveStatus('error', this.saveError);
+                alert(this.saveError);
+                throw error;
+            }
+        },
+    }));
+});
+</script>
+{% endif %}
+{% endif %}

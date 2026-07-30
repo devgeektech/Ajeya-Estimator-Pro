@@ -8,7 +8,7 @@ class AdminRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
     """Restrict a view to authenticated Admin (client admin) users.
 
     Used for user management, database management and product approval
-    (docs/PRD.md - User Roles). Also grants access to Django superusers
+    (docs/PRODUCT.md). Also grants access to Django superusers
     (Developer tier).
     """
 

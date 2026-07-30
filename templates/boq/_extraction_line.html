@@ -1,0 +1,427 @@
+    <article class="extraction-line extraction-line--{{ line.status }}{% if line.multiproduct_review %} extraction-line--multiproduct-review{% elif line.confidence_border %} extraction-line--confidence-{{ line.confidence_border }}{% endif %}" id="line-{{ line.row_id }}">
+        <header class="extraction-line__header">
+            <div class="extraction-line__title">
+                <span class="extraction-line__serial">{{ line.serial|default:"—" }}</span>
+                {% if line.lineage_count > 1 %}
+                    <span class="badge badge--soft">{{ line.lineage_count }} lines grouped</span>
+                {% endif %}
+                {% if line.multiproduct_review %}
+                    <span class="badge badge--review" title="More products extracted than Unit/Qty rows in this group">Multi-product review</span>
+                {% endif %}
+            </div>
+            <div class="extraction-line__meta">
+                {% if line.show_qty_unit %}
+                <span class="extraction-line__qty-unit">Quantity: {{ line.qty_display }}, Unit: {{ line.unit_display }}</span>
+                {% endif %}
+                <span class="badge badge--soft">{{ line.product_count }} product{{ line.product_count|pluralize }}</span>
+                {% if line.status == 'skipped' and line.skip_reason == 'ai_missing_row' %}
+                    <span class="badge badge--yellow">needs re-analyse</span>
+                {% endif %}
+            </div>
+        </header>
+
+        <div class="extraction-line__description">
+            <p class="extraction-line__description-text extraction-line__description-text--preview">{{ line.description }}</p>
+            {% if line.lineage_count > 1 %}
+            <details class="extraction-lineage">
+                <summary>View {{ line.lineage_count }} grouped lines</summary>
+                <ul class="extraction-lineage__list">
+                    {% for part in line.lineage_parts %}
+                    <li>
+                        <span class="extraction-lineage__serial">{{ part.serial|default:"—" }}</span>
+                        {{ part.description }}
+                    </li>
+                    {% endfor %}
+                </ul>
+            </details>
+            {% elif line.description|length > 140 %}
+            <details class="extraction-lineage">
+                <summary>Full description</summary>
+                <p class="extraction-line__description-text extraction-line__description-text--full">{{ line.description }}</p>
+            </details>
+            {% endif %}
+        </div>
+
+        {% if can_edit_extraction and not line.products %}
+        <div class="extraction-line__actions extraction-line__actions--empty">
+            {% if line.needs_product or line.status == 'empty' or line.status == 'not_analyzed' or line.skip_reason == 'ai_missing_row' %}
+            <span class="badge badge--yellow">No product fetched</span>
+            {% endif %}
+            <button
+                type="button"
+                class="btn btn--xsmall btn--primary"
+                title="Add product"
+                aria-label="Add product"
+                @click="window.extractionAjaxPost('{% url 'boq:extraction_edit' boq.pk %}', { action: 'add_product', row_id: '{{ line.row_id }}' }).then(() => { try { const el = document.getElementById('line-{{ line.row_id }}'); sessionStorage.setItem('boq-detail-scroll-{{ boq.pk }}-analysis', JSON.stringify({ y: window.scrollY, rowId: '{{ line.row_id }}', offset: el ? el.getBoundingClientRect().top : null })); } catch (e) {} window.location.reload(); })"
+            >+ Add product</button>
+            <button
+                type="button"
+                class="btn btn--xsmall btn--boq-analyse"
+                title="Re-analyse this section"
+                @click="window.reanalyseEmptyExtractionLine && window.reanalyseEmptyExtractionLine($el, '{% url "boq:row_extract" boq.pk line.row_id %}', '{{ line.row_id }}')"
+            >Re-analyse</button>
+        </div>
+        {% endif %}
+
+        {% if line.products %}
+        <div
+            class="extraction-products"
+            x-data="{
+                activeProduct: {{ line.products.0.product_index }},
+                reanalysingByProduct: {},
+                saveStatus: { type: '', message: '', visible: false },
+                saveStatusTimer: null,
+                get activeIsReanalysing() {
+                    return !!this.reanalysingByProduct[this.activeProduct];
+                },
+                clearSaveStatus() {
+                    if (this.saveStatusTimer) {
+                        clearTimeout(this.saveStatusTimer);
+                        this.saveStatusTimer = null;
+                    }
+                    this.saveStatus = { type: '', message: '', visible: false };
+                },
+                handleSaveStatus(event) {
+                    const detail = event.detail || {};
+                    if (detail.productIndex !== this.activeProduct) {
+                        return;
+                    }
+                    if (this.saveStatusTimer) {
+                        clearTimeout(this.saveStatusTimer);
+                        this.saveStatusTimer = null;
+                    }
+                    if (detail.phase === 'saving') {
+                        this.saveStatus = { type: 'saving', message: 'Saving…', visible: true };
+                        return;
+                    }
+                    if (detail.phase === 'ok') {
+                        this.saveStatus = { type: 'ok', message: 'Auto-saved', visible: true };
+                        this.saveStatusTimer = setTimeout(() => { this.clearSaveStatus(); }, 1500);
+                        return;
+                    }
+                    if (detail.phase === 'error') {
+                        this.saveStatus = {
+                            type: 'error',
+                            message: detail.message || 'Save failed',
+                            visible: true,
+                        };
+                    }
+                },
+            }"
+            @extraction-save-status="handleSaveStatus($event)"
+        >
+            <div class="extraction-product-tabs" role="tablist" aria-label="Products">
+                {% for product in line.products %}
+                <button
+                    type="button"
+                    class="extraction-product-tabs__btn"
+                    role="tab"
+                    :class="{
+                        'is-active': activeProduct === {{ product.product_index }},
+                        'is-busy': !!reanalysingByProduct[{{ product.product_index }}],
+                    }"
+                    :aria-selected="activeProduct === {{ product.product_index }}"
+                    @click="activeProduct = {{ product.product_index }}; clearSaveStatus()"
+                >Product {{ product.display_number }}</button>
+                {% endfor %}
+                {% if can_edit_extraction and line.status != 'skipped' %}
+                <button
+                    type="button"
+                    class="btn btn--xsmall btn--primary extraction-product-tabs__add"
+                    title="Add product"
+                    aria-label="Add product"
+                    @click="window.extractionAjaxPost('{% url 'boq:extraction_edit' boq.pk %}', { action: 'add_product', row_id: '{{ line.row_id }}' }).then(() => { try { const el = document.getElementById('line-{{ line.row_id }}'); sessionStorage.setItem('boq-detail-scroll-{{ boq.pk }}-analysis', JSON.stringify({ y: window.scrollY, rowId: '{{ line.row_id }}', offset: el ? el.getBoundingClientRect().top : null })); } catch (e) {} window.location.reload(); })"
+                >+</button>
+                {% endif %}
+                {% if can_edit_extraction %}
+                <div class="extraction-product-tabs__status" x-show="saveStatus.visible" x-cloak>
+                    <span class="extraction-save-hint extraction-save-hint--saving" x-show="saveStatus.type === 'saving'" x-text="saveStatus.message"></span>
+                    <span class="extraction-save-hint extraction-save-hint--ok" x-show="saveStatus.type === 'ok'">Auto-saved</span>
+                    <span class="extraction-save-hint extraction-save-hint--error" x-show="saveStatus.type === 'error'" x-text="saveStatus.message"></span>
+                </div>
+                {% endif %}
+                {% if can_edit_extraction and line.status != 'skipped' %}
+                <div class="extraction-product-tabs__actions">
+                    <button
+                        type="button"
+                        class="btn btn--xsmall btn--boq-analyse"
+                        :disabled="activeIsReanalysing"
+                        title="Rematch this product against Rate_Master using current fields"
+                        @click="window.reanalyseActiveExtractionProduct($el, '{% url "boq:row_extract" boq.pk line.row_id %}')"
+                    >
+                        <span x-text="activeIsReanalysing ? 'Re-analysing…' : 'Re-analyse'"></span>
+                    </button>
+                    <button
+                        type="button"
+                        class="btn btn--xsmall btn--ghost"
+                        :disabled="activeIsReanalysing"
+                        title="Re-run AI extraction from the BOQ workbook text for this section"
+                        @click="window.reextractExtractionLine && window.reextractExtractionLine($el, '{% url "boq:row_extract" boq.pk line.row_id %}', '{{ line.row_id }}')"
+                    >Re-extract</button>
+                    <button
+                        type="button"
+                        class="btn btn--xsmall btn--danger"
+                        :disabled="activeIsReanalysing"
+                        @click="window.removeActiveExtractionProduct($el, '{% url 'boq:extraction_edit' boq.pk %}', '{{ boq.pk }}')"
+                    >Remove</button>
+                </div>
+                {% endif %}
+            </div>
+
+            {% for product in line.products %}
+            <div
+                class="extraction-product-panel"
+                x-show="activeProduct === {{ product.product_index }}"
+                x-cloak
+            >
+            <section
+                class="extraction-product-card"
+                id="product-{{ line.row_id }}-{{ product.product_index }}"
+                role="tabpanel"
+                {% if can_edit_extraction %}
+                x-data="extractionProductForm({
+                    url: '{% url 'boq:extraction_edit' boq.pk %}',
+                    rowId: '{{ line.row_id }}',
+                    productRowId: '{{ product.source_row_id }}',
+                    productIndex: {{ product.product_index }},
+                    missingCount: {{ product.missing_count }},
+                    attributeConfidence: {{ product.attribute_confidence|default:0 }},
+                    attributeSchema: {{ product.attribute_schema_json }},
+                    extraAttrs: {{ product.extra_attrs_json }}
+                })"
+                {% endif %}
+            >
+                {% if can_edit_extraction %}
+                <div
+                    class="extraction-product-card__busy"
+                    x-show="reanalysing"
+                    x-cloak
+                    aria-live="polite"
+                    aria-busy="true"
+                >
+                    <span class="extraction-product-card__busy-text">Re-analysing…</span>
+                </div>
+                {% endif %}
+                {% if product.db_match %}
+                <div class="extraction-db-match extraction-db-match--{{ product.db_match.status|default:product.db_match_status }}">
+                    <div class="extraction-db-match__head">
+                        {% if product.db_match.status == 'matched' %}
+                        <span class="extraction-db-match__heading">Matched database product</span>
+                        {% elif product.db_match.status == 'provisional' %}
+                        <span class="extraction-db-match__heading">Suggested database product</span>
+                        {% else %}
+                        <span class="extraction-db-match__heading">Database match</span>
+                        {% endif %}
+                        {% if product.db_match.summary %}
+                        <span class="extraction-db-match__summary">{{ product.db_match.summary }}</span>
+                        {% endif %}
+                        <span class="badge badge--{{ product.attribute_confidence_band }}">
+                            {{ product.attribute_confidence|floatformat:0 }}% {% if product.db_match.status == 'matched' %}match{% else %}fill{% endif %}
+                        </span>
+                    </div>
+                    {% if product.missing_attribute_count %}
+                    <p class="extraction-db-match__missing">
+                        {{ product.missing_attribute_count }} missing attribute(s) —
+                        fill them below to raise confidence, then click <strong>Re-analyse</strong>.
+                    </p>
+                    {% endif %}
+                    {% if product.db_match.notes %}
+                    <p class="extraction-db-match__notes">{{ product.db_match.notes }}</p>
+                    {% endif %}
+                </div>
+                {% elif product.db_match_status == 'unmatched' %}
+                <div class="extraction-db-match extraction-db-match--unmatched">
+                    <div class="extraction-db-match__head">
+                        <span class="extraction-section-label">No database match yet</span>
+                    </div>
+                    <p class="extraction-db-match__notes">
+                        Fill known attributes, then click <strong>Re-analyse</strong> to search Rate_Master again.
+                    </p>
+                </div>
+                {% endif %}
+
+                {% if product.db_candidates %}
+                <details class="extraction-db-candidates">
+                    <summary>Top database candidates ({{ product.db_candidates|length }})</summary>
+                    <ul class="extraction-db-candidates__list">
+                        {% for candidate in product.db_candidates %}
+                        <li class="{% if candidate.is_selected %}is-selected{% endif %}">
+                            {% if can_edit_extraction and candidate.id and not candidate.is_selected %}
+                            <button
+                                type="button"
+                                class="extraction-db-candidates__link"
+                                title="Select this database product"
+                                @click="window.selectExtractionCandidate($el, '{% url 'boq:extraction_edit' boq.pk %}', '{{ line.row_id }}', {{ product.product_index }}, {{ candidate.id }})"
+                            >
+                                <span>{{ candidate.summary }}</span>
+                                {% if candidate.tech_key %}<span class="muted"> · {{ candidate.tech_key }}</span>{% endif %}
+                                {% if candidate.confidence is not None %}
+                                <span class="badge badge--gray extraction-db-candidates__pct">{{ candidate.confidence|floatformat:0 }}%</span>
+                                {% endif %}
+                            </button>
+                            {% else %}
+                            <span>{{ candidate.summary }}</span>
+                            {% if candidate.tech_key %}<span class="muted"> · {{ candidate.tech_key }}</span>{% endif %}
+                            {% if candidate.confidence is not None %}
+                            <span class="badge badge--gray extraction-db-candidates__pct">{{ candidate.confidence|floatformat:0 }}%</span>
+                            {% endif %}
+                            {% if candidate.is_selected %}
+                            <span class="badge badge--green">Selected</span>
+                            {% endif %}
+                            {% endif %}
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </details>
+                {% endif %}
+
+                {% if can_edit_extraction %}
+                <form class="extraction-product-form" @submit.prevent @input="scheduleAutoSave()" @change="scheduleAutoSave()">
+                    <input type="hidden" name="action" value="update_product">
+                    <input type="hidden" name="row_id" value="{{ line.row_id }}">
+                    <input type="hidden" name="product_row_id" value="{{ product.source_row_id }}">
+                    <input type="hidden" name="product_index" value="{{ product.product_index }}">
+
+                    <div class="extraction-field-grid">
+                        {% for field in product.fields %}
+                        <label class="extraction-field {% if field.key == 'description_hint' %}extraction-field--full{% endif %}{% if field.missing %} extraction-field--missing{% endif %}">
+                            <span class="extraction-field__label">{{ field.label }}{% if field.missing %} *{% endif %}</span>
+                            {% if field.key == 'description_hint' %}
+                            <textarea
+                                name="{{ field.key }}"
+                                class="extraction-input extraction-input--textarea extraction-input--wrap"
+                                rows="1"
+                                placeholder="Optional — fill when known"
+                            >{{ field.value }}</textarea>
+                            {% else %}
+                            <input
+                                type="text"
+                                name="{{ field.key }}"
+                                value="{{ field.value }}"
+                                class="extraction-input"
+                                placeholder="Optional"
+                            >
+                            {% endif %}
+                        </label>
+                        {% endfor %}
+                    </div>
+
+                    <div class="extraction-attributes-block">
+                        <div class="extraction-attributes-block__head">
+                            <span class="extraction-section-label">Attributes</span>
+                            <button
+                                type="button"
+                                class="btn btn--xsmall btn--primary extraction-attributes-block__add"
+                                title="Add attribute"
+                                aria-label="Add attribute"
+                                @click="addExtra()"
+                            >+</button>
+                            <span class="extraction-attributes-block__hint">
+                                {% if product.attributes.has_db_schema %}
+                                Fill attributes needed for matching — AI values filled where found
+                                {% else %}
+                                No matched database attribute schema yet — use + to add attributes
+                                {% endif %}
+                            </span>
+                        </div>
+                        <div class="extraction-field-grid">
+                            {% for attr in product.attributes.fields %}
+                            <label class="extraction-field{% if not attr.filled %} extraction-field--empty{% endif %}">
+                                <span class="extraction-field__label">{{ attr.label }}</span>
+                                {% if attr.removable %}
+                                <div class="extraction-attr-input-row">
+                                    <input
+                                        type="text"
+                                        name="attr_{{ attr.key }}"
+                                        value="{{ attr.value }}"
+                                        class="extraction-input"
+                                        placeholder="Optional"
+                                        @input="recalcAttributeConfidence()"
+                                    >
+                                    <button
+                                        type="button"
+                                        class="extraction-attr-remove"
+                                        title="Remove attribute"
+                                        aria-label="Remove {{ attr.label }}"
+                                        @click.prevent="removeNamedAttr($el)"
+                                    >&times;</button>
+                                </div>
+                                {% else %}
+                                <input
+                                    type="text"
+                                    name="attr_{{ attr.key }}"
+                                    value="{{ attr.value }}"
+                                    class="extraction-input"
+                                    placeholder="{% if attr.filled %}{% else %}Not found in BOQ{% endif %}"
+                                    @input="recalcAttributeConfidence()"
+                                >
+                                {% endif %}
+                            </label>
+                            {% endfor %}
+                            <template x-for="(item, index) in extraAttrs" :key="item.key + '-' + index">
+                                <label class="extraction-field">
+                                    <span class="extraction-field__label" x-text="item.label || item.key"></span>
+                                    <div class="extraction-attr-input-row">
+                                        <input
+                                            type="text"
+                                            class="extraction-input"
+                                            :name="'attr_' + item.key"
+                                            x-model="item.value"
+                                            placeholder="Optional"
+                                            @input="recalcAttributeConfidence(); scheduleAutoSave()"
+                                        >
+                                        <button
+                                            type="button"
+                                            class="extraction-attr-remove"
+                                            title="Remove attribute"
+                                            aria-label="Remove attribute"
+                                            @click.prevent="removeExtra(index)"
+                                        >&times;</button>
+                                    </div>
+                                </label>
+                            </template>
+                            {% if not product.attributes.fields %}
+                            <p class="extraction-line__empty" x-show="!extraAttrs.length">None — click + to add</p>
+                            {% endif %}
+                        </div>
+                    </div>
+                </form>
+                {% else %}
+                <dl class="extraction-readonly-grid">
+                    {% for field in product.fields %}
+                    <div class="extraction-readonly-item {% if field.key == 'description_hint' %}extraction-readonly-item--full{% endif %}{% if field.missing %} extraction-field--missing{% endif %}">
+                        <dt>{{ field.label }}</dt>
+                        <dd class="extraction-readonly-item__wrap">{{ field.value|default:"—" }}</dd>
+                    </div>
+                    {% endfor %}
+                </dl>
+                <div class="extraction-attributes-readonly">
+                    <div class="extraction-attributes-block__head">
+                        <span class="extraction-section-label">Attributes</span>
+                        <span class="extraction-attributes-block__hint">
+                            {% if product.attributes.has_db_schema %}
+                            Attributes found in Database
+                            {% else %}
+                            No matched database attribute schema
+                            {% endif %}
+                        </span>
+                    </div>
+                    <ul class="extraction-list">
+                        {% for attr in product.attributes.fields %}
+                            <li class="{% if not attr.filled %}extraction-attr--empty{% endif %}">
+                                {{ attr.label }}: {% if attr.value %}{{ attr.value }}{% else %}—{% endif %}
+                            </li>
+                        {% empty %}
+                            <li class="extraction-attr--empty">None</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+            </section>
+            </div>
+            {% endfor %}
+        </div>
+        {% elif line.status != 'skipped' %}
+        <p class="extraction-line__empty">No products extracted for this row.</p>
+        {% endif %}
+    </article>

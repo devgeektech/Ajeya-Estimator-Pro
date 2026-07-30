@@ -1,8 +1,4 @@
-"""Notification models.
-
-User notifications for processing completion, failures, pending review and
-export completion (docs/PRD.md - Notifications).
-"""
+"""Notification models."""
 from django.conf import settings
 from django.db import models
 

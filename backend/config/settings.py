@@ -1,10 +1,10 @@
-
 """Single settings module for BOQ_AI.
 
 All runtimes use this module. Environment values are read from ``.env`` in the
 project root when present, and production safety checks are enabled whenever
 ``DEBUG=False``.
 """
+
 from pathlib import Path
 import sys
 
@@ -28,9 +28,9 @@ env_file = ROOT_DIR / ".env"
 if env_file.exists():
     env.read_env(str(env_file))
 
-SECRET_KEY = env("SECRET_KEY", default="insecure-dev-key-change-me")
+SECRET_KEY = env.str("SECRET_KEY", default="insecure-dev-key-change-me")
 DEBUG = env.bool("DEBUG", default=False)
-ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["localhost", "127.0.0.1"])
+ALLOWED_HOSTS = env.list("ALLOWED_HOSTS")
 
 if not DEBUG and SECRET_KEY == "insecure-dev-key-change-me":
     raise ImproperlyConfigured(
@@ -57,13 +57,6 @@ LOCAL_APPS = [
     "apps.users",
     "apps.database_manager",
     "apps.boq",
-    "apps.make_list",
-    "apps.processing",
-    "apps.matching",
-    "apps.costing",
-    "apps.review",
-    "apps.exports",
-    "apps.pending_products",
     "apps.notifications",
     "apps.audit",
 ]
@@ -109,7 +102,7 @@ ASGI_APPLICATION = "config.asgi.application"
 
 # --- Database ---------------------------------------------------------------
 
-DATABASE_URL = env("DATABASE_URL", default="")
+DATABASE_URL = env.str("DATABASE_URL", default="")
 if DATABASE_URL:
     DATABASES = {"default": env.db_url_config(DATABASE_URL)}
 elif DEBUG:
@@ -134,7 +127,9 @@ LOGIN_REDIRECT_URL = "dashboard:home"
 LOGOUT_REDIRECT_URL = "accounts:login"
 
 AUTH_PASSWORD_VALIDATORS = [
-    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"
+    },
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
@@ -171,33 +166,57 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # --- Celery / Redis ---------------------------------------------------------
 
-REDIS_URL = env("REDIS_URL", default="redis://localhost:6379/0")
-CELERY_BROKER_URL = env("CELERY_BROKER_URL", default=REDIS_URL)
-CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default=REDIS_URL)
+REDIS_URL = env.str("REDIS_URL", default="redis://localhost:6379/0")
+CELERY_BROKER_URL = env.str("CELERY_BROKER_URL", default=REDIS_URL)
+CELERY_RESULT_BACKEND = env.str("CELERY_RESULT_BACKEND", default=REDIS_URL)
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_RESULT_EXPIRES = 3600
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 60 * 30
-CELERY_TASK_ALWAYS_EAGER = env.bool("CELERY_TASK_ALWAYS_EAGER", default=False)
+CELERY_TASK_ALWAYS_EAGER = env.bool("CELERY_TASK_ALWAYS_EAGER", default=DEBUG)
 
 # --- OpenAI -----------------------------------------------------------------
 
-OPENAI_API_KEY = env("OPENAI_API_KEY", default="")
-OPENAI_MODEL = env("OPENAI_MODEL", default="gpt-4o-mini")
-OPENAI_EMBEDDING_MODEL = env("OPENAI_EMBEDDING_MODEL", default="text-embedding-3-small")
-OPENAI_TIMEOUT_SECONDS = env.int("OPENAI_TIMEOUT_SECONDS", default=30)
+OPENAI_API_KEY = env.str("OPENAI_API_KEY", default="")
+OPENAI_MODEL = env.str("OPENAI_MODEL", default="gpt-4o-mini")
+OPENAI_EMBEDDING_MODEL = env.str("OPENAI_EMBEDDING_MODEL", default="text-embedding-3-small")
+OPENAI_EMBEDDING_DIMENSIONS = env.int("OPENAI_EMBEDDING_DIMENSIONS", default=1536)
+OPENAI_EMBEDDING_BATCH_SIZE = env.int("OPENAI_EMBEDDING_BATCH_SIZE", default=500)
+OPENAI_TIMEOUT_SECONDS = env.int("OPENAI_TIMEOUT_SECONDS", default=120)
+OPENAI_MAX_RETRIES = env.int("OPENAI_MAX_RETRIES", default=1)
+AI_INSTRUCTION_LOGGING = env.bool("AI_INSTRUCTION_LOGGING", default=True)
+# How many BOQ sections to send per extract_products AI call.
+AI_ROW_EXTRACTION_BATCH_SIZE = env.int("AI_ROW_EXTRACTION_BATCH_SIZE", default=5)
+# How many products to map per map_product_match AI call.
+AI_PRODUCT_MAPPING_BATCH_SIZE = env.int("AI_PRODUCT_MAPPING_BATCH_SIZE", default=4)
+
+# --- Chroma -----------------------------------------------------------------
+
+_chroma_env = env.str("CHROMA_PATH", default="")
+if _chroma_env and Path(_chroma_env).is_absolute():
+    CHROMA_PATH = _chroma_env
+else:
+    # Always keep Chroma beside other uploaded media, not cwd-relative paths.
+    CHROMA_PATH = str(MEDIA_ROOT / "chroma")
+CHROMA_COLLECTION = env.str("CHROMA_COLLECTION", default="rate_master_products")
 
 # --- Email ------------------------------------------------------------------
 
-if env("EMAIL_HOST", default=""):
+if env.str("EMAIL_HOST", default=""):
     EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
-    EMAIL_HOST = env("EMAIL_HOST")
+    EMAIL_HOST = env.str("EMAIL_HOST")
     EMAIL_PORT = env.int("EMAIL_PORT", default=587)
-    EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
-    EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
+    EMAIL_HOST_USER = env.str("EMAIL_HOST_USER", default="")
+    EMAIL_HOST_PASSWORD = env.str("EMAIL_HOST_PASSWORD", default="")
     EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=True)
 else:
     EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
-DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="no-reply@boq-ai.local")
+DEFAULT_FROM_EMAIL = env.str("DEFAULT_FROM_EMAIL", default="no-reply@boq-ai.local")
 
 # --- Security ---------------------------------------------------------------
 
@@ -226,6 +245,7 @@ LOGGING = {
     "disable_existing_loggers": False,
     "formatters": {
         "verbose": {
+            "()": "common.logging_formatters.LocalTimeFormatter",
             "format": "{asctime} [{levelname}] {name}: {message}",
             "style": "{",
         },
@@ -236,18 +256,25 @@ LOGGING = {
             "formatter": "verbose",
         },
         "app_file": {
-            "class": "logging.handlers.RotatingFileHandler",
+            "class": "common.logging_handlers.SafeRotatingFileHandler",
             "filename": str(LOGS_DIR / "application.log"),
             "maxBytes": 5 * 1024 * 1024,
             "backupCount": 5,
             "formatter": "verbose",
         },
         "error_file": {
-            "class": "logging.handlers.RotatingFileHandler",
+            "class": "common.logging_handlers.SafeRotatingFileHandler",
             "filename": str(LOGS_DIR / "errors.log"),
             "maxBytes": 5 * 1024 * 1024,
             "backupCount": 5,
             "level": "ERROR",
+            "formatter": "verbose",
+        },
+        "instruction_file": {
+            "class": "common.logging_handlers.SafeRotatingFileHandler",
+            "filename": str(LOGS_DIR / "instructions.log"),
+            "maxBytes": 10 * 1024 * 1024,
+            "backupCount": 5,
             "formatter": "verbose",
         },
     },
@@ -258,6 +285,11 @@ LOGGING = {
     "loggers": {
         "boq_ai": {
             "handlers": ["console", "app_file", "error_file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "boq_ai.instructions": {
+            "handlers": ["console", "instruction_file"],
             "level": "INFO",
             "propagate": False,
         },
