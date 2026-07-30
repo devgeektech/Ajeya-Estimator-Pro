@@ -7,6 +7,16 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ## 2026-07-30
 
+**UI / viewport**
+- Removed desktop `html { zoom: 0.9 }` that left a grey strip under full-height
+  pages (login, dashboard, and others) on Windows Chrome / DPI setups.
+- Layout and auth use `min-height: 100dvh` (with `100vh` fallback); dashboard
+  lock uses `100dvh`; auth pages set body to the dark canvas color.
+- Auth shell uses `position: fixed; inset: 0` so it always covers the viewport.
+- With local `DEBUG=False`, WhiteNoise serves `staticfiles/` — ran
+  `collectstatic` so the fix is actually live (stale collected CSS was the
+  reason the first edit looked unchanged).
+
 **UAT / smoke**
 - Local full-stack smoke: Django check, Redis, Celery ping, pages, status JSON;
   live Re-analyse + Re-extract on BOQ `hg` OK (status preserved).

@@ -58,13 +58,13 @@ uploads kept for view/download; only the active upload retains master rows.
 
 Keep only the latest entry below. Older work is in `docs/CHANGELOG.md`.
 
-### 2026-07-30 — Full App Smoke / UAT Pass
+### 2026-07-30 — Viewport / grey strip fix
 
-Completed: Local smoke of stack + key pages + live **Re-analyse** and
-**Re-extract** on BOQ 82 (`hg`). Django check clean; Redis/Celery ping OK;
-active DB `14_July_DB`. Pages 200: login, dashboard, BOQs, upload, database,
-notifications, users, audit, profile; BOQ 81/82 detail tabs + status JSON.
-Pending: Restore tests; EC2 migrate; restart Celery after code changes before
-full Analyse jobs; Export needs Labour→Review complete (blocked as designed).
-Issues: None blocking found in this pass.
-Next: Restart Celery worker; optional full Analyse Celery job UAT.
+Completed: White strip was stale WhiteNoise hashed CSS (`zoom: 0.9`) still
+served by a long-lived runserver after `collectstatic`. Fixed source CSS,
+recollected static, deleted old hashed file, restarted runserver (now serves
+`app.0362447acb2d.css` with no zoom), and added inline `zoom: 1 !important` +
+fixed auth shell in `base.html` so a restart alone cannot leave the gap.
+Pending: Restore tests; on deploy always `collectstatic` then restart app.
+Issues: With `DEBUG=False`, CSS changes need collectstatic + process restart.
+Next: Hard-refresh browser (Ctrl+F5) on login — strip should be gone.

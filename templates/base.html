@@ -6,8 +6,34 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Ajeya Estimator Pro{% endblock %}</title>
     <meta name="csrf-token" content="{{ csrf_token }}">
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=55">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=58">
     <style>
+        /* Override stale collected CSS (DEBUG=False keeps old hashed files until server restart). */
+        html { zoom: 1 !important; height: 100%; }
+        html, body {
+            margin: 0;
+            min-height: 100%;
+            min-height: 100dvh;
+        }
+        body:has(.auth) { background: #0f172a !important; }
+        .auth {
+            position: fixed !important;
+            inset: 0 !important;
+            width: 100% !important;
+            min-height: 100% !important;
+            overflow: auto !important;
+            display: grid !important;
+            place-items: center !important;
+            padding: 24px !important;
+            background: linear-gradient(135deg, #1e293b, #0f172a) !important;
+            box-sizing: border-box !important;
+        }
+        .layout {
+            min-height: 100vh !important;
+            min-height: 100dvh !important;
+        }
+        .main { min-height: 100vh; min-height: 100dvh; }
+
         [x-cloak] { display: none !important; }
         .sidebar-backdrop { display: none; }
 
