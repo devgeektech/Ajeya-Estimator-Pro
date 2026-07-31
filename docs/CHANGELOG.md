@@ -5,6 +5,44 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
+## 2026-07-31 — Stale Static Manifest (And Broken-Pipe Diagnosis)
+
+- `staticfiles.json` mapped `css/app.css` to a 15 KB hashed build while the
+  source was 51 KB, so browsers were served an outdated stylesheet no matter how
+  often the `?v=` query bump changed. Re-ran `collectstatic`; the manifest now
+  points at `css/app.2edc5a8cc945.css`, byte-identical to the source.
+- The `- Broken pipe from ('127.0.0.1', …)` INFO lines are not an error. Django's
+  dev server logs `ConnectionResetError`/`ConnectionAbortedError` under that
+  message, and it fires when the browser reaps its idle HTTP/1.1 keep-alive
+  sockets. Reproduced by opening three keep-alive sockets, going idle and
+  closing them: three "Broken pipe" lines, no failed request. No code change.
+
+## 2026-07-31 — Fix Broken Make & Vendor Cards (Find Rates Button)
+
+- `vendors_by_make_json` was interpolated with `|safe` into the double-quoted
+  `x-data="makeVendorForm({...})"` attribute. Its JSON quotes closed the
+  attribute early, so the browser swallowed the rest of the tag and Alpine never
+  initialised the card: **Find rates** rendered as an empty yellow stub, and
+  `Product rate` stayed blank instead of showing its value.
+- Dropped `|safe` on `vendors_by_make_json` and `same_price_choices_json` so
+  Django escapes the quotes; the browser unescapes them and Alpine still
+  receives a valid object literal.
+- The note added beside that fix used a **multi-line** `{# … #}`. Django template
+  comments are single-line only, so both lines rendered as literal text in the
+  middle of the object literal and Alpine failed with
+  `Alpine Expression Error: Unexpected token '{'` on every card — same dead-card
+  symptoms. The comment now sits on one line above the element.
+- Verified in headless Chrome: no console errors, `Find rates` visible on all
+  cards, and `Product rate` populated (1800.00 / 1700.00 / …).
+
+## 2026-07-31 — Qty/Unit Only In Analysis Section Header
+
+- Removed quantity/unit from inside the product card and from the row below the
+  Product tabs. It now appears only in the section-header position highlighted
+  by the user.
+- In multi-product sections, clicking a Product tab updates that header value to
+  the selected product's own slot quantity/unit.
+
 ## 2026-07-31 — Guarantee Product Coverage For Every Qty Slot
 
 - Changed extraction from “exactly one product per slot” to **at least one per

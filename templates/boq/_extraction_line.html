@@ -10,7 +10,13 @@
                 {% endif %}
             </div>
             <div class="extraction-line__meta">
-                {% if line.show_qty_unit and line.product_count < 2 %}
+                {% if line.product_count >= 2 %}
+                <span
+                    class="extraction-line__qty-unit"
+                    data-active-product-qty
+                    {% if not line.products.0.show_quantity %}hidden{% endif %}
+                >Quantity: {{ line.products.0.quantity_display }}, Unit: {{ line.products.0.quantity_unit_display }}</span>
+                {% elif line.show_qty_unit %}
                 <span class="extraction-line__qty-unit">Quantity: {{ line.qty_display }}, Unit: {{ line.unit_display }}</span>
                 {% endif %}
                 <span class="badge badge--soft">{{ line.product_count }} product{{ line.product_count|pluralize }}</span>
@@ -71,21 +77,8 @@
                 reanalysingByProduct: {},
                 saveStatus: { type: '', message: '', visible: false },
                 saveStatusTimer: null,
-                qtyByProduct: {
-                    {% for product in line.products %}
-                    {{ product.product_index }}: {
-                        show: {{ product.show_quantity|yesno:'true,false' }},
-                        text: 'Quantity: {{ product.quantity_display|escapejs }}, Unit: {{ product.quantity_unit_display|escapejs }}'{% if product.rate_only %},
-                        rateOnly: true{% else %},
-                        rateOnly: false{% endif %}
-                    }{% if not forloop.last %},{% endif %}
-                    {% endfor %}
-                },
                 get activeIsReanalysing() {
                     return !!this.reanalysingByProduct[this.activeProduct];
-                },
-                get activeQty() {
-                    return this.qtyByProduct[this.activeProduct] || null;
                 },
                 clearSaveStatus() {
                     if (this.saveStatusTimer) {
@@ -134,7 +127,15 @@
                         'is-busy': !!reanalysingByProduct[{{ product.product_index }}],
                     }"
                     :aria-selected="activeProduct === {{ product.product_index }}"
-                    @click="activeProduct = {{ product.product_index }}; clearSaveStatus()"
+                    @click="
+                        activeProduct = {{ product.product_index }};
+                        clearSaveStatus();
+                        const qtyEl = $el.closest('.extraction-line').querySelector('[data-active-product-qty]');
+                        if (qtyEl) {
+                            qtyEl.textContent = 'Quantity: {{ product.quantity_display|escapejs }}, Unit: {{ product.quantity_unit_display|escapejs }}';
+                            qtyEl.hidden = {{ product.show_quantity|yesno:'false,true' }};
+                        }
+                    "
                 >Product {{ product.display_number }}</button>
                 {% endfor %}
                 {% if can_edit_extraction and line.status != 'skipped' %}
@@ -174,16 +175,6 @@
                 {% endif %}
             </div>
 
-            {% if line.products.0.show_quantity or line.product_count >= 2 %}
-            <div class="extraction-active-qty" x-show="!activeQty || activeQty.show">
-                <span
-                    class="extraction-line__qty-unit extraction-product-tabs__qty"
-                    x-text="activeQty ? activeQty.text : 'Quantity: {{ line.products.0.quantity_display|escapejs }}, Unit: {{ line.products.0.quantity_unit_display|escapejs }}'"
-                >Quantity: {{ line.products.0.quantity_display }}, Unit: {{ line.products.0.quantity_unit_display }}</span>
-                <span class="badge badge--soft" x-show="activeQty && activeQty.rateOnly" x-cloak>Rate only</span>
-            </div>
-            {% endif %}
-
             {% for product in line.products %}
             <div
                 class="extraction-product-panel"
@@ -216,17 +207,6 @@
                     aria-busy="true"
                 >
                     <span class="extraction-product-card__busy-text">Re-analysing…</span>
-                </div>
-                {% endif %}
-
-                {% if product.show_quantity %}
-                <div class="extraction-product-card__qty">
-                    <span class="extraction-line__qty-unit">
-                        Quantity: {{ product.quantity_display }}, Unit: {{ product.quantity_unit_display }}
-                    </span>
-                    {% if product.rate_only %}
-                    <span class="badge badge--soft">Rate only</span>
-                    {% endif %}
                 </div>
                 {% endif %}
                 {% if product.db_match %}

@@ -122,10 +122,9 @@ Removed the green ``Welcome back`` flash after login.
 Labour summary shows
 ``Products Y · Labour Charges found for X products · Mode: Manual/Auto``
 with bold counts and mode.
-Analysis product cards show their own slot quantity/unit (a 7-product section
-now reads 45 / 95 / 15 / 20 / 10 / 75 / 175 Metre per tab instead of repeating
-the section figure); the section header keeps its figure only for single-product
-sections.
+Analysis shows quantity/unit only in the section-header position beside product
+count. In multi-product sections, clicking Product tabs updates that header to
+the selected product's slot value; quantity/unit is not repeated inside cards.
 Top database candidates are collapsed by default again.
 Multi-product Analysis shows the active product's quantity/unit on a row under
 the Product tabs (updates on tab switch), not only inside the card.
@@ -133,6 +132,23 @@ Initial extraction now enforces Unit/Qty slots as minimum product coverage:
 every slot needs a product, but genuine extras are retained. Underfilled
 sections get one focused AI correction pass; any still-missing slot becomes a
 BOQ-evidence-only review product so no priced line is silently ignored.
+Fixed the Make & Vendor cards being dead: the `vendors_by_make` JSON added for
+per-make vendor lists was injected with `|safe` into the double-quoted `x-data`
+attribute, so its quotes closed the attribute and Alpine never initialised the
+card — **Find rates** showed as an empty yellow stub and `Product rate` was
+blank. Escaping the JSON (no `|safe`) restores both; verified all 39 cards on
+BOQ 100 parse with labels. Rule of thumb: never `|safe` JSON into an attribute.
+Second cause of the same dead card: a **multi-line** `{# … #}` comment added next
+to that fix. Django template comments are single-line only, so it rendered as
+literal text inside the `x-data` object and Alpine died with
+`Unexpected token '{'`. Because the component never initialised, `Product rate`
+also stayed blank on matched (green) cards even though the rate was in the
+payload. Both fixed; confirmed in headless Chrome with zero console errors.
+Debug tip: `chrome --headless=new --dump-dom` over a saved copy of the page
+surfaces Alpine expression errors that server-side HTML checks cannot.
+`staticfiles.json` was serving a stale 15 KB `app.css` (source is 51 KB), which
+is why `?v=` bumps kept appearing to do nothing; `collectstatic` re-pointed it
+at `css/app.2edc5a8cc945.css`. Re-run `collectstatic` after editing `app.css`.
 Pending: Upload a full Rate_Master_Output so more than `PIPE` exists.
 Issues: Only 6 of 50 make-list materials map because the active DB has a single
 category. `Size` values like `150 mm` still parse to NULL (decimal column) —

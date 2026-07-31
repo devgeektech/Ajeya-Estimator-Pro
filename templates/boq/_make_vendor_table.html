@@ -217,6 +217,7 @@
                 x-show="activeProduct === {{ product.product_index }}"
                 x-cloak
             >
+            {# The two *_json values below land inside a double-quoted attribute: leave them escaped or their quotes close x-data early. #}
             <section
                 class="make-vendor-card"
                 :class="{
@@ -242,8 +243,8 @@
                     allowTypedEntry: {{ product.allow_typed_make_vendor|yesno:'true,false' }},
                     vendorRateReview: {{ product.vendor_rate_review|yesno:'true,false' }},
                     samePriceTie: {{ product.same_price_tie|yesno:'true,false' }},
-                    samePriceChoices: {{ product.same_price_choices_json|default:'[]'|safe }},
-                    vendorsByMake: {{ product.vendors_by_make_json|default:'{}'|safe }},
+                    samePriceChoices: {{ product.same_price_choices_json|default:'[]' }},
+                    vendorsByMake: {{ product.vendors_by_make_json|default:'{}' }},
                     rateMasterId: {{ product.rate_master_id|default:'null' }}
                 })"
             >

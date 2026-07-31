@@ -225,7 +225,9 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
   ``quantity`` / ``quantity_unit`` only — never into product ``unit``.
   Quantity comes from filled Unit/Qty **slots** inside the section
   (including ``0`` and ``Rate Only`` / ``RO``); for Rate Only the BOQ rate cell is
-  stored as ``boq_rate``. Each product binds to its own slot.
+  stored as ``boq_rate``. Each product binds to its own slot. Analysis shows the
+  active product's quantity/unit only in the section header (beside product
+  count); switching Product tabs updates that header value.
 - **Pricing:** normal lines use ``(material_rate + labour_rate)`` via amounts
   ``material_rate × qty`` and ``labour_rate × qty``. For qty ``0`` or Rate Only / RO,
   Review/Export show the **sum of unit rates only** (no quantity multiply), flagged
