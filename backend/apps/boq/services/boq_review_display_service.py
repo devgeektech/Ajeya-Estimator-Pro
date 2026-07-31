@@ -164,16 +164,21 @@ class BOQReviewDisplayService:
         selected = {
             "rate_master_id": selection.get("rate_master_id")
             or (rate_detail or {}).get("rate_master_id"),
+            "product_id": selection.get("product_id")
+            or (rate_detail or {}).get("product_id"),
+            "rate_id": selection.get("rate_id")
+            or (rate_detail or {}).get("rate_id"),
             "tech_key": selection.get("tech_key")
+            or (rate_detail or {}).get("product_display_key")
             or (rate_detail or {}).get("tech_key")
             or "",
             "make": selection.get("make")
             or product.get("selected_make")
             or (rate_detail or {}).get("make")
             or "",
-            "supplier": selection.get("supplier")
-            or product.get("selected_supplier")
-            or (rate_detail or {}).get("supplier")
+            "vendor": selection.get("vendor")
+            or product.get("selected_vendor")
+            or (rate_detail or {}).get("vendor")
             or "",
             "category": product.get("category")
             or (rate_detail or {}).get("category")

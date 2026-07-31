@@ -17,8 +17,8 @@
                 <th class="analysis-col-status">Status</th>
                 <th>Category</th>
                 <th>Make</th>
-                <th>Supplier</th>
-                <th>Tech Key</th>
+                <th>Vendor</th>
+                <th>Product ID</th>
                 <th class="analysis-col-num">Material</th>
                 <th class="analysis-col-num">Labour</th>
                 <th class="analysis-col-num">Total</th>
@@ -41,8 +41,8 @@
                         </td>
                         <td>{% if product.selected %}{{ product.selected.category|default:"—" }}{% else %}{{ product.extracted_category|default:"—" }}{% endif %}</td>
                         <td>{% if product.selected %}{{ product.selected.make|default:"—" }}{% else %}—{% endif %}</td>
-                        <td>{% if product.selected %}{{ product.selected.supplier|default:"—" }}{% else %}—{% endif %}</td>
-                        <td class="analysis-col-tech" title="{% if product.selected %}{{ product.selected.tech_key }}{% endif %}">{% if product.selected %}{{ product.selected.tech_key|default:"—"|truncatechars:14 }}{% else %}—{% endif %}</td>
+                        <td>{% if product.selected %}{{ product.selected.vendor|default:"—" }}{% else %}—{% endif %}</td>
+                        <td class="analysis-col-tech">{% if product.selected %}{{ product.selected.product_id|default:"—" }}{% else %}—{% endif %}</td>
                         <td class="analysis-col-num">{{ product.line_output.material_rate|default:"—" }}</td>
                         <td class="analysis-col-num">{{ product.line_output.labour_rate|default:"—" }}</td>
                         <td class="analysis-col-num">{{ product.line_output.total_amount|default:"—" }}</td>

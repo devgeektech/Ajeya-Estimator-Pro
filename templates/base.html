@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Ajeya Estimator Pro{% endblock %}</title>
     <meta name="csrf-token" content="{{ csrf_token }}">
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=58">
+<link rel="stylesheet" href="{% static 'css/app.css' %}?v=71">
     <style>
         /* Override stale collected CSS (DEBUG=False keeps old hashed files until server restart). */
         html { zoom: 1 !important; height: 100%; }
@@ -33,6 +33,36 @@
             min-height: 100dvh !important;
         }
         .main { min-height: 100vh; min-height: 100dvh; }
+
+        /* Table headers: theme text by default; active sort column uses theme blue */
+        .table th,
+        .table th a,
+        .table th a:link,
+        .table th a:visited,
+        .table th a:hover,
+        .table th a:active,
+        .table-sort,
+        .table-sort:link,
+        .table-sort:visited,
+        .table-sort:hover,
+        .table-sort:active,
+        .table-sort:focus {
+            color: var(--text, #1e293b) !important;
+            text-decoration: none !important;
+            border-bottom: 0 !important;
+        }
+        .table-sort.is-active,
+        .table-sort.is-active:link,
+        .table-sort.is-active:visited,
+        .table-sort.is-active:hover,
+        .table th a.table-sort.is-active {
+            color: #2563eb !important;
+        }
+        .table-sort__arrows { color: #94a3b8 !important; text-decoration: none !important; }
+        .table-sort.is-active.is-asc .table-sort__up,
+        .table-sort.is-active.is-desc .table-sort__down { color: #2563eb !important; }
+        .table-sort.is-active.is-asc .table-sort__down,
+        .table-sort.is-active.is-desc .table-sort__up { color: #cbd5e1 !important; }
 
         [x-cloak] { display: none !important; }
         .sidebar-backdrop { display: none; }
@@ -301,6 +331,24 @@
             top: 0;
             z-index: 1;
             background: var(--surface, #fff);
+            text-transform: none !important;
+            font-size: .85rem !important;
+            letter-spacing: normal !important;
+        }
+        /* BOQ / Make List sheets: normal header styling vs list-table uppercase */
+        .table.boq-sheet th {
+            text-transform: none !important;
+            font-size: .85rem !important;
+            letter-spacing: normal !important;
+            color: var(--text) !important;
+        }
+        .table.boq-sheet > thead > tr > th,
+        .table.boq-sheet > tbody > tr > td {
+            text-align: left !important;
+        }
+        .dark-mode .table.boq-sheet tbody tr:nth-child(odd) td,
+        .dark-mode .table.boq-sheet tbody tr:nth-child(even) td {
+            background-color: transparent !important;
         }
 
         .analysis-tab-canvas {
@@ -791,6 +839,15 @@
             font-size: .75rem;
         }
 
+        .analysis-tab-canvas .extraction-db-candidates__list {
+            margin-top: 2px;
+            gap: 0;
+        }
+
+        .analysis-tab-canvas .extraction-db-candidates__list li {
+            line-height: 1.2;
+        }
+
         .analysis-tab-canvas .extraction-field-grid {
             grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
             gap: 5px 8px;
@@ -1227,7 +1284,7 @@
         .make-vendor-summary__filtered { color: #1d4ed8; font-weight: 600; }
         .make-vendor-summary__not-found { color: #c2410c; font-weight: 600; }
         .make-vendor-summary__no-match { color: #b91c1c; font-weight: 600; }
-        .make-vendor-summary__supplier-review { color: #a16207; font-weight: 600; }
+        .make-vendor-summary__vendor-review { color: #a16207; font-weight: 600; }
         .make-vendor-summary__same-price { color: #a16207; font-weight: 600; }
         .make-vendor-summary__muted {
             color: var(--text-muted, #64748b);
@@ -1664,7 +1721,7 @@
             /* Outer card already shows the status line; keep inner clean. */
             box-shadow: none;
         }
-        .make-vendor-card--supplier-review {
+        .make-vendor-card--vendor-review {
             background: #fffbeb;
             border-radius: 6px;
             padding-left: 10px;
@@ -1672,7 +1729,7 @@
             /* Outer card already shows the status line; keep inner clean. */
             box-shadow: none;
         }
-        .make-vendor-card__supplier-review-note {
+        .make-vendor-card__vendor-review-note {
             margin: 6px 0 0;
             font-size: .78rem;
             line-height: 1.35;
@@ -2164,17 +2221,18 @@
             color: var(--text-muted);
         }
         .extraction-db-candidates__list {
-            margin: 8px 0 0;
+            margin: 4px 0 0;
             padding-left: 1.1rem;
             display: flex;
             flex-direction: column;
-            gap: 4px;
+            gap: 1px;
         }
         .extraction-db-candidates__list li {
             display: flex;
             flex-wrap: wrap;
             align-items: center;
             gap: 6px;
+            line-height: 1.25;
         }
         .extraction-db-candidates__link {
             display: inline-flex;
@@ -2206,6 +2264,35 @@
             flex: 0 0 auto;
             font-variant-numeric: tabular-nums;
             white-space: nowrap;
+            color: var(--text-muted);
+        }
+        .extraction-db-candidates__selected {
+            color: #15803d;
+            white-space: nowrap;
+        }
+        .extraction-product-card__qty {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+            margin: 0 0 8px;
+            font-size: .85rem;
+            color: var(--text);
+            font-weight: 500;
+        }
+        .extraction-product-tabs__qty {
+            margin-left: 0;
+            font-size: .85rem;
+            color: var(--text);
+            font-weight: 600;
+        }
+        .extraction-active-qty {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+            margin: 0 0 8px;
+            padding: 2px 0 6px;
         }
 
         .extraction-input {
@@ -2217,6 +2304,29 @@
             font-size: .85rem;
             background: var(--input-bg, #fff);
             color: var(--text);
+        }
+
+        /* Keep list search label + input on one row (override width:100% above) */
+        .list-search {
+            display: flex !important;
+            flex-direction: row !important;
+            flex-wrap: wrap !important;
+            align-items: center !important;
+            gap: 10px;
+            margin: 0 0 14px;
+        }
+        .list-search__label {
+            flex: 0 0 auto;
+            white-space: nowrap;
+            font-size: .875rem;
+            font-weight: 700;
+            color: var(--text);
+        }
+        .list-search .extraction-input,
+        .list-search__input {
+            width: 280px !important;
+            max-width: min(360px, calc(100% - 90px)) !important;
+            flex: 0 0 auto !important;
         }
 
         .extraction-input--textarea {
@@ -2452,22 +2562,17 @@
             .table td {
                 white-space: nowrap;
             }
-            /* Make List stays full-width with left-aligned columns. */
-            .table.boq-sheet.boq-sheet--make-list {
+            /* BOQ / Make List sheets stay full-width with left-aligned columns. */
+            .table.boq-sheet {
                 width: 100% !important;
                 min-width: 100% !important;
                 max-width: 100%;
                 table-layout: fixed !important;
             }
-            .table.boq-sheet.boq-sheet--make-list th,
-            .table.boq-sheet.boq-sheet--make-list td {
+            .table.boq-sheet th,
+            .table.boq-sheet td {
                 text-align: left !important;
                 white-space: normal !important;
-            }
-            .table.boq-sheet.boq-sheet--make-list th.boq-sheet__col-makes,
-            .table.boq-sheet.boq-sheet--make-list td.boq-sheet__col-makes {
-                text-align: left !important;
-                padding-right: 12px !important;
             }
             .sidebar-backdrop {
                 position: fixed;
@@ -2538,6 +2643,25 @@
         }
         .dark-mode .table tbody tr:nth-child(odd) td { background-color: #111827; }
         .dark-mode .table tbody tr:nth-child(even) td { background-color: #334155; }
+        .dark-mode .table th,
+        .dark-mode .table th a,
+        .dark-mode .table th a:link,
+        .dark-mode .table th a:visited,
+        .dark-mode .table-sort,
+        .dark-mode .table-sort:link,
+        .dark-mode .table-sort:visited,
+        .dark-mode .table-sort:hover {
+            color: var(--text, #e2e8f0) !important;
+            text-decoration: none !important;
+        }
+        .dark-mode .table-sort.is-active,
+        .dark-mode .table-sort.is-active:link,
+        .dark-mode .table-sort.is-active:visited,
+        .dark-mode .table-sort.is-active:hover,
+        .dark-mode .table th a.table-sort.is-active {
+            color: #60a5fa !important;
+            text-decoration: none !important;
+        }
         .dark-mode .table.table--plain tbody tr td,
         .dark-mode .table.table--plain tbody tr:nth-child(odd) td,
         .dark-mode .table.table--plain tbody tr:nth-child(even) td {
@@ -2624,12 +2748,12 @@
             /* Outer card already shows the status line; keep inner clean. */
             box-shadow: none;
         }
-        .dark-mode .make-vendor-card--supplier-review {
+        .dark-mode .make-vendor-card--vendor-review {
             background: rgba(245, 158, 11, 0.16);
             /* Outer card already shows the status line; keep inner clean. */
             box-shadow: none;
         }
-        .dark-mode .make-vendor-card__supplier-review-note {
+        .dark-mode .make-vendor-card__vendor-review-note {
             color: #fde68a;
         }
 
@@ -3045,9 +3169,12 @@
         }
 
         .sidebar__brand .brand-mark {
-            color: #ffffff !important;
+            color: var(--primary, #2563eb) !important;
         }
         .sidebar__brand .brand-ai {
+            color: #ffffff !important;
+        }
+        .sidebar__tagline {
             color: #ffffff !important;
         }
     </style>

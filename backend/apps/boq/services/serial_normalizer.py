@@ -108,20 +108,55 @@ def cell_value(row: dict, key: str) -> Any:
     return value
 
 
+def _sheet_col_class(header: dict) -> str:
+    """CSS column class for a BOQ sheet header (drives column width)."""
+    blob = re.sub(
+        r"[^a-z0-9]+",
+        " ",
+        f"{header.get('key') or ''} {header.get('label') or ''}".casefold(),
+    ).strip()
+    if any(hint in blob for hint in ("s no", "sno", "sl no", "sr no", "serial")):
+        return "boq-sheet__col-sno"
+    if any(hint in blob for hint in ("description", "particular", "material", "item desc")):
+        return "boq-sheet__col-desc"
+    if "unit" in blob:
+        return "boq-sheet__col-unit"
+    if "qty" in blob or "quantity" in blob:
+        return "boq-sheet__col-qty"
+    if "rate" in blob:
+        return "boq-sheet__col-rate"
+    if "amount" in blob or "total" in blob:
+        return "boq-sheet__col-amount"
+    return "boq-sheet__col-other"
+
+
+def _with_display_cells(headers: list[dict], cells: list) -> list[dict]:
+    """Pair each cell with its header column class for template rendering."""
+    return [
+        {"text": value, "col_class": header.get("col_class") or ""}
+        for header, value in zip(headers, cells)
+    ]
+
+
 def structure_for_display(structure: dict) -> dict:
     """Attach ordered ``cells`` lists to rows for template rendering."""
     if not structure:
         return {}
-    headers = structure.get("headers") or []
+    headers = [
+        {**header, "col_class": _sheet_col_class(header)}
+        for header in (structure.get("headers") or [])
+    ]
     rows = []
     for row in structure.get("rows") or []:
+        cells = [cell_value(row, header["key"]) for header in headers]
         rows.append(
             {
                 **row,
-                "cells": [cell_value(row, header["key"]) for header in headers],
+                "cells": cells,
+                "display_cells": _with_display_cells(headers, cells),
             }
         )
-    return {**structure, "rows": rows}
+    return {**structure, "headers": headers, "rows": rows}
 
 
 def _prefer_make_list_sheet_rows(flat_rows: list[dict]) -> list[dict]:
@@ -154,9 +189,24 @@ def _prefer_make_list_sheet_rows(flat_rows: list[dict]) -> list[dict]:
     return filtered or flat_rows
 
 
+def _make_list_sheet_col_class(header: dict, serial_key: str | None) -> str:
+    """CSS column class for Make List display headers."""
+    key = str(header.get("key") or "")
+    if key == "_approved_makes":
+        return "boq-sheet__col-makes"
+    if key == "_mapped_category":
+        return "boq-sheet__col-mapped-cat"
+    if key == "_mapped_sub_category":
+        return "boq-sheet__col-mapped-sub"
+    if serial_key and key == serial_key:
+        return "boq-sheet__col-sno"
+    return "boq-sheet__col-desc"
+
+
 def structure_for_make_list_display(structure: dict) -> dict:
     """
-    Make List tab: only S.No, Description/Material, and Approved Makes.
+    Make List tab: S.No, Description/Material, Mapped Category,
+    Mapped Sub-category, and Approved Makes.
 
     Ignores leftover rate/estimate columns from older multi-sheet merges.
     """
@@ -212,6 +262,10 @@ def structure_for_make_list_display(structure: dict) -> dict:
     display_headers.append({"key": "_mapped_category", "label": "Mapped Category"})
     display_headers.append({"key": "_mapped_sub_category", "label": "Mapped Sub-category"})
     display_headers.append({"key": "_approved_makes", "label": "Approved Makes"})
+    display_headers = [
+        {**header, "col_class": _make_list_sheet_col_class(header, serial_key)}
+        for header in display_headers
+    ]
 
     rows: list[dict] = []
     header_like = {
@@ -261,6 +315,7 @@ def structure_for_make_list_display(structure: dict) -> dict:
             {
                 **row,
                 "cells": cells,
+                "display_cells": _with_display_cells(display_headers, cells),
                 "approved_makes_list": list(makes or []),
                 "mapped_category": mapped_category or None,
                 "mapped_sub_category": mapped_sub or None,

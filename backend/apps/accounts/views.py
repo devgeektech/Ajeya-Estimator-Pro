@@ -43,7 +43,6 @@ class LoginView(View):
                 return render(request, self.template_name, {"form": form})
             login(request, user)
             record_login(user)
-            messages.success(request, f"Welcome back, {user.full_name}.")
             return redirect("dashboard:home")
         return render(request, self.template_name, {"form": form})
 

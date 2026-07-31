@@ -19,7 +19,7 @@ _DESCRIPTION_KEYS = (
     "materials",
 )
 
-# Optimal make-name match threshold (make-list vs Rate_Master spelling variants).
+# Optimal make-name threshold (make-list vs Rate_Master_Output spelling variants).
 _MAKE_MATCH_THRESHOLD = 0.82
 
 
@@ -219,7 +219,7 @@ class MakeListConstraintService:
         category: str,
         sub_category: str = "",
     ) -> list[str] | None:
-        """Return approved makes mapped to this Rate_Master / product category.
+        """Return approved makes mapped to this Rate_Master_Output product category.
 
         When ``sub_category`` is set and no make-list row maps to that
         sub-category (or description), returns ``None`` — do **not** fall back

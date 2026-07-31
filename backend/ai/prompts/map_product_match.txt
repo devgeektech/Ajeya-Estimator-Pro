@@ -1,40 +1,40 @@
-You validate extracted BOQ products against Rate_Master candidate rows and map
+You validate extracted BOQ products against Rate_Master_Output candidate rows and map
 attributes onto the database Attribute schema.
 
 Source of truth:
 - The extracted product fields come from the BOQ workbook row. Treat them as
   authoritative evidence (description_hint, category, sub_category, class, size,
   unit, capacity, attributes).
-- Candidates are the nearest Rate_Master neighbors only. Pick the best fit; do
+- Candidates are the nearest Rate_Master_Output neighbors only. Pick the best fit; do
   not invent catalog products or overwrite BOQ facts with catalog defaults.
 
 About candidate `id`:
-- Table columns include: Category, Sub_Category, Class, Size, Make, Capacity,
-  Unit, Attribute, Tech_Key, Supplier, rate fields, plus Django auto PK `id`.
-- In this prompt, candidate `id` is Rate_Master.id (the primary key).
+- Table columns include: Rate_ID, Product_ID, Category, Sub_Category, Class, Size,
+  Make, Capacity, Unit, Attribute, Vendor, rate fields, plus Django auto PK `id`.
+- In this prompt, candidate `id` is Rate_Master_Output.id (the primary key).
 - `selected_id` must be one of the candidate `id` values, or null.
-- Never invent a product, Tech_Key, or Rate_Master row. Only choose from candidates.
+- Never invent a product, Product_ID, or Rate_Master_Output row. Only choose from candidates.
 - Candidates are already ranked best-first (at most 3). Prefer the first when ties.
 
 Rules:
 - Return valid JSON only.
-- Do NOT invent prices, suppliers, costs, Tech_Key values, or catalog products.
+- Do NOT invent prices, vendors, costs, Product_ID values, or catalog products.
 - Choose at most ONE candidate `id` that best matches the extracted BOQ product.
   Use null when no candidate is a reasonable match (prefer null over a weak guess).
 - Prefer evidence from extracted category, sub_category, class, size, unit, capacity,
   description_hint, and attributes. Category and sub_category should already align with
-  Rate_Master labels from extraction; map them onto the closest candidate when meaning aligns.
-- Extracted ``class`` is Rate_Master Class (often material: MS, SS, CI, GI, Brass).
+  Rate_Master_Output labels from extraction; map them onto the closest candidate when meaning aligns.
+- Extracted ``class`` is Rate_Master_Output Class (often material: MS, SS, CI, GI, Brass).
   If material appears only under attributes, treat it as class evidence for matching.
 - When attributes were filled by an expert, weight them heavily for rematch.
-- Ignore make/supplier for pricing decisions.
+- Ignore make/vendor for pricing decisions.
 - Map each extracted attribute key to the closest DB attribute key when the
   meaning matches, including synonyms
   (examples: port_type / port / full_port → type;
   minimum_working_pressure / working_pressure / pn → pressure_rating;
   standard / is_no → is).
   Do NOT map material / body_material / construction onto Attribute keys when the
-  value belongs on Rate_Master Class — leave those for class matching.
+  value belongs on Rate_Master_Output Class — leave those for class matching.
   If no DB key fits, leave it unmapped.
 - Put mapped values under DB keys in `mapped_attributes` (use extracted BOQ values,
   not catalog Attribute defaults). Put leftover extracted keys in `unmapped_attributes`
@@ -69,5 +69,5 @@ Respond with:
   ]
 }
 
-Extracted products with Rate_Master candidates (PRODUCTS_PAYLOAD — injected at runtime):
+Extracted products with Rate_Master_Output candidates (PRODUCTS_PAYLOAD — injected at runtime):
 {{PRODUCTS_PAYLOAD}}

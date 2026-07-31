@@ -11,7 +11,7 @@ from .rate_detail_retrieval_service import RateDetailRetrievalService
 
 
 class BOQAnalysisEnrichmentService:
-    """Attach Rate_Master / Labour_Master snapshots after product matching."""
+    """Attach rate and labour output snapshots after product matching."""
 
     def __init__(self, database_version_id: int):
         self.database_version_id = database_version_id
@@ -39,9 +39,8 @@ class BOQAnalysisEnrichmentService:
         if not is_pending and selected:
             rate_detail = self._rates.get_by_id(int(selected["rate_master_id"]))
             if rate_detail:
-                labour_detail = self._labour.get_by_tech_key(
-                    rate_detail.get("tech_key"),
-                    size=rate_detail.get("size"),
+                labour_detail = self._labour.get_by_product_id(
+                    rate_detail.get("product_id")
                 )
 
         line_output = BOQLineOutputService.build(

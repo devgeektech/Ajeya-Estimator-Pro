@@ -9,7 +9,7 @@ from django.conf import settings
 from ai.embeddings.chroma_store import ChromaEmbeddingStore, rate_document
 from ai.instruction_log import log_instruction
 from ai.openai_client import get_client, is_configured
-from apps.database_manager.models import DatabaseVersion, Rate_Master
+from apps.database_manager.models import DatabaseVersion, Rate_Master_Output
 from common.exceptions import AIServiceError
 
 logger = logging.getLogger("boq_ai")
@@ -87,10 +87,10 @@ def generate_embeddings(texts: list[str]) -> list[list[float]]:
 
 def _index_rate_batch(
     store: ChromaEmbeddingStore,
-    rates: list[Rate_Master],
+    rates: list[Rate_Master_Output],
     texts: list[str],
 ) -> tuple[int, int]:
-    """Index one batch of Rate_Master rows; return (generated, errors)."""
+    """Index one batch of Rate_Master_Output rows; return (generated, errors)."""
     if not rates:
         return 0, 0
 
@@ -100,7 +100,7 @@ def _index_rate_batch(
         return len(rates), 0
     except AIServiceError:
         logger.exception(
-            "Embedding batch failed for %s Rate_Master rows; retrying row-by-row",
+            "Embedding batch failed for %s Rate_Master_Output rows; retrying row-by-row",
             len(rates),
         )
 
@@ -111,19 +111,21 @@ def _index_rate_batch(
             store.upsert_rate(rate, vector)
             generated += 1
         except AIServiceError:
-            logger.exception("Embedding failed for Rate_Master row %s", rate.pk)
+            logger.exception("Embedding failed for Rate_Master_Output row %s", rate.pk)
             errors += 1
         except Exception:
-            logger.exception("Chroma indexing failed for Rate_Master row %s", rate.pk)
+            logger.exception(
+                "Chroma indexing failed for Rate_Master_Output row %s", rate.pk
+            )
             errors += 1
     return generated, errors
 
 
 def generate_embeddings_for_version(database_version_id: int) -> dict:
-    """Index Rate_Master rows for the active database version into Chroma.
+    """Index Rate_Master_Output rows for the active database version into Chroma.
 
     Each row is stored separately in Chroma with its own vector, document text,
-    and metadata (including ``tech_key``). Batching is used only for OpenAI API
+    and metadata (including ``product_id``). Batching is used only for OpenAI API
     calls and Chroma writes; storage remains row-wise.
 
     Clears the entire Chroma collection first so only the active database has
@@ -146,16 +148,16 @@ def generate_embeddings_for_version(database_version_id: int) -> dict:
         return {"total": 0, "generated": 0, "skipped": 0, "errors": 1}
 
     products = (
-        Rate_Master.objects.filter(database_version=version)
+        Rate_Master_Output.objects.filter(database_version=version)
         .select_related("database_version")
         .iterator(chunk_size=_embedding_batch_size())
     )
-    total = Rate_Master.objects.filter(database_version=version).count()
+    total = Rate_Master_Output.objects.filter(database_version=version).count()
     generated = skipped = errors = 0
     store = ChromaEmbeddingStore()
     store.reset_all()
 
-    pending_rates: list[Rate_Master] = []
+    pending_rates: list[Rate_Master_Output] = []
     pending_texts: list[str] = []
     batch_size = _embedding_batch_size()
 

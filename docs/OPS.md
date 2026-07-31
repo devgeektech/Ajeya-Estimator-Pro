@@ -35,10 +35,22 @@ schema creation — the `\c` block above is required before the first `migrate`.
 
 ### 2. Python environment
 
+**Windows (PowerShell)**
+
+```powershell
+git clone <repo-url> BOQ_AI
+cd BOQ_AI
+python -m venv .venv
+.\.venv\Scripts\pip install -U pip -r requirements.txt
+Copy-Item .env.example .env
+```
+
+**Linux / macOS**
+
 ```bash
 git clone <repo-url> BOQ_AI && cd BOQ_AI
 python -m venv .venv
-.venv/bin/pip install -U pip -r requirements.txt   # Windows: .venv\Scripts\pip
+.venv/bin/pip install -U pip -r requirements.txt
 cp .env.example .env
 ```
 
@@ -57,6 +69,18 @@ CELERY_RESULT_BACKEND=redis://localhost:6379/1
 
 ### 3. Migrate and run
 
+**Windows (PowerShell)**
+
+```powershell
+cd backend
+..\.venv\Scripts\python.exe manage.py migrate
+..\.venv\Scripts\python.exe manage.py collectstatic --noinput
+..\.venv\Scripts\python.exe manage.py createsuperuser
+..\.venv\Scripts\python.exe manage.py runserver
+```
+
+**Linux / macOS**
+
 ```bash
 cd backend
 ../.venv/bin/python manage.py migrate
@@ -66,6 +90,16 @@ cd backend
 ```
 
 ### 4. Tests
+
+**Windows (PowerShell)**
+
+```powershell
+cd backend
+..\.venv\Scripts\python.exe manage.py check
+..\.venv\Scripts\python.exe manage.py test tests --no-input
+```
+
+**Linux / macOS**
 
 ```bash
 cd backend
@@ -78,10 +112,8 @@ cd backend
 BOQ analysis uses Celery. In production (`DEBUG=False`), Redis and the Celery worker
 are required. Check readiness:
 
-```bash
-cd backend
-../.venv/bin/python manage.py check_celery
-```
+**Windows:** `..\.venv\Scripts\python.exe manage.py check_celery`  
+**Linux / macOS:** `../.venv/bin/python manage.py check_celery`
 
 **Option A — inline analysis (no Redis/worker):**
 
@@ -94,7 +126,14 @@ CELERY_TASK_ALWAYS_EAGER=True
 
 Terminal 1 — Django:
 
+```powershell
+# Windows
+cd backend
+..\.venv\Scripts\python.exe manage.py runserver
+```
+
 ```bash
+# Linux / macOS
 cd backend
 ../.venv/bin/python manage.py runserver
 ```
@@ -109,15 +148,16 @@ On Windows without native Redis, use WSL: `wsl redis-server` or `scripts/run_red
 
 Terminal 3 — Celery worker:
 
+```powershell
+# Windows
+.\scripts\run_celery_worker.ps1
+```
+
 ```bash
+# Linux / macOS
 ./scripts/run_celery_worker.sh
 ```
 
-Windows:
-
-```powershell
-.\scripts\run_celery_worker.ps1
-```
 
 Default worker concurrency is **8** (up to 8 BOQs analysing at once). Override:
 

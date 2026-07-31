@@ -1,10 +1,10 @@
 {% if not make_vendor_display.has_products %}
-<p class="panel__text">No analysed products yet. Run <strong>Analyse</strong> first, then select make and supplier here.</p>
+<p class="panel__text">No analysed products yet. Run <strong>Analyse</strong> first, then select make and vendor here.</p>
 {% else %}
 <p class="make-vendor-hint panel__text panel__text--muted">
     Products are prefilled with lowest approved make/vendor. Adjust from the cascade below.
     Make &amp; Vendor shows <strong>product rate only</strong> — labour is set on the Labour tab.
-    Same material rate with different make/supplier is highlighted for supplier confirmation.
+    Same material rate with different make/vendor is highlighted for vendor confirmation.
 </p>
 
 {% if make_vendor_display.selection_catalog.categories %}
@@ -61,15 +61,15 @@
                 >
             </label>
             <label class="extraction-field">
-                <span class="extraction-field__label">Supplier</span>
+                <span class="extraction-field__label">Vendor</span>
                 <select
                     class="extraction-input"
                     x-show="!category || hasApprovedMakes"
-                    x-model="supplier"
+                    x-model="vendor"
                     :disabled="!category || !hasApprovedMakes || !make || isLowestMake(make)"
                 >
                     <option value="">Auto (lowest price)</option>
-                    <template x-for="option in supplierOptions" :key="option">
+                    <template x-for="option in vendorOptions" :key="option">
                         <option :value="option" x-text="option"></option>
                     </template>
                 </select>
@@ -78,8 +78,8 @@
                     class="extraction-input"
                     x-show="category && !hasApprovedMakes"
                     x-cloak
-                    x-model="supplier"
-                    placeholder="Enter supplier (optional)"
+                    x-model="vendor"
+                    placeholder="Enter vendor (optional)"
                     autocomplete="off"
                 >
             </label>
@@ -99,7 +99,7 @@
                 class="extraction-save-hint extraction-save-hint--error"
                 x-show="category && !hasApprovedMakes && !error"
                 x-cloak
-            >No Approved Make Found in Make List — enter make and supplier above, then Apply.</span>
+            >No Approved Make Found in Make List — enter make and vendor above, then Apply.</span>
         </div>
     </div>
 </section>
@@ -113,7 +113,7 @@
         <li class="make-vendor-applied-filters__item">
             <div class="make-vendor-applied-filters__body">
                 <strong>{{ item.category }} / {{ item.sub_category }}</strong>
-                <span>{{ item.make }} · {{ item.supplier }}</span>
+                <span>{{ item.make }} · {{ item.vendor }}</span>
                 {% if item.product_count %}
                 <span class="badge badge--gray">{{ item.product_count }} product{{ item.product_count|pluralize }}</span>
                 {% endif %}
@@ -222,7 +222,7 @@
                 :class="{
                     'make-vendor-card--no-make': notFound,
                     'make-vendor-card--no-match': status === 'unmatched' && !notFound,
-                    'make-vendor-card--supplier-review': supplierRateReview,
+                    'make-vendor-card--vendor-review': vendorRateReview,
                     'make-vendor-card--same-price': samePriceTie
                 }"
                 role="tabpanel"
@@ -231,7 +231,7 @@
                     rowId: '{{ line.row_id }}',
                     productIndex: {{ product.product_index }},
                     make: '{{ product.selected_make|default:''|escapejs }}',
-                    supplier: '{{ product.selected_supplier|default:''|escapejs }}',
+                    vendor: '{{ product.selected_vendor|default:''|escapejs }}',
                     status: '{{ product.match_status|default:'not_searched'|escapejs }}',
                     confidence: {{ product.confidence|default:'null' }},
                     techKey: '{{ product.tech_key|default:''|escapejs }}',
@@ -240,18 +240,19 @@
                     materialRate: '{{ product.line_output.material_rate|default:''|escapejs }}',
                     notFound: {{ product.highlight_no_make|yesno:'true,false' }},
                     allowTypedEntry: {{ product.allow_typed_make_vendor|yesno:'true,false' }},
-                    supplierRateReview: {{ product.supplier_rate_review|yesno:'true,false' }},
+                    vendorRateReview: {{ product.vendor_rate_review|yesno:'true,false' }},
                     samePriceTie: {{ product.same_price_tie|yesno:'true,false' }},
                     samePriceChoices: {{ product.same_price_choices_json|default:'[]'|safe }},
+                    vendorsByMake: {{ product.vendors_by_make_json|default:'{}'|safe }},
                     rateMasterId: {{ product.rate_master_id|default:'null' }}
                 })"
             >
                 <div class="make-vendor-card__head">
                     <div class="make-vendor-card__heading">
                         <h4 class="make-vendor-card__title">{{ product.description_hint|default:product.summary }}</h4>
-                        {% if product.supplier_rate_review %}
-                        <p class="make-vendor-card__supplier-review-note">
-                            Same material rate appears with a different make/supplier elsewhere — confirm this supplier before continuing.
+                        {% if product.vendor_rate_review %}
+                        <p class="make-vendor-card__vendor-review-note">
+                            Same material rate appears with a different make/vendor elsewhere — confirm this vendor before continuing.
                         </p>
                         {% endif %}
                         {% if product.same_price_tie %}
@@ -260,23 +261,23 @@
                         </p>
                         {% endif %}
                         {% if product.highlight_no_make %}
-                        <p class="make-vendor-card__no-make-note">No Approved Make Found in Make List — enter make and supplier below, then Find rates. You can edit and retry anytime.</p>
+                        <p class="make-vendor-card__no-make-note">No Approved Make Found in Make List — enter make and vendor below, then Find rates. You can edit and retry anytime.</p>
                         {% elif product.is_no_match %}
-                        <p class="make-vendor-card__no-make-note">No Rate_Master match — edit make/supplier and Find rates again.</p>
+                        <p class="make-vendor-card__no-make-note">No Rate_Master_Output match — edit make/vendor and Find rates again.</p>
                         {% endif %}
                     </div>
                     <span
                         class="badge badge--yellow"
                         x-show="samePriceTie"
                         x-cloak
-                        title="Multiple Rate_Master rows share the lowest price"
+                        title="Multiple Rate_Master_Output rows share the lowest price"
                     >Same price</span>
                     <span
                         class="badge badge--yellow"
-                        x-show="supplierRateReview"
+                        x-show="vendorRateReview"
                         x-cloak
-                        title="Confirm supplier — same material rate with different make/vendor"
-                    >Supplier review</span>
+                        title="Confirm vendor — same material rate with different make/vendor"
+                    >Vendor review</span>
                     <span
                         class="badge badge--red"
                         x-show="notFound"
@@ -325,18 +326,18 @@
                         {% endif %}
                     </label>
                     <label class="extraction-field">
-                        <span class="extraction-field__label">Supplier</span>
+                        <span class="extraction-field__label">Vendor</span>
                         <input
                             type="text"
                             class="extraction-input"
-                            x-model="supplier"
-                            list="supplier-options-{{ line.row_id }}-{{ product.product_index }}"
-                            placeholder="Enter supplier (optional)"
+                            x-model="vendor"
+                            list="vendor-options-{{ line.row_id }}-{{ product.product_index }}"
+                            placeholder="Enter vendor (optional)"
                             autocomplete="off"
                         >
-                        {% if product.supplier_options %}
-                        <datalist id="supplier-options-{{ line.row_id }}-{{ product.product_index }}">
-                            {% for option in product.supplier_options %}
+                        {% if product.vendor_options %}
+                        <datalist id="vendor-options-{{ line.row_id }}-{{ product.product_index }}">
+                            {% for option in product.vendor_options %}
                             <option value="{{ option }}"></option>
                             {% endfor %}
                         </datalist>
@@ -345,7 +346,7 @@
                     {% else %}
                     <label class="extraction-field">
                         <span class="extraction-field__label">Make</span>
-                        <select class="extraction-input" x-model="make">
+                        <select class="extraction-input" x-model="make" @change="onMakeChange()">
                             <option value="">Select make…</option>
                             {% for option in product.make_options %}
                             <option value="{{ option }}" {% if option == product.selected_make %}selected{% endif %}>{{ option }}</option>
@@ -353,12 +354,12 @@
                         </select>
                     </label>
                     <label class="extraction-field">
-                        <span class="extraction-field__label">Supplier</span>
-                        <select class="extraction-input" x-model="supplier">
+                        <span class="extraction-field__label">Vendor</span>
+                        <select class="extraction-input" x-model="vendor" :disabled="!make || isLowestMake(make)">
                             <option value="">Auto (lowest price)</option>
-                            {% for option in product.supplier_options %}
-                            <option value="{{ option }}" {% if option == product.selected_supplier %}selected{% endif %}>{{ option }}</option>
-                            {% endfor %}
+                            <template x-for="option in vendorOptions" :key="option">
+                                <option :value="option" x-text="option" :selected="option === vendor"></option>
+                            </template>
                         </select>
                     </label>
                     {% endif %}
@@ -377,7 +378,7 @@
                         <button
                             type="button"
                             class="btn btn--small btn--boq-analyse"
-                            :disabled="saving || (!make && !supplier)"
+                            :disabled="saving || (!make && !vendor)"
                             @click="findRates()"
                         >
                             <span x-show="!saving">Find rates</span>
@@ -399,7 +400,7 @@
                                     x-model.number="chosenRateMasterId"
                                 >
                                 <span>
-                                    <strong x-text="(choice.supplier || '—') + ' · ' + (choice.make || '—')"></strong>
+                                    <strong x-text="(choice.vendor || '—') + ' · ' + (choice.make || '—')"></strong>
                                     <span class="make-vendor-same-price__meta"
                                           x-text="'Rate ' + choice.amount + (choice.summary ? ' · ' + choice.summary : '')"></span>
                                 </span>
@@ -484,7 +485,7 @@ document.addEventListener('alpine:init', () => {
         category: '',
         subCategory: '',
         make: LOWEST_LABEL,
-        supplier: '',
+        vendor: '',
         saving: false,
         error: '',
         init() {
@@ -521,31 +522,36 @@ document.addEventListener('alpine:init', () => {
             const row = this.activeScope;
             return row ? row.make_options || [] : [];
         },
-        get supplierOptions() {
+        get vendorOptions() {
             const row = this.activeScope;
             if (!row || isLowestMake(this.make)) return [];
-            const byMake = row.suppliers_by_make || {};
+            const byMake = row.vendors_by_make || {};
             return byMake[this.make] || [];
         },
         onCategoryChange() {
             this.subCategory = '';
             const row = this.currentCategory;
             this.make = (row && row.make_options && row.make_options.length) ? LOWEST_LABEL : '';
-            this.supplier = '';
+            this.vendor = '';
         },
         onSubCategoryChange() {
             const row = this.activeScope;
             if (row && row.has_approved_makes === false) {
                 this.make = '';
-                this.supplier = '';
+                this.vendor = '';
                 return;
             }
             this.make = (row && row.selected_make) ? row.selected_make : (row && (row.make_options || []).length ? LOWEST_LABEL : '');
-            this.supplier = (row && row.selected_supplier) ? row.selected_supplier : '';
+            this.vendor = (row && row.selected_vendor) ? row.selected_vendor : '';
         },
         onMakeChange() {
             if (isLowestMake(this.make)) {
-                this.supplier = '';
+                this.vendor = '';
+                return;
+            }
+            const options = this.vendorOptions;
+            if (this.vendor && !options.some((item) => String(item) === String(this.vendor))) {
+                this.vendor = '';
             }
         },
         async applySubcategory() {
@@ -563,7 +569,7 @@ document.addEventListener('alpine:init', () => {
                 body.append('category', this.category);
                 body.append('sub_category', this.subCategory || '');
                 body.append('make', this.hasApprovedMakes ? (this.make || LOWEST_LABEL) : String(this.make || '').trim());
-                body.append('supplier', this.supplier || '');
+                body.append('vendor', this.vendor || '');
                 body.append('find_rates', '1');
                 const response = await fetch(this.url, {
                     method: 'POST',
@@ -594,7 +600,7 @@ document.addEventListener('alpine:init', () => {
         rowId: config.rowId,
         productIndex: config.productIndex,
         make: config.make || '',
-        supplier: config.supplier || '',
+        vendor: config.vendor || '',
         status: config.status || 'not_searched',
         confidence: config.confidence,
         techKey: config.techKey || '',
@@ -603,12 +609,40 @@ document.addEventListener('alpine:init', () => {
         materialRate: config.materialRate || '',
         notFound: Boolean(config.notFound),
         allowTypedEntry: Boolean(config.allowTypedEntry),
-        supplierRateReview: Boolean(config.supplierRateReview),
+        vendorRateReview: Boolean(config.vendorRateReview),
         samePriceTie: Boolean(config.samePriceTie),
         samePriceChoices: Array.isArray(config.samePriceChoices) ? config.samePriceChoices : [],
+        vendorsByMake: (config.vendorsByMake && typeof config.vendorsByMake === 'object')
+            ? config.vendorsByMake
+            : {},
         chosenRateMasterId: config.rateMasterId || null,
         saving: false,
         error: '',
+        isLowestMake(value) {
+            const text = String(value || '').trim().toLowerCase();
+            return !text || text === 'lowest price' || text === 'lowest make' || text === 'lowest';
+        },
+        get vendorOptions() {
+            if (this.isLowestMake(this.make)) return [];
+            const byMake = this.vendorsByMake || {};
+            // Exact key first, then case-insensitive fallback for Rate_Master casing.
+            if (byMake[this.make]) return byMake[this.make];
+            const wanted = String(this.make || '').trim().toLowerCase();
+            for (const [key, values] of Object.entries(byMake)) {
+                if (String(key).trim().toLowerCase() === wanted) return values || [];
+            }
+            return [];
+        },
+        onMakeChange() {
+            if (this.isLowestMake(this.make)) {
+                this.vendor = '';
+                return;
+            }
+            const options = this.vendorOptions;
+            if (this.vendor && !options.some((item) => String(item) === String(this.vendor))) {
+                this.vendor = '';
+            }
+        },
         get statusLabel() {
             if (this.samePriceTie) return 'Same price';
             if (this.status === 'matched') return 'Matched';
@@ -655,10 +689,10 @@ document.addEventListener('alpine:init', () => {
                 this.error = 'Enter a make to continue.';
                 return;
             }
-            if (!this.make && !this.supplier) {
+            if (!this.make && !this.vendor) {
                 this.error = this.allowTypedEntry
-                    ? 'Enter a make or supplier.'
-                    : 'Select a make or supplier.';
+                    ? 'Enter a make or vendor.'
+                    : 'Select a make or vendor.';
                 return;
             }
             this.saving = true;
@@ -676,7 +710,7 @@ document.addEventListener('alpine:init', () => {
                         ? String(this.make || '').trim()
                         : (this.make || 'Lowest price')
                 );
-                body.append('supplier', this.supplier || '');
+                body.append('vendor', this.vendor || '');
                 const response = await fetch(this.url, {
                     method: 'POST',
                     headers: {
@@ -692,7 +726,7 @@ document.addEventListener('alpine:init', () => {
                     throw new Error(data.message || 'Search failed.');
                 }
                 const selection = data.selection || {};
-                // Refresh when not-found clears or rates match — supplier-review
+                // Refresh when not-found clears or rates match — vendor-review
                 // highlights compare material rates across all products.
                 if (wasNotFound || selection.status === 'matched' || selection.same_price_tie) {
                     window.location.assign(
@@ -711,7 +745,7 @@ document.addEventListener('alpine:init', () => {
                     : [];
                 this.chosenRateMasterId = selection.rate_master_id || null;
                 if (selection.make) this.make = selection.make;
-                if (selection.supplier != null) this.supplier = selection.supplier || '';
+                if (selection.vendor != null) this.vendor = selection.vendor || '';
                 const line = selection.line_output || {};
                 this.materialRate = line.material_rate || '';
                 // Keep free-text editable after not-found retries only.

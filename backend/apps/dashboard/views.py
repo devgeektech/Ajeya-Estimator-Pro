@@ -50,14 +50,14 @@ class DashboardHomeView(LoginRequiredMixin, TemplateView):
                 "tone": "amber",
             },
             {
-                "label": "Analysis complete",
+                "label": "Analysis Completed",
                 "value": analysis_complete,
-                "tone": "green",
+                "tone": "red",
             },
             {
-                "label": "Matching complete",
+                "label": "Exported",
                 "value": matching_complete,
-                "tone": "red",
+                "tone": "green",
             },
         ]
 

@@ -48,9 +48,8 @@ def resolve_confirmed_line(
             "confirmed": False,
         }
 
-    labour_detail = labour_service.get_by_tech_key(
-        rate_detail.get("tech_key"),
-        size=rate_detail.get("size"),
+    labour_detail = labour_service.get_by_product_id(
+        rate_detail.get("product_id")
     )
     extracted = item.get("extracted") or {}
     line_output = BOQLineOutputService.build(

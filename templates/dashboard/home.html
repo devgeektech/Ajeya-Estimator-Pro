@@ -223,13 +223,14 @@
         color: var(--text, #1e293b);
     }
 
-    /* Recent BOQs — clean table matching reference; sized for 7 rows, no scroll */
+    /* Recent BOQs — normal content-sized rows (up to 7), header aligned via colgroup */
     .dash-section--recent {
         padding: 12px 16px;
     }
 
     .dash-section--recent .dash-section__head {
         margin-bottom: 4px;
+        flex-shrink: 0;
     }
 
     .dash-section--recent .dash-section__title {
@@ -251,33 +252,63 @@
         overflow: hidden;
         display: flex;
         flex-direction: column;
+        justify-content: flex-start;
     }
 
     .dash-table {
+        --dash-table-columns: minmax(0, 34fr) minmax(0, 22fr) minmax(0, 26fr) minmax(0, 18fr);
         width: 100%;
         height: 100%;
         border-collapse: collapse;
         table-layout: fixed;
         margin: 0;
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
     }
+
+    .dash-table colgroup {
+        display: none;
+    }
+
+    .dash-table thead,
+    .dash-table tbody {
+        display: grid;
+        min-height: 0;
+    }
+
+    .dash-table tbody {
+        grid-template-rows: repeat(7, minmax(0, 1fr));
+    }
+
+    .dash-table thead tr,
+    .dash-table tbody tr {
+        display: grid;
+        grid-template-columns: var(--dash-table-columns);
+        min-height: 0;
+    }
+
+    .dash-table tbody td {
+        display: flex;
+        align-items: center;
+    }
+
+    .dash-table col.dash-col-name { width: 34%; }
+    .dash-table col.dash-col-status { width: 22%; }
+    .dash-table col.dash-col-uploaded { width: 26%; }
+    .dash-table col.dash-col-action { width: 18%; }
 
     .dash-table thead th {
         text-align: left;
         font-size: 0.78rem;
-        font-weight: 700;
+        font-weight: 800;
         letter-spacing: 0.04em;
         text-transform: uppercase;
-        color: #475569;
+        color: #334155;
         padding: 4px 10px 6px 0;
         border-bottom: 1px solid #e2e8f0;
         background: transparent;
         white-space: nowrap;
     }
-
-    .dash-table thead th:nth-child(1) { width: 34%; }
-    .dash-table thead th:nth-child(2) { width: 22%; }
-    .dash-table thead th:nth-child(3) { width: 26%; }
-    .dash-table thead th:nth-child(4) { width: 18%; }
 
     .dash-table thead th:last-child,
     .dash-table tbody td:last-child {
@@ -287,7 +318,7 @@
 
     .dash-table tbody td {
         text-align: left;
-        padding: 7px 12px 7px 0;
+        padding: 8px 10px 8px 0;
         border-bottom: 1px solid #e2e8f0;
         background: transparent;
         vertical-align: middle;
@@ -329,24 +360,27 @@
         padding: 4px 12px;
         font-size: 0.82rem;
         font-weight: 600;
-        color: #334155;
-        background: #fff;
-        border: 1px solid #d0d7e2;
+        color: #1d4ed8;
+        background: rgba(37, 99, 235, 0.12);
+        border: 1px solid rgba(37, 99, 235, 0.28);
         border-radius: 8px;
         text-decoration: none;
         white-space: nowrap;
     }
 
     .dash-table .btn--open:hover {
-        background: #f8fafc;
-        color: #0f172a;
+        background: rgba(37, 99, 235, 0.2);
+        border-color: rgba(37, 99, 235, 0.4);
+        color: #1e40af;
     }
 
     .dash-table__empty {
+        grid-column: 1 / -1;
+        justify-content: center;
         text-align: center !important;
         color: #64748b;
         font-size: 0.95rem;
-        padding: 28px 12px !important;
+        padding: 8px 12px !important;
     }
 
     .dark-mode .dash-section--recent .dash-section__title {
@@ -354,9 +388,14 @@
     }
 
     .dark-mode .dash-table .btn--open {
-        background: var(--surface);
-        border-color: var(--border);
-        color: var(--text);
+        background: rgba(37, 99, 235, 0.22);
+        border-color: rgba(96, 165, 250, 0.35);
+        color: #93c5fd;
+    }
+    .dark-mode .dash-table .btn--open:hover {
+        background: rgba(37, 99, 235, 0.32);
+        border-color: rgba(96, 165, 250, 0.5);
+        color: #bfdbfe;
     }
 
     .dark-mode .dash-table thead th {
@@ -472,8 +511,26 @@
             -webkit-overflow-scrolling: touch;
         }
         .dash-table {
+            display: table;
             height: auto;
             min-width: 520px;
+        }
+        .dash-table colgroup {
+            display: table-column-group;
+        }
+        .dash-table thead {
+            display: table-header-group;
+        }
+        .dash-table tbody {
+            display: table-row-group;
+        }
+        .dash-table thead tr,
+        .dash-table tbody tr {
+            display: table-row;
+        }
+        .dash-table thead th,
+        .dash-table tbody td {
+            display: table-cell;
         }
         .dash-section {
             height: auto;
@@ -574,6 +631,12 @@
             </div>
             <div class="dash-table-wrap">
                 <table class="dash-table">
+                    <colgroup>
+                        <col class="dash-col-name">
+                        <col class="dash-col-status">
+                        <col class="dash-col-uploaded">
+                        <col class="dash-col-action">
+                    </colgroup>
                     <thead>
                         <tr>
                             <th>Name</th>

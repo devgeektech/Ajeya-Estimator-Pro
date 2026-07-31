@@ -776,8 +776,9 @@
                 {% endif %}
                 {% if labour_display.has_products %}
                 <span x-show="tab === 'labour'" x-cloak>
-                    Labour Charges found for <strong>{{ labour_display.stats.with_labour_count|default:0 }}</strong> Products
-                    · Mode: <strong>{{ labour_display.mode|default:"auto" }}</strong>
+                    Products <strong>{{ labour_display.stats.product_count|default:0 }}</strong>
+                    · Labour Charges found for <strong>{{ labour_display.stats.with_labour_count|default:0 }}</strong> products
+                    · Mode: <strong>{{ labour_display.mode|default:"auto"|title }}</strong>
                 </span>
                 {% endif %}
                 {% if analysis_display.has_analysis %}
@@ -846,8 +847,8 @@
                 · <span class="make-vendor-summary__filtered">{{ make_vendor_display.stats.filtered_count|default:0 }} filtered</span>
                 · <span class="make-vendor-summary__not-found">{{ make_vendor_display.stats.not_found_count|default:0 }} not found</span>
                 · <span class="make-vendor-summary__no-match">{{ make_vendor_display.stats.no_match_count|default:0 }} no match</span>
-                {% if make_vendor_display.stats.supplier_review_count %}
-                · <span class="make-vendor-summary__supplier-review">{{ make_vendor_display.stats.supplier_review_count }} supplier review</span>
+                {% if make_vendor_display.stats.vendor_review_count %}
+                · <span class="make-vendor-summary__vendor-review">{{ make_vendor_display.stats.vendor_review_count }} vendor review</span>
                 {% endif %}
                 {% if make_vendor_display.stats.same_price_tie_count %}
                 · <span class="make-vendor-summary__same-price">{{ make_vendor_display.stats.same_price_tie_count }} same price</span>

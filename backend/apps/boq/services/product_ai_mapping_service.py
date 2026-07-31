@@ -1,4 +1,4 @@
-"""AI layer: map extracted products to Rate_Master rows and attribute schemas."""
+"""AI layer: map extracted products to Rate_Master_Output rows and attributes."""
 from __future__ import annotations
 
 import json
@@ -13,7 +13,7 @@ from apps.boq.services.product_matching_service import (
     ProductMatchingService,
     structured_match_score,
 )
-from apps.database_manager.models import Rate_Master
+from apps.database_manager.models import Rate_Master_Output
 from common.constants import MATCH_CONFIDENCE_THRESHOLD, REFINE_MATCH_CONFIDENCE_TARGET
 from utils.attribute_parser import (
     normalize_attribute_key,
@@ -36,7 +36,7 @@ def _mapping_batch_size() -> int:
     return max(1, int(getattr(settings, "AI_PRODUCT_MAPPING_BATCH_SIZE", 4) or 4))
 
 
-# Analysis UI + AI payload: only the best few Rate_Master neighbors.
+# Analysis UI + AI payload: only the best few Rate_Master_Output neighbors.
 _CANDIDATE_LIMIT = 3
 # Chroma recall pool before ranking down to _CANDIDATE_LIMIT.
 _RECALL_CHROMA_LIMIT = 30
@@ -93,6 +93,8 @@ def _slim_candidate(snapshot: dict[str, Any]) -> dict[str, Any]:
     """Store/display candidate without inventing fields."""
     return {
         "id": snapshot.get("id"),
+        "product_id": snapshot.get("product_id"),
+        "rate_id": snapshot.get("rate_id"),
         "tech_key": snapshot.get("tech_key"),
         "category": snapshot.get("category"),
         "sub_category": snapshot.get("sub_category"),
@@ -101,6 +103,7 @@ def _slim_candidate(snapshot: dict[str, Any]) -> dict[str, Any]:
         "unit": snapshot.get("unit"),
         "capacity": _json_scalar(snapshot.get("capacity")),
         "make": snapshot.get("make"),
+        "vendor": snapshot.get("vendor"),
         "attribute_schema": list(snapshot.get("attribute_schema") or []),
         "attributes": dict(snapshot.get("attributes") or {}),
         "confidence": _json_scalar(snapshot.get("confidence")),
@@ -130,17 +133,23 @@ def _prefer_candidate_first(
     return ordered
 
 
-def _candidate_snapshot(rate: Rate_Master, *, confidence: float | None = None) -> dict[str, Any]:
-    """Serialize a Rate_Master row for AI/mapping.
+def _candidate_snapshot(
+    rate: Rate_Master_Output,
+    *,
+    confidence: float | None = None,
+) -> dict[str, Any]:
+    """Serialize a Rate_Master_Output row for AI/mapping.
 
-    ``id`` / ``rate_master_id`` are both ``Rate_Master.id`` (Django PK). There is
+    ``id`` / ``rate_master_id`` are both ``Rate_Master_Output.id`` (Django PK). There is
     no ``rate_master_id`` column on the table — that name is only a JSON alias.
     """
     attrs = parse_attributes(rate.Attribute)
     return {
         "id": rate.pk,
         "rate_master_id": rate.pk,  # alias of id for older callers
-        "tech_key": rate.Tech_Key,
+        "product_id": rate.Product_ID,
+        "rate_id": rate.Rate_ID,
+        "tech_key": rate.display_key(),
         "category": rate.Category,
         "sub_category": rate.Sub_Category,
         "class": rate.Class,
@@ -148,6 +157,7 @@ def _candidate_snapshot(rate: Rate_Master, *, confidence: float | None = None) -
         "unit": rate.Unit,
         "capacity": _json_scalar(rate.Capacity),
         "make": rate.Make,
+        "vendor": rate.Vendor,
         "attribute_schema": list(attrs.keys()),
         "attributes": attrs,
         "confidence": confidence,
@@ -171,7 +181,7 @@ def _normalize_attr_dict(raw: Any) -> dict[str, str]:
 
 def _compute_match_confidence(
     extracted: dict[str, Any],
-    rate: Rate_Master,
+    rate: Rate_Master_Output,
     *,
     mapped_attributes: dict[str, str],
     schema_keys: list[str],
@@ -222,7 +232,7 @@ def _map_attrs_onto_schema(
     mapped_attributes: dict[str, str],
     unmapped_attributes: dict[str, str],
 ) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
-    """Resolve AI + extracted attributes onto a Rate_Master Attribute schema."""
+    """Resolve AI + extracted attributes onto a Rate_Master_Output Attribute schema."""
     from utils.attribute_parser import build_alias_map, resolve_to_schema_key
 
     alias_map = build_alias_map(schema_keys)
@@ -273,10 +283,10 @@ def _map_attrs_onto_schema(
 
 class ProductAIMappingService:
     """
-    Retrieve Rate_Master candidates, then use AI to select the product and map
+    Retrieve Rate_Master_Output candidates, then use AI to select the product and map
     extracted attributes onto the DB Attribute schema for Analysis review.
 
-    Never invents Rate_Master rows or Tech_Key values. Attaches a DB product only
+    Never invents Rate_Master_Output rows or Product_ID values. Attaches a DB product only
     when AI selects a candidate or service confidence meets the match threshold.
     Weak top candidates may supply a provisional attribute schema for gap-fill,
     without claiming a confirmed match.
@@ -297,17 +307,17 @@ class ProductAIMappingService:
         rate_master_id: int,
     ) -> dict[str, Any]:
         """
-        Expert override: confirm a Rate_Master candidate from the Analysis list.
+        Expert override: confirm a Rate_Master_Output candidate from Analysis.
 
         Maps product attributes onto that row's Attribute schema and marks the
         product as matched (user choice), keeping other candidates for re-pick.
         """
-        rate = Rate_Master.objects.filter(
+        rate = Rate_Master_Output.objects.filter(
             pk=int(rate_master_id),
             database_version_id=self.database_version_id,
         ).first()
         if rate is None:
-            raise ValueError(f"Unknown Rate_Master id: {rate_master_id}")
+            raise ValueError(f"Unknown Rate_Master_Output id: {rate_master_id}")
 
         snapshot = _candidate_snapshot(rate)
         existing_candidates = list(product.get("db_candidates") or [])
@@ -382,7 +392,7 @@ class ProductAIMappingService:
         enriched["db_match_status"] = DB_MATCH_MATCHED
         enriched["db_product_id"] = rate.pk
         enriched["db_product_make"] = ""
-        enriched["db_product_tech_key"] = rate.Tech_Key
+        enriched["db_product_tech_key"] = rate.display_key()
         enriched["db_match_confidence"] = confidence
         enriched["db_product_summary"] = _product_summary(snapshot)
         enriched["suggested_db_product_id"] = rate.pk
@@ -487,9 +497,17 @@ class ProductAIMappingService:
             progress_callback(0, total)
         for start in range(0, total, chunk_size):
             chunk = pending[start : start + chunk_size]
-            mapped_products.extend(
-                self.map_products([item[2] for item in chunk], refine=refine)
-            )
+            chunk_products = [item[2] for item in chunk]
+            try:
+                mapped_products.extend(self.map_products(chunk_products, refine=refine))
+            except Exception:
+                # Keep this chunk unmapped rather than discarding the whole BOQ's mapping.
+                logger.exception(
+                    "Product mapping chunk %s-%s failed; leaving those products unmapped",
+                    start,
+                    start + len(chunk),
+                )
+                mapped_products.extend(chunk_products)
             if progress_callback:
                 progress_callback(min(total, start + len(chunk)), total)
 
@@ -658,7 +676,7 @@ class ProductAIMappingService:
 
         rate_map = {
             rate.pk: rate
-            for rate in Rate_Master.objects.filter(
+            for rate in Rate_Master_Output.objects.filter(
                 pk__in=rate_ids,
                 database_version_id=self.database_version_id,
             )
@@ -691,7 +709,7 @@ class ProductAIMappingService:
 
         PRODUCTS_PAYLOAD is built here (not loaded from a file): a JSON list of
         ``{product_ref, extracted, candidates[]}`` for the current batch.
-        Each candidate ``id`` is ``Rate_Master.id`` (table PK).
+        Each candidate ``id`` is ``Rate_Master_Output.id`` (table PK).
         """
         template = AIService.load_prompt("map_product_match.txt")
         by_ref: dict[str, dict[str, Any]] = {}
@@ -705,6 +723,8 @@ class ProductAIMappingService:
                     "candidates": [
                         {
                             "id": candidate["id"],
+                            "product_id": candidate.get("product_id"),
+                            "rate_id": candidate.get("rate_id"),
                             "tech_key": candidate.get("tech_key"),
                             "category": candidate.get("category"),
                             "sub_category": candidate.get("sub_category"),
@@ -798,7 +818,7 @@ class ProductAIMappingService:
         # retrieval candidate when structured fields already look plausible.
         if selected_id is None and candidates:
             top = candidates[0]
-            top_rate = Rate_Master.objects.filter(
+            top_rate = Rate_Master_Output.objects.filter(
                 pk=top["id"],
                 database_version_id=self.database_version_id,
             ).first()
@@ -812,11 +832,11 @@ class ProductAIMappingService:
                 enriched,
                 extracted_attrs,
                 candidates=slim_candidates,
-                notes=notes or "No Rate_Master candidate selected.",
+                notes=notes or "No Rate_Master_Output candidate selected.",
             )
 
         snapshot = candidate_by_id.get(selected_id)
-        rate = Rate_Master.objects.filter(
+        rate = Rate_Master_Output.objects.filter(
             pk=selected_id,
             database_version_id=self.database_version_id,
         ).first()
@@ -825,7 +845,7 @@ class ProductAIMappingService:
                 enriched,
                 extracted_attrs,
                 candidates=slim_candidates,
-                notes="Selected Rate_Master row not found.",
+                notes="Selected Rate_Master_Output row not found.",
             )
 
         schema_keys = list(
@@ -876,7 +896,7 @@ class ProductAIMappingService:
         slim_candidates = _prefer_candidate_first(slim_candidates, rate.pk)
 
         # Confirm only when blended confidence clears the threshold — never stamp
-        # Tech_Key from a weak / unrelated candidate.
+        # Product identity from a weak / unrelated candidate.
         if confidence < MATCH_CONFIDENCE_THRESHOLD:
             return self._provisional_schema_match(
                 enriched,
@@ -902,7 +922,7 @@ class ProductAIMappingService:
         enriched["db_product_id"] = rate.pk
         # Keep make off Analysis UI; Make & Vendor owns vendor selection.
         enriched["db_product_make"] = ""
-        enriched["db_product_tech_key"] = rate.Tech_Key
+        enriched["db_product_tech_key"] = rate.display_key()
         enriched["db_match_confidence"] = confidence
         enriched["db_product_summary"] = _product_summary(summary_source)
         enriched["suggested_db_product_id"] = rate.pk
@@ -923,7 +943,7 @@ class ProductAIMappingService:
         self,
         product: dict[str, Any],
         *,
-        rate: Rate_Master,
+        rate: Rate_Master_Output,
         snapshot: dict[str, Any],
         schema_keys: list[str],
         attributes: dict[str, str],
@@ -998,7 +1018,7 @@ class ProductAIMappingService:
         extracted_attrs: dict[str, str] | None = None,
         *,
         candidates: list[dict[str, Any]] | None = None,
-        notes: str = "No Rate_Master candidate selected.",
+        notes: str = "No Rate_Master_Output candidate selected.",
     ) -> dict[str, Any]:
         enriched = dict(product)
         attrs = extracted_attrs

@@ -6,11 +6,11 @@
                     <span class="badge badge--soft">{{ line.lineage_count }} lines grouped</span>
                 {% endif %}
                 {% if line.multiproduct_review %}
-                    <span class="badge badge--review" title="More products extracted than Unit/Qty rows in this group">Multi-product review</span>
+                    <span class="badge badge--review" title="Product count does not match Unit/Qty rows in this section — confirm the split">Multi-product review</span>
                 {% endif %}
             </div>
             <div class="extraction-line__meta">
-                {% if line.show_qty_unit %}
+                {% if line.show_qty_unit and line.product_count < 2 %}
                 <span class="extraction-line__qty-unit">Quantity: {{ line.qty_display }}, Unit: {{ line.unit_display }}</span>
                 {% endif %}
                 <span class="badge badge--soft">{{ line.product_count }} product{{ line.product_count|pluralize }}</span>
@@ -71,8 +71,21 @@
                 reanalysingByProduct: {},
                 saveStatus: { type: '', message: '', visible: false },
                 saveStatusTimer: null,
+                qtyByProduct: {
+                    {% for product in line.products %}
+                    {{ product.product_index }}: {
+                        show: {{ product.show_quantity|yesno:'true,false' }},
+                        text: 'Quantity: {{ product.quantity_display|escapejs }}, Unit: {{ product.quantity_unit_display|escapejs }}'{% if product.rate_only %},
+                        rateOnly: true{% else %},
+                        rateOnly: false{% endif %}
+                    }{% if not forloop.last %},{% endif %}
+                    {% endfor %}
+                },
                 get activeIsReanalysing() {
                     return !!this.reanalysingByProduct[this.activeProduct];
+                },
+                get activeQty() {
+                    return this.qtyByProduct[this.activeProduct] || null;
                 },
                 clearSaveStatus() {
                     if (this.saveStatusTimer) {
@@ -146,18 +159,11 @@
                         type="button"
                         class="btn btn--xsmall btn--boq-analyse"
                         :disabled="activeIsReanalysing"
-                        title="Rematch this product against Rate_Master using current fields"
+                        title="Rematch this product against Rate_Master_Output using current fields"
                         @click="window.reanalyseActiveExtractionProduct($el, '{% url "boq:row_extract" boq.pk line.row_id %}')"
                     >
                         <span x-text="activeIsReanalysing ? 'Re-analysing…' : 'Re-analyse'"></span>
                     </button>
-                    <button
-                        type="button"
-                        class="btn btn--xsmall btn--ghost"
-                        :disabled="activeIsReanalysing"
-                        title="Re-run AI extraction from the BOQ workbook text for this section"
-                        @click="window.reextractExtractionLine && window.reextractExtractionLine($el, '{% url "boq:row_extract" boq.pk line.row_id %}', '{{ line.row_id }}')"
-                    >Re-extract</button>
                     <button
                         type="button"
                         class="btn btn--xsmall btn--danger"
@@ -167,6 +173,16 @@
                 </div>
                 {% endif %}
             </div>
+
+            {% if line.products.0.show_quantity or line.product_count >= 2 %}
+            <div class="extraction-active-qty" x-show="!activeQty || activeQty.show">
+                <span
+                    class="extraction-line__qty-unit extraction-product-tabs__qty"
+                    x-text="activeQty ? activeQty.text : 'Quantity: {{ line.products.0.quantity_display|escapejs }}, Unit: {{ line.products.0.quantity_unit_display|escapejs }}'"
+                >Quantity: {{ line.products.0.quantity_display }}, Unit: {{ line.products.0.quantity_unit_display }}</span>
+                <span class="badge badge--soft" x-show="activeQty && activeQty.rateOnly" x-cloak>Rate only</span>
+            </div>
+            {% endif %}
 
             {% for product in line.products %}
             <div
@@ -202,6 +218,17 @@
                     <span class="extraction-product-card__busy-text">Re-analysing…</span>
                 </div>
                 {% endif %}
+
+                {% if product.show_quantity %}
+                <div class="extraction-product-card__qty">
+                    <span class="extraction-line__qty-unit">
+                        Quantity: {{ product.quantity_display }}, Unit: {{ product.quantity_unit_display }}
+                    </span>
+                    {% if product.rate_only %}
+                    <span class="badge badge--soft">Rate only</span>
+                    {% endif %}
+                </div>
+                {% endif %}
                 {% if product.db_match %}
                 <div class="extraction-db-match extraction-db-match--{{ product.db_match.status|default:product.db_match_status }}">
                     <div class="extraction-db-match__head">
@@ -235,7 +262,7 @@
                         <span class="extraction-section-label">No database match yet</span>
                     </div>
                     <p class="extraction-db-match__notes">
-                        Fill known attributes, then click <strong>Re-analyse</strong> to search Rate_Master again.
+                        Fill known attributes, then click <strong>Re-analyse</strong> to search Rate_Master_Output again.
                     </p>
                 </div>
                 {% endif %}
@@ -254,19 +281,19 @@
                                 @click="window.selectExtractionCandidate($el, '{% url 'boq:extraction_edit' boq.pk %}', '{{ line.row_id }}', {{ product.product_index }}, {{ candidate.id }})"
                             >
                                 <span>{{ candidate.summary }}</span>
-                                {% if candidate.tech_key %}<span class="muted"> · {{ candidate.tech_key }}</span>{% endif %}
+                                {% if candidate.tech_key %}<span class="muted"> . {{ candidate.tech_key }}</span>{% endif %}
                                 {% if candidate.confidence is not None %}
-                                <span class="badge badge--gray extraction-db-candidates__pct">{{ candidate.confidence|floatformat:0 }}%</span>
+                                <span class="extraction-db-candidates__pct">{{ candidate.confidence|floatformat:0 }}%</span>
                                 {% endif %}
                             </button>
                             {% else %}
                             <span>{{ candidate.summary }}</span>
-                            {% if candidate.tech_key %}<span class="muted"> · {{ candidate.tech_key }}</span>{% endif %}
+                            {% if candidate.tech_key %}<span class="muted"> . {{ candidate.tech_key }}</span>{% endif %}
                             {% if candidate.confidence is not None %}
-                            <span class="badge badge--gray extraction-db-candidates__pct">{{ candidate.confidence|floatformat:0 }}%</span>
+                            <span class="extraction-db-candidates__pct">{{ candidate.confidence|floatformat:0 }}%</span>
                             {% endif %}
                             {% if candidate.is_selected %}
-                            <span class="badge badge--green">Selected</span>
+                            <span class="extraction-db-candidates__selected">Selected</span>
                             {% endif %}
                             {% endif %}
                         </li>

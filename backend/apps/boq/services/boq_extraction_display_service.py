@@ -15,7 +15,7 @@ from apps.boq.services.product_attribute_enrichment_service import (
     humanize_attribute_key,
 )
 from apps.boq.services.product_matching_service import structured_match_score
-from apps.database_manager.models import Rate_Master
+from apps.database_manager.models import Rate_Master_Output
 from utils.attribute_parser import coerce_attributes_dict
 
 
@@ -27,6 +27,14 @@ def _candidate_confidence_value(raw: Any) -> float | None:
         return round(float(raw), 2)
     except (TypeError, ValueError):
         return None
+
+
+def _format_tech_key_for_display(tech_key: Any) -> str:
+    """Show product keys with `` . `` separators instead of pipes."""
+    text = str(tech_key or "").strip()
+    if not text:
+        return ""
+    return " . ".join(part.strip() for part in text.split("|"))
 
 
 def _backfill_candidate_confidences(
@@ -51,7 +59,7 @@ def _backfill_candidate_confidences(
         return
     rates = {
         rate.pk: rate
-        for rate in Rate_Master.objects.filter(
+        for rate in Rate_Master_Output.objects.filter(
             pk__in=missing_ids,
             database_version_id=database_version_id,
         )
@@ -230,7 +238,7 @@ def _shape_product(
                 "id": cand_id,
                 "summary": item.get("summary")
                 or _product_summary(item),
-                "tech_key": item.get("tech_key") or "",
+                "tech_key": _format_tech_key_for_display(item.get("tech_key") or ""),
                 "confidence": confidence,
                 "is_selected": is_selected,
             }
@@ -244,10 +252,23 @@ def _shape_product(
             database_version_id=database_version_id,
         )
 
+    # Each product binds to its own Unit/Qty slot, so a multi-product section
+    # shows different values per tab rather than the section header's figure.
+    quantity = product.get("quantity")
+    quantity_unit = product.get("quantity_unit")
+    has_quantity = quantity not in (None, "")
     return {
         "product_index": int(product.get("product_index") or 0),
         "source_row_id": source_row_id,
         "display_number": display_number,
+        "quantity": quantity,
+        "quantity_unit": quantity_unit or "",
+        "quantity_display": str(quantity) if has_quantity else "—",
+        "quantity_unit_display": (
+            str(quantity_unit).strip() if quantity_unit not in (None, "") else "—"
+        ),
+        "show_quantity": has_quantity or bool(str(quantity_unit or "").strip()),
+        "rate_only": bool(product.get("rate_only")),
         "display_label": f"Product {display_number}" + (f" of {total}" if total > 1 else ""),
         "is_user_added": (product.get("source") or "").lower() == "user",
         "fields": fields,
@@ -435,8 +456,19 @@ class BOQExtractionDisplayService:
             product_total = len(products)
             qty_rows = list(group.get("qty_rows") or [])
             qty_row_count = len(qty_rows)
-            # More products than Unit/Qty rows → expert should review (e.g. 1 qty, 2 products).
-            multiproduct_review = product_total >= 2 and product_total > qty_row_count
+            # Multi-product review = product count and Unit/Qty slots disagree:
+            # e.g. 1 qty row → 2+ products, or 2 qty rows → only 1 product.
+            multiproduct_review = (
+                (
+                    qty_row_count > 0
+                    and product_total > 0
+                    and product_total != qty_row_count
+                )
+                or any(
+                    bool(product.get("needs_extraction_review"))
+                    for product in products
+                )
+            )
 
             shaped_products = [
                 _shape_product(

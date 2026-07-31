@@ -46,8 +46,8 @@
             </tr>
         </tbody>
     </table>
-    
-    <h3 style="margin-top: 24px;" class="panel__title">Data Statistics</h3>
+
+    <h3 style="margin-top: 24px;" class="panel__title">Ingested Tables</h3>
     {% if not version.is_active %}
     <p class="panel__text" style="margin-bottom: 12px;">
         Archived uploads keep the workbook for download. Master sheet rows are stored
@@ -57,30 +57,46 @@
     <table class="table table--plain">
         <tbody>
             <tr>
-                <th style="text-align: left;">Rate Master Items</th>
+                <th style="text-align: left;">Rate_Master_Output</th>
                 <td style="text-align: right;">{{ rates_count }}</td>
             </tr>
             <tr>
-                <th style="text-align: left;">Labour Master Items</th>
+                <th style="text-align: left;">Labour_master_Output</th>
                 <td style="text-align: right;">{{ labour_count }}</td>
-            </tr>
-            <tr>
-                <th style="text-align: left;">TOR Main Items</th>
-                <td style="text-align: right;">{{ tor_main_count }}</td>
-            </tr>
-            <tr>
-                <th style="text-align: left;">TOR Labour Items</th>
-                <td style="text-align: right;">{{ tor_labour_count }}</td>
-            </tr>
-            <tr>
-                <th style="text-align: left;">TOR Accessories Items</th>
-                <td style="text-align: right;">{{ tor_accessories_count }}</td>
-            </tr>
-            <tr>
-                <th style="text-align: left;">State Control List Items</th>
-                <td style="text-align: right;">{{ state_control_count }}</td>
             </tr>
         </tbody>
     </table>
+
+    {% if sheet_stats %}
+    <h3 style="margin-top: 24px;" class="panel__title">Workbook Sheet Counts</h3>
+    <p class="panel__text" style="margin-bottom: 12px;">
+        Only Rate_Master_Output and Labour_master_Output are imported. Other sheets are
+        counted from the workbook for reference.
+    </p>
+    <table class="table table--plain">
+        <thead>
+            <tr>
+                <th style="text-align: left;">Sheet</th>
+                <th style="text-align: right;">Rows</th>
+                <th style="text-align: right;">Imported</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for sheet in sheet_stats %}
+            <tr>
+                <td style="text-align: left;">{{ sheet.name }}</td>
+                <td style="text-align: right;">{{ sheet.rows }}</td>
+                <td style="text-align: right;">
+                    {% if sheet.ingested %}
+                    <span class="badge badge--green">Yes</span>
+                    {% else %}
+                    <span class="badge">No</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
 </div>
 {% endblock %}

@@ -31,10 +31,11 @@
             <button
                 type="button"
                 class="btn btn--small btn--boq-analyse"
-                x-show="mode === 'manual'"
-                x-cloak
                 :disabled="!canApply || saving"
-                @click="applyManual()"
+                @click="mode === 'auto' ? applyAuto() : applyManual()"
+                :title="mode === 'auto'
+                    ? 'Load labour charges from Labour_master_Output for every product'
+                    : 'Apply the % labour rates entered per category'"
             >
                 <span x-show="!saving">Apply labour</span>
                 <span x-show="saving" x-cloak>Applying…</span>
@@ -193,7 +194,7 @@
                             {% if product.unit %}<div><dt>Unit</dt><dd>{{ product.unit }}</dd></div>{% endif %}
                             {% if product.capacity %}<div><dt>Capacity</dt><dd>{{ product.capacity }}</dd></div>{% endif %}
                             <div><dt>Make</dt><dd>{{ product.make|default:"—" }}</dd></div>
-                            <div><dt>Supplier</dt><dd>{{ product.supplier|default:"—" }}</dd></div>
+                            <div><dt>Vendor</dt><dd>{{ product.vendor|default:"—" }}</dd></div>
                         </dl>
 
                         <div class="make-vendor-fields labour-rate-fields">

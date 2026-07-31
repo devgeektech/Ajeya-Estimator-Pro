@@ -13,20 +13,16 @@ from apps.audit.services import record
 from common.constants import DATABASE_UPLOADS_TO_RETAIN
 from common.exceptions import BOQAIError
 from common.mixins import DatabaseAccessRequiredMixin
-from utils.files import unique_filename
+from utils.files import stamped_upload_filename
 
 from .forms import DatabaseUploadForm
 from .models import (
     DatabaseVersion,
-    Labour_Master,
-    Rate_Master,
-    State_Control_List,
-    TOR_Accessories,
-    TOR_Labour,
-    TOR_Main,
+    Labour_master_Output,
+    Rate_Master_Output,
 )
 from .services.activation import repair_duplicate_active_versions
-from .services.importer import DatabaseImportService
+from .services.importer import DatabaseImportService, count_workbook_sheet_rows
 
 logger = logging.getLogger("boq_ai")
 
@@ -44,7 +40,6 @@ class DatabaseVersionListView(LoginRequiredMixin, ListView):
     }
 
     def get_queryset(self):
-        # Retain newest uploads first, then filter/sort within that window.
         retained_ids = list(
             DatabaseVersion.objects.order_by("-uploaded_at", "-id").values_list(
                 "id", flat=True
@@ -53,8 +48,6 @@ class DatabaseVersionListView(LoginRequiredMixin, ListView):
         qs = DatabaseVersion.objects.filter(id__in=retained_ids).select_related(
             "uploaded_by"
         )
-
-        # Search is client-side over the retained upload window (same as BOQ list).
 
         sort_key = (self.request.GET.get("sort") or "status").strip().lower()
         direction = (self.request.GET.get("dir") or "desc").strip().lower()
@@ -119,7 +112,7 @@ class DatabaseUploadView(DatabaseAccessRequiredMixin, FormView):
         upload = form.cleaned_data["workbook"]
         storage = FileSystemStorage()
         stored_name = storage.save(
-            f"database/{unique_filename(upload.name)}", upload
+            f"database/{stamped_upload_filename(upload.name)}", upload
         )
         file_path = storage.path(stored_name)
 
@@ -167,17 +160,29 @@ class DatabaseDownloadView(LoginRequiredMixin, View):
 class DatabaseVersionDetailView(LoginRequiredMixin, View):
     def get(self, request, pk):
         version = get_object_or_404(DatabaseVersion, pk=pk)
+        sheet_stats: list[dict] = []
+        if version.file and version.file.name:
+            try:
+                sheet_stats = count_workbook_sheet_rows(version.file.path)
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "Failed reading sheet stats for database version %s", version.pk
+                )
+
+        rates_count = 0
+        labour_count = 0
+        if version.is_active:
+            rates_count = Rate_Master_Output.objects.filter(
+                database_version=version
+            ).count()
+            labour_count = Labour_master_Output.objects.filter(
+                database_version=version
+            ).count()
+
         context = {
             "version": version,
-            "rates_count": Rate_Master.objects.filter(database_version=version).count(),
-            "labour_count": Labour_Master.objects.filter(database_version=version).count(),
-            "tor_main_count": TOR_Main.objects.filter(database_version=version).count(),
-            "tor_labour_count": TOR_Labour.objects.filter(database_version=version).count(),
-            "tor_accessories_count": TOR_Accessories.objects.filter(
-                database_version=version
-            ).count(),
-            "state_control_count": State_Control_List.objects.filter(
-                database_version=version
-            ).count(),
+            "sheet_stats": sheet_stats,
+            "rates_count": rates_count,
+            "labour_count": labour_count,
         }
         return render(request, "database/version_detail.html", context)

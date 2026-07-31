@@ -1,4 +1,4 @@
-"""Make & supplier selection after Analysis — exact Rate_Master match + rates."""
+"""Make & vendor selection after Analysis — exact Rate_Master_Output match + rates."""
 from __future__ import annotations
 
 import json
@@ -27,7 +27,7 @@ from apps.boq.services.product_matching_service import (
 from apps.boq.services.rate_detail_retrieval_service import RateDetailRetrievalService
 from ai.embeddings.chroma_store import selection_amount
 from apps.boq.services.serial_normalizer import analysis_fields
-from apps.database_manager.models import Rate_Master
+from apps.database_manager.models import Rate_Master_Output
 from apps.database_manager.services.activation import get_active_database_version
 from common.choices import BOQStatus
 from common.constants import MATCH_CONFIDENCE_THRESHOLD
@@ -73,10 +73,10 @@ SAME_PRICE_TIE_LABEL = "Multiple product detected in same price"
 
 
 def _build_same_price_choices(
-    scored: list[tuple[float, Rate_Master, dict[str, Any], float]],
+    scored: list[tuple[float, Rate_Master_Output, dict[str, Any], float]],
 ) -> list[dict[str, Any]]:
     """
-    When lowest-price pick has multiple Rate_Master rows at the same amount
+    When lowest-price pick has multiple Rate_Master_Output rows at the same amount
     for the winning make (typically different vendors), return selectable choices.
     """
     if len(scored) < 2:
@@ -98,9 +98,11 @@ def _build_same_price_choices(
             {
                 "rate_master_id": rate_id,
                 "make": str(rate.Make or "").strip(),
-                "supplier": str(rate.Supplier or "").strip(),
+                "vendor": str(rate.Vendor or "").strip(),
                 "amount": round(float(amount), 4),
-                "tech_key": str(rate.Tech_Key or "").strip(),
+                "product_id": rate.Product_ID,
+                "rate_id": rate.Rate_ID,
+                "tech_key": rate.display_key(),
                 "confidence": round(float(confidence), 2),
                 "summary": _product_summary(
                     {
@@ -117,22 +119,22 @@ def _build_same_price_choices(
     # Need at least two distinct vendors (or product rows) at that price.
     if len(ties) < 2:
         return []
-    suppliers = {_normalize_text(item.get("supplier")) for item in ties}
+    vendors = {_normalize_text(item.get("vendor")) for item in ties}
     # Flag when multiple vendors share the price, or multiple products same vendor.
-    if len(suppliers) >= 2 or len(ties) >= 2:
+    if len(vendors) >= 2 or len(ties) >= 2:
         return ties
     return []
 
 
-def _flag_same_material_rate_supplier_review(lines: list[dict[str, Any]]) -> int:
+def _flag_same_material_rate_vendor_review(lines: list[dict[str, Any]]) -> int:
     """
     Highlight products that share the same material rate but use different
-    make/supplier pairs — expert must confirm the supplier choice.
+    make/vendor pairs — expert must confirm the vendor choice.
     """
     buckets: dict[str, list[dict[str, Any]]] = {}
     for line in lines:
         for product in line.get("products") or []:
-            product["supplier_rate_review"] = False
+            product["vendor_rate_review"] = False
             line_output = product.get("line_output") or {}
             rate_key = _normalize_material_rate_key(line_output.get("material_rate"))
             if not rate_key:
@@ -148,14 +150,14 @@ def _flag_same_material_rate_supplier_review(lines: list[dict[str, Any]]) -> int
         combos = {
             (
                 _normalize_text(item.get("selected_make")),
-                _normalize_text(item.get("selected_supplier")),
+                _normalize_text(item.get("selected_vendor")),
             )
             for item in products
         }
         if len(combos) < 2:
             continue
         for item in products:
-            item["supplier_rate_review"] = True
+            item["vendor_rate_review"] = True
             flagged += 1
     return flagged
 
@@ -227,8 +229,8 @@ def _ordered_boq_rows(boq_data: dict) -> list[dict[str, Any]]:
 
 class MakeVendorSelectionService:
     """
-    After Analysis: expert picks Make + Supplier, then exact Rate_Master search
-    using analysis product fields + that make/supplier, then load rates by Tech_Key.
+    After Analysis, an expert picks Make + Vendor, searches Rate_Master_Output,
+    and loads labour by Product_ID.
     """
 
     def __init__(self, boq_id: int, make_list_data: dict | None = None):
@@ -299,7 +301,7 @@ class MakeVendorSelectionService:
                 shaped["product_index"] = product_index
                 shaped["display_number"] = product_index + 1
                 product_count += 1
-                if shaped.get("selected_make") or shaped.get("selected_supplier"):
+                if shaped.get("selected_make") or shaped.get("selected_vendor"):
                     selected_count += 1
                 match_status = str(shaped.get("match_status") or "not_searched")
                 if match_status == "matched":
@@ -376,7 +378,7 @@ class MakeVendorSelectionService:
                 }
             )
 
-        supplier_review_count = _flag_same_material_rate_supplier_review(lines)
+        vendor_review_count = _flag_same_material_rate_vendor_review(lines)
 
         return {
             "has_products": product_count > 0,
@@ -389,7 +391,7 @@ class MakeVendorSelectionService:
                 "filtered_count": filtered_count,
                 "not_found_count": not_found_count,
                 "no_match_count": no_match_count,
-                "supplier_review_count": supplier_review_count,
+                "vendor_review_count": vendor_review_count,
                 "same_price_tie_count": same_price_tie_count,
             },
             "selection_catalog": self._build_selection_catalog(analysis, database_version_id),
@@ -402,18 +404,18 @@ class MakeVendorSelectionService:
         category: str,
         sub_category: str,
         make: str = "",
-        supplier: str = "",
+        vendor: str = "",
         find_rates: bool = True,
         prefer_lowest_price: bool | None = None,
     ) -> dict[str, Any]:
-        """Apply make/supplier to every analysed product in category + sub-category."""
+        """Apply make/vendor to every analysed product in category + sub-category."""
         boq = self._get_boq()
         self._ensure_editable(boq)
 
         category_text = str(category or "").strip()
         sub_category_text = str(sub_category or "").strip()
         make_text = str(make or "").strip()
-        supplier_text = str(supplier or "").strip()
+        vendor_text = str(vendor or "").strip()
         if not category_text:
             raise ValidationError("Category is required.")
         # Sub-category may be blank to apply make/vendor across the whole category.
@@ -423,7 +425,7 @@ class MakeVendorSelectionService:
             sub_category_text,
         ) or []
         # With a make list: do not fall back to every make when this scope has none.
-        # With no make list: allow lowest price across all Rate_Master makes.
+        # With no make list: allow lowest price across all Rate_Master_Output makes.
 
         use_lowest = prefer_lowest_price
         if use_lowest is None:
@@ -460,8 +462,8 @@ class MakeVendorSelectionService:
                 f"{NO_APPROVED_MAKE_LABEL} for {scope}. Enter a make to continue."
             )
 
-        if supplier_text and _is_lowest_make(supplier_text):
-            supplier_text = ""
+        if vendor_text and _is_lowest_make(vendor_text):
+            vendor_text = ""
 
         database_version_id = self._database_version_id(boq)
         if find_rates and not database_version_id:
@@ -478,7 +480,7 @@ class MakeVendorSelectionService:
         updated_count = 0
         matched_count = 0
         applied_make = make_text
-        applied_supplier = supplier_text
+        applied_vendor = vendor_text
         for row in rows:
             products = list(row.get("products") or [])
             if not products:
@@ -499,26 +501,26 @@ class MakeVendorSelectionService:
                     match_payload = self._exact_match_and_rates(
                         updated,
                         make=make_text,
-                        supplier=supplier_text,
+                        vendor=vendor_text,
                         quantity=qty,
                         database_version_id=database_version_id,
                         prefer_lowest_price=use_lowest
-                        or (bool(make_text) and not supplier_text),
+                        or (bool(make_text) and not vendor_text),
                         approved_makes=approved_makes or None,
                     )
                     updated["vendor_selection"] = match_payload
                     applied_make = match_payload.get("make") or applied_make
-                    applied_supplier = match_payload.get("supplier") or applied_supplier
+                    applied_vendor = match_payload.get("vendor") or applied_vendor
                     if match_payload.get("status") == "matched":
                         matched_count += 1
                 else:
                     selection = dict(updated.get("vendor_selection") or {})
                     selection["make"] = make_text
-                    selection["supplier"] = supplier_text
+                    selection["vendor"] = vendor_text
                     selection["status"] = selection.get("status") or "not_searched"
                     updated["vendor_selection"] = selection
                 updated["selected_make"] = applied_make or None
-                updated["selected_supplier"] = applied_supplier or None
+                updated["selected_vendor"] = applied_vendor or None
                 if applied_make:
                     updated["make_hint"] = applied_make
                 updated["approved_make_found"] = True
@@ -543,7 +545,7 @@ class MakeVendorSelectionService:
             "category": category_text,
             "sub_category": sub_category_text,
             "make": applied_make,
-            "supplier": applied_supplier,
+            "vendor": applied_vendor,
             "prefer_lowest_price": use_lowest,
             "applied_at": now_local_iso(),
             "product_count": updated_count,
@@ -561,12 +563,12 @@ class MakeVendorSelectionService:
             boq.save(update_fields=["analysis_data"])
 
         logger.debug(
-            "Sub-category make applied boq=%s category=%s sub_category=%s make=%s supplier=%s products=%s matched=%s",
+            "Sub-category make applied boq=%s category=%s sub_category=%s make=%s vendor=%s products=%s matched=%s",
             boq.pk,
             category_text,
             sub_category_text,
             applied_make,
-            applied_supplier,
+            applied_vendor,
             updated_count,
             matched_count,
         )
@@ -574,7 +576,7 @@ class MakeVendorSelectionService:
             "category": category_text,
             "sub_category": sub_category_text,
             "make": applied_make,
-            "supplier": applied_supplier,
+            "vendor": applied_vendor,
             "prefer_lowest_price": use_lowest,
             "updated_count": updated_count,
             "matched_count": matched_count,
@@ -685,7 +687,7 @@ class MakeVendorSelectionService:
                         "confidence": 0.0,
                         "notes": NO_APPROVED_MAKE_LABEL,
                         "make": "",
-                        "supplier": "",
+                        "vendor": "",
                         "rate_master_id": None,
                         "tech_key": "",
                         "summary": "",
@@ -706,7 +708,7 @@ class MakeVendorSelectionService:
                     match_payload = self._exact_match_and_rates(
                         updated,
                         make="",
-                        supplier="",
+                        vendor="",
                         quantity=qty,
                         database_version_id=database_version_id,
                         prefer_lowest_price=True,
@@ -717,9 +719,9 @@ class MakeVendorSelectionService:
 
                 updated["vendor_selection"] = match_payload
                 applied_make = match_payload.get("make") or ""
-                applied_supplier = match_payload.get("supplier") or ""
+                applied_vendor = match_payload.get("vendor") or ""
                 updated["selected_make"] = applied_make or None
-                updated["selected_supplier"] = applied_supplier or None
+                updated["selected_vendor"] = applied_vendor or None
                 if applied_make:
                     updated["make_hint"] = applied_make
                 updated["approved_make_found"] = approved_found
@@ -761,11 +763,11 @@ class MakeVendorSelectionService:
 
     def apply_lowest_defaults_all(self, *, find_rates: bool = True) -> dict[str, Any]:
         """
-        Prefill every analysed product with the lowest-price Rate_Master row
+        Prefill every analysed product with the lowest-price Rate_Master_Output row
         (Next from Analysis).
 
         With a make list: among approved makes for category / sub-category.
-        With no make list: among all Rate_Master rows for that taxonomy.
+        With no make list: among all Rate_Master_Output rows for that taxonomy.
         """
         boq = self._get_boq()
         self._ensure_editable(boq)
@@ -811,7 +813,7 @@ class MakeVendorSelectionService:
                         "confidence": 0.0,
                         "notes": NO_APPROVED_MAKE_LABEL,
                         "make": "",
-                        "supplier": "",
+                        "vendor": "",
                         "rate_master_id": None,
                         "tech_key": "",
                         "summary": "",
@@ -832,7 +834,7 @@ class MakeVendorSelectionService:
                     match_payload = self._exact_match_and_rates(
                         product,
                         make="",
-                        supplier="",
+                        vendor="",
                         quantity=qty,
                         database_version_id=database_version_id,
                         prefer_lowest_price=True,
@@ -843,9 +845,9 @@ class MakeVendorSelectionService:
                 updated = dict(product)
                 updated["vendor_selection"] = match_payload
                 applied_make = match_payload.get("make") or ""
-                applied_supplier = match_payload.get("supplier") or ""
+                applied_vendor = match_payload.get("vendor") or ""
                 updated["selected_make"] = applied_make or None
-                updated["selected_supplier"] = applied_supplier or None
+                updated["selected_vendor"] = applied_vendor or None
                 if applied_make:
                     updated["make_hint"] = applied_make
                 updated["approved_make_found"] = approved_found
@@ -863,7 +865,7 @@ class MakeVendorSelectionService:
                         "category": category_text,
                         "sub_category": sub_category_text,
                         "make": applied_make,
-                        "supplier": applied_supplier,
+                        "vendor": applied_vendor,
                         "prefer_lowest_price": True,
                         "product_count": 0,
                     },
@@ -871,8 +873,8 @@ class MakeVendorSelectionService:
                 stats["product_count"] += 1
                 if applied_make:
                     stats["make"] = applied_make
-                if applied_supplier:
-                    stats["supplier"] = applied_supplier
+                if applied_vendor:
+                    stats["vendor"] = applied_vendor
             if changed:
                 row["products"] = products
 
@@ -928,15 +930,15 @@ class MakeVendorSelectionService:
         *,
         category: str,
         make: str,
-        supplier: str = "",
+        vendor: str = "",
         find_rates: bool = True,
     ) -> dict[str, Any]:
-        """Apply make/supplier to every analysed product in the category."""
+        """Apply make/vendor to every analysed product in the category."""
         return self.apply_subcategory_make(
             category=category,
             sub_category="",
             make=make,
-            supplier=supplier,
+            vendor=vendor,
             find_rates=find_rates,
         )
 
@@ -1003,10 +1005,10 @@ class MakeVendorSelectionService:
         category: str,
         sub_category: str,
     ) -> list[str]:
-        """Distinct Rate_Master makes for category / optional sub-category."""
+        """Distinct Rate_Master_Output makes for category / optional sub-category."""
         if not database_version_id or not str(category or "").strip():
             return []
-        queryset = Rate_Master.objects.filter(
+        queryset = Rate_Master_Output.objects.filter(
             database_version_id=database_version_id,
             Category__iexact=str(category).strip(),
         )
@@ -1035,7 +1037,7 @@ class MakeVendorSelectionService:
         Return ``(make_options, concrete_makes, selectable)``.
 
         With make list: approved makes only (or empty / not selectable).
-        Without make list: Lowest price + Rate_Master makes.
+        Without make list: Lowest price + Rate_Master_Output makes.
         """
         approved = self._approved_makes_for_subcategory(category, sub_category)
         if self.has_make_list:
@@ -1049,7 +1051,7 @@ class MakeVendorSelectionService:
         )
         return [LOWEST_MAKE_LABEL] + list(rate_makes), list(rate_makes), True
 
-    def _suppliers_for_subcategory_make(
+    def _vendors_for_subcategory_make(
         self,
         *,
         database_version_id: int,
@@ -1059,7 +1061,7 @@ class MakeVendorSelectionService:
     ) -> list[str]:
         if not database_version_id or not make or _is_lowest_make(make):
             return []
-        queryset = Rate_Master.objects.filter(
+        queryset = Rate_Master_Output.objects.filter(
             database_version_id=database_version_id,
             Category__iexact=str(category).strip(),
         )
@@ -1067,24 +1069,42 @@ class MakeVendorSelectionService:
             narrowed = queryset.filter(Sub_Category__iexact=str(sub_category).strip())
             if narrowed.exists():
                 queryset = narrowed
-        suppliers: list[str] = []
-        seen: set[str] = set()
-        for rate in queryset.exclude(Make__isnull=True).exclude(Make="")[:400]:
-            if not MakeListConstraintService.make_is_allowed(rate.Make, [make]):
-                continue
-            text = str(rate.Supplier or "").strip()
-            key = _normalize_text(text)
-            if text and key not in seen:
-                seen.add(key)
-                suppliers.append(text)
-        return sorted(suppliers, key=lambda item: item.lower())
+
+        def _collect(rows) -> list[str]:
+            vendors: list[str] = []
+            seen: set[str] = set()
+            for rate in rows:
+                if not MakeListConstraintService.make_is_allowed(rate.Make, [make]):
+                    continue
+                text = str(rate.Vendor or "").strip()
+                key = _normalize_text(text)
+                if text and key not in seen:
+                    seen.add(key)
+                    vendors.append(text)
+            return sorted(vendors, key=lambda item: item.lower())
+
+        vendors = _collect(queryset.exclude(Make__isnull=True).exclude(Make="")[:500])
+        # Sub-category may be too narrow for vendor variety — fall back to category.
+        if (
+            len(vendors) < 2
+            and str(sub_category or "").strip()
+            and sub_category != "—"
+        ):
+            category_rows = Rate_Master_Output.objects.filter(
+                database_version_id=database_version_id,
+                Category__iexact=str(category).strip(),
+            ).exclude(Make__isnull=True).exclude(Make="")[:500]
+            category_vendors = _collect(category_rows)
+            if len(category_vendors) > len(vendors):
+                return category_vendors
+        return vendors
 
     def _build_selection_catalog(
         self,
         analysis: dict[str, Any],
         database_version_id: int,
     ) -> dict[str, Any]:
-        """Cascade data for Make & Vendor: category → sub-category → make → supplier."""
+        """Cascade data for Make & Vendor: category → sub-category → make → vendor."""
         catalog = self._collect_extraction_catalog(analysis)
         stored = dict(analysis.get("subcategory_make_selections") or {})
 
@@ -1099,9 +1119,9 @@ class MakeVendorSelectionService:
                     sub_category="",
                 )
             )
-            category_suppliers_by_make: dict[str, list[str]] = {}
+            category_vendors_by_make: dict[str, list[str]] = {}
             for make_option in category_concrete:
-                category_suppliers_by_make[make_option] = self._suppliers_for_subcategory_make(
+                category_vendors_by_make[make_option] = self._vendors_for_subcategory_make(
                     database_version_id=database_version_id,
                     category=category,
                     sub_category="",
@@ -1124,22 +1144,22 @@ class MakeVendorSelectionService:
                 elif selected_make and selected_make not in make_options and selectable:
                     make_options = [selected_make] + make_options
 
-                suppliers_by_make: dict[str, list[str]] = {}
+                vendors_by_make: dict[str, list[str]] = {}
                 for make_option in concrete_makes:
-                    suppliers_by_make[make_option] = self._suppliers_for_subcategory_make(
+                    vendors_by_make[make_option] = self._vendors_for_subcategory_make(
                         database_version_id=database_version_id,
                         category=category,
                         sub_category=sub_category,
                         make=make_option,
                     )
 
-                selected_supplier = str(selection.get("supplier") or "").strip()
-                supplier_options: list[str] = []
+                selected_vendor = str(selection.get("vendor") or "").strip()
+                vendor_options: list[str] = []
                 if selected_make and not _is_lowest_make(selected_make):
-                    supplier_options = list(suppliers_by_make.get(selected_make) or [])
-                if supplier_options:
-                    supplier_options = [
-                        item for item in supplier_options if not _is_lowest_make(item)
+                    vendor_options = list(vendors_by_make.get(selected_make) or [])
+                if vendor_options:
+                    vendor_options = [
+                        item for item in vendor_options if not _is_lowest_make(item)
                     ]
 
                 sub_rows.append(
@@ -1149,10 +1169,10 @@ class MakeVendorSelectionService:
                         "has_approved_makes": selectable,
                         "no_approved_make_label": NO_APPROVED_MAKE_LABEL,
                         "make_options": make_options,
-                        "suppliers_by_make": suppliers_by_make,
-                        "supplier_options": supplier_options,
+                        "vendors_by_make": vendors_by_make,
+                        "vendor_options": vendor_options,
                         "selected_make": selected_make if selectable else "",
-                        "selected_supplier": selected_supplier if selectable else "",
+                        "selected_vendor": selected_vendor if selectable else "",
                         "prefer_lowest_price": bool(selection.get("prefer_lowest_price")),
                     }
                 )
@@ -1163,7 +1183,7 @@ class MakeVendorSelectionService:
                     "has_approved_makes": category_selectable,
                     "no_approved_make_label": NO_APPROVED_MAKE_LABEL,
                     "make_options": category_make_options,
-                    "suppliers_by_make": category_suppliers_by_make,
+                    "vendors_by_make": category_vendors_by_make,
                     "sub_categories": sub_rows,
                 }
             )
@@ -1186,7 +1206,8 @@ class MakeVendorSelectionService:
                     "sub_category": sub_category or "(entire category)",
                     "sub_category_value": sub_category,
                     "make": str(value.get("make") or "").strip() or "Lowest price",
-                    "supplier": str(value.get("supplier") or "").strip() or "Auto (lowest price)",
+                    "vendor": str(value.get("vendor") or "").strip()
+                    or "Auto (lowest price)",
                     "prefer_lowest_price": bool(value.get("prefer_lowest_price")),
                     "product_count": int(value.get("product_count") or 0),
                     "source": "manual",
@@ -1206,16 +1227,16 @@ class MakeVendorSelectionService:
         row_id: str,
         product_index: int,
         make: str,
-        supplier: str = "",
+        vendor: str = "",
     ) -> dict[str, Any]:
-        """Persist make/supplier, find exact Rate_Master row, load rates via Tech_Key."""
+        """Persist make/vendor, find a rate row, and load labour by Product_ID."""
         boq = self._get_boq()
         self._ensure_editable(boq)
 
         make_text = str(make or "").strip()
-        supplier_text = str(supplier or "").strip()
-        if not make_text and not supplier_text:
-            raise ValidationError("Select a make or supplier before searching.")
+        vendor_text = str(vendor or "").strip()
+        if not make_text and not vendor_text:
+            raise ValidationError("Select a make or vendor before searching.")
 
         database_version_id = self._database_version_id(boq)
         if not database_version_id:
@@ -1244,9 +1265,9 @@ class MakeVendorSelectionService:
         category = str(product.get("category") or "").strip()
         sub_category = str(product.get("sub_category") or "").strip()
         approved_makes = self._approved_makes_for_subcategory(category, sub_category) or None
-        # Make-list gap: expert may type make/supplier freely and search Rate_Master.
+        # Make-list gap: expert may type make/vendor and search Rate_Master_Output.
         allow_manual_override = self.has_make_list and not approved_makes
-        prefer_lowest = _is_lowest_make(make_text) or (not make_text and not supplier_text)
+        prefer_lowest = _is_lowest_make(make_text) or (not make_text and not vendor_text)
         if make_text and not _is_lowest_make(make_text) and approved_makes:
             if not MakeListConstraintService.make_is_allowed(make_text, approved_makes):
                 raise ValidationError(
@@ -1254,10 +1275,10 @@ class MakeVendorSelectionService:
                 )
         if allow_manual_override and prefer_lowest:
             raise ValidationError(
-                "Enter a make (and optional supplier) — no approved make in the make list."
+                "Enter a make (and optional vendor) — no approved make in the make list."
             )
-        if _is_lowest_make(supplier_text):
-            supplier_text = ""
+        if _is_lowest_make(vendor_text):
+            vendor_text = ""
         if prefer_lowest:
             make_text = ""
 
@@ -1273,17 +1294,21 @@ class MakeVendorSelectionService:
         match_payload = self._exact_match_and_rates(
             product,
             make=make_text,
-            supplier=supplier_text,
+            vendor=vendor_text,
             quantity=qty,
             database_version_id=database_version_id,
-            prefer_lowest_price=prefer_lowest or (bool(make_text) and not supplier_text),
+            prefer_lowest_price=prefer_lowest or (bool(make_text) and not vendor_text),
             # Do not constrain to an empty approved list when overriding not-found.
             approved_makes=None if allow_manual_override else approved_makes,
         )
 
         updated = dict(product)
         updated["selected_make"] = match_payload.get("make") or make_text or None
-        updated["selected_supplier"] = match_payload.get("supplier") or supplier_text or None
+        updated["selected_vendor"] = (
+            match_payload.get("vendor")
+            or vendor_text
+            or None
+        )
         updated["make_hint"] = make_text or updated.get("make_hint")
         updated["vendor_selection"] = match_payload
         # Manual override leaves the not-found bucket even when the make list has no entry.
@@ -1314,12 +1339,12 @@ class MakeVendorSelectionService:
             boq.save(update_fields=["analysis_data"])
 
         logger.debug(
-            "Make/vendor selection saved boq=%s row=%s product=%s make=%s supplier=%s status=%s",
+            "Make/vendor selection saved boq=%s row=%s product=%s make=%s vendor=%s status=%s",
             boq.pk,
             row_id,
             product_index,
             make_text,
-            supplier_text,
+            vendor_text,
             match_payload.get("status"),
         )
         return match_payload
@@ -1331,7 +1356,7 @@ class MakeVendorSelectionService:
         product_index: int,
         rate_master_id: int,
     ) -> dict[str, Any]:
-        """Expert picks one Rate_Master row when lowest price ties across vendors."""
+        """Expert picks one Rate_Master_Output row when lowest price ties."""
         boq = self._get_boq()
         self._ensure_editable(boq)
 
@@ -1373,12 +1398,12 @@ class MakeVendorSelectionService:
             raise ValidationError("Selected same-price option is no longer available.")
 
         try:
-            rate = Rate_Master.objects.get(
+            rate = Rate_Master_Output.objects.get(
                 pk=int(rate_master_id),
                 database_version_id=database_version_id,
             )
-        except Rate_Master.DoesNotExist as exc:
-            raise ValidationError("Rate_Master row not found for this choice.") from exc
+        except Rate_Master_Output.DoesNotExist as exc:
+            raise ValidationError("Rate_Master_Output row not found for this choice.") from exc
 
         boq_row = next(
             (
@@ -1399,10 +1424,7 @@ class MakeVendorSelectionService:
         rate_service = RateDetailRetrievalService(database_version_id)
         labour_service = LabourDetailRetrievalService(database_version_id)
         rate_detail = rate_service.get_by_id(rate.pk)
-        labour_detail = labour_service.get_by_tech_key(
-            rate.Tech_Key,
-            size=extracted.get("size"),
-        )
+        labour_detail = labour_service.get_by_product_id(rate.Product_ID)
         structured, breakdown = structured_match_score(extracted, rate)
         status = "matched" if structured >= MATCH_CONFIDENCE_THRESHOLD else "pending"
         line_output = BOQLineOutputService.build(
@@ -1414,11 +1436,13 @@ class MakeVendorSelectionService:
         )
         match_payload = {
             "make": str(rate.Make or chosen.get("make") or "").strip(),
-            "supplier": str(rate.Supplier or chosen.get("supplier") or "").strip(),
+            "vendor": str(rate.Vendor or chosen.get("vendor") or "").strip(),
             "status": status,
             "confidence": round(float(structured), 2),
             "rate_master_id": rate.pk,
-            "tech_key": rate.Tech_Key or "",
+            "product_id": rate.Product_ID,
+            "rate_id": rate.Rate_ID,
+            "tech_key": rate.display_key(),
             "summary": _product_summary(
                 {
                     "category": rate.Category,
@@ -1444,7 +1468,7 @@ class MakeVendorSelectionService:
 
         updated = dict(product)
         updated["selected_make"] = match_payload["make"] or None
-        updated["selected_supplier"] = match_payload["supplier"] or None
+        updated["selected_vendor"] = match_payload["vendor"] or None
         if match_payload["make"]:
             updated["make_hint"] = match_payload["make"]
         updated["vendor_selection"] = match_payload
@@ -1473,12 +1497,12 @@ class MakeVendorSelectionService:
             boq.save(update_fields=["analysis_data"])
 
         logger.debug(
-            "Same-price choice resolved boq=%s row=%s product=%s rate_master_id=%s supplier=%s",
+            "Same-price choice resolved boq=%s row=%s product=%s rate_master_id=%s vendor=%s",
             boq.pk,
             row_id,
             product_index,
             rate.pk,
-            match_payload.get("supplier"),
+            match_payload.get("vendor"),
         )
         return match_payload
 
@@ -1494,17 +1518,37 @@ class MakeVendorSelectionService:
     ) -> dict[str, Any]:
         product = _normalize_product_fields(product)
         selection = dict(product.get("vendor_selection") or {})
-        make_options, supplier_options = self._options_for_product(
+        make_options, vendor_options, vendors_by_make = self._options_for_product(
             product,
             database_version_id=database_version_id,
             boq_description=boq_description,
         )
         selected_make = product.get("selected_make") or selection.get("make") or ""
-        selected_supplier = product.get("selected_supplier") or selection.get("supplier") or ""
+        selected_vendor = (
+            product.get("selected_vendor")
+            or selection.get("vendor")
+            or ""
+        )
         if selected_make and selected_make not in make_options:
             make_options = [selected_make] + make_options
-        if selected_supplier and selected_supplier not in supplier_options:
-            supplier_options = [selected_supplier] + supplier_options
+        # Always refresh vendors for the selected make so the dropdown is complete.
+        if selected_make and not _is_lowest_make(selected_make):
+            vendors_by_make[selected_make] = self._vendors_for_subcategory_make(
+                database_version_id=database_version_id,
+                category=str(product.get("category") or ""),
+                sub_category=str(product.get("sub_category") or ""),
+                make=selected_make,
+            )
+            vendor_options = list(vendors_by_make.get(selected_make) or [])
+        if selected_vendor and selected_vendor not in vendor_options:
+            vendor_options = [selected_vendor] + vendor_options
+            if selected_make and not _is_lowest_make(selected_make):
+                vendors_by_make.setdefault(selected_make, [])
+                if selected_vendor not in vendors_by_make[selected_make]:
+                    vendors_by_make[selected_make] = [
+                        selected_vendor,
+                        *vendors_by_make[selected_make],
+                    ]
 
         rate_detail = selection.get("rate_detail")
         labour_detail = selection.get("labour_detail")
@@ -1525,7 +1569,7 @@ class MakeVendorSelectionService:
             approved_make_found = bool(stored_approved)
 
         # Manual typed make/vendor (not-found override) counts as filtered, not not_found.
-        if source == "manual" and (selected_make or selected_supplier or match_status != "not_searched"):
+        if source == "manual" and (selected_make or selected_vendor or match_status != "not_searched"):
             make_status = "filtered"
             approved_make_found = True
         elif (
@@ -1546,10 +1590,10 @@ class MakeVendorSelectionService:
         else:
             make_status = "default"
 
-        # True when approved make exists but Rate_Master row was not found.
+        # True when approved make exists but Rate_Master_Output row was not found.
         is_no_match = make_status != "not_found" and match_status == "unmatched"
-        # Free-text Make/Supplier only when the make list has no approved make.
-        # No-match cards keep dropdowns so experts can pick another make/supplier.
+        # Free-text Make/Vendor only when the make list has no approved make.
+        # No-match cards keep dropdowns so experts can pick another make/vendor.
         allow_typed_make_vendor = (
             make_status == "not_found"
             or (self.has_make_list and not approved)
@@ -1575,9 +1619,11 @@ class MakeVendorSelectionService:
             "qty": qty,
             "quantity_unit": product.get("quantity_unit") or unit or "",
             "make_options": make_options,
-            "supplier_options": supplier_options,
+            "vendor_options": vendor_options,
+            "vendors_by_make": vendors_by_make,
+            "vendors_by_make_json": json.dumps(vendors_by_make),
             "selected_make": selected_make,
-            "selected_supplier": selected_supplier,
+            "selected_vendor": selected_vendor,
             "match_status": match_status,
             "confidence": selection.get("confidence"),
             "tech_key": selection.get("tech_key") or "",
@@ -1592,7 +1638,7 @@ class MakeVendorSelectionService:
             "highlight_no_make": make_status == "not_found",
             "is_no_match": is_no_match,
             "allow_typed_make_vendor": allow_typed_make_vendor,
-            "supplier_rate_review": False,
+            "vendor_rate_review": False,
             "same_price_tie": same_price_tie,
             "same_price_choices": same_price_choices,
             "same_price_choices_json": json.dumps(same_price_choices),
@@ -1604,21 +1650,20 @@ class MakeVendorSelectionService:
         *,
         database_version_id: int,
         boq_description: str,
-    ) -> tuple[list[str], list[str]]:
+    ) -> tuple[list[str], list[str], dict[str, list[str]]]:
         category = str(product.get("category") or "")
         sub_category = str(product.get("sub_category") or "")
-        preferred_makes, _, selectable = self._make_options_for_scope(
+        preferred_makes, concrete_makes, selectable = self._make_options_for_scope(
             database_version_id=database_version_id,
             category=category,
             sub_category=sub_category,
         )
         if not selectable:
             preferred_makes = []
+            concrete_makes = []
 
         makes: list[str] = []
-        suppliers: list[str] = []
         seen_makes: set[str] = set()
-        seen_suppliers: set[str] = set()
 
         def _add_make(value: Any) -> None:
             text = str(value or "").strip()
@@ -1628,44 +1673,63 @@ class MakeVendorSelectionService:
             seen_makes.add(key)
             makes.append(text)
 
-        def _add_supplier(value: Any) -> None:
-            text = str(value or "").strip()
-            key = _normalize_text(text)
-            if not text or key in seen_suppliers:
-                return
-            seen_suppliers.add(key)
-            suppliers.append(text)
-
         for make in preferred_makes:
             _add_make(make)
 
         selected_make = str(product.get("selected_make") or "").strip()
+        if selected_make:
+            _add_make(selected_make)
+
+        # Prefetch vendors for every concrete make so the UI can switch lists
+        # when the expert changes Make (without a page reload).
+        vendors_by_make: dict[str, list[str]] = {}
+        for make_option in concrete_makes:
+            if _is_lowest_make(make_option):
+                continue
+            vendors_by_make[make_option] = self._vendors_for_subcategory_make(
+                database_version_id=database_version_id,
+                category=category,
+                sub_category=sub_category,
+                make=make_option,
+            )
         if selected_make and not _is_lowest_make(selected_make):
-            for supplier in self._suppliers_for_subcategory_make(
+            vendors_by_make[selected_make] = self._vendors_for_subcategory_make(
                 database_version_id=database_version_id,
                 category=category,
                 sub_category=sub_category,
                 make=selected_make,
-            ):
-                _add_supplier(supplier)
+            )
+            # Also pull vendors from structured SQL candidates for this product.
+            if database_version_id:
+                matcher = ProductMatchingService(database_version_id)
+                for candidate in matcher._sql_fallback_candidates(product)[:30]:
+                    if _normalize_text(candidate.get("make") or "") != _normalize_text(
+                        selected_make
+                    ):
+                        continue
+                    text = str(candidate.get("vendor") or "").strip()
+                    if not text or _is_lowest_make(text):
+                        continue
+                    bucket = vendors_by_make.setdefault(selected_make, [])
+                    if text not in bucket:
+                        bucket.append(text)
 
-        if database_version_id and selected_make and not _is_lowest_make(selected_make):
-            matcher = ProductMatchingService(database_version_id)
-            for candidate in matcher._sql_fallback_candidates(product)[:30]:
-                if _normalize_text(candidate.get("make") or "") == _normalize_text(selected_make):
-                    _add_supplier(candidate.get("supplier"))
+        vendor_options: list[str] = []
+        if selected_make and not _is_lowest_make(selected_make):
+            vendor_options = [
+                item
+                for item in (vendors_by_make.get(selected_make) or [])
+                if not _is_lowest_make(item)
+            ]
 
-        if suppliers:
-            suppliers = [item for item in suppliers if not _is_lowest_make(item)]
-
-        return makes, suppliers
+        return makes, vendor_options, vendors_by_make
 
     def _exact_match_and_rates(
         self,
         product: dict[str, Any],
         *,
         make: str,
-        supplier: str,
+        vendor: str,
         quantity: Any,
         database_version_id: int,
         prefer_lowest_price: bool = False,
@@ -1675,11 +1739,13 @@ class MakeVendorSelectionService:
         if make:
             extracted["make_hint"] = make
 
-        queryset = Rate_Master.objects.filter(database_version_id=database_version_id)
+        queryset = Rate_Master_Output.objects.filter(
+            database_version_id=database_version_id
+        )
         # Do not filter Make with exact SQL — approved-list names can differ slightly
-        # from Rate_Master.Make; optimal matching runs in Python below.
-        if supplier:
-            queryset = queryset.filter(Supplier__iexact=supplier)
+        # from Rate_Master_Output.Make; optimal matching runs in Python below.
+        if vendor:
+            queryset = queryset.filter(Vendor__iexact=vendor)
 
         category = extracted.get("category")
         if _is_filled(category):
@@ -1724,10 +1790,10 @@ class MakeVendorSelectionService:
             rate_rows = MakeListConstraintService.filter_rate_ids_by_make(
                 rate_rows, [make]
             )
-        scored: list[tuple[float, Rate_Master, dict[str, Any], float]] = []
+        scored: list[tuple[float, Rate_Master_Output, dict[str, Any], float]] = []
         for rate in rate_rows:
             structured, breakdown = structured_match_score(extracted, rate)
-            if supplier and _normalize_text(rate.Supplier) == _normalize_text(supplier):
+            if vendor and _normalize_text(rate.Vendor) == _normalize_text(vendor):
                 structured = min(100.0, structured + 5.0)
             amount = float(selection_amount(rate))
             scored.append((structured, rate, breakdown, amount))
@@ -1744,7 +1810,7 @@ class MakeVendorSelectionService:
         if not scored:
             return {
                 "make": make,
-                "supplier": supplier,
+                "vendor": vendor,
                 "status": "unmatched",
                 "confidence": 0.0,
                 "rate_master_id": None,
@@ -1758,24 +1824,21 @@ class MakeVendorSelectionService:
                     labour_detail=None,
                     is_pending=True,
                 ),
-                "notes": "No Rate_Master row found for this product with the selected make/supplier.",
+                "notes": "No Rate_Master_Output row found with the selected make/vendor.",
                 "same_price_tie": False,
                 "same_price_choices": [],
                 "matched_at": now_local_iso(),
             }
 
         same_price_choices: list[dict[str, Any]] = []
-        if prefer_lowest_price and not supplier:
+        if prefer_lowest_price and not vendor:
             same_price_choices = _build_same_price_choices(scored)
 
         confidence, rate, breakdown, _amount = scored[0]
         rate_service = RateDetailRetrievalService(database_version_id)
         labour_service = LabourDetailRetrievalService(database_version_id)
         rate_detail = rate_service.get_by_id(rate.pk)
-        labour_detail = labour_service.get_by_tech_key(
-            rate.Tech_Key,
-            size=extracted.get("size"),
-        )
+        labour_detail = labour_service.get_by_product_id(rate.Product_ID)
         status = "matched" if confidence >= MATCH_CONFIDENCE_THRESHOLD else "pending"
         qty_value = (
             extracted.get("quantity")
@@ -1797,14 +1860,16 @@ class MakeVendorSelectionService:
         if same_price_choices:
             notes = SAME_PRICE_TIE_LABEL
         elif status != "matched":
-            notes = "Closest Rate_Master row found — review make/supplier or product fields."
+            notes = "Closest Rate_Master_Output row found — review make/vendor or product fields."
         return {
             "make": resolved_make or make or (rate.Make or ""),
-            "supplier": supplier or (rate.Supplier or ""),
+            "vendor": vendor or (rate.Vendor or ""),
             "status": status,
             "confidence": round(confidence, 2),
             "rate_master_id": rate.pk,
-            "tech_key": rate.Tech_Key or "",
+            "product_id": rate.Product_ID,
+            "rate_id": rate.Rate_ID,
+            "tech_key": rate.display_key(),
             "summary": _product_summary(
                 {
                     "category": rate.Category,

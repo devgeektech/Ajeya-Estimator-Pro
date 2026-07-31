@@ -2,13 +2,8 @@ from django.contrib import admin
 
 from .models import (
     DatabaseVersion,
-    Labour_Master,
-    Labour_Structure_Source,
-    Rate_Master,
-    State_Control_List,
-    TOR_Accessories,
-    TOR_Labour,
-    TOR_Main,
+    Labour_master_Output,
+    Rate_Master_Output,
 )
 
 
@@ -16,12 +11,14 @@ from .models import (
 class DatabaseVersionAdmin(admin.ModelAdmin):
     list_display = (
         "version_number",
+        "name",
         "is_active",
         "uploaded_by",
         "uploaded_at",
         "source_filename",
     )
     list_filter = ("is_active",)
+    search_fields = ("name", "source_filename")
 
     def save_model(self, request, obj, form, change):
         super().save_model(request, obj, form, change)
@@ -31,36 +28,38 @@ class DatabaseVersionAdmin(admin.ModelAdmin):
             activate_database_version(obj)
 
 
-@admin.register(Rate_Master)
-class RateMasterAdmin(admin.ModelAdmin):
+@admin.register(Rate_Master_Output)
+class RateMasterOutputAdmin(admin.ModelAdmin):
     list_display = (
-        "Tech_Key",
+        "Rate_ID",
+        "Product_ID",
         "Category",
         "Sub_Category",
         "Make",
-        "Supplier",
-        "Net_Material_Rate",
-        "Final_Amount_Excl_GST",
-        "Unit",
+        "Vendor",
+        "Final_Material_Amount",
         "database_version",
     )
-    search_fields = ("Tech_Key", "Category", "Sub_Category", "Make", "Supplier")
-    list_filter = ("database_version", "Category", "Sub_Category")
+    list_filter = ("Category", "database_version")
+    search_fields = (
+        "Product_ID",
+        "Rate_ID",
+        "Category",
+        "Sub_Category",
+        "Make",
+        "Vendor",
+    )
 
 
-@admin.register(Labour_Master)
-class LabourMasterAdmin(admin.ModelAdmin):
+@admin.register(Labour_master_Output)
+class LabourMasterOutputAdmin(admin.ModelAdmin):
     list_display = (
-        "Tech_Key",
+        "Product_ID",
+        "Category",
+        "Sub_Category",
         "Labour_Type",
         "Total_Labour_per_unit_with_labour_Multipler",
         "database_version",
     )
-    search_fields = ("Tech_Key", "Labour_Type")
-
-
-admin.site.register(TOR_Main)
-admin.site.register(Labour_Structure_Source)
-admin.site.register(TOR_Labour)
-admin.site.register(TOR_Accessories)
-admin.site.register(State_Control_List)
+    list_filter = ("Labour_Type", "database_version")
+    search_fields = ("Product_ID", "Category", "Sub_Category", "Labour_Type")

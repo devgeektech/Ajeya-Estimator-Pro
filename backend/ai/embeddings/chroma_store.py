@@ -1,16 +1,20 @@
-"""Local Chroma vector index for Rate_Master product embeddings."""
+"""Local Chroma vector index for Rate_Master_Output product embeddings."""
 from __future__ import annotations
 
+import logging
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Sequence, cast
 
 import chromadb
+from chromadb.api.client import SharedSystemClient
 from chromadb.api.types import PyEmbeddings
 from chromadb.config import Settings
 from django.conf import settings
 
-from apps.database_manager.models import Rate_Master
+from apps.database_manager.models import Rate_Master_Output
+
+logger = logging.getLogger("boq_ai")
 
 
 def _to_decimal(value) -> Decimal:
@@ -21,11 +25,11 @@ def _to_decimal(value) -> Decimal:
     return Decimal(str(value))
 
 
-def selection_amount(rate: Rate_Master) -> Decimal:
-    """Amount used when comparing Rate_Master rows."""
-    if rate.Final_Amount_Excl_GST is not None:
-        return _to_decimal(rate.Final_Amount_Excl_GST)
-    return _to_decimal(rate.Net_Material_Rate or 0)
+def selection_amount(rate: Rate_Master_Output) -> Decimal:
+    """Amount used when comparing Rate_Master_Output rows."""
+    if rate.Final_Material_Amount is not None:
+        return _to_decimal(rate.Final_Material_Amount)
+    return Decimal(0)
 
 
 def _scalar(value: Any):
@@ -36,13 +40,13 @@ def _scalar(value: Any):
     return value
 
 
-def rate_document_id(rate: Rate_Master) -> str:
-    """Return the stable Chroma document id for a Rate_Master row."""
+def rate_document_id(rate: Rate_Master_Output) -> str:
+    """Return the stable Chroma document id for a Rate_Master_Output row."""
     return f"rate-master-{rate.pk}"
 
 
 def resolve_rate_master_id(document_id: str, metadata: dict[str, Any] | None = None) -> int | None:
-    """Resolve PostgreSQL Rate_Master pk from a Chroma hit id/metadata."""
+    """Resolve PostgreSQL Rate_Master_Output pk from a Chroma hit id/metadata."""
     if metadata:
         raw_id = metadata.get("rate_master_id")
         if raw_id is not None:
@@ -64,9 +68,10 @@ def resolve_rate_master_id(document_id: str, metadata: dict[str, Any] | None = N
         return None
 
 
-def rate_document(rate: Rate_Master) -> str:
+def rate_document(rate: Rate_Master_Output) -> str:
     """Build structured text embedded for vector product search."""
     fields = [
+        ("Product_ID", rate.Product_ID),
         ("Category", rate.Category),
         ("Sub Category", rate.Sub_Category),
         ("Class", rate.Class),
@@ -75,8 +80,7 @@ def rate_document(rate: Rate_Master) -> str:
         ("Capacity", rate.Capacity),
         ("Unit", rate.Unit),
         ("Attribute", rate.Attribute),
-        ("Supplier", rate.Supplier),
-        ("Tech_Key", rate.Tech_Key),
+        ("Vendor", rate.Vendor),
     ]
     lines = []
     for label, value in fields:
@@ -86,11 +90,13 @@ def rate_document(rate: Rate_Master) -> str:
     return "\n".join(lines)
 
 
-def rate_metadata(rate: Rate_Master) -> dict:
+def rate_metadata(rate: Rate_Master_Output) -> dict:
     """Return Chroma-safe metadata for resolving vector hits back to PostgreSQL."""
     return {
         "database_version_id": rate.database_version.pk,
         "rate_master_id": rate.pk,
+        "product_id": rate.Product_ID or "",
+        "rate_id": rate.Rate_ID or "",
         "category": rate.Category or "",
         "sub_category": rate.Sub_Category or "",
         "class": rate.Class or "",
@@ -99,9 +105,9 @@ def rate_metadata(rate: Rate_Master) -> dict:
         "capacity": rate.Capacity or "",
         "unit": rate.Unit or "",
         "attribute": rate.Attribute or "",
-        "supplier": rate.Supplier or "",
-        "tech_key": rate.Tech_Key or "",
-        "final_amount_excl_gst": _scalar(rate.Final_Amount_Excl_GST),
+        "vendor": rate.Vendor or "",
+        "product_display_key": rate.display_key(),
+        "final_material_amount": _scalar(rate.Final_Material_Amount),
         "selection_amount": _scalar(selection_amount(rate)),
     }
 
@@ -113,6 +119,19 @@ class ChromaEmbeddingStore:
         self.path = Path(path or settings.CHROMA_PATH)
         self.path.mkdir(parents=True, exist_ok=True)
         self.collection_name = collection_name or settings.CHROMA_COLLECTION
+        self._connect()
+
+    def _connect(self, *, drop_cached_client: bool = False) -> None:
+        """
+        Open the persistent client and collection handle.
+
+        Chroma caches one system per path per process. A long-lived Celery worker
+        therefore keeps serving the segment it opened first, so a database re-import
+        (which rewrites every vector) leaves the worker querying ids that no longer
+        exist. ``drop_cached_client`` forces a genuinely fresh read of the files.
+        """
+        if drop_cached_client:
+            SharedSystemClient.clear_system_cache()
         self.client = chromadb.PersistentClient(
             path=str(self.path),
             settings=Settings(anonymized_telemetry=False),
@@ -140,18 +159,20 @@ class ChromaEmbeddingStore:
         limit: int = 20,
         database_version_id: int | None = None,
     ) -> list[dict]:
-        """Return nearest Rate_Master rows by embedding distance."""
+        """Return nearest Rate_Master_Output rows by embedding distance."""
         where_filter: Any = (
             {"database_version_id": int(database_version_id)}
             if database_version_id is not None
             else None
         )
-        result = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=max(1, limit),
-            where=cast(Any, where_filter),
-            include=["metadatas", "distances", "documents"],
-        )
+        try:
+            result = self._query(query_embedding, limit, where_filter)
+        except Exception:
+            # A re-import can invalidate the segment this process opened; reconnect once.
+            logger.warning("Chroma query failed; reopening the index and retrying")
+            self._connect(drop_cached_client=True)
+            result = self._query(query_embedding, limit, where_filter)
+
         ids = (result.get("ids") or [[]])[0]
         metadatas = (result.get("metadatas") or [[]])[0]
         distances = (result.get("distances") or [[]])[0]
@@ -176,16 +197,24 @@ class ChromaEmbeddingStore:
             )
         return hits
 
-    def upsert_rate(self, rate: Rate_Master, embedding: Sequence[float]) -> str:
-        """Upsert one Rate_Master row into Chroma and return its document id."""
+    def _query(self, query_embedding: list[float], limit: int, where_filter: Any):
+        return self.collection.query(
+            query_embeddings=[query_embedding],
+            n_results=max(1, limit),
+            where=cast(Any, where_filter),
+            include=["metadatas", "distances", "documents"],
+        )
+
+    def upsert_rate(self, rate: Rate_Master_Output, embedding: Sequence[float]) -> str:
+        """Upsert one Rate_Master_Output row into Chroma and return its document id."""
         return self.upsert_rates([rate], [embedding])[0]
 
     def upsert_rates(
         self,
-        rates: list[Rate_Master],
+        rates: list[Rate_Master_Output],
         embeddings: Sequence[Sequence[float]],
     ) -> list[str]:
-        """Upsert many Rate_Master rows into Chroma, one vector per row."""
+        """Upsert many Rate_Master_Output rows into Chroma, one vector per row."""
         if not rates:
             return []
         if len(rates) != len(embeddings):

@@ -4,19 +4,14 @@
 # Only the active upload keeps master sheet rows in PostgreSQL.
 DATABASE_UPLOADS_TO_RETAIN = 10
 
-# Master workbook sheet names (docs/DATABASE.md).
+# Master workbook sheets that are ingested into PostgreSQL (docs/DATABASE.md).
 REQUIRED_MASTER_SHEETS = [
-    "Rate_Master",
+    "Rate_Master_Output",
+    "Labour_master_Output",
 ]
 
-OPTIONAL_MASTER_SHEETS = [
-    "Labour_Master",
-    "TOR_Main",
-    "Labour_Structure_Source",
-    "TOR_Labour",
-    "TOR_Accessories",
-    "State_Control_List",
-]
+# Optional sheets are no longer ingested; other workbook sheets are counted for UI only.
+OPTIONAL_MASTER_SHEETS: list[str] = []
 
 MASTER_SHEETS = REQUIRED_MASTER_SHEETS + OPTIONAL_MASTER_SHEETS
 

@@ -40,7 +40,7 @@ def quantity_is_rate_sum_only(quantity: Any, *, rate_only: bool = False) -> bool
 
 
 class BOQLineOutputService:
-    """Combine BOQ quantity with Rate_Master / Labour_Master per-unit values."""
+    """Combine BOQ quantity with rate and labour output snapshots."""
 
     @staticmethod
     def build(
@@ -66,7 +66,8 @@ class BOQLineOutputService:
 
         qty = _to_decimal(quantity)
         material_rate = _to_decimal(
-            rate_detail.get("final_amount_excl_gst")
+            rate_detail.get("final_material_amount")
+            or rate_detail.get("selection_amount")
             or rate_detail.get("net_material_rate")
         )
         labour_rate = _to_decimal(

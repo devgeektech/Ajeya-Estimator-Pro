@@ -1,10 +1,10 @@
-"""Read precomputed Rate_Master values for matched BOQ lines."""
+"""Read precomputed Rate_Master_Output values for matched BOQ lines."""
 from __future__ import annotations
 
 from decimal import Decimal
 from typing import Any
 
-from apps.database_manager.models import Rate_Master
+from apps.database_manager.models import Rate_Master_Output, product_display_key
 
 
 def _decimal(value: Decimal | None) -> str | None:
@@ -13,11 +13,15 @@ def _decimal(value: Decimal | None) -> str | None:
     return format(value, "f")
 
 
-def rate_to_snapshot(rate: Rate_Master) -> dict[str, Any]:
-    """Return a JSON-safe snapshot of one Rate_Master row."""
+def rate_to_snapshot(rate: Rate_Master_Output) -> dict[str, Any]:
+    """Return a JSON-safe snapshot of one Rate_Master_Output row."""
     return {
         "rate_master_id": rate.pk,
-        "tech_key": rate.Tech_Key,
+        "rate_id": rate.Rate_ID,
+        "product_id": rate.Product_ID,
+        "product_display_key": rate.display_key(),
+        # Legacy analysis key used as display label in some UI paths.
+        "tech_key": rate.display_key(),
         "category": rate.Category,
         "sub_category": rate.Sub_Category,
         "class": rate.Class,
@@ -26,32 +30,33 @@ def rate_to_snapshot(rate: Rate_Master) -> dict[str, Any]:
         "capacity": rate.Capacity,
         "unit": rate.Unit,
         "attribute": rate.Attribute,
-        "supplier": rate.Supplier,
+        "vendor": rate.Vendor,
         "base_purchase_rate": _decimal(rate.Base_Purchase_Rate),
-        "discount_percent": _decimal(rate.Discount_Percent),
+        "discount": _decimal(rate.Discount),
         "net_material_rate": _decimal(rate.Net_Material_Rate),
         "procurement_value": _decimal(rate.Procurement_Value),
         "commercial_material_base": _decimal(rate.Commercial_Material_Base),
         "accessories_value": _decimal(rate.Accessories_Value),
         "handling_value": _decimal(rate.Handling_Value),
         "wastage_value": _decimal(rate.Wastage_Value),
-        "subtotal_before_profit": _decimal(rate.Subtotal_Before_Profit),
+        "sub_total": _decimal(rate.Sub_Total),
         "profit_value": _decimal(rate.Profit_Value),
-        "final_expenditure": _decimal(rate.Final_Expenditure),
-        "final_amount_excl_gst": _decimal(rate.Final_Amount_Excl_GST),
-        "margin_percent_on_selling": _decimal(rate.Margin_Percent_On_Selling),
+        "final_material_amount": _decimal(rate.Final_Material_Amount),
+        "margin_pct_on_selling": _decimal(rate.Margin_pct_on_Selling),
+        # Pricing amount used by Make & Vendor / export.
+        "selection_amount": _decimal(rate.Final_Material_Amount),
     }
 
 
 class RateDetailRetrievalService:
-    """Fetch Rate_Master snapshots by primary key."""
+    """Fetch Rate_Master_Output snapshots by primary key."""
 
     def __init__(self, database_version_id: int):
         self.database_version_id = database_version_id
 
     def get_by_id(self, rate_master_id: int) -> dict[str, Any] | None:
         rate = (
-            Rate_Master.objects.filter(
+            Rate_Master_Output.objects.filter(
                 pk=rate_master_id,
                 database_version_id=self.database_version_id,
             )
@@ -64,7 +69,7 @@ class RateDetailRetrievalService:
     def get_many_by_ids(self, rate_master_ids: list[int]) -> dict[int, dict[str, Any]]:
         if not rate_master_ids:
             return {}
-        rows = Rate_Master.objects.filter(
+        rows = Rate_Master_Output.objects.filter(
             pk__in=rate_master_ids,
             database_version_id=self.database_version_id,
         )

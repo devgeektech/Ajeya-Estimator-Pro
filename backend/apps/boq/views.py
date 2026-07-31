@@ -43,7 +43,6 @@ from .services.boq_status_display_service import (
     mark_exported_in_session,
     resolve_boq_database_label,
     resolve_detail_tab,
-    should_skip_attribute_enrichment,
 )
 from .services.serial_normalizer import (
     structure_for_analysis,
@@ -407,19 +406,6 @@ class BOQDetailView(LoginRequiredMixin, DetailView):
             if context["is_extracting"]
             else ""
         )
-
-        # Attach Rate_Master Attribute schemas for products analysed before enrichment.
-        # Skip after Make & Vendor unlock — rewriting rows can wipe vendor progress.
-        if (
-            (boq.analysis_data or {}).get("rows")
-            and not _job_is_running(boq)
-            and not should_skip_attribute_enrichment(boq)
-        ):
-            try:
-                if BOQAnalysisService(boq.pk).ensure_attribute_enrichment():
-                    boq.refresh_from_db(fields=["analysis_data"])
-            except Exception:
-                logger.exception("Attribute enrichment backfill failed for BOQ id=%s", boq.pk)
 
         context["extraction_display"] = BOQExtractionDisplayService(
             boq,
@@ -812,7 +798,7 @@ class BOQExtractionEditView(LoginRequiredMixin, View):
 
 
 class BOQMakeVendorSelectView(LoginRequiredMixin, View):
-    """Save make/supplier (product or category) and exact-match Rate_Master + rates."""
+    """Save make/vendor (product or category) and exact-match Rate_Master_Output + rates."""
 
     def post(self, request, pk: int):
         user = cast(User, request.user)
@@ -847,13 +833,13 @@ class BOQMakeVendorSelectView(LoginRequiredMixin, View):
                 category = (request.POST.get("category") or "").strip()
                 sub_category = (request.POST.get("sub_category") or "").strip()
                 make = (request.POST.get("make") or "").strip()
-                supplier = (request.POST.get("supplier") or "").strip()
+                vendor = (request.POST.get("vendor") or "").strip()
                 find_rates = (request.POST.get("find_rates") or "1").strip() != "0"
                 result = service.apply_subcategory_make(
                     category=category,
                     sub_category=sub_category,
                     make=make,
-                    supplier=supplier,
+                    vendor=vendor,
                     find_rates=find_rates,
                 )
                 message = (
@@ -913,7 +899,7 @@ class BOQMakeVendorSelectView(LoginRequiredMixin, View):
                     rate_master_id=rate_master_id,
                 )
                 message = (
-                    f"Selected supplier {result.get('supplier') or '—'} "
+                    f"Selected vendor {result.get('vendor') or '—'} "
                     f"({result.get('make') or '—'}) for same-price tie."
                 )
                 if ajax:
@@ -930,12 +916,12 @@ class BOQMakeVendorSelectView(LoginRequiredMixin, View):
             if action == "apply_category":
                 category = (request.POST.get("category") or "").strip()
                 make = (request.POST.get("make") or "").strip()
-                supplier = (request.POST.get("supplier") or "").strip()
+                vendor = (request.POST.get("vendor") or "").strip()
                 find_rates = (request.POST.get("find_rates") or "1").strip() != "0"
                 result = service.apply_category_make(
                     category=category,
                     make=make,
-                    supplier=supplier,
+                    vendor=vendor,
                     find_rates=find_rates,
                 )
                 message = (
@@ -950,7 +936,7 @@ class BOQMakeVendorSelectView(LoginRequiredMixin, View):
 
             row_id = (request.POST.get("row_id") or "").strip()
             make = (request.POST.get("make") or "").strip()
-            supplier = (request.POST.get("supplier") or "").strip()
+            vendor = (request.POST.get("vendor") or "").strip()
             try:
                 product_index = int(request.POST.get("product_index") or "0")
             except ValueError:
@@ -971,7 +957,7 @@ class BOQMakeVendorSelectView(LoginRequiredMixin, View):
                 row_id=row_id,
                 product_index=product_index,
                 make=make,
-                supplier=supplier,
+                vendor=vendor,
             )
             message = (
                 "Exact product matched and rates loaded."
@@ -992,7 +978,7 @@ class BOQMakeVendorSelectView(LoginRequiredMixin, View):
             messages.error(request, str(exc))
         except Exception:
             logger.exception("Make/vendor selection failed for BOQ id=%s", boq.pk)
-            message = "Failed to match make/supplier against the database."
+            message = "Failed to match make/vendor against the database."
             if ajax:
                 return _extraction_edit_json_error(message, status=500)
             messages.error(request, message)

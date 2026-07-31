@@ -3,99 +3,19 @@
 {% block heading %}Audit Log{% endblock %}
 
 {% block content %}
-<style>
-    .db-list-actions .btn--ghost {
-        background: #ffffff !important;
-        border: 1px solid #d0d7e2 !important;
-        color: #334155 !important;
-        border-radius: 8px;
-        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
-    }
-    .db-list-actions .btn--ghost:hover {
-        background: #f8fafc !important;
-        color: #0f172a !important;
-    }
-    .audit-list-toolbar {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: end;
-        gap: 10px;
-        margin: 0 0 14px;
-    }
-    .audit-list-toolbar__search {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        min-width: min(280px, 100%);
-        flex: 1 1 220px;
-    }
-    .audit-list-toolbar__label {
-        font-size: .75rem;
-        font-weight: 700;
-        color: var(--text);
-    }
-    .audit-list-toolbar .extraction-input {
-        width: 100%;
-    }
-    .audit-list-toolbar__hint {
-        font-size: .8rem;
-        margin-left: auto;
-    }
-    .table-sort {
-        color: inherit;
-        text-decoration: none;
-        white-space: nowrap;
-        display: inline-flex;
-        align-items: center;
-        gap: 5px;
-        cursor: pointer;
-    }
-    .table-sort:hover,
-    .table-sort.is-active {
-        color: #1d4ed8;
-    }
-    .table-sort__arrows {
-        display: inline-flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        line-height: 0.7;
-        gap: 1px;
-        font-size: 0.55rem;
-        color: #94a3b8;
-        vertical-align: middle;
-    }
-    .table-sort:hover .table-sort__arrows {
-        color: #64748b;
-    }
-    .table-sort.is-active.is-asc .table-sort__up,
-    .table-sort.is-active.is-desc .table-sort__down {
-        color: #1d4ed8;
-    }
-    .table-sort.is-active.is-asc .table-sort__down,
-    .table-sort.is-active.is-desc .table-sort__up {
-        color: #cbd5e1;
-    }
-    .audit-list-row.is-filtered-out {
-        display: none;
-    }
-</style>
-
 <div
-    class="panel"
     x-data="auditListFilter({ initialQuery: '{{ search_q|escapejs }}' })"
 >
-    <div class="audit-list-toolbar">
-        <label class="audit-list-toolbar__search">
-            <span class="audit-list-toolbar__label">Search</span>
-            <input
-                type="search"
-                class="extraction-input"
-                placeholder="Type to filter (word by word)…"
-                autocomplete="off"
-                x-model="query"
-            >
-        </label>
+    <div class="list-search">
+        <span class="list-search__label">Search :</span>
+        <input
+            type="search"
+            class="extraction-input list-search__input"
+            placeholder="Type to filter (word by word)…"
+            autocomplete="off"
+            x-model="query"
+            aria-label="Search"
+        >
         <button
             type="button"
             class="btn btn--small"
@@ -103,73 +23,74 @@
             x-cloak
             @click="clearFilter()"
         >Clear</button>
-        <span class="audit-list-toolbar__hint muted" x-text="filterHint"></span>
     </div>
 
-    <table class="table">
-        <thead>
-            <tr>
-                {% with base=request.path %}
-                <th style="text-align: left;">
-                    <a
-                        class="table-sort{% if sort == 'name' %} is-active is-{{ dir }}{% endif %}"
-                        href="{{ base }}?sort=name&dir={% if sort == 'name' and dir == 'asc' %}desc{% else %}asc{% endif %}"
-                        @click.prevent="goSort($event.currentTarget.href)"
-                        title="Sort by Name"
-                    >Name <span class="table-sort__arrows" aria-hidden="true"><span class="table-sort__up">▲</span><span class="table-sort__down">▼</span></span></a>
-                </th>
-                <th>
-                    <a
-                        class="table-sort{% if sort == 'action' %} is-active is-{{ dir }}{% endif %}"
-                        href="{{ base }}?sort=action&dir={% if sort == 'action' and dir == 'asc' %}desc{% else %}asc{% endif %}"
-                        @click.prevent="goSort($event.currentTarget.href)"
-                        title="Sort by Recent Action"
-                    >Recent Action <span class="table-sort__arrows" aria-hidden="true"><span class="table-sort__up">▲</span><span class="table-sort__down">▼</span></span></a>
-                </th>
-                <th>
-                    <a
-                        class="table-sort{% if sort == 'when' %} is-active is-{{ dir }}{% endif %}"
-                        href="{{ base }}?sort=when&dir={% if sort == 'when' and dir == 'asc' %}desc{% else %}asc{% endif %}"
-                        @click.prevent="goSort($event.currentTarget.href)"
-                        title="Sort by Recent Action Datetime"
-                    >Recent Action Datetime <span class="table-sort__arrows" aria-hidden="true"><span class="table-sort__up">▲</span><span class="table-sort__down">▼</span></span></a>
-                </th>
-                {% endwith %}
-                <th class="table__actions" style="text-align: left;">Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for u in users %}
-            <tr
-                class="audit-list-row"
-                data-search="{{ u.full_name|lower }} {{ u.email|lower }} {{ u.recent_action|default:''|lower }} {{ u.recent_action_datetime|date:'M d H:i'|lower }}"
-            >
-                <td style="text-align: left;">
-                    {{ u.full_name }}
-                    {% if u == request.user %}
-                    <span style="color: var(--text-muted); font-size: 0.85em; font-weight: normal; margin-left: 4px;">(You)</span>
-                    {% endif %}
-                </td>
-                <td>{{ u.recent_action|default:"—" }}</td>
-                <td>{{ u.recent_action_datetime|date:"M d, H:i"|default:"—" }}</td>
-                <td class="table__actions" style="text-align: left;">
-                    <div class="db-list-actions" style="display: flex; gap: 8px; align-items: center; justify-content: flex-start;">
-                        <a href="{% url 'audit:user_list' u.pk %}" class="btn btn--small btn--ghost" aria-label="View" title="View">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                        </a>
-                    </div>
-                </td>
-            </tr>
-            {% empty %}
-            <tr class="audit-list-empty-static">
-                <td colspan="4" class="table__empty">No audit entries found.</td>
-            </tr>
-            {% endfor %}
-            <tr class="audit-list-empty-filter" x-show="noMatches" x-cloak>
-                <td colspan="4" class="table__empty">No users match the search.</td>
-            </tr>
-        </tbody>
-    </table>
+    <div class="panel">
+        <table class="table">
+            <thead>
+                <tr>
+                    {% with base=request.path %}
+                    <th style="text-align: left;">
+                        <a
+                            class="table-sort{% if sort == 'name' %} is-active is-{{ dir }}{% endif %}"
+                            href="{{ base }}?sort=name&dir={% if sort == 'name' and dir == 'asc' %}desc{% else %}asc{% endif %}"
+                            @click.prevent="goSort($event.currentTarget.href)"
+                            title="Sort by Name"
+                        >Name <span class="table-sort__arrows" aria-hidden="true"><span class="table-sort__up">▲</span><span class="table-sort__down">▼</span></span></a>
+                    </th>
+                    <th style="text-align: left;">
+                        <a
+                            class="table-sort{% if sort == 'action' %} is-active is-{{ dir }}{% endif %}"
+                            href="{{ base }}?sort=action&dir={% if sort == 'action' and dir == 'asc' %}desc{% else %}asc{% endif %}"
+                            @click.prevent="goSort($event.currentTarget.href)"
+                            title="Sort by Recent Action"
+                        >Recent Action <span class="table-sort__arrows" aria-hidden="true"><span class="table-sort__up">▲</span><span class="table-sort__down">▼</span></span></a>
+                    </th>
+                    <th style="text-align: left;">
+                        <a
+                            class="table-sort{% if sort == 'when' %} is-active is-{{ dir }}{% endif %}"
+                            href="{{ base }}?sort=when&dir={% if sort == 'when' and dir == 'asc' %}desc{% else %}asc{% endif %}"
+                            @click.prevent="goSort($event.currentTarget.href)"
+                            title="Sort by Recent Action Datetime"
+                        >Recent Action Datetime <span class="table-sort__arrows" aria-hidden="true"><span class="table-sort__up">▲</span><span class="table-sort__down">▼</span></span></a>
+                    </th>
+                    {% endwith %}
+                    <th class="table__actions" style="text-align: left;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for u in users %}
+                <tr
+                    class="audit-list-row"
+                    data-search="{{ u.full_name|lower }} {{ u.email|lower }} {{ u.recent_action|default:''|lower }} {{ u.recent_action_datetime|date:'M d H:i'|lower }}"
+                >
+                    <td style="text-align: left;">
+                        {{ u.full_name }}
+                        {% if u == request.user %}
+                        <span style="color: var(--text-muted); font-size: 0.85em; font-weight: normal; margin-left: 4px;">(You)</span>
+                        {% endif %}
+                    </td>
+                    <td style="text-align: left;">{{ u.recent_action|default:"—" }}</td>
+                    <td style="text-align: left;">{{ u.recent_action_datetime|date:"M d, H:i"|default:"—" }}</td>
+                    <td class="table__actions" style="text-align: left;">
+                        <div class="list-actions">
+                            <a href="{% url 'audit:user_list' u.pk %}" class="btn btn--small btn--ghost" aria-label="View" title="View">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                            </a>
+                        </div>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr class="audit-list-empty-static">
+                    <td colspan="4" class="table__empty">No audit entries found.</td>
+                </tr>
+                {% endfor %}
+                <tr class="audit-list-empty-filter" x-show="noMatches" x-cloak>
+                    <td colspan="4" class="table__empty">No users match the search.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
 </div>
 
 {% if page_obj.has_other_pages %}
@@ -191,13 +112,6 @@ document.addEventListener('alpine:init', () => {
         visibleCount: 0,
         totalCount: 0,
         noMatches: false,
-        get filterHint() {
-            if (!this.totalCount) return '';
-            if (!String(this.query || '').trim()) {
-                return `${this.totalCount} user${this.totalCount === 1 ? '' : 's'}`;
-            }
-            return `${this.visibleCount} of ${this.totalCount}`;
-        },
         init() {
             this.$watch('query', () => this.applyFilter());
             this.$nextTick(() => this.applyFilter());

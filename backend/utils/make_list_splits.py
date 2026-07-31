@@ -31,7 +31,6 @@ _MAKE_HEADER_STRONG = (
     "brand",
     "brands",
     "vendor",
-    "supplier",
 )
 
 # Header tokens that strongly suggest material / description (not makes).

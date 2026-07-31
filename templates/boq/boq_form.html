@@ -38,7 +38,6 @@
         </label>
 
         <div class="form-actions">
-            <a href="{% url 'boq:list' %}" class="btn btn--ghost">Cancel</a>
             {# type=button avoids native form submit (which reloads and clears file inputs) #}
             <button type="button" class="btn btn--primary" id="boq-upload-submit">Upload BOQ</button>
         </div>
@@ -177,7 +176,14 @@
                 nameInput.focus();
             }
         } catch (err) {
-            showErrors({ __all__: [err.message || 'Upload failed.'] });
+            // A dropped connection surfaces as the browser's bare "Failed to fetch".
+            console.error('BOQ upload request failed', err);
+            showErrors({
+                __all__: [
+                    'Could not reach the server, so nothing was uploaded. Your files are '
+                    + 'still selected — check that the server is running and try again.',
+                ],
+            });
         } finally {
             submitBtn.disabled = false;
             submitBtn.textContent = previousLabel || 'Upload BOQ';

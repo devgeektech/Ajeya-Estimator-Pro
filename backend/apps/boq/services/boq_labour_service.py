@@ -1,4 +1,4 @@
-"""Labour charges after Make & Vendor — Auto (Labour_Master) or Manual (% of material)."""
+"""Labour charges after Make & Vendor using Labour_master_Output or manual rates."""
 from __future__ import annotations
 
 import logging
@@ -122,7 +122,7 @@ class BOQLabourService:
         return {"status": BOQStatus.LABOUR, "mode": config.get("mode") or "auto"}
 
     def apply_auto(self) -> dict[str, Any]:
-        """Fill labour from Labour_Master by each product Tech_Key."""
+        """Fill labour from Labour_master_Output by each selected Product_ID."""
         boq = self._get_boq()
         self._ensure_labour_editable(boq)
         database_version_id = self._database_version_id(boq)
@@ -151,17 +151,12 @@ class BOQLabourService:
             for index, product in enumerate(products):
                 selection = dict(product.get("vendor_selection") or {})
                 rate_detail = selection.get("rate_detail")
-                tech_key = str(
-                    selection.get("tech_key")
-                    or (rate_detail or {}).get("tech_key")
-                    or ""
-                ).strip()
+                product_id = selection.get("product_id") or (rate_detail or {}).get(
+                    "product_id"
+                )
                 labour_detail = None
-                if tech_key:
-                    labour_detail = labour_service.get_by_tech_key(
-                        tech_key,
-                        size=product.get("size"),
-                    )
+                if product_id not in (None, ""):
+                    labour_detail = labour_service.get_by_product_id(product_id)
                 is_pending = not rate_detail or selection.get("status") not in {
                     "matched",
                     "pending",
@@ -194,7 +189,7 @@ class BOQLabourService:
                 updated += 1
                 if labour_detail and line_output.get("labour_rate"):
                     with_labour += 1
-                elif tech_key:
+                elif product_id not in (None, ""):
                     missing += 1
                 else:
                     missing += 1
@@ -291,7 +286,8 @@ class BOQLabourService:
                 material_rate = _to_decimal(base_line.get("material_rate"))
                 if material_rate is None and rate_detail:
                     material_rate = _to_decimal(
-                        rate_detail.get("final_amount_excl_gst")
+                        rate_detail.get("final_material_amount")
+                        or rate_detail.get("selection_amount")
                         or rate_detail.get("net_material_rate")
                     )
                 product_qty = (
@@ -491,9 +487,13 @@ class BOQLabourService:
                     mode_label = "Manual"
                 else:
                     mode_label = "Auto"
+                rate_detail = selection.get("rate_detail") or {}
+                product_id = selection.get("product_id") or rate_detail.get("product_id")
                 tech_key = str(
                     selection.get("tech_key")
-                    or ((selection.get("rate_detail") or {}).get("tech_key") or "")
+                    or rate_detail.get("product_display_key")
+                    or rate_detail.get("tech_key")
+                    or ""
                 ).strip()
                 has_labour = _has_positive_labour(labour_rate, labour_amount)
                 if has_labour:
@@ -516,9 +516,10 @@ class BOQLabourService:
                         "make": selection.get("make")
                         or product.get("selected_make")
                         or "",
-                        "supplier": selection.get("supplier")
-                        or product.get("selected_supplier")
+                        "vendor": selection.get("vendor")
+                        or product.get("selected_vendor")
                         or "",
+                        "product_id": product_id,
                         "tech_key": tech_key,
                         "status": selection.get("status") or "not_searched",
                         "labour_mode": labour_mode,

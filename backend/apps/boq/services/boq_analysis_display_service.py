@@ -170,7 +170,7 @@ class BOQAnalysisDisplayService:
                 "rate_master_id": rate_detail.get("rate_master_id"),
                 "tech_key": rate_detail.get("tech_key"),
                 "make": rate_detail.get("make"),
-                "supplier": rate_detail.get("supplier"),
+                "vendor": rate_detail.get("vendor"),
                 "category": rate_detail.get("category"),
                 "sub_category": rate_detail.get("sub_category"),
             }

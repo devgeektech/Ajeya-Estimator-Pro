@@ -14,51 +14,76 @@ Schema and import rules for PostgreSQL. Update when models or migrations change.
 
 ## Upload History
 
-`DatabaseVersion` tracks each master workbook upload.
+`DatabaseVersion` tracks each master database workbook upload.
 
 - `version_number` — monotonic display sequence
 - `is_active` — only one row may be `True` (partial unique constraint)
 - Retention: keep the **last 10** uploads for view/download (metadata + workbook file)
-- Master sheet rows (`Rate_Master`, `Labour_Master`, etc.) are stored in PostgreSQL
-  **only for the active** upload; inactive versions keep their workbook only
+- Master sheet rows are stored in PostgreSQL **only for the active** upload;
+  inactive versions keep their workbook only
+- Stored file is renamed with a datetime stamp
+  (`{stem}_{YYYYMMDD_HHMMSS}.xlsx`); download still uses original
+  `source_filename`
 - **No rollback** — new upload replaces the active database
 
 ---
 
 ## Master Workbook Sheets
 
-Imported into versioned tables (PascalCase ORM fields mirror workbook columns).
+Uploaded workbooks may contain many sheets. **Only these two are ingested** into
+PostgreSQL (both required). Other sheets are counted for the database detail UI
+only.
 
-| Sheet | Model | Required |
+| Sheet | Model / table | Required |
 | --- | --- | --- |
-| `Rate_Master` | `Rate_Master` | **Yes** |
-| `Labour_Master` | `Labour_Master` | No |
-| `TOR_Main` | `TOR_Main` | No |
-| `Labour_Structure_Source` | `Labour_Structure_Source` | No |
-| `TOR_Labour` | `TOR_Labour` | No |
-| `TOR_Accessories` | `TOR_Accessories` | No |
-| `State_Control_List` | `State_Control_List` | No |
+| `Rate_Master_Output` | `Rate_Master_Output` | **Yes** |
+| `Labour_master_Output` | `Labour_master_Output` | **Yes** |
+
+**Removed (no longer imported or modeled):** `Rate_Master`, `Labour_Master`,
+`TOR_Main`, `TOR_Labour`, `TOR_Accessories`, `Labour_Structure_Source`,
+`State_Control_List`.
 
 **Import rules:**
 
-- Validate structure before any DB write.
-- Blank cells → `NULL` (not empty string / zero).
-- Skip optional sheets not present in the workbook.
+- Validate that both required sheets are present before any DB write.
+- Blank / non-numeric formula placeholders (`<<`, `Base_Rate missing`, …) → `NULL`.
 - All master rows carry `database_version_id`.
 - Model and table names match workbook sheet names exactly.
+- `Product_ID` (both sheets) and `Rate_ID` are **text** (`varchar(64)`): codes
+  like `P1001` and plain numbers like `1001` are both accepted. Whole numbers
+  read from Excel as `1001.0` are trimmed to `1001` so rate and labour rows stay
+  linked. Rows without a `Product_ID` (plus `Category` for rates) are skipped.
+- If a required sheet has rows but **none** are importable, the import fails
+  with the offending column names and nothing is activated; the previous active
+  version stays intact.
 
-**Key fields on `Rate_Master`:** `Category`, `Sub_Category`, `Class`, `Size`,
-`Make`, `Capacity`, `Unit`, `Attribute`, `Supplier`, `Tech_Key`, rate columns
-(`Base_Purchase_Rate`, `Net_Material_Rate`, `Final_Amount_(Excl GST)`, etc.).
+### `Rate_Master_Output`
 
-**`Tech_Key`:** indexed, links to `Labour_Master`; not globally unique.
+One priced Make/Vendor row. Key fields:
 
-**Labour charge columns on `Labour_Master`:** `Labour_Rate_Per_unit`, `Testing_Labour_Value`,
-`Scaffolding_Labour_Value`, `Consumables_Labour_Value`, `Painting_Labour_Value`,
-`Labour_Buffer_Value`, `Total_Labour_per_Unit`, `Labour_Multiplier`,
-`Total_Labour_per_unit_with_labour_Multipler`. BOQ analysis reads these by `Tech_Key`
-(size match when multiple rows exist); effective per-unit labour prefers the total-with-multiplier
-column, then total per unit, then base labour rate.
+`Rate_ID`, `Product_ID`, `Category`, `Sub_Category`, `Class`, `Size`, `Unit`,
+`Capacity`, `Attribute`, `Make`, `Vendor`, `Base_Purchase_Rate`, `Last_Updated`,
+`Discount`, `Net_Material_Rate`, cost-build columns, **`Final_Material_Amount`**
+(amount used by BOQ Make & Vendor / pricing), `Margin_pct_on_Selling`.
+
+- **`Product_ID`** — product identity (text); link to labour (1 labour row per
+  product). Not a database FK — matched on the string value.
+- **`Rate_ID`** — identity of this priced rate row (text; Make/Vendor variant).
+  Internal references (`rate_master_id`, `db_product_id`) use the integer PK and
+  are unaffected by the text IDs.
+- UI display key (not stored as Tech_Key):  
+  `Category|Sub_Category|Class|Size|Capacity|Attribute` via `product_display_key()`.
+- Embeddings: **one Chroma vector per rate row**, metadata includes `Product_ID`.
+
+### `Labour_master_Output`
+
+One labour row per `Product_ID`. Key fields mirror product taxonomy plus labour
+columns. BOQ Auto labour uses
+**`Total_Labour_per_unit_with_labour_Multipler`** (Excel header may include
+spaces; importer normalizes). Category-wise labour % remains a Labour-page UI
+feature (not this sheet).
+
+---
 
 ## BOQ Tables (current)
 
@@ -68,12 +93,12 @@ column, then total per unit, then base labour rate.
 | --- | --- |
 | `user` | Owner |
 | `boq_name` | Display name; **unique** (case-insensitive) — maps to `media/extract_json/{boq_name}/` |
-| `status` | `UPLOADED`, `PROCESSING`, `EXTRACTED`, `MATCHING`, `PROCESSED`, `ANALYSIS_FAILED` |
+| `status` | `UPLOADED`, `PROCESSING`, `EXTRACTED`, `MAKE_VENDOR`, `LABOUR`, … |
 | `uploaded_file` | Original workbook |
 | `make_list_file` | Optional (Excel or PDF) |
 | `boq_data` | Normalized BOQ JSON (headers + hierarchical rows) |
 | `make_list_data` | Normalized make-list JSON |
-| `analysis_data` | AI extraction + matching + rate/labour enrichment (schema v2) |
+| `analysis_data` | AI extraction + matching + rate/labour enrichment |
 | `created_at` | Timestamp |
 
 **`boq_data` / `make_list_data` row shape (flat list, hierarchy via fields):**
@@ -88,16 +113,6 @@ column, then total per unit, then base labour rate.
 | `display_values` | UI-safe cell values keyed by normalized header |
 | `values` | Raw parsed cell values |
 
-**`rows_tree`** (nested, for AI extraction): each node has `fields`
-(cleaned `display_values`), `children`, plus `row_id`, `serial`, `depth`.
-Use `rows_tree` for product/activity extraction; keep flat `rows` for UI/review.
-
-Serial rules: `1` → depth 0; `1.1` → child of `1`; `a` / `(a)` → child of
-current parent; `(1)` → child of serial `1`.
-
-`BOQRun`, `BOQItem`, `ProductMatch`, and related pipeline tables were dropped
-in migration `boq.0003` and `database_manager.0010`.
-
 ---
 
 ## System Tables
@@ -110,50 +125,23 @@ in migration `boq.0003` and `database_manager.0010`.
 
 ## Embeddings
 
-After each successful import, `generate_embeddings_for_version()` in
-`ai/embeddings/generator.py` indexes active `Rate_Master` rows into Chroma.
+After each successful import, `generate_embeddings_for_version()` indexes active
+`Rate_Master_Output` rows into Chroma (one vector per rate row).
 
-Embeddings are generated in **batches** (default 500 rows per OpenAI request)
-but stored **row-wise**: one Chroma record per `Rate_Master` row with its own
-vector, document text, and metadata.
+**Embedded text fields:** Product_ID, Category, Sub Category, Class, Size, Make,
+Capacity, Unit, Attribute, Vendor.
 
-**Embedded text fields** (structured `Label: value` lines):
-
-Category, Sub Category, Class, Size, Make, Capacity, Unit, Attribute, Supplier,
-Tech_Key
-
-**Metadata** mirrors the same fields plus `rate_master_id` and
-`database_version_id` for resolving hits back to PostgreSQL.
-
-Only the **active** database has embeddings; the Chroma collection is cleared
-before each import indexes the new active rows.
+Taxonomy for AI extract/map comes from distinct Category / Sub_Category on
+`Rate_Master_Output`.
 
 ---
 
-## Migrations
+## Pricing (active rule)
 
-Fresh initial migrations (2026-07-10 reset). Each app has a single `0001_initial`:
+For a selected rate row and its labour row (`Product_ID`):
 
-| App | Migration |
-| --- | --- |
-| `accounts` | `0001_initial` — `User` |
-| `audit` | `0001_initial` — `AuditLog` |
-| `boq` | `0001_initial` — `BOQ` |
-| `database_manager` | `0001_initial` — `DatabaseVersion` + 7 master tables |
-| `notifications` | `0001_initial` — `Notification` |
-
-Apply with:
-
-```bash
-cd backend
-../.venv/bin/python manage.py migrate
+```text
+(Final_Material_Amount + Total_Labour_per_unit_with_labour_Multipler) × Qty
 ```
 
-On a **new PostgreSQL database** (especially PG 15+), grant schema access before
-the first migrate:
-
-```sql
-GRANT ALL ON SCHEMA public TO boq_user;
-GRANT CREATE ON SCHEMA public TO boq_user;
-ALTER DATABASE boq_db OWNER TO boq_user;
-```
+Category labour % on the Labour page is applied separately in UI/config.

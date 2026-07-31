@@ -214,13 +214,44 @@ class MakeListCategoryMappingService:
         self._ai = AIService()
         self._taxonomy = load_rate_master_taxonomy(database_version_id)
 
-    def map_payload(self, payload: dict | None) -> dict:
+    @staticmethod
+    def _mapping_attempted(item: dict) -> bool:
+        """
+        True when this material has already been through a real mapping pass.
+
+        A material that was mapped and genuinely matched no category is stored as
+        ``unmapped``; that is a final answer. Only ``pending`` stubs — written when
+        the Rate_Master_Output taxonomy was empty — are worth retrying. Without
+        this distinction every unmatched material would re-trigger the AI pass on
+        each page load.
+        """
+        if str(item.get("mapped_category") or "").strip():
+            return True
+        return str(item.get("source") or "").strip().lower() in {"ai", "unmapped"}
+
+    @classmethod
+    def _mappings_incomplete(cls, mappings: list | None) -> bool:
+        """True when mappings are missing or some material was never mapped."""
+        if not mappings:
+            return True
+        return any(not cls._mapping_attempted(item) for item in mappings)
+
+    def _can_improve_mappings(self) -> bool:
+        """Remapping only helps when Rate_Master_Output taxonomy is available."""
+        return bool(self._taxonomy.get("categories"))
+
+    def map_payload(self, payload: dict | None, *, force: bool = False) -> dict:
         """Return make-list payload with ``category_mappings`` and per-row category fields."""
         if not payload or not (payload.get("rows") or []):
             return payload or {}
 
-        if payload.get("category_mappings"):
-            return self._apply_mappings_to_rows(dict(payload), payload["category_mappings"])
+        existing = payload.get("category_mappings")
+        if (
+            not force
+            and existing
+            and not self._mappings_incomplete(existing)
+        ):
+            return self._apply_mappings_to_rows(dict(payload), existing)
 
         categories = list(self._taxonomy.get("categories") or [])
         materials = _materials_from_payload(payload)
@@ -229,18 +260,51 @@ class MakeListCategoryMappingService:
             enriched["category_mappings"] = []
             return enriched
 
+        if not categories:
+            # Keep prior stubs (if any) but do not invent categories without taxonomy.
+            logger.warning(
+                "Make-list category mapping skipped: Rate_Master_Output taxonomy is empty"
+            )
+            if existing is not None:
+                return self._apply_mappings_to_rows(dict(payload), existing)
+            enriched = dict(payload)
+            enriched["category_mappings"] = [
+                {
+                    "material": item["material"],
+                    "material_ref": f"m{index}",
+                    "approved_makes_list": list(item.get("approved_makes_list") or []),
+                    "mapped_category": None,
+                    "mapped_sub_category": None,
+                    "confidence": 0.0,
+                    "source": "pending",
+                    "notes": "Rate_Master_Output taxonomy empty",
+                }
+                for index, item in enumerate(materials)
+            ]
+            return self._apply_mappings_to_rows(enriched, enriched["category_mappings"])
+
         mappings = self._map_materials(materials, categories)
         enriched = dict(payload)
         enriched["category_mappings"] = mappings
         return self._apply_mappings_to_rows(enriched, mappings)
 
     def ensure_mappings(self, payload: dict | None) -> dict:
-        """Map when ``category_mappings`` is missing; otherwise return payload as-is."""
+        """
+        Ensure make-list rows have category mappings.
+
+        Remaps when mappings are missing or incomplete (pending / null category)
+        and Rate_Master_Output taxonomy is available. Incomplete stubs left from an
+        empty database no longer permanently block remapping.
+        """
         if not payload:
             return {}
-        if payload.get("category_mappings") is not None:
-            # Still backfill row fields if mappings exist but rows lack category.
-            return self._apply_mappings_to_rows(dict(payload), payload.get("category_mappings") or [])
+        existing = payload.get("category_mappings")
+        if existing is not None and not self._mappings_incomplete(existing):
+            return self._apply_mappings_to_rows(dict(payload), existing)
+        if existing is not None and self._mappings_incomplete(existing):
+            if self._can_improve_mappings():
+                return self.map_payload(payload, force=True)
+            return self._apply_mappings_to_rows(dict(payload), existing)
         return self.map_payload(payload)
 
     def _map_materials(

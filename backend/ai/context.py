@@ -5,7 +5,7 @@ import json
 import re
 from typing import Any
 
-from apps.database_manager.models import Rate_Master
+from apps.database_manager.models import Rate_Master_Output
 from apps.database_manager.services.activation import get_active_database_version
 from utils.attribute_parser import learn_aliases_from_attributes, parse_attributes
 
@@ -19,7 +19,7 @@ def load_rate_master_taxonomy(
     database_version_id: int | None = None,
 ) -> dict[str, Any]:
     """
-    Return Rate_Master category / sub-category taxonomy for the active (or given) DB.
+    Return Rate_Master_Output taxonomy for the active (or given) database.
 
     Shape::
         {
@@ -38,7 +38,7 @@ def load_rate_master_taxonomy(
     if version is None:
         return {"categories": [], "sub_categories_by_category": {}}
 
-    rows = Rate_Master.objects.filter(database_version=version).values_list(
+    rows = Rate_Master_Output.objects.filter(database_version=version).values_list(
         "Category",
         "Sub_Category",
     )
@@ -134,7 +134,7 @@ def snap_product_taxonomy(
     product: dict[str, Any],
     taxonomy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Snap product category / sub_category onto Rate_Master labels when possible."""
+    """Snap product category/sub_category onto Rate_Master_Output labels."""
     taxonomy = taxonomy or load_rate_master_taxonomy()
     categories = list(taxonomy.get("categories") or [])
     by_category = dict(taxonomy.get("sub_categories_by_category") or {})
@@ -166,7 +166,7 @@ def align_product_taxonomy_from_db_labels(
     sub_category: Any = None,
     taxonomy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Align extracted category/sub_category with matched Rate_Master labels."""
+    """Align extracted taxonomy with matched Rate_Master_Output labels."""
     item = dict(product)
     if category not in (None, ""):
         item["category"] = str(category).strip()
@@ -185,16 +185,16 @@ def _is_blank(value: Any) -> bool:
 
 def fill_product_core_fields_from_rate(
     product: dict[str, Any],
-    rate: Rate_Master,
+    rate: Rate_Master_Output,
     *,
     overwrite: bool = False,
 ) -> dict[str, Any]:
     """
-    Copy core Rate_Master identity fields onto the extracted product.
+    Copy core Rate_Master_Output identity fields onto the extracted product.
 
     Analysis owns product identity (not make). Blank fields are always filled.
     When ``overwrite`` is True (confirmed DB match), replace AI values that
-    disagree with the matched Rate_Master row so experts need not Re-analyse
+    disagree with the matched Rate_Master_Output row so experts need not Re-analyse
     only to pick up DB class/size/unit/capacity.
     """
     item = dict(product)
@@ -232,12 +232,12 @@ def fill_product_core_fields_from_rate(
 
 def align_product_taxonomy_from_rate(
     product: dict[str, Any],
-    rate: Rate_Master,
+    rate: Rate_Master_Output,
     *,
     taxonomy: dict[str, Any] | None = None,
     overwrite_core_fields: bool = False,
 ) -> dict[str, Any]:
-    """Set product taxonomy (+ optional core fields) from a Rate_Master row."""
+    """Set product taxonomy and core fields from a Rate_Master_Output row."""
     item = align_product_taxonomy_from_db_labels(
         product,
         category=rate.Category,
@@ -265,7 +265,7 @@ def build_database_context() -> str:
             ensure_ascii=False,
         )
 
-    rows = Rate_Master.objects.filter(database_version=version).values_list(
+    rows = Rate_Master_Output.objects.filter(database_version=version).values_list(
         "Attribute",
         flat=True,
     )

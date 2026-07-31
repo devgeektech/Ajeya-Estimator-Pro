@@ -1,4 +1,4 @@
-"""Structured + vector product matching against active Rate_Master."""
+"""Structured + vector product matching against active Rate_Master_Output."""
 from __future__ import annotations
 
 import logging
@@ -7,7 +7,7 @@ from typing import Any, cast
 
 from ai.embeddings.chroma_store import ChromaEmbeddingStore, rate_document, selection_amount
 from ai.embeddings.generator import generate_embedding, generate_embeddings
-from apps.database_manager.models import Rate_Master
+from apps.database_manager.models import Rate_Master_Output
 from common.constants import MATCH_CONFIDENCE_THRESHOLD
 from common.exceptions import AIServiceError
 
@@ -79,7 +79,10 @@ def _size_match_score(left: Any, right: Any) -> float:
     return 0.0
 
 
-def structured_match_score(extracted: dict[str, Any], rate: Rate_Master) -> tuple[float, dict[str, Any]]:
+def structured_match_score(
+    extracted: dict[str, Any],
+    rate: Rate_Master_Output,
+) -> tuple[float, dict[str, Any]]:
     """Return 0-100 structured score using product fields only (never make/vendor)."""
     extracted_attrs = {
         str(key): str(value)
@@ -141,7 +144,7 @@ def build_match_query_text(extracted: dict[str, Any]) -> str:
         extracted.get("size"),
         extracted.get("unit"),
         extracted.get("capacity"),
-        # Intentionally omit make_hint / supplier — product identity only.
+        # Intentionally omit make_hint / vendor — product identity only.
     ]
     attrs = extracted.get("attributes") or {}
     for key, value in attrs.items():
@@ -156,7 +159,7 @@ def build_match_query_text(extracted: dict[str, Any]) -> str:
 
 
 class ProductMatchingService:
-    """Match extracted products to Rate_Master using Chroma recall + structured scoring."""
+    """Match products to Rate_Master_Output using vector recall and structured scoring."""
 
     def __init__(self, database_version_id: int):
         self.database_version_id = database_version_id
@@ -185,6 +188,11 @@ class ProductMatchingService:
             )
         except AIServiceError:
             logger.warning("Chroma query skipped; falling back to structured SQL filter")
+            hits = []
+        except Exception:
+            # Vector recall is an optimisation. Losing it must not lose the match,
+            # otherwise one bad index read strips confidence from the whole BOQ.
+            logger.exception("Chroma recall failed; falling back to structured SQL filter")
             hits = []
 
         return self._rank_candidates(
@@ -243,9 +251,11 @@ class ProductMatchingService:
             candidates.append(
                 {
                     "rate_master_id": rate.pk,
-                    "tech_key": rate.Tech_Key,
+                    "product_id": rate.Product_ID,
+                    "rate_id": rate.Rate_ID,
+                    "tech_key": rate.display_key(),
                     "make": rate.Make,
-                    "supplier": rate.Supplier,
+                    "vendor": rate.Vendor,
                     "confidence": round(confidence, 2),
                     "chroma_similarity": round(chroma_score, 2),
                     "structured_score": round(structured, 2),
@@ -289,9 +299,11 @@ class ProductMatchingService:
             "candidates": [
                 {
                     "rate_master_id": item["rate_master_id"],
+                    "product_id": item["product_id"],
+                    "rate_id": item["rate_id"],
                     "tech_key": item["tech_key"],
                     "make": item["make"],
-                    "supplier": item["supplier"],
+                    "vendor": item["vendor"],
                     "confidence": item["confidence"],
                     "chroma_similarity": item["chroma_similarity"],
                     "structured_score": item["structured_score"],
@@ -303,24 +315,28 @@ class ProductMatchingService:
         if best and confidence >= MATCH_CONFIDENCE_THRESHOLD:
             result["selected"] = {
                 "rate_master_id": best["rate_master_id"],
+                "product_id": best["product_id"],
+                "rate_id": best["rate_id"],
                 "tech_key": best["tech_key"],
                 "make": best["make"],
-                "supplier": best["supplier"],
+                "vendor": best["vendor"],
                 "selection_amount": best.get("selection_amount"),
             }
         return result
 
-    def _load_rates(self, rate_ids: list[int]) -> dict[int, Rate_Master]:
+    def _load_rates(self, rate_ids: list[int]) -> dict[int, Rate_Master_Output]:
         if not rate_ids:
             return {}
-        rows = Rate_Master.objects.filter(
+        rows = Rate_Master_Output.objects.filter(
             pk__in=rate_ids,
             database_version_id=self.database_version_id,
         )
         return {row.pk: row for row in rows}
 
     def _sql_fallback_candidates(self, extracted: dict[str, Any]) -> list[dict[str, Any]]:
-        queryset = Rate_Master.objects.filter(database_version_id=self.database_version_id)
+        queryset = Rate_Master_Output.objects.filter(
+            database_version_id=self.database_version_id
+        )
         # Apply filters only for filled properties — never constrain on null/blank.
         category = extracted.get("category")
         if _is_filled(category):
@@ -341,9 +357,11 @@ class ProductMatchingService:
             candidates.append(
                 {
                     "rate_master_id": rate.pk,
-                    "tech_key": rate.Tech_Key,
+                    "product_id": rate.Product_ID,
+                    "rate_id": rate.Rate_ID,
+                    "tech_key": rate.display_key(),
                     "make": rate.Make,
-                    "supplier": rate.Supplier,
+                    "vendor": rate.Vendor,
                     "confidence": round(structured, 2),
                     "chroma_similarity": 0.0,
                     "structured_score": round(structured, 2),

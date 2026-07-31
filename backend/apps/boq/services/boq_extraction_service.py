@@ -23,6 +23,17 @@ logger = logging.getLogger("boq_ai")
 
 _QTY_KEYS = ("qty", "quantity", "qnty", "nos")
 _MAX_BATCH_CHARS = 14000
+_MINIMUM_SLOT_RETRY_INSTRUCTION = """
+
+CORRECTION — MINIMUM SLOT COVERAGE IS MANDATORY:
+- The previous response may have omitted products.
+- For every input section, return at least ``slot_count`` products.
+- Every object in ``slots`` must be represented by at least one product carrying
+  that slot's ``qty_row_id``, quantity, and quantity_unit.
+- Preserve every separately purchasable extra product evidenced by the BOQ; the
+  slot count is a minimum, not a cap.
+- Return the complete corrected rows JSON, not only the missing products.
+"""
 
 
 def _extract_batch_size() -> int:
@@ -62,6 +73,8 @@ _SPEC_LABEL_ONLY = re.compile(
 
 def _is_spec_only_product(product: dict[str, Any]) -> bool:
     """Drop spec-label rows the model may still return as products."""
+    if product.get("slot_fallback"):
+        return False
     hint = str(product.get("description_hint") or "").strip()
     if not hint:
         return False
@@ -560,6 +573,120 @@ def _compact_anchor_payload(group: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _group_slots(group: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return the authoritative filled Unit/Qty slots for one section."""
+    return list(group.get("slots") or group.get("qty_rows") or [])
+
+
+def _slot_row_id(slot: dict[str, Any]) -> str:
+    return str(slot.get("qty_row_id") or slot.get("row_id") or "").strip()
+
+
+def _missing_product_slots(
+    group: dict[str, Any],
+    row: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Find filled Unit/Qty slots not represented by any extracted product."""
+    slots = _group_slots(group)
+    if not slots:
+        return []
+    products = list(row.get("products") or [])
+    covered_ids = {
+        str(product.get("qty_row_id") or product.get("source_row_id") or "").strip()
+        for product in products
+        if str(product.get("qty_row_id") or product.get("source_row_id") or "").strip()
+    }
+    missing: list[dict[str, Any]] = []
+    for index, slot in enumerate(slots):
+        row_id = _slot_row_id(slot)
+        if row_id:
+            if row_id not in covered_ids:
+                missing.append(slot)
+            continue
+        # Defensive fallback for malformed legacy slots without row ids.
+        if index >= len(products):
+            missing.append(slot)
+    return missing
+
+
+def _slot_fallback_product(
+    group: dict[str, Any],
+    slot: dict[str, Any],
+    *,
+    product_index: int,
+) -> dict[str, Any]:
+    """
+    Preserve a filled BOQ slot if AI still omits it after the correction pass.
+
+    This does not invent catalog facts. It keeps the slot's BOQ evidence visible
+    for expert review and downstream matching instead of silently losing a line.
+    """
+    evidence = str(
+        slot.get("evidence_text")
+        or slot.get("description")
+        or group.get("full_description")
+        or "Product from BOQ Unit/Qty row"
+    ).strip()
+    row_id = _slot_row_id(slot)
+    product = {
+        "product_index": product_index,
+        "source_row_id": row_id,
+        "qty_row_id": row_id,
+        "slot_index": slot.get("slot_index", product_index),
+        "slot_id": slot.get("slot_id"),
+        "description_hint": evidence[:500],
+        "category": None,
+        "sub_category": None,
+        "class": None,
+        "size": None,
+        "unit": None,
+        "capacity": None,
+        "make_hint": None,
+        "attributes": {},
+        "extraction_confidence": 0.0,
+        "slot_fallback": True,
+        "needs_extraction_review": True,
+    }
+    return _apply_one_qty(
+        _normalize_product_fields(product),
+        qty=slot.get("qty"),
+        unit=slot.get("unit"),
+        qty_status=slot.get("qty_status"),
+        boq_rate=slot.get("boq_rate"),
+    )
+
+
+def _ensure_minimum_slot_products(
+    group: dict[str, Any],
+    row: dict[str, Any],
+) -> dict[str, Any]:
+    """Guarantee one visible product per filled Unit/Qty slot."""
+    missing_slots = _missing_product_slots(group, row)
+    if not missing_slots:
+        return row
+    updated = dict(row)
+    products = list(updated.get("products") or [])
+    for slot in missing_slots:
+        products.append(
+            _slot_fallback_product(
+                group,
+                slot,
+                product_index=len(products),
+            )
+        )
+    updated["products"] = products
+    updated["skip_matching"] = False
+    updated["slot_shortfall_fallback_count"] = len(missing_slots)
+    updated.pop("skip_reason", None)
+    logger.warning(
+        "AI extraction still missed %s Unit/Qty slot(s) for row=%s; "
+        "added BOQ-evidence review products",
+        len(missing_slots),
+        group.get("row_id"),
+    )
+    return updated
+
+
 class BOQExtractionService:
     """Extract products from grouped BOQ anchor rows via OpenAI."""
 
@@ -774,12 +901,86 @@ class BOQExtractionService:
         }
 
     def _extract_batch(self, groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """
+        Extract a batch, retry under-covered sections once, then preserve every slot.
+
+        AI may return extra evidenced products. Those are never truncated. A second,
+        focused pass is only used when a filled Unit/Qty slot has no product.
+        """
+        normalized = self._extract_batch_once(groups)
+        row_by_id = {
+            str(row.get("row_id")): row
+            for row in normalized
+            if row.get("row_id") is not None
+        }
+        underfilled = [
+            group
+            for group in groups
+            if _missing_product_slots(
+                group,
+                row_by_id.get(str(group.get("row_id"))) or {},
+            )
+        ]
+        if underfilled:
+            logger.warning(
+                "Retrying AI extraction for %s section(s) missing Unit/Qty slot products",
+                len(underfilled),
+            )
+            try:
+                repaired_rows = self._extract_batch_once(
+                    underfilled,
+                    minimum_slot_retry=True,
+                )
+            except Exception:
+                logger.exception(
+                    "Minimum-slot extraction retry failed; preserving BOQ slots for review"
+                )
+                repaired_rows = []
+            repaired_by_id = {
+                str(row.get("row_id")): row
+                for row in repaired_rows
+                if row.get("row_id") is not None
+            }
+            for group in underfilled:
+                row_id = str(group.get("row_id"))
+                current = row_by_id.get(row_id) or {}
+                repaired = repaired_by_id.get(row_id)
+                if repaired is None:
+                    continue
+                current_missing = len(_missing_product_slots(group, current))
+                repaired_missing = len(_missing_product_slots(group, repaired))
+                if repaired_missing < current_missing or (
+                    repaired_missing == current_missing
+                    and len(repaired.get("products") or [])
+                    > len(current.get("products") or [])
+                ):
+                    row_by_id[row_id] = repaired
+
+        return [
+            _ensure_minimum_slot_products(
+                group,
+                row_by_id.get(str(group.get("row_id"))) or {
+                    "row_id": group.get("row_id"),
+                    "products": [],
+                },
+            )
+            for group in groups
+        ]
+
+    def _extract_batch_once(
+        self,
+        groups: list[dict[str, Any]],
+        *,
+        minimum_slot_retry: bool = False,
+    ) -> list[dict[str, Any]]:
         template = AIService.load_prompt("extract_products.txt")
         payload = [_compact_anchor_payload(group) for group in groups]
         prompt = (
             template.replace("{{DATABASE_CONTEXT}}", self._database_context_text())
             .replace("{{ROWS_PAYLOAD}}", json.dumps(payload, ensure_ascii=False, default=str))
         )
+        if minimum_slot_retry:
+            prompt += _MINIMUM_SLOT_RETRY_INSTRUCTION
         response = self.ai.complete_json(prompt, template_name="extract_products.txt")
         rows = response.get("rows") or []
         if not isinstance(rows, list):
@@ -790,8 +991,10 @@ class BOQExtractionService:
         normalized: list[dict[str, Any]] = []
         for group in groups:
             row_id = group.get("row_id")
-            row = _resolve_batch_row(group, by_id)
-            row.setdefault("row_id", row_id)
+            row = dict(_resolve_batch_row(group, by_id))
+            # Batch output is one normalized row per requested anchor even when
+            # the model accidentally returns a child row id.
+            row["row_id"] = row_id
             products = _filter_spec_products(
                 list(row.get("products") or []),
                 taxonomy=taxonomy,
