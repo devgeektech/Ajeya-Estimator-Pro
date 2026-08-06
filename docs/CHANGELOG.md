@@ -5,6 +5,24 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
+## 2026-08-03 — Master workbook column/sheet alignment
+
+- Confirmed `docs/BOQ_Master_03 Aug_2026.xlsx` Rate_Master_Output columns and
+  datatypes match models (no migration needed).
+- Import now accepts workbook sheet `Labour_Master_Output` (alias keeps older
+  `Labour_master_Output`). Maps `Labour_With_State_Multiplier` into
+  `Total_Labour_per_unit_with_labour_Multipler`; labour fetch falls back to
+  `Total_Labour_per_Unit` when blank.
+
+## 2026-08-03 — Review Output format + dual export
+
+- Review tab rebuilt to the client `Output format.xlsx` columns (Ser no, BOQ
+  Description, AI Interpretation, Rate_ID, Make, Vendor, full material
+  breakdown, Labour, Qty, TOTAL MATERIAL/LABOUR, Amount).
+- Dual export: `GET /boqs/<id>/export/?kind=review` (Review sheet) and
+  `?kind=boq` (original uploaded sheet with Rate/Amount filled). Charge
+  Breakdown sheet removed from the export path.
+
 ## 2026-07-31 — Stale Static Manifest (And Broken-Pipe Diagnosis)
 
 - `staticfiles.json` mapped `css/app.css` to a 15 KB hashed build while the
@@ -265,6 +283,18 @@ the summaries below live in **git history** (`git log -- docs/`).
   `Rate_Master` / `Labour_Master` model aliases.
 - Aligned `docs/PRODUCT.md` wording to Rate_Master_Output / Labour_master_Output,
   Vendor, and Product_ID (no Tech_Key / Supplier).
+
+## 2026-08-03
+
+**Review / Export**
+- Review tab rebuilt to the client `Output format.xlsx` columns (Ser no, BOQ
+  Description, AI Interpretation, Rate_ID, Make, Vendor, full material
+  breakdown, Labour, Qty, TOTAL MATERIAL/LABOUR, Amount).
+- Dual export: `GET /boqs/<id>/export/?kind=review` (Review sheet) and
+  `?kind=boq` (original uploaded sheet with Rate/Amount filled). Charge
+  Breakdown sheet removed from the export path.
+
+---
 
 ## 2026-07-30
 

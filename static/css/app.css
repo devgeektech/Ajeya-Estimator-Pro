@@ -1264,6 +1264,27 @@ body:has(.auth) {
     display: inline-flex;
     margin: 0;
 }
+
+/* Review Output format: many numeric columns — keep dense + scroll horizontally. */
+.analysis-table--review-output {
+    min-width: 1600px;
+}
+.analysis-table--review-output th,
+.analysis-table--review-output td {
+    white-space: nowrap;
+    font-size: .72rem;
+}
+.analysis-table--review-output .analysis-col-desc {
+    white-space: normal;
+    min-width: 140px;
+    max-width: 220px;
+}
+.boq-export-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
 .analysis-action-btn.btn {
     padding: 2px 7px !important;
     font-size: .62rem !important;

@@ -4,7 +4,8 @@ Field names mirror workbook sheet columns. Each master row is scoped to the
 ``database_version`` that imported it; only the active version keeps rows in
 PostgreSQL after import.
 
-Ingested sheets (required): ``Rate_Master_Output``, ``Labour_master_Output``.
+Ingested sheets (required): ``Rate_Master_Output``, ``Labour_Master_Output``
+(older workbooks may still use ``Labour_master_Output``).
 """
 from __future__ import annotations
 
@@ -167,7 +168,13 @@ class Rate_Master_Output(models.Model):
 
 
 class Labour_master_Output(models.Model):
-    """Source: Labour_master_Output sheet (one labour row per Product_ID)."""
+    """Source: Labour_Master_Output sheet (one labour row per Product_ID).
+
+    PostgreSQL table name remains ``Labour_master_Output``. The preferred
+    workbook sheet title is ``Labour_Master_Output``; older files may use
+    ``Labour_master_Output``. Column ``Labour_With_State_Multiplier`` maps into
+    ``Total_Labour_per_unit_with_labour_Multipler``.
+    """
 
     database_version = models.ForeignKey(
         DatabaseVersion,

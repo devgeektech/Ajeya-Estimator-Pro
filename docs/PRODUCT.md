@@ -302,9 +302,12 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
 **Step 4 — Review + Export** (Review tab):
 
 - Shows product details from Make & Vendor + Labour (`BOQReviewDisplayService`),
-  not fuzzy Match `product_matches`.
-- **Export Excel** (`GET /boqs/<id>/export/`) writes the original BOQ sheet columns
-  plus a **Charge Breakdown** sheet; sets status `EXPORTED`.
+  not fuzzy Match `product_matches`, in the client **Output format** columns
+  (Rate_Master / Labour breakdown + totals).
+- **Two exports** (`GET /boqs/<id>/export/?kind=…`):
+  - `kind=review` — Review sheet matching `Output format.xlsx` (one row per product).
+  - `kind=boq` — original uploaded BOQ layout with Rate/Amount filled on qty rows.
+- Either download sets status `EXPORTED`.
 - Gate: `READY_EXPORT` / `pricing_ready` after Labour → Next.
 
 Poll `GET /boqs/<id>/status/?expect=extract` while `PROCESSING`.
@@ -330,7 +333,7 @@ live analysis is edited before re-match.
 | `BOQLabourService` | Auto/Manual labour charges; unlock Review |
 | `BOQReviewDisplayService` | Review/export lines from vendor_selection + labour |
 | `BOQPriceCalculationService` | Aggregate line amounts onto original rows; unlock export |
-| `BOQExportService` | Excel export (original BOQ format + breakdown) |
+| `BOQExportService` | Excel export: Review sheet (`kind=review`) or priced BOQ (`kind=boq`) |
 | `BOQAnalysisService` | Orchestrator |
 | `utils/attribute_parser.py` | Parse/normalize dynamic `Attribute` key-value text |
 
@@ -403,11 +406,16 @@ rows (size-aware when multiple rows share a key). Per-unit labour uses precomput
 `Total_Labour_per_unit_with_labour_Multipler` → `Total_Labour_per_Unit` → `Labour_Rate_Per_unit`.
 Component breakdown (testing, scaffolding, consumables, painting, buffer) is exposed for export.
 
-**Export:** After Labour → Next (`READY_EXPORT`), `BOQExportService` → Excel
-download with two sheets: **BOQ** (original upload layout with rate/amount filled
-only on rows that already have quantity; top/left aligned, wrapped text, dark
-borders; blank row after each section) and **Charge Breakdown** (detailed
-material/labour lines). Successful download sets `EXPORTED`.
+**Export:** After Labour → Next (`READY_EXPORT`), Review tab offers two downloads
+via `BOQExportService` (`?kind=`):
+
+- **Review sheet** (`kind=review`) — client Output format columns (Rate_ID, Make,
+  Vendor, material breakdown, Labour, Qty, TOTAL MATERIAL/LABOUR, Amount); one
+  row per product.
+- **BOQ** (`kind=boq`) — original upload layout with rate/amount filled only on
+  rows that already have quantity; blank row after each section.
+
+Either successful download sets `EXPORTED`.
 
 ## Business Rules (stable)
 
@@ -497,7 +505,7 @@ BOQ_AI/
 | `apps/boq/services/boq_labour_service.py` | Labour Auto/Manual + complete → Review |
 | `apps/boq/services/boq_review_display_service.py` | Review/export from vendor_selection |
 | `apps/boq/services/boq_price_calculation_service.py` | Labour → Next row pricing / ready to export |
-| `apps/boq/services/boq_export_service.py` | Excel export |
+| `apps/boq/services/boq_export_service.py` | Excel export (`kind=review` | `kind=boq`) |
 | `ai/openai_client.py` | OpenAI client + API key check |
 | `ai/embeddings/` | Chroma product index |
 | `config/settings.py` | Single settings module |

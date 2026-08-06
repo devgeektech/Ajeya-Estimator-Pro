@@ -34,10 +34,12 @@ Uploaded workbooks may contain many sheets. **Only these two are ingested** into
 PostgreSQL (both required). Other sheets are counted for the database detail UI
 only.
 
-| Sheet | Model / table | Required |
+| Sheet (workbook) | Model / table | Required |
 | --- | --- | --- |
 | `Rate_Master_Output` | `Rate_Master_Output` | **Yes** |
-| `Labour_master_Output` | `Labour_master_Output` | **Yes** |
+| `Labour_Master_Output` | `Labour_master_Output` | **Yes** |
+
+Alias: older workbooks titled `Labour_master_Output` are still accepted.
 
 **Removed (no longer imported or modeled):** `Rate_Master`, `Labour_Master`,
 `TOR_Main`, `TOR_Labour`, `TOR_Accessories`, `Labour_Structure_Source`,
@@ -48,7 +50,8 @@ only.
 - Validate that both required sheets are present before any DB write.
 - Blank / non-numeric formula placeholders (`<<`, `Base_Rate missing`, …) → `NULL`.
 - All master rows carry `database_version_id`.
-- Model and table names match workbook sheet names exactly.
+- Model / table names keep historical spellings; workbook sheet titles follow
+  the current client file (with aliases above).
 - `Product_ID` (both sheets) and `Rate_ID` are **text** (`varchar(64)`): codes
   like `P1001` and plain numbers like `1001` are both accepted. Whole numbers
   read from Excel as `1001.0` are trimmed to `1001` so rate and labour rows stay
@@ -64,7 +67,17 @@ One priced Make/Vendor row. Key fields:
 `Rate_ID`, `Product_ID`, `Category`, `Sub_Category`, `Class`, `Size`, `Unit`,
 `Capacity`, `Attribute`, `Make`, `Vendor`, `Base_Purchase_Rate`, `Last_Updated`,
 `Discount`, `Net_Material_Rate`, cost-build columns, **`Final_Material_Amount`**
-(amount used by BOQ Make & Vendor / pricing), `Margin_pct_on_Selling`.
+(amount used by BOQ Make & Vendor / pricing), `Margin_%_on_Selling`
+(→ model `Margin_pct_on_Selling`).
+
+| Excel type (typical) | Model field type |
+| --- | --- |
+| `Rate_ID` / `Product_ID` int or text | `CharField(64)` |
+| Category / Sub_Category / Class / Unit / Make / Vendor | `CharField` |
+| `Size` number | `DecimalField(12,2)` |
+| `Capacity` / `Attribute` text | `CharField` / `TextField` |
+| Rate / amount columns | `DecimalField(18,2)` (`Discount` 6 dp, margin 8 dp) |
+| `Last_Updated` datetime | `DateTimeField` |
 
 - **`Product_ID`** — product identity (text); link to labour (1 labour row per
   product). Not a database FK — matched on the string value.
@@ -75,13 +88,21 @@ One priced Make/Vendor row. Key fields:
   `Category|Sub_Category|Class|Size|Capacity|Attribute` via `product_display_key()`.
 - Embeddings: **one Chroma vector per rate row**, metadata includes `Product_ID`.
 
-### `Labour_master_Output`
+### `Labour_Master_Output`
 
-One labour row per `Product_ID`. Key fields mirror product taxonomy plus labour
-columns. BOQ Auto labour uses
-**`Total_Labour_per_unit_with_labour_Multipler`** (Excel header may include
-spaces; importer normalizes). Category-wise labour % remains a Labour-page UI
-feature (not this sheet).
+One labour row per `Product_ID`. Taxonomy fields plus labour charges. BOQ Auto
+labour uses **`Labour_With_State_Multiplier`** (mapped to model field
+`Total_Labour_per_unit_with_labour_Multipler`; falls back to
+`Total_Labour_Per_Unit` when blank). Category-wise labour % remains a Labour-page
+UI feature (not this sheet).
+
+| Excel column | Model field |
+| --- | --- |
+| `Labour_Rate_Per_Unit` | `Labour_Rate_Per_unit` |
+| `Total_Labour_Per_Unit` | `Total_Labour_per_Unit` |
+| `Labour_With_State_Multiplier` | `Total_Labour_per_unit_with_labour_Multipler` |
+
+`Attribute` is optional on this sheet (nullable in the model).
 
 ---
 
@@ -141,7 +162,11 @@ Taxonomy for AI extract/map comes from distinct Category / Sub_Category on
 For a selected rate row and its labour row (`Product_ID`):
 
 ```text
-(Final_Material_Amount + Total_Labour_per_unit_with_labour_Multipler) × Qty
+(Final_Material_Amount + Labour_With_State_Multiplier) × Qty
 ```
+
+(`Labour_With_State_Multiplier` is stored as
+`Total_Labour_per_unit_with_labour_Multipler`; falls back to
+`Total_Labour_per_Unit` when blank.)
 
 Category labour % on the Labour page is applied separately in UI/config.

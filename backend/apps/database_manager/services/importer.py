@@ -2,8 +2,9 @@
 
 Validate -> Backup -> Import -> Activate -> Generate Embeddings
 
-Only ``Rate_Master_Output`` and ``Labour_master_Output`` are ingested. Other
+Only ``Rate_Master_Output`` and ``Labour_Master_Output`` are ingested. Other
 workbook sheets may exist and are counted for the database detail UI only.
+Older workbooks that still use ``Labour_master_Output`` are accepted via alias.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
+from common.constants import MASTER_SHEET_ALIASES, REQUIRED_MASTER_SHEETS
 from common.exceptions import ImportError_
 from utils.excel import list_sheet_names, read_rows
 
@@ -29,7 +31,7 @@ from ..models import (
     Labour_master_Output,
     Rate_Master_Output,
 )
-from .validator import validate_workbook
+from .validator import resolve_master_sheet_name, validate_workbook
 
 logger = logging.getLogger("boq_ai")
 
@@ -171,9 +173,11 @@ def _labour_fields(row: dict) -> dict:
         "Painting_Labour_Value": _to_optional_decimal(row.get("painting_labour_value")),
         "Labour_Buffer_Value": _to_optional_decimal(row.get("labour_buffer_value")),
         "Total_Labour_per_Unit": _to_optional_decimal(row.get("total_labour_per_unit")),
+        # Current workbook: Labour_With_State_Multiplier. Older: *_with_labour_Multipler.
         "Total_Labour_per_unit_with_labour_Multipler": _to_optional_decimal(
             _row_value(
                 row,
+                "labour_with_state_multiplier",
                 "total_labour_per_unit_with_labour_multipler",
                 "total_labour_with_multiplier",
                 "total_labour_per_unit_with_labour_multiplier",
@@ -182,9 +186,11 @@ def _labour_fields(row: dict) -> dict:
     }
 
 
+# Preferred workbook sheet name → (model, row builder). Actual sheet title may
+# differ by alias (see MASTER_SHEET_ALIASES / resolve_master_sheet_name).
 VERSIONED_SHEETS = {
     "Rate_Master_Output": (Rate_Master_Output, _rate_fields),
-    "Labour_master_Output": (Labour_master_Output, _labour_fields),
+    "Labour_Master_Output": (Labour_master_Output, _labour_fields),
 }
 
 REQUIRED_MODEL_FIELDS = {
@@ -229,11 +235,17 @@ def _skip_reason(model, sheet_name: str, built_rows: list[dict]) -> str:
     )
 
 
+def _ingested_sheet_titles() -> set[str]:
+    titles: set[str] = set()
+    for preferred in REQUIRED_MASTER_SHEETS:
+        titles.update(MASTER_SHEET_ALIASES.get(preferred, (preferred,)))
+    return titles
+
+
 def count_workbook_sheet_rows(file_path: str) -> list[dict]:
     """Return [{name, rows, ingested}] for every sheet (UI statistics)."""
-    from common.constants import REQUIRED_MASTER_SHEETS
-
-    ingested = set(REQUIRED_MASTER_SHEETS)
+    ingested = _ingested_sheet_titles()
+    ingested_lower = {name.lower() for name in ingested}
     stats: list[dict] = []
     for sheet_name in list_sheet_names(file_path):
         try:
@@ -246,7 +258,7 @@ def count_workbook_sheet_rows(file_path: str) -> list[dict]:
             {
                 "name": sheet_name,
                 "rows": row_count,
-                "ingested": sheet_name in ingested,
+                "ingested": sheet_name in ingested or sheet_name.lower() in ingested_lower,
             }
         )
     return stats
@@ -307,11 +319,12 @@ class DatabaseImportService:
         )
 
     def _import_versioned_sheets(self, version: DatabaseVersion) -> None:
-        available_sheets = set(list_sheet_names(self.file_path))
-        for sheet_name, (model, builder) in VERSIONED_SHEETS.items():
-            if sheet_name not in available_sheets:
+        available_sheets = list_sheet_names(self.file_path)
+        for preferred_name, (model, builder) in VERSIONED_SHEETS.items():
+            sheet_name = resolve_master_sheet_name(available_sheets, preferred_name)
+            if sheet_name is None:
                 raise ImportError_(
-                    f"Required sheet '{sheet_name}' is missing from the workbook."
+                    f"Required sheet '{preferred_name}' is missing from the workbook."
                 )
             rows = read_rows(self.file_path, sheet_name)
             objects = []

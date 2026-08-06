@@ -784,7 +784,7 @@
                 {% if analysis_display.has_analysis %}
                 <span x-show="tab === 'review'" x-cloak>
                     {{ analysis_display.stats.products_matched|default:0 }} / {{ analysis_display.stats.products_total|default:0 }} products with rates
-                    · Export final BOQ + Charge Breakdown when ready.
+                    · Export Review sheet or priced BOQ when ready.
                 </span>
                 {% endif %}
             </div>
@@ -824,13 +824,21 @@
                     >Next</button>
                 </span>
 
-                <span x-show="tab === 'review'" x-cloak>
+                <span x-show="tab === 'review'" x-cloak class="boq-export-actions">
                     <a
-                        href="{% url 'boq:export' boq.pk %}"
+                        href="{% url 'boq:export' boq.pk %}?kind=review"
                         class="btn btn--small btn--boq-export"
                         x-show="canExport"
                         x-cloak
-                    >Export Excel</a>
+                        title="Client Output format — full product rate breakdown"
+                    >Export Review sheet</a>
+                    <a
+                        href="{% url 'boq:export' boq.pk %}?kind=boq"
+                        class="btn btn--small btn--primary"
+                        x-show="canExport"
+                        x-cloak
+                        title="Original uploaded BOQ with Rate and Amount filled"
+                    >Export BOQ</a>
                 </span>
             </div>
         </div>

@@ -1333,21 +1333,22 @@ class BOQConfirmView(LoginRequiredMixin, View):
 
 
 class BOQExportView(LoginRequiredMixin, View):
-    """Download priced analysis as Excel."""
+    """Download Review sheet or priced original BOQ Excel (`?kind=review|boq`)."""
 
     def get(self, request, pk: int):
         user = cast(User, request.user)
         boq = get_object_or_404(_boq_queryset_for_user(user), pk=pk)
+        kind = str(request.GET.get("kind") or "review").strip().lower()
 
         try:
             confirmations = BOQConfirmationService(boq.pk, request.session).all()
-            content, filename = BOQExportService(boq.pk, confirmations).run()
+            content, filename = BOQExportService(boq.pk, confirmations).run(kind=kind)
             mark_exported_in_session(boq.pk, request.session)
         except ValueError as exc:
             messages.error(request, str(exc))
             return HttpResponseRedirect(_detail_tab_url(boq.pk, "review"))
         except Exception:
-            logger.exception("BOQ export failed for id=%s", boq.pk)
+            logger.exception("BOQ export failed for id=%s kind=%s", boq.pk, kind)
             messages.error(request, "Export failed.")
             return HttpResponseRedirect(_detail_tab_url(boq.pk, "review"))
 
