@@ -295,17 +295,6 @@ class BOQDetailView(LoginRequiredMixin, DetailView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         boq = context["boq"]
-        boq_structure, make_list_structure = _structures_for_display(boq)
-        try:
-            _, make_list_payload = load_extract_data(boq)
-        except Exception:
-            make_list_payload = boq.make_list_data or {}
-        if not boq.make_list_file:
-            make_list_payload = {}
-        confirmations = BOQConfirmationService(boq.pk, self.request.session).all()
-        context["boq_structure"] = boq_structure
-        context["make_list_structure"] = make_list_structure
-        context["has_make_list"] = bool(boq.make_list_file)
         # Persist unlock if Next already wrote vendor selections but status/flag lagged.
         try:
             if heal_make_vendor_unlock(boq):
@@ -319,12 +308,43 @@ class BOQDetailView(LoginRequiredMixin, DetailView):
                 boq.refresh_from_db(fields=["analysis_data", "status"])
         except Exception:
             logger.exception("Stale job heal failed for BOQ id=%s", boq.pk)
+
         context["tab_access"] = build_boq_tab_access(boq)
         context["default_tab"] = resolve_detail_tab(
             boq,
             self.request.session,
             self.request.GET.get("tab"),
         )
+        active_tab = context["default_tab"]
+
+        # Load extract JSON only for tabs that render it (keeps switches light).
+        boq_payload: dict = {}
+        make_list_payload: dict = {}
+        if active_tab == "boq":
+            # Sheet display uses stored BOQ JSON — skip make-list normalize path.
+            boq_payload = boq.boq_data or {}
+        elif active_tab in {"make_list", "analysis", "make_vendor"}:
+            try:
+                _loaded_boq, loaded_make_list = load_extract_data(boq)
+            except Exception:
+                logger.exception("Failed to load extract JSON for BOQ id=%s", boq.pk)
+                loaded_make_list = boq.make_list_data or {}
+            make_list_payload = loaded_make_list if boq.make_list_file else {}
+            if active_tab == "make_list":
+                # make_list display needs the make-list payload only.
+                pass
+
+        # Per-tab payloads only — keeps tab switches fast (no multi-MB combined HTML).
+        context["boq_structure"] = {}
+        context["make_list_structure"] = {}
+        if active_tab == "boq":
+            context["boq_structure"] = structure_for_display(boq_payload)
+        elif active_tab == "make_list" and boq.make_list_file:
+            context["make_list_structure"] = structure_for_make_list_display(
+                make_list_payload
+            )
+        context["has_make_list"] = bool(boq.make_list_file)
+        context["has_analysis_rows"] = bool((boq.analysis_data or {}).get("rows"))
         context["is_extracting"] = boq.status == BOQStatus.PROCESSING
         context["is_matching"] = boq.status == BOQStatus.MATCHING
         context["is_processing"] = _job_is_running(boq)
@@ -352,9 +372,12 @@ class BOQDetailView(LoginRequiredMixin, DetailView):
             )
             and not _job_is_running(boq)
         )
+        # Include MAKE_VENDOR: labour_ready can remain after MV edits, and
+        # BOQLabourService._ensure_labour_editable already allows that status.
         context["can_apply_labour"] = (
             boq.status
             in {
+                BOQStatus.MAKE_VENDOR,
                 BOQStatus.LABOUR,
                 BOQStatus.READY_EXPORT,
                 BOQStatus.EXPORTED,
@@ -370,6 +393,7 @@ class BOQDetailView(LoginRequiredMixin, DetailView):
             labour_ready
             and boq.status
             in {
+                BOQStatus.MAKE_VENDOR,
                 BOQStatus.LABOUR,
                 BOQStatus.READY_EXPORT,
                 BOQStatus.PROCESSED,
@@ -407,32 +431,60 @@ class BOQDetailView(LoginRequiredMixin, DetailView):
             else ""
         )
 
-        context["extraction_display"] = BOQExtractionDisplayService(
-            boq,
-            make_list_payload,
-            has_make_list_file=bool(boq.make_list_file),
-        ).build()
-        context["analysis_display"] = BOQReviewDisplayService(boq, confirmations).build()
-        try:
-            context["make_vendor_display"] = MakeVendorSelectionService(
-                boq.pk,
+        empty_extraction = {
+            "has_extraction": False,
+            "lines": [],
+            "product_count": 0,
+            "multiproduct_review_count": 0,
+            "missing_field_count": 0,
+        }
+        empty_review = {
+            "has_analysis": False,
+            "lines": [],
+            "stats": {},
+            "confirmation_stats": {},
+            "review_headers": [],
+        }
+        empty_make_vendor = {"has_products": False, "lines": [], "stats": {}}
+        empty_labour = {
+            "has_products": False,
+            "lines": [],
+            "category_rows": [],
+            "stats": {},
+            "mode": "auto",
+            "labour_ready": False,
+        }
+        context["extraction_display"] = empty_extraction
+        context["analysis_display"] = empty_review
+        context["make_vendor_display"] = empty_make_vendor
+        context["labour_display"] = empty_labour
+
+        if active_tab == "analysis" and not context["is_extracting"]:
+            context["extraction_display"] = BOQExtractionDisplayService(
+                boq,
                 make_list_payload,
-            ).build_display()
-        except Exception:
-            logger.exception("Failed to build Make & Vendor display for BOQ id=%s", boq.pk)
-            context["make_vendor_display"] = {"has_products": False, "lines": [], "stats": {}}
-        try:
-            context["labour_display"] = BOQLabourService(boq.pk).build_display()
-        except Exception:
-            logger.exception("Failed to build Labour display for BOQ id=%s", boq.pk)
-            context["labour_display"] = {
-                "has_products": False,
-                "lines": [],
-                "category_rows": [],
-                "stats": {},
-                "mode": "auto",
-                "labour_ready": False,
-            }
+                has_make_list_file=bool(boq.make_list_file),
+            ).build()
+        elif active_tab == "make_vendor":
+            try:
+                context["make_vendor_display"] = MakeVendorSelectionService(
+                    boq.pk,
+                    make_list_payload,
+                ).build_display()
+            except Exception:
+                logger.exception(
+                    "Failed to build Make & Vendor display for BOQ id=%s", boq.pk
+                )
+        elif active_tab == "labour":
+            try:
+                context["labour_display"] = BOQLabourService(boq.pk).build_display()
+            except Exception:
+                logger.exception("Failed to build Labour display for BOQ id=%s", boq.pk)
+        elif active_tab == "review":
+            confirmations = BOQConfirmationService(boq.pk, self.request.session).all()
+            context["analysis_display"] = BOQReviewDisplayService(
+                boq, confirmations
+            ).build()
         return context
 
 
@@ -901,6 +953,38 @@ class BOQMakeVendorSelectView(LoginRequiredMixin, View):
                 message = (
                     f"Selected vendor {result.get('vendor') or '—'} "
                     f"({result.get('make') or '—'}) for same-price tie."
+                )
+                if ajax:
+                    return _extraction_edit_json_ok(
+                        message,
+                        row_id=row_id,
+                        product_index=product_index,
+                        selection=result,
+                        reload=True,
+                    )
+                messages.success(request, message)
+                return HttpResponseRedirect(redirect_url)
+
+            if action == "find_in_db":
+                row_id = (request.POST.get("row_id") or "").strip()
+                try:
+                    product_index = int(request.POST.get("product_index") or "0")
+                except ValueError:
+                    message = "Invalid product index."
+                    if ajax:
+                        return _extraction_edit_json_error(message)
+                    messages.error(request, message)
+                    return HttpResponseRedirect(redirect_url)
+                if not row_id:
+                    message = "Missing BOQ row."
+                    if ajax:
+                        return _extraction_edit_json_error(message)
+                    messages.error(request, message)
+                    return HttpResponseRedirect(redirect_url)
+                result = service.find_in_db(row_id=row_id, product_index=product_index)
+                message = (
+                    f"Found Product_ID {result.get('product_id') or '—'} in database; "
+                    f"loaded make/vendor rates."
                 )
                 if ajax:
                     return _extraction_edit_json_ok(

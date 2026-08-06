@@ -1,66 +1,73 @@
 """Shape Make & Vendor + Labour product lines for Review and export."""
 from __future__ import annotations
 
+from collections import Counter
 from typing import Any
 
 from apps.boq.models import BOQ
+from apps.boq.services.boq_extraction_service import (
+    quantity_display_fields,
+    rehydrate_products_quantity_from_group,
+)
+from apps.boq.services.boq_row_grouping_service import grouped_anchor_rows
 from apps.boq.services.make_list_constraint_service import walk_rows_tree
-from apps.boq.services.serial_normalizer import analysis_fields
+from apps.boq.services.serial_normalizer import (
+    analysis_fields,
+    detect_serial_key,
+    export_serial_with_suffix,
+    letter_from_serial,
+    nearest_structural_serial,
+    workbook_serial,
+)
 
 _DESCRIPTION_KEYS = ("description", "item_description", "particulars", "item")
 _QTY_KEYS = ("qty", "quantity", "qnty", "nos")
 _UNIT_KEYS = ("unit", "uom")
 
-# Client Output format.xlsx column labels (Review sheet / Review tab).
-REVIEW_OUTPUT_HEADERS = [
-    "Ser no of BOQ",
-    "BOQ Description",
-    "AI based Interpretation of BOQ Item",
-    "Matching Rate_ID (column A) in Rate_Master_Output Sheet",
-    "Make  (column J) in Rate_Master_Output Sheet",
-    "Vendor  (column K) in Rate_Master_Output Sheet",
-    "Base_Purchase_Rate  (column L) in Rate_Master_Output Sheet",
-    "Discount  (column N) in Rate_Master_Output Sheet",
-    "Net_Material_Rate  (column O) in Rate_Master_Output Sheet",
-    "Procurement_Value  (column P) in Rate_Master_Output Sheet",
-    "Commercial_Material_Base  (column Q) in Rate_Master_Output Sheet",
-    "Accessories_Value  (column R) in Rate_Master_Output Sheet",
-    "Handling_Value  (column S) in Rate_Master_Output Sheet",
-    "Wastage_Value  (column T) in Rate_Master_Output Sheet",
-    "Sub_Total  (column U) in Rate_Master_Output Sheet",
-    "Profit_Value  (column V) in Rate_Master_Output Sheet",
-    "Final_Material_Amount  (column W) in Rate_Master_Output Sheet",
-    "Labour (Colmn R ) in Labour_Master_Output Sheet",
-    "Qty (as in BOQ)",
-    "TOTAL MATERIAL (Q*S)",
-    "TOTAL LABOUR (R*S)",
-    "Amount (T+U)",
+# Client Output format.xlsx columns for Review/breakdown export.
+# Red headers use the exact red text from the template; instructional black
+# headers are shortened to the field name only (text before the parenthetical).
+# Tuple: (export header label, is_red_in_Output_format.xlsx).
+REVIEW_OUTPUT_HEADER_SPECS: list[tuple[str, bool]] = [
+    ("Ser no of BOQ", True),
+    ("BOQ Description", True),
+    ("AI based Interpretation of BOQ Item", True),
+    ("Matching Rate_ID", False),
+    ("Make", False),
+    ("Vendor", False),
+    ("Base_Purchase_Rate", False),
+    ("Discount", False),
+    ("Net_Material_Rate", False),
+    ("Procurement_Value", False),
+    ("Commercial_Material_Base", False),
+    ("Accessories_Value", False),
+    ("Handling_Value", False),
+    ("Wastage_Value", False),
+    ("Sub_Total", False),
+    ("Profit_Value", False),
+    ("Final_Material_Amount", False),
+    # Red in template; keep the short label (instructional suffix dropped).
+    ("Labour", True),
+    ("Qty", False),
+    ("TOTAL MATERIAL (Q*S)", True),
+    ("TOTAL LABOUR (R*S)", True),
+    ("Amount (T+U)", False),
 ]
+REVIEW_OUTPUT_HEADERS = [label for label, _is_red in REVIEW_OUTPUT_HEADER_SPECS]
 
-# Shorter labels for the on-screen Review table (same column order).
+# Shorter labels for on-screen Review cards (subset of export columns).
 REVIEW_UI_HEADERS = [
-    "Ser no",
+    "S. No.",
     "BOQ Description",
     "AI Interpretation",
-    "Rate_ID",
     "Make",
     "Vendor",
-    "Base Purchase Rate",
-    "Discount",
-    "Net Material Rate",
-    "Procurement",
-    "Commercial Material Base",
-    "Accessories",
-    "Handling",
-    "Wastage",
-    "Sub Total",
-    "Profit",
-    "Final Material Amount",
+    "Material amount",
     "Labour",
     "Qty",
     "TOTAL MATERIAL",
     "TOTAL LABOUR",
-    "Amount",
+    "Total Amount",
 ]
 
 
@@ -77,6 +84,84 @@ def _ordered_boq_rows(boq_data: dict) -> list[dict[str, Any]]:
     if flat_rows:
         return flat_rows
     return walk_rows_tree(boq_data.get("rows_tree") or [])
+
+
+def _product_base_serial(
+    product: dict[str, Any],
+    *,
+    parent_serial: str,
+    rows_by_id: dict[str, dict[str, Any]],
+    serial_key: str | None,
+) -> str:
+    """
+    Resolve BOQ serial for one product from its Unit/Qty row.
+
+    Letter slots (``a)``, ``b)``) are qualified with the qty row's nearest
+    structural parent (``5.1 a)``), not the broader group serial (``5 a)``).
+    Structural slot serials (``1.7``, ``2.10``) are kept as-is.
+    """
+    fallback_parent = str(parent_serial or "").strip()
+    qty_row_id = ""
+    for key in ("qty_row_id", "source_row_id"):
+        candidate = str(product.get(key) or "").strip()
+        if candidate:
+            qty_row_id = candidate
+            break
+
+    child = str(product.get("boq_serial") or "").strip()
+    source_row = rows_by_id.get(qty_row_id) if qty_row_id else None
+    if not child and source_row is not None:
+        child = workbook_serial(source_row, serial_key=serial_key)
+    if not child:
+        return fallback_parent
+
+    if letter_from_serial(child):
+        structural = nearest_structural_serial(
+            qty_row_id,
+            rows_by_id,
+            serial_key=serial_key,
+            start_at_parent=True,
+        )
+        return _qualify_serial_with_parent(structural or fallback_parent, child)
+
+    # Already a section/item serial on the qty row itself.
+    return child
+
+
+def _qualify_serial_with_parent(parent: str, child: str) -> str:
+    """
+    Combine section serial with letter/qty-row serial.
+
+    Examples: parent ``1.1`` + child ``a)`` → ``1.1 a)``;
+    parent ``1.2`` + child ``1.2`` → ``1.2``.
+    """
+    parent_text = str(parent or "").strip()
+    child_text = str(child or "").strip()
+    if not child_text:
+        return parent_text
+    if not parent_text:
+        return child_text
+    if child_text == parent_text or child_text.startswith(f"{parent_text}."):
+        return child_text
+    # Child already includes parent (e.g. "1.1 a)" or "1.1a)").
+    if child_text.startswith(parent_text) and len(child_text) > len(parent_text):
+        return child_text
+    return f"{parent_text} {child_text}"
+
+
+def _assign_export_serials(products: list[dict[str, Any]]) -> None:
+    """Preserve original serials; add (A)/(B)/(C) only when several products share one."""
+    bases = [str(item.get("serial") or "").strip() or "—" for item in products]
+    totals = Counter(bases)
+    seen: dict[str, int] = {}
+    for product, base in zip(products, bases):
+        index = seen.get(base, 0)
+        seen[base] = index + 1
+        export_serial = export_serial_with_suffix(base, index, totals[base])
+        product["serial"] = export_serial
+        review_output = product.get("review_output")
+        if isinstance(review_output, dict):
+            review_output["serial"] = export_serial
 
 
 def _product_summary(product: dict[str, Any]) -> str:
@@ -100,6 +185,66 @@ def _ai_interpretation(product: dict[str, Any]) -> str:
         if value not in (None, ""):
             parts.append(str(value).strip())
     return " / ".join(parts) if parts else _product_summary(product)
+
+
+def _qty_row_description(
+    group: dict[str, Any] | None,
+    product: dict[str, Any],
+    *,
+    product_index: int,
+    fallback: str = "",
+) -> str:
+    """
+    Description from the Unit/Qty BOQ row (a/b/c…) — not the parent header.
+
+    Includes the letter serial and qty/unit when present, e.g.
+    ``a) 150mm dia — 350 Metre``.
+    """
+    if not group:
+        return fallback
+    slots = list(group.get("slots") or group.get("qty_rows") or [])
+    if not slots:
+        return fallback
+
+    by_id = {
+        str(slot.get("qty_row_id") or slot.get("row_id") or ""): slot
+        for slot in slots
+        if slot.get("qty_row_id") or slot.get("row_id")
+    }
+    source_id = str(
+        product.get("qty_row_id") or product.get("source_row_id") or ""
+    ).strip()
+    slot = by_id.get(source_id) if source_id else None
+    if slot is None and 0 <= product_index < len(slots):
+        slot = slots[product_index]
+    if slot is None:
+        slot = slots[0]
+
+    serial = str(slot.get("serial") or "").strip()
+    text = str(slot.get("description") or "").strip()
+    if serial and text:
+        # Avoid "a) a) 150mm dia" when description already starts with the letter.
+        serial_core = serial.rstrip(").").strip().casefold()
+        if text.casefold().startswith(serial_core):
+            label = text
+        else:
+            label = f"{serial} {text}".strip()
+    else:
+        label = text or serial
+
+    qty = slot.get("qty")
+    unit = slot.get("unit")
+    extras: list[str] = []
+    if qty not in (None, ""):
+        extras.append(str(qty).strip())
+    if unit not in (None, ""):
+        extras.append(str(unit).strip())
+    if extras:
+        joined = " ".join(extras)
+        if joined not in label:
+            label = f"{label} — {joined}".strip(" —") if label else joined
+
+    return label or fallback
 
 
 def build_review_output_row(
@@ -190,13 +335,25 @@ class BOQReviewDisplayService:
             for row in analysis.get("rows") or []
             if row.get("row_id")
         }
+        ordered_rows = _ordered_boq_rows(boq_data)
+        rows_by_id = {
+            str(row.get("row_id")): row
+            for row in ordered_rows
+            if row.get("row_id")
+        }
+        serial_key = detect_serial_key(list(boq_data.get("headers") or []))
+        group_by_row = {
+            str(group.get("row_id") or ""): group
+            for group in grouped_anchor_rows(boq_data)
+            if group.get("row_id")
+        }
 
         lines: list[dict[str, Any]] = []
         matched_count = 0
         pending_count = 0
         product_total = 0
 
-        for boq_row in _ordered_boq_rows(boq_data):
+        for boq_row in ordered_rows:
             row_id = str(boq_row.get("row_id") or "")
             if not row_id:
                 continue
@@ -206,11 +363,20 @@ class BOQReviewDisplayService:
                 continue
 
             fields = analysis_fields(boq_row)
-            serial = boq_row.get("serial", "")
+            serial = workbook_serial(boq_row, serial_key=serial_key)
             depth = boq_row.get("depth", 0)
             description = _field_from_map(fields, _DESCRIPTION_KEYS) or ""
             qty = _field_from_map(fields, _QTY_KEYS)
             unit = _field_from_map(fields, _UNIT_KEYS)
+            group = group_by_row.get(row_id, {})
+            if qty in (None, "") and group:
+                qty = group.get("qty")
+                unit = unit or group.get("unit")
+
+            line_description = group.get("description") or description
+            full_description = group.get("full_description") or description
+            lineage_parts = list(group.get("lineage_parts") or [])
+            lineage_count = int(group.get("lineage_count") or 1)
 
             if analysis_row.get("skip_matching"):
                 lines.append(
@@ -218,34 +384,80 @@ class BOQReviewDisplayService:
                         "row_id": row_id,
                         "serial": serial,
                         "depth": depth,
-                        "description": description,
+                        "description": line_description,
+                        "full_description": full_description,
+                        "lineage_parts": lineage_parts,
+                        "lineage_count": lineage_count,
                         "qty": qty,
                         "unit": unit,
                         "status": "skipped",
                         "products": [],
+                        "product_count": 0,
+                        "show_qty_unit": qty not in (None, "") or bool(unit),
                     }
                 )
                 continue
 
+            raw_products = rehydrate_products_quantity_from_group(
+                list(analysis_row.get("products") or []),
+                group,
+            )
             products: list[dict[str, Any]] = []
-            for item in analysis_row.get("products") or []:
+            for index, item in enumerate(raw_products):
                 product_total += 1
-                display = self._product_line(item, qty=qty, unit=unit)
-                display["line_key"] = f"{row_id}:{display['product_index']}"
+                product_qty = (
+                    item.get("quantity")
+                    if item.get("quantity") not in (None, "")
+                    else qty
+                )
+                product_unit = (
+                    item.get("quantity_unit")
+                    if item.get("quantity_unit") not in (None, "")
+                    else unit
+                )
+                qty_fields = quantity_display_fields(
+                    {
+                        **item,
+                        "quantity": product_qty,
+                        "quantity_unit": product_unit,
+                    }
+                )
+                display = self._product_line(item, qty=product_qty, unit=product_unit)
+                # Stable 0-based index for Product tabs (stored indices can collide).
+                display["product_index"] = index
+                display["display_number"] = index + 1
+                product_serial = _product_base_serial(
+                    item,
+                    parent_serial=serial,
+                    rows_by_id=rows_by_id,
+                    serial_key=serial_key,
+                )
+                # BOQ Description = the Unit/Qty row text, not the section header above it.
+                qty_description = _qty_row_description(
+                    group,
+                    item,
+                    product_index=index,
+                    fallback=description or line_description,
+                )
+                display["line_key"] = f"{row_id}:{index}"
                 display["row_id"] = row_id
-                display["serial"] = serial
+                # Keep Unit/Qty slot identity for BOQ export Rate/Amount placement.
+                display["qty_row_id"] = item.get("qty_row_id") or item.get("source_row_id")
+                display["source_row_id"] = item.get("source_row_id") or item.get("qty_row_id")
+                display["serial"] = product_serial
                 display["depth"] = depth
-                display["description"] = description
-                display["qty"] = qty or item.get("quantity")
-                display["unit"] = unit or item.get("quantity_unit")
+                display["description"] = qty_description
+                display["qty"] = product_qty
+                display["unit"] = product_unit
+                display.update(qty_fields)
                 display["review_output"] = build_review_output_row(
-                    serial=serial,
-                    description=description,
+                    serial=product_serial,
+                    description=qty_description,
                     product=item,
                     selected=display.get("selected") or {},
                     rate_detail=display.get("rate_detail"),
                     line_output=display.get("line_output") or {},
-                    qty=display["qty"],
+                    qty=product_qty,
                 )
                 if display.get("status") == "matched":
                     matched_count += 1
@@ -253,20 +465,50 @@ class BOQReviewDisplayService:
                     pending_count += 1
                 products.append(display)
 
-            line_status = "active" if products else "empty"
-            if not analysis_row:
-                line_status = "not_analyzed"
+            _assign_export_serials(products)
 
+            if products:
+                product_statuses = [
+                    str(product.get("status") or "") for product in products
+                ]
+                if any(
+                    status in {"unmatched", "pending", "not_searched"}
+                    for status in product_statuses
+                ):
+                    line_status = "no_match"
+                elif product_statuses and all(
+                    status == "matched" for status in product_statuses
+                ):
+                    line_status = "matched"
+                else:
+                    line_status = "default"
+            else:
+                line_status = "default"
+            if not analysis_row:
+                line_status = "default"
+
+            first = products[0] if products else {}
             lines.append(
                 {
                     "row_id": row_id,
                     "serial": serial,
                     "depth": depth,
-                    "description": description,
-                    "qty": qty,
-                    "unit": unit,
+                    "description": line_description,
+                    "full_description": full_description,
+                    "lineage_parts": lineage_parts,
+                    "lineage_count": lineage_count,
+                    "qty": first.get("quantity", qty),
+                    "unit": first.get("quantity_unit", unit),
+                    "qty_display": first.get("quantity_display")
+                    or (str(qty) if qty not in (None, "") else "—"),
+                    "unit_display": first.get("quantity_unit_display")
+                    or (str(unit).strip() if unit not in (None, "") else "—"),
+                    "show_qty_unit": bool(first.get("show_quantity"))
+                    or qty not in (None, "")
+                    or bool(unit),
                     "status": line_status,
                     "products": products,
+                    "product_count": len(products),
                 }
             )
 

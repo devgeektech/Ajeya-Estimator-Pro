@@ -47,12 +47,12 @@ created by admins.
 ### Master database import
 
 ```text
-Upload workbook → Validate → Import Rate_Master_Output + Labour_master_Output
-→ Activate version → Generate embeddings
+Upload workbook → Validate → Import Product_Helper + Rate_Master_Output +
+Labour_master_Output → Activate version → Generate embeddings
 ```
 
 - Runs **synchronously** in the upload request (no Celery).
-- Both `Rate_Master_Output` and `Labour_master_Output` are **required**.
+- `Product_Helper`, `Rate_Master_Output`, and `Labour_master_Output` are **required**.
 - Other workbook sheets may exist; they are **not ingested** (UI counts only).
 - Exactly **one** active `DatabaseVersion` at a time; Chroma holds embeddings for
   the active database only (one vector per rate row; includes `Product_ID`).
@@ -60,7 +60,8 @@ Upload workbook → Validate → Import Rate_Master_Output + Labour_master_Outpu
 - Last **10** uploads remain visible for view/download (metadata + workbook file).
 - Master sheet rows are stored in PostgreSQL only for the **active** upload.
 - No rollback — new upload replaces the active database.
-- Pricing amount: **`Final_Material_Amount`**. Labour join: **`Product_ID`**.
+- Catalog identity: **`Product_Helper.Product_ID`**. Pricing amount:
+  **`Final_Material_Amount`**. Labour: **`Total_Labour_Per_Unit`** by Product_ID.
 - Embeddings skip cleanly when OpenAI is not configured.
 
 Entry point: `DatabaseImportService` in `apps/database_manager/services/importer.py`.
@@ -110,7 +111,14 @@ Upload BOQ (+ optional make list) → parse to JSON → store files + hierarchy
 - Empty / unrecognizable parses **fail the upload** (no silent empty JSON).
 - Normalized JSON is also written to `media/extract_json/{boq_name}/` as
   `boq_data.json` and `make_list_data.json` for downstream AI analysis.
-- View page shows **BOQ** and **Make List** tabs with indented sheet layout.
+- View page shows **BOQ** and **Make List** tabs with indented sheet layout
+  (BOQ description indent capped at two visual levels so deep nesting does not
+  create large mid-row gaps). Make List uses a full-width CSS grid with
+  equal-height stretched cells and row-level borders (avoids mid-row lines when
+  descriptions wrap or mapped sub-category is empty). Each detail tab is
+  server-rendered alone (`?tab=…`) so switching does not download all tab
+  panels at once. Make & Vendor display preloads Rate_Master_Output once
+  (no per-product N+1).
 - Attribute value synonyms (e.g. MS→mild steel, DI→ductile iron) are applied during
   Analyse attribute comparison via `utils/attribute_parser.py`.
 
@@ -180,8 +188,10 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
 - Flow per product:
   1. AI extract product fields/attributes from the **BOQ row as source of truth**
      (always includes `category` + `sub_category` from BOQ meaning; DB context lists
-     **categories and sub-categories** (`sub_categories_by_category`) so AI maps onto
-     existing Rate_Master_Output labels; values are snapped to DB labels after extract)
+     **categories**, **sub_categories_by_category**, and
+     **classes_by_category_sub_category** so AI maps onto existing Rate_Master_Output
+     labels; values are snapped to DB labels after extract — e.g. PIPE material MS
+     stays in sub_category, Class snaps to catalog Class such as C)
   2. Retrieve the **top 3** nearest Rate_Master_Output candidates (Chroma + structured/SQL),
      ranked best-first — never invent catalog rows or Product_ID
   3. **AI mapping layer** (`ProductAIMappingService`) selects the best candidate when
@@ -211,8 +221,12 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
   also flagged for review. Matching counts (1↔1, 2↔2, …) are not flagged unless
   a fallback review product was required. Section-only header rows are hidden
   (products live with the Unit/Qty groups).
-- Attribute / match confidence badge colors: ≥80 green, >70 yellow, >50 orange,
-  else red
+- **Product match percentage** on each Analysis Product tab/card uses
+  `db_match_confidence` (fallback: attribute confidence) with client bands:
+  **≥95% green**, **90–94.99% orange**, **<90% red**. Section left border is
+  green only when every product in that section is ≥95%.
+- Attribute-fill helper band (schema completeness) remains ≥80 / >70 / >50 for
+  internal fill scoring; the tab/card UI shows the product match percentage above.
 - Analysis confidence is **product-only** (category, sub-category, class, size,
   unit, capacity, attributes). Make / vendor / brand fields are excluded from the
   score, Chroma query, and AI mapping payload — Make & Vendor owns vendor selection.
@@ -225,9 +239,11 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
   ``quantity`` / ``quantity_unit`` only — never into product ``unit``.
   Quantity comes from filled Unit/Qty **slots** inside the section
   (including ``0`` and ``Rate Only`` / ``RO``); for Rate Only the BOQ rate cell is
-  stored as ``boq_rate``. Each product binds to its own slot. Analysis shows the
-  active product's quantity/unit only in the section header (beside product
-  count); switching Product tabs updates that header value.
+  stored as ``boq_rate``. Each product binds to its own slot. Analysis, Make &
+  Vendor, Labour, and Review show the active product's quantity/unit in the
+  section header; switching Product tabs updates that header. Blank stored
+  quantities are rehydrated from BOQ slots on display and after Analyse /
+  Re-analyse / Labour Apply.
 - **Pricing:** normal lines use ``(material_rate + labour_rate)`` via amounts
   ``material_rate × qty`` and ``labour_rate × qty``. For qty ``0`` or Rate Only / RO,
   Review/Export show the **sum of unit rates only** (no quantity multiply), flagged
@@ -239,30 +255,33 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
 **Step 2 — Make & Vendor** (BOQ detail → **Make & Vendor** tab, after Analyse):
 
 - From Analysis, toolbar **Next** (blue) prefills every product with the
-  **lowest-price** Rate_Master_Output row for its category / sub-category (among
-  **approved makes** when a make list exists; among **all makes** when none was
-  uploaded), then opens **Make & Vendor** and sets status `MAKE_VENDOR`.
+  **lowest-price** Rate_Master_Output row for its **Product_ID** (from
+  Product_Helper / matched catalog), among **approved makes** when a make list
+  exists; among **all makes** for that Product_ID when none was uploaded), then
+  opens **Make & Vendor** and sets status `MAKE_VENDOR`.
 - After full Analyse completes, the page **stays on Analysis** (review first;
   use Next to continue).
 - Enabled when `analysis_data.rows` exist and Make & Vendor defaults have been
   applied (`MAKE_VENDOR` / later pipeline statuses).
-- For each analysed product, expert selects **Make** and/or **Vendor** from options
-  (make-list approved makes when present; otherwise Rate_Master_Output makes for the
-  product category/spec).
+- Analysis attaches **`catalog_product_id`** (Product_Helper `Product_ID`) when
+  the matched Rate_Master_Output row (or structured Product_Helper match) resolves.
+- For each analysed product, expert selects **Make** and/or **Vendor** from the
+  Rate_Master_Output rows that share that Product_ID (make-list approved makes
+  when present). Product rate = **`Final_Material_Amount`**.
+- Line headers show a soft badge **Auto** (lowest-price default) or **filtered**
+  (any product has an expert make-list pick), after “N lines grouped” when present.
 - When the make list has **no approved make** for a product's category/sub-category
-  (**Not found**), Make and Vendor become free-text inputs so the expert can type
-  values and run **Find rates** against Rate_Master_Output. The cascade panel also accepts
-  typed make/vendor for that scope. After a manual entry, the product leaves the
-  not-found summary bucket (counts as filtered/manual). Free-text fields stay
-  editable so make/vendor can be changed and Find rates re-run. **No match**
-  cards keep Make/Vendor dropdowns (approved options) for retry.
+  (**Not found**), or when rates do not match (**No match**), Make and Vendor stay
+  editable and the card shows **Find in DB** — resolves Product_Helper → Product_ID
+  then loads Make/Vendor Rate_IDs for that product. Free-text Find rates remains
+  available for typed make/vendor retry.
 - **Sub-category makes:** top panel lists **category → sub-category → make → vendor**
   (only categories/sub-categories present in Analysis extraction). **Apply to sub-category**
   sets make/vendor on every product in that sub-category and loads rates. Default make is
   **Lowest price** (approved-make constrained when a make list exists). Empty vendor also
   picks the lowest-priced Rate_Master_Output row for the chosen make. Changing Make on a
   product or the cascade panel reloads **all** Rate_Master_Output vendors for that make
-  (category-wide when the sub-category only has one). When two or more
+  (scoped to Product_ID when known). When two or more
   Rate_Master_Output rows for that make share the same lowest price (typically different
   vendors), the product is flagged **Multiple product detected in same price** and
   the expert must choose one. Applied filters list
@@ -283,9 +302,11 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
 
 **Step 3 — Labour** (Labour tab, after Make & Vendor → Next):
 
-- Status `LABOUR`. `Product_ID` comes from Make & Vendor `vendor_selection`.
+- Status `LABOUR`. `Product_ID` comes from Make & Vendor `vendor_selection` /
+  `catalog_product_id`.
 - **Auto:** for each product, load Labour_master_Output by Product_ID and fill labour rate/amount
-  from `Total_Labour_per_unit_with_labour_Multipler`
+  from **`Total_Labour_Per_Unit`** (fallback:
+  `Total_Labour_per_unit_with_labour_Multipler`)
   (`BOQLabourService.apply_auto` → `LabourDetailRetrievalService`).
   Toolbar **Apply labour** (visible in Auto and Manual) runs this load.
 - **Manual:** enter a percentage per extraction category; labour =
@@ -296,17 +317,38 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
 - Persist `analysis_data.labour_config` (`mode`, `category_percentages`, `labour_ready`).
 - Toolbar **Next** runs row pricing aggregate and sets `READY_EXPORT`
   (`BOQLabourService.complete` → `BOQPriceCalculationService`).
+- Apply / Next UI gates allow `MAKE_VENDOR` as well as `LABOUR` (and later
+  pipeline statuses) so labour remains editable if status has not yet advanced.
 - **Client progress report:** [`docs/LABOUR_CLIENT_REPORT.md`](LABOUR_CLIENT_REPORT.md)
   (capabilities, UX delivered, demo script, confirmation checklist).
 
 **Step 4 — Review + Export** (Review tab):
 
-- Shows product details from Make & Vendor + Labour (`BOQReviewDisplayService`),
-  not fuzzy Match `product_matches`, in the client **Output format** columns
-  (Rate_Master / Labour breakdown + totals).
+- Product-wise cards (same line / product-tab pattern as Make & Vendor and
+  Labour), including serial-lineage “View N grouped lines” when a section spans
+  multiple BOQ rows. On-screen cards show Ser no, Description, AI Interpretation,
+  Make, Vendor, Final Material Amount, Labour, Qty, TOTAL MATERIAL, TOTAL LABOUR,
+  and Amount (material breakdown columns stay on the Excel Review export only).
+- Line cards on Make & Vendor / Labour / Review use the same white /
+  `--card-stripe` zebra as Analysis, and the same **inset 3px** left status
+  stripe format as Analysis confidence borders (`box-shadow: inset 3px 0 0`).
+- **UI reference:** Analysis is the visual/format source of truth for shared BOQ
+  detail patterns (cards, stripes, badges, tabs). Make & Vendor, Labour, and
+  Review must follow Analysis when adding or changing shared chrome.
 - **Two exports** (`GET /boqs/<id>/export/?kind=…`):
-  - `kind=review` — Review sheet matching `Output format.xlsx` (one row per product).
-  - `kind=boq` — original uploaded BOQ layout with Rate/Amount filled on qty rows.
+  - `kind=review` — Review/breakdown sheet using `Output format.xlsx` column order
+    (one row per product). Export headers use the **red** labels from that
+    template (Ser no, BOQ Description, AI interpretation, Labour, TOTAL
+    MATERIAL/LABOUR); instructional Rate_Master headers are shortened to field
+    names only (Make, Vendor, …). Red header cells are written in red.
+    **Ser no of BOQ** uses each product's Unit/Qty row serial. Letter slots
+    (`a)`, `b)`) are qualified with that row's nearest structural parent
+    (`5.1 a)`, not the wider group `5`). When several products share one serial,
+    export uses `1.7(A)`, `1.7(B)` so hierarchy stays readable without renumbering.
+  - `kind=boq` — exact uploaded workbook layout (original file filled in place);
+    Rate/Amount written on each product's Unit/Qty row (not the section header).
+    Rows with no matched product are highlighted with a red background.
+  - Review export also red-highlights product rows with no fetched match.
 - Either download sets status `EXPORTED`.
 - Gate: `READY_EXPORT` / `pricing_ready` after Labour → Next.
 
@@ -327,7 +369,8 @@ live analysis is edited before re-match.
 | `MakeListConstraintService` | Approved-makes filter by category / description |
 | `ProductAIMappingService` | After extract: candidate recall + AI product/attribute mapping + confidence |
 | `ProductAttributeEnrichmentService` | Attribute confidence helpers / schema fill utilities |
-| `MakeVendorSelectionService` | After Analyse: make/vendor pick → exact Rate_Master_Output → rates by Product_ID |
+| `ProductHelperMatchingService` | Match BOQ extract → Product_Helper → Product_ID |
+| `MakeVendorSelectionService` | After Analyse: make/vendor pick → Rate_Master_Output by Product_ID → Final_Material_Amount |
 | `ProductMatchingService` | Chroma recall + structured `Rate_Master_Output` scoring |
 | `MakeListConstraintService` | Map BOQ lines to `approved_makes_list`; hard Make filter |
 | `BOQLabourService` | Auto/Manual labour charges; unlock Review |
@@ -359,7 +402,7 @@ Approved makes are split on `/`, `,`, `;`, or `|` into `approved_makes_list`
 **Make-list → category mapping:** each make-list description (free text / synonym)
 is mapped onto Rate_Master_Output ``Category`` and ``Sub_Category`` (heuristic + AI
 ``map_make_list_categories`` using the full taxonomy). Stored as ``category_mappings``
-on `make_list_data` and shown as separate **Mapped Category** and **Mapped Sub-category**
+on `make_list_data` and shown as separate **Category** and **Subcategory**
 columns on the Make List tab. Only **pending** stubs (written when the
 Rate_Master_Output taxonomy was empty) are remapped automatically once taxonomy is
 available (`MakeListCategoryMappingService.ensure_mappings`). A material recorded as
@@ -401,19 +444,20 @@ matched products → rate + labour lookup → line output → session confirm �
 - Pending lines require picking a candidate product before confirm; matched lines confirm the auto-selection.
 - Re-running analysis does not clear session confirmations (user may undo per line).
 
-**Labour charges:** `LabourDetailRetrievalService` links `Rate_Master_Output.Product_ID` → `Labour_master_Output`
-rows (size-aware when multiple rows share a key). Per-unit labour uses precomputed workbook columns:
-`Total_Labour_per_unit_with_labour_Multipler` → `Total_Labour_per_Unit` → `Labour_Rate_Per_unit`.
+**Labour charges:** `LabourDetailRetrievalService` links `Product_ID` →
+`Labour_master_Output` (size-aware when multiple rows share a key). Per-unit
+labour prefers **`Total_Labour_Per_Unit`**, then
+`Total_Labour_per_unit_with_labour_Multipler`, then `Labour_Rate_Per_unit`.
 Component breakdown (testing, scaffolding, consumables, painting, buffer) is exposed for export.
 
 **Export:** After Labour → Next (`READY_EXPORT`), Review tab offers two downloads
 via `BOQExportService` (`?kind=`):
 
-- **Review sheet** (`kind=review`) — client Output format columns (Rate_ID, Make,
-  Vendor, material breakdown, Labour, Qty, TOTAL MATERIAL/LABOUR, Amount); one
-  row per product.
-- **BOQ** (`kind=boq`) — original upload layout with rate/amount filled only on
-  rows that already have quantity; blank row after each section.
+- **Review sheet** (`kind=review`) — client Output format columns with short/red
+  headers (Rate_ID, Make, Vendor, material breakdown, Labour, Qty, TOTAL
+  MATERIAL/LABOUR, Amount); one row per product.
+- **BOQ** (`kind=boq`) — original upload workbook with rate/amount filled only on
+  rows that already have Qty and Unit.
 
 Either successful download sets `EXPORTED`.
 
@@ -502,6 +546,8 @@ BOQ_AI/
 | `apps/boq/services/boq_analysis_service.py` | Analysis orchestrator |
 | `apps/boq/services/rate_detail_retrieval_service.py` | Rate_Master_Output snapshot by id |
 | `apps/boq/services/labour_detail_retrieval_service.py` | Labour_master_Output by Product_ID |
+| `apps/boq/services/product_helper_matching_service.py` | Product_Helper → Product_ID |
+| `apps/boq/services/make_vendor_selection_service.py` | Make/Vendor by Product_ID + Find in DB |
 | `apps/boq/services/boq_labour_service.py` | Labour Auto/Manual + complete → Review |
 | `apps/boq/services/boq_review_display_service.py` | Review/export from vendor_selection |
 | `apps/boq/services/boq_price_calculation_service.py` | Labour → Next row pricing / ready to export |

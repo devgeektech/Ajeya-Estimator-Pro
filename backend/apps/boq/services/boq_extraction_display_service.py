@@ -4,8 +4,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from ai.context import load_rate_master_taxonomy, snap_product_taxonomy
 from apps.boq.models import BOQ
-from apps.boq.services.boq_extraction_service import _normalize_product_fields
+from apps.boq.services.boq_extraction_service import (
+    _normalize_product_fields,
+    quantity_display_fields,
+    rehydrate_products_quantity_from_group,
+)
 from apps.boq.services.boq_row_grouping_service import grouped_anchor_rows
 from apps.boq.services.extraction_attribute_fields import COMMON_ATTRIBUTE_LABELS
 from apps.boq.services.make_list_constraint_service import MakeListConstraintService
@@ -13,6 +18,7 @@ from apps.boq.services.product_attribute_enrichment_service import (
     compute_attribute_confidence,
     confidence_band,
     humanize_attribute_key,
+    match_percentage_band,
 )
 from apps.boq.services.product_matching_service import structured_match_score
 from apps.database_manager.models import Rate_Master_Output
@@ -156,8 +162,9 @@ def _shape_product(
     total: int,
     source_row_id: str,
     database_version_id: int | None = None,
+    taxonomy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    product = _normalize_product_fields(product)
+    product = snap_product_taxonomy(_normalize_product_fields(product), taxonomy)
     fields: list[dict[str, Any]] = []
     missing_count = 0
     for key, label in _PRODUCT_FIELDS:
@@ -220,6 +227,8 @@ def _shape_product(
         selected_confidence = _candidate_confidence_value(
             product.get("attribute_confidence")
         )
+    match_percentage = float(selected_confidence or 0.0)
+    match_band = match_percentage_band(match_percentage)
     for item in (product.get("db_candidates") or [])[:3]:
         cand_id = item.get("id")
         is_selected = False
@@ -254,21 +263,12 @@ def _shape_product(
 
     # Each product binds to its own Unit/Qty slot, so a multi-product section
     # shows different values per tab rather than the section header's figure.
-    quantity = product.get("quantity")
-    quantity_unit = product.get("quantity_unit")
-    has_quantity = quantity not in (None, "")
+    qty_fields = quantity_display_fields(product)
     return {
         "product_index": int(product.get("product_index") or 0),
         "source_row_id": source_row_id,
         "display_number": display_number,
-        "quantity": quantity,
-        "quantity_unit": quantity_unit or "",
-        "quantity_display": str(quantity) if has_quantity else "—",
-        "quantity_unit_display": (
-            str(quantity_unit).strip() if quantity_unit not in (None, "") else "—"
-        ),
-        "show_quantity": has_quantity or bool(str(quantity_unit or "").strip()),
-        "rate_only": bool(product.get("rate_only")),
+        **qty_fields,
         "display_label": f"Product {display_number}" + (f" of {total}" if total > 1 else ""),
         "is_user_added": (product.get("source") or "").lower() == "user",
         "fields": fields,
@@ -283,6 +283,8 @@ def _shape_product(
         ),
         "attribute_confidence": attribute_fields["confidence"],
         "attribute_confidence_band": attribute_fields["confidence_band"],
+        "match_percentage": match_percentage,
+        "match_percentage_band": match_band,
         "db_match": db_match,
         "db_match_status": db_match_status,
         "db_candidates": candidates,
@@ -415,6 +417,8 @@ def build_product_save_feedback(product: dict[str, Any]) -> dict[str, Any]:
         "is_complete": shaped["missing_count"] == 0,
         "attribute_confidence": shaped["attribute_confidence"],
         "attribute_confidence_band": shaped["attribute_confidence_band"],
+        "match_percentage": shaped["match_percentage"],
+        "match_percentage_band": shaped["match_percentage_band"],
     }
 
 
@@ -446,6 +450,7 @@ class BOQExtractionDisplayService:
 
             active = get_active_database_version()
             db_version_id = active.pk if active else None
+        taxonomy = load_rate_master_taxonomy(db_version_id)
 
         for group in grouped_anchor_rows(boq_data):
             row_id = group["row_id"]
@@ -453,6 +458,8 @@ class BOQExtractionDisplayService:
                 group["group_ids"],
                 analysis_by_row,
             )
+            # Restore slot qty when products kept qty_row_id but lost quantity.
+            products = rehydrate_products_quantity_from_group(products, group)
             product_total = len(products)
             qty_rows = list(group.get("qty_rows") or [])
             qty_row_count = len(qty_rows)
@@ -477,6 +484,7 @@ class BOQExtractionDisplayService:
                     total=product_total,
                     source_row_id=str(product.get("source_row_id") or row_id),
                     database_version_id=db_version_id,
+                    taxonomy=taxonomy,
                 )
                 for index, product in enumerate(products)
             ]
@@ -495,18 +503,14 @@ class BOQExtractionDisplayService:
             else:
                 status = "not_analyzed"
 
-            # Analysis UI: show a left “confidence line” on the outer extraction card.
-            # - Green only when at least one extracted product has confidence band "green"
-            # - Otherwise red
-            # - Except multiproduct review where we keep the existing review styling
+            # Analysis UI: left confidence line on the outer extraction card.
+            # Green only when every product match is ≥ 95% (match_percentage_band green).
             confidence_border: str | None
             if multiproduct_review or not shaped_products:
                 confidence_border = None
             else:
-                # Keep the section red until *all* extracted products in that section
-                # reach confidence band "green".
                 is_all_green = all(
-                    str(p.get("attribute_confidence_band") or "").strip() == "green"
+                    str(p.get("match_percentage_band") or "").strip() == "green"
                     for p in shaped_products
                 )
                 confidence_border = "green" if is_all_green else "red"

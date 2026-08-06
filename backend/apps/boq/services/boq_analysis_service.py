@@ -15,7 +15,11 @@ from apps.boq.services.boq_analysis_store import (
     save_boq_analysis_json,
     save_boq_match_results_json,
 )
-from apps.boq.services.boq_extraction_service import BOQExtractionService, _normalize_product_fields
+from apps.boq.services.boq_extraction_service import (
+    BOQExtractionService,
+    _normalize_product_fields,
+    rehydrate_analysis_rows_quantity,
+)
 from apps.boq.services.boq_extract_service import load_extract_data
 from apps.boq.services.boq_job_progress import (
     clear_boq_job_progress,
@@ -250,6 +254,8 @@ class BOQAnalysisService:
                 database_version_id=db_snap.get("database_version_id"),
                 progress_callback=_on_enrich_progress,
             )
+            # Mapping must not leave blank quantities when BOQ slots are known.
+            extracted_rows = rehydrate_analysis_rows_quantity(boq_data, extracted_rows)
 
             set_boq_job_progress(boq.pk, percent=98, label="Saving results…", phase="extract")
             analysis_payload = {
@@ -425,6 +431,11 @@ class BOQAnalysisService:
             else:
                 rematched_rows = rematched
 
+            rematched_rows = rehydrate_analysis_rows_quantity(
+                self._get_boq().boq_data or {},
+                rematched_rows,
+            )
+
             persist_status = self._status_after_row_work(previous_status)
             with transaction.atomic():
                 boq = BOQ.objects.select_for_update().get(pk=self.boq_id)
@@ -507,6 +518,7 @@ class BOQAnalysisService:
                 replacements,
                 database_version_id=int(existing.get("database_version_id") or 0) or None,
             )
+            replacements = rehydrate_analysis_rows_quantity(boq_data, replacements)
             updated_rows = _replace_rows(list(existing.get("rows") or []), replacements)
             analysis_payload = {
                 **existing,

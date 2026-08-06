@@ -18,6 +18,69 @@
     .boq-view {
         margin-top: -28px;
     }
+    /* Make List tab — CSS grid fills the panel edge-to-edge. */
+    .panel.panel--make-list-flush {
+        width: 100% !important;
+        max-width: none !important;
+        padding: 0 !important;
+        box-sizing: border-box !important;
+    }
+    .make-list-tab-canvas {
+        width: 100% !important;
+        max-width: none !important;
+        display: block !important;
+        box-sizing: border-box !important;
+        margin: 0;
+        padding: 0;
+    }
+    .make-list-sheet {
+        display: block !important;
+        width: 100% !important;
+        max-width: none !important;
+        box-sizing: border-box !important;
+        margin: 0 !important;
+    }
+    .make-list-sheet__head,
+    .make-list-sheet__row {
+        display: grid !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+        /* Last column (Approved Makes) is 1fr — fills all remaining width to the right edge. */
+        grid-template-columns: 3.5rem minmax(0, 28%) 9rem 10rem 1fr !important;
+        column-gap: 2.75rem !important;
+        align-items: stretch;
+        border-bottom: 1px solid var(--border, #cbd5e1);
+    }
+    .make-list-sheet__cell {
+        padding: 12px 8px !important;
+        font-size: .9rem;
+        color: var(--text, #1e293b);
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        min-width: 0 !important;
+        text-align: left !important;
+    }
+    .make-list-sheet__cell.boq-sheet__col-mapped-cat,
+    .make-list-sheet__cell.boq-sheet__col-mapped-sub,
+    .make-list-sheet__cell.boq-sheet__col-makes {
+        width: 100% !important;
+        max-width: none !important;
+        justify-self: stretch !important;
+        text-align: left !important;
+    }
+    .make-list-sheet__cell--head {
+        font-weight: 700 !important;
+        font-size: .85rem !important;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: var(--surface, #fff) !important;
+        text-align: left !important;
+    }
+    .make-list-sheet__cell.boq-sheet__col-sno {
+        white-space: nowrap !important;
+        overflow-wrap: normal !important;
+    }
     .boq-detail-header {
         position: sticky !important;
         top: 63px !important;
@@ -61,6 +124,7 @@
     }
     .boq-tab-context__status {
         flex-shrink: 0;
+        margin-left: auto;
     }
     .boq-tab-context__summary {
         flex: 1 1 auto;
@@ -98,8 +162,10 @@
         }
         .boq-tab-context__summary {
             flex: 1 1 100%;
-            order: 3;
             font-size: .78rem;
+        }
+        .boq-tab-context__status {
+            margin-left: 0;
         }
         .boq-tab-context__actions {
             flex: 1 1 auto;
@@ -123,17 +189,23 @@
             width: auto;
         }
     }
-    /* Distinct alternating card colors - Light Mode */
-    .extraction-line:nth-child(odd) {
+    /* Distinct alternating card colors - Light Mode (Analysis + Make & Vendor / Labour / Review) */
+    .extraction-line:nth-child(odd),
+    .make-vendor-lines > .make-vendor-line:nth-of-type(odd) {
         background-color: #ffffff !important;
     }
-    .extraction-line:nth-child(even) {
+    .extraction-line:nth-child(even),
+    .make-vendor-lines > .make-vendor-line:nth-of-type(even),
+    .make-vendor-line--alt {
         background-color: #e2e8f0 !important;
     }
-    .dark-mode .extraction-line:nth-child(odd) {
+    .dark-mode .extraction-line:nth-child(odd),
+    .dark-mode .make-vendor-lines > .make-vendor-line:nth-of-type(odd) {
         background-color: #111827 !important;
     }
-    .dark-mode .extraction-line:nth-child(even) {
+    .dark-mode .extraction-line:nth-child(even),
+    .dark-mode .make-vendor-lines > .make-vendor-line:nth-of-type(even),
+    .dark-mode .make-vendor-line--alt {
         background-color: #334155 !important;
     }
     .extraction-product-card {
@@ -219,10 +291,14 @@
         extractStatusUrl: '{% url 'boq:status' boq.pk %}?expect=extract',
         matchStatusUrl: '{% url 'boq:status' boq.pk %}?expect=match',
         detailAnalysisUrl: '{% url 'boq:detail' boq.pk %}?tab=analysis',
+        detailMakeListUrl: '{% url 'boq:detail' boq.pk %}?tab=make_list',
         detailMakeVendorUrl: '{% url 'boq:detail' boq.pk %}?tab=make_vendor',
         detailLabourUrl: '{% url 'boq:detail' boq.pk %}?tab=labour',
         detailReviewUrl: '{% url 'boq:detail' boq.pk %}?tab=review',
         detailMatchUrl: '{% url 'boq:detail' boq.pk %}?tab=review',
+        detailBoqUrl: '{% url 'boq:detail' boq.pk %}?tab=boq',
+        onMakeListPage: {% if default_tab == 'make_list' %}true{% else %}false{% endif %},
+        activeTabPage: '{{ default_tab|escapejs }}',
         canExport: {{ can_export|yesno:'true,false' }},
         canUnlockLabour: {{ can_unlock_labour|yesno:'true,false' }},
         canCompleteLabour: {{ can_complete_labour|yesno:'true,false' }},
@@ -412,18 +488,23 @@
             if (name === 'labour' && !this.labourEnabled) return;
             if ((name === 'review' || name === 'match_results') && !this.reviewEnabled) return;
             if (name === 'match_results') name = 'review';
+            // Each tab is server-rendered alone — navigate to that tab URL.
+            if (name === this.activeTabPage || name === this.tab) {
+                this.tab = name;
+                return;
+            }
+            const urls = {
+                boq: this.detailBoqUrl,
+                make_list: this.detailMakeListUrl,
+                analysis: this.detailAnalysisUrl,
+                make_vendor: this.detailMakeVendorUrl,
+                labour: this.detailLabourUrl,
+                review: this.detailReviewUrl,
+            };
+            const url = urls[name];
+            if (!url) return;
             this.persistScroll(this.tab);
-            this.scrollPositions[this.tab] = window.scrollY;
-            this.tab = name;
-            this.syncTabUrl(name);
-            this.$nextTick(() => {
-                const saved = this.scrollPositions[name];
-                if (typeof saved === 'number') {
-                    window.scrollTo(0, saved);
-                } else {
-                    this.restoreScroll(name);
-                }
-            });
+            window.location.href = url;
         },
         applyStatus(data) {
             if (data.label) this.statusLabel = data.label;
@@ -627,8 +708,9 @@
             }
         },
         async completeLabour() {
+            // Do not gate on canCompleteLabour alone — Labour Next can show when
+            // labourReady is true while status is still MAKE_VENDOR; server validates.
             if (this.analysing || this.matching || this.completingLabour) return;
-            if (!this.canCompleteLabour) return;
             this.completingLabour = true;
             try {
                 const body = new FormData();
@@ -649,6 +731,7 @@
                     throw new Error(data.message || 'Failed to complete labour.');
                 }
                 this.reviewEnabled = true;
+                this.canCompleteLabour = true;
                 this.canExport = true;
                 this.statusLabel = 'Ready to Export';
                 this.statusBadge = 'badge--green';
@@ -750,15 +833,6 @@
         </div>
 
         <div class="boq-tab-context" :class="{ 'boq-tab-context--compact': tab === 'make_list' || tab === 'make_vendor' || tab === 'labour' }">
-            <div class="boq-tab-context__status" x-show="tab !== 'make_list' && tab !== 'make_vendor' && statusLabel" x-cloak>
-                <span
-                    class="badge"
-                    :class="statusBadge"
-                    x-show="!(analysing && tab === 'analysis')"
-                    x-text="statusLabel"
-                >{% if not is_extracting and status_display.label %}{{ status_display.label }}{% endif %}</span>
-            </div>
-
             <div class="boq-tab-context__summary" x-show="tab !== 'make_list' && tab !== 'make_vendor'" x-cloak>
                 {% if extraction_display.has_extraction %}
                 <span x-show="tab === 'analysis' && !analysing" x-cloak>
@@ -784,25 +858,39 @@
                 {% if analysis_display.has_analysis %}
                 <span x-show="tab === 'review'" x-cloak>
                     {{ analysis_display.stats.products_matched|default:0 }} / {{ analysis_display.stats.products_total|default:0 }} products with rates
-                    · Export Review sheet or priced BOQ when ready.
                 </span>
                 {% endif %}
             </div>
 
+            <div class="boq-tab-context__status" x-show="tab !== 'make_list' && tab !== 'make_vendor' && statusLabel" x-cloak>
+                <span
+                    class="badge"
+                    :class="statusBadge"
+                    x-show="!(analysing && tab === 'analysis')"
+                    x-text="statusLabel"
+                >{% if not is_extracting and status_display.label %}{{ status_display.label }}{% endif %}</span>
+            </div>
+
             <div class="boq-tab-context__actions">
-                {% if can_analyse and not extraction_display.has_extraction %}
+                {% if can_analyse and not has_analysis_rows %}
                     <button
                         type="button"
                         class="btn btn--small btn--boq-analyse"
                         :class="{ 'btn--analysis-loading': analysing }"
                         :disabled="analysing"
+                        x-show="tab === 'boq' || tab === 'make_list' || tab === 'analysis'"
                         @click="startAnalyse()"
                     >
                         <span x-show="!analysing">Analyse BOQ</span>
                         <span x-show="analysing" x-cloak>Analysing...</span>
                     </button>
                 {% elif is_extracting %}
-                    <button type="button" class="btn btn--small btn--analysis-loading" disabled>Analysing...</button>
+                    <button
+                        type="button"
+                        class="btn btn--small btn--analysis-loading"
+                        x-show="tab === 'boq' || tab === 'make_list' || tab === 'analysis'"
+                        disabled
+                    >Analysing...</button>
                 {% endif %}
 
                 <span x-show="tab === 'analysis' && !analysing && analysisEnabled && !makeVendorEnabled" x-cloak>
@@ -883,6 +971,12 @@
                     <span x-show="!unlockingLabour">Next</span>
                     <span x-show="unlockingLabour" x-cloak>Loading…</span>
                 </button>
+                {% elif tab_access.labour %}
+                <button
+                    type="button"
+                    class="btn btn--small btn--primary"
+                    @click="selectTab('labour')"
+                >Next</button>
                 {% endif %}
             </div>
         </div>
@@ -890,26 +984,26 @@
     </div>
 
     <div
-        class="panel"
+        class="panel{% if default_tab == 'make_list' %} panel--make-list-flush{% endif %}"
         :class="{
-            'panel--analysis-flat': tab === 'analysis' || tab === 'make_list' || tab === 'make_vendor' || tab === 'labour',
+            'panel--analysis-flat': tab === 'analysis' || tab === 'make_vendor' || tab === 'labour' || tab === 'review',
             'panel--make-list-flush': tab === 'make_list',
         }"
     >
-        <div x-show="tab === 'boq'" x-cloak role="tabpanel">
-            {% include "boq/_sheet_table.html" with structure=boq_structure %}
-        </div>
-
-        <div x-show="tab === 'make_list'" x-cloak role="tabpanel" class="make-list-tab-canvas">
+        {% if default_tab == 'make_list' %}
+        <div role="tabpanel" class="make-list-tab-canvas">
             {% if has_make_list %}
-                {% include "boq/_sheet_table.html" with structure=make_list_structure sheet_variant="make_list" %}
+                {% include "boq/_sheet_table.html" with structure=make_list_structure sheet_variant="make_list" only %}
             {% else %}
                 <p class="panel__text">No make list uploaded for this BOQ.</p>
             {% endif %}
         </div>
-
-        <div x-show="tab === 'analysis'" x-cloak role="tabpanel" class="analysis-tab-canvas">
-            {# Server-rendered when mid-job so the spinner shows even before Alpine boots. #}
+        {% elif default_tab == 'boq' %}
+        <div role="tabpanel">
+            {% include "boq/_sheet_table.html" with structure=boq_structure only %}
+        </div>
+        {% elif default_tab == 'analysis' %}
+        <div role="tabpanel" class="analysis-tab-canvas">
             <div
                 class="analysis-loading-center{% if is_extracting %} analysis-loading-center--active{% endif %}"
                 :class="{ 'analysis-loading-center--active': analysing }"
@@ -931,18 +1025,19 @@
                 {% include "boq/_extraction_table.html" with extraction_display=extraction_display can_edit_extraction=can_edit_extraction boq=boq %}
             </div>
         </div>
-
-        <div x-show="tab === 'make_vendor'" x-cloak role="tabpanel" class="make-vendor-tab-canvas">
+        {% elif default_tab == 'make_vendor' %}
+        <div role="tabpanel" class="make-vendor-tab-canvas">
             {% include "boq/_make_vendor_table.html" with make_vendor_display=make_vendor_display boq=boq %}
         </div>
-
-        <div x-show="tab === 'labour'" x-cloak role="tabpanel" class="labour-tab-canvas">
-            {% include "boq/_labour_table.html" with labour_display=labour_display boq=boq can_apply_labour=can_apply_labour %}
+        {% elif default_tab == 'labour' %}
+        <div role="tabpanel" class="labour-tab-canvas">
+            {% include "boq/_labour_table.html" with labour_display=labour_display boq=boq can_apply_labour=can_apply_labour can_complete_labour=can_complete_labour %}
         </div>
-
-        <div x-show="tab === 'review'" x-cloak role="tabpanel">
+        {% elif default_tab == 'review' %}
+        <div role="tabpanel" class="review-tab-canvas labour-tab-canvas">
             {% include "boq/_review_table.html" with analysis_display=analysis_display boq=boq %}
         </div>
+        {% endif %}
     </div>
 </div>
 {% endblock %}

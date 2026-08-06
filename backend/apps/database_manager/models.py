@@ -4,8 +4,9 @@ Field names mirror workbook sheet columns. Each master row is scoped to the
 ``database_version`` that imported it; only the active version keeps rows in
 PostgreSQL after import.
 
-Ingested sheets (required): ``Rate_Master_Output``, ``Labour_Master_Output``
-(older workbooks may still use ``Labour_master_Output``).
+Ingested sheets (required): ``Product_Helper``, ``Rate_Master_Output``,
+``Labour_Master_Output`` (older workbooks may still use ``Labour_master_Output``;
+``Product_Master`` is accepted as an alias for ``Product_Helper``).
 """
 from __future__ import annotations
 
@@ -80,6 +81,49 @@ def product_display_key(
             _part(attribute),
         ]
     )
+
+
+class Product_Helper(models.Model):
+    """Source: Product_Helper sheet (one catalog product identity per Product_ID).
+
+    Make/Vendor prices live on ``Rate_Master_Output`` rows that share this
+    ``Product_ID``. Labour joins on the same ``Product_ID``.
+    """
+
+    database_version = models.ForeignKey(
+        DatabaseVersion,
+        on_delete=models.CASCADE,
+        related_name="product_helper_rows",
+    )
+    Product_ID = models.CharField(max_length=64, db_index=True)
+    Category = models.CharField(max_length=255, null=True, blank=True)
+    Sub_Category = models.CharField(max_length=255, null=True, blank=True)
+    Class = models.CharField(max_length=255, null=True, blank=True)
+    Size = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    Unit = models.CharField(max_length=100, null=True, blank=True)
+    Capacity = models.CharField(max_length=255, null=True, blank=True)
+    Attribute = models.TextField(null=True, blank=True)
+    Status = models.CharField(max_length=64, null=True, blank=True)
+
+    class Meta:
+        db_table = "Product_Helper"
+        indexes = [
+            models.Index(fields=["database_version", "Product_ID"]),
+            models.Index(fields=["database_version", "Category", "Sub_Category"]),
+        ]
+
+    def display_key(self) -> str:
+        return product_display_key(
+            self.Category,
+            self.Sub_Category,
+            self.Class,
+            self.Size,
+            self.Capacity,
+            self.Attribute,
+        )
+
+    def __str__(self) -> str:
+        return f"Product {self.Product_ID} {self.display_key()}"
 
 
 class Rate_Master_Output(models.Model):
@@ -254,6 +298,7 @@ class Labour_master_Output(models.Model):
 
 # Master tables cleared for inactive versions after each import.
 MASTER_DATA_MODELS = (
+    Product_Helper,
     Rate_Master_Output,
     Labour_master_Output,
 )

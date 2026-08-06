@@ -6,9 +6,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Ajeya Estimator Pro{% endblock %}</title>
     <meta name="csrf-token" content="{{ csrf_token }}">
-<link rel="stylesheet" href="{% static 'css/app.css' %}?v=72">
+<link rel="stylesheet" href="{% static 'css/app.css' %}?v=103">
     <style>
         /* Override stale collected CSS (DEBUG=False keeps old hashed files until server restart). */
+        :root { --card-stripe: #e2e8f0; }
         html { zoom: 1 !important; height: 100%; }
         html, body {
             margin: 0;
@@ -215,14 +216,20 @@
         }
 
         .badge--review {
-            background: #ffedd5;
-            color: #c2410c;
-            border-color: #fdba74;
+            background: #f3e0c8;
+            color: #9a3412;
+            border-color: #d4a574;
         }
 
         .badge--yellow {
             background: #fef3c7;
             color: #854d0e;
+            border-color: transparent;
+        }
+
+        .badge--orange {
+            background: #f3e0c8;
+            color: #7c2d12;
             border-color: transparent;
         }
 
@@ -315,25 +322,85 @@
             box-shadow: none;
         }
 
-        /* Make List: flush table to the sticky header (no gap above heading row). */
+        /* Make List tab — CSS grid fills the panel edge-to-edge. */
         .panel.panel--make-list-flush {
             margin-top: 0;
+            padding: 0 !important;
+            width: 100% !important;
+            max-width: none !important;
+            box-sizing: border-box !important;
         }
         .make-list-tab-canvas {
             margin: 0;
             padding: 0;
+            width: 100% !important;
+            max-width: none !important;
+            display: block !important;
+            box-sizing: border-box !important;
         }
-        .make-list-tab-canvas .boq-sheet-wrap--make-list {
-            margin-top: 0;
+        .make-list-sheet {
+            display: block !important;
+            width: 100% !important;
+            max-width: none !important;
+            box-sizing: border-box !important;
+            margin: 0 !important;
         }
-        .make-list-tab-canvas .table.boq-sheet.boq-sheet--make-list thead th {
+        .make-list-sheet__head,
+        .make-list-sheet__row {
+            display: grid !important;
+            width: 100% !important;
+            box-sizing: border-box !important;
+            /* Last column (Approved Makes) is 1fr — fills all remaining width to the right edge. */
+            grid-template-columns: 3.5rem minmax(0, 28%) 9rem 10rem 1fr !important;
+            column-gap: 2.75rem !important;
+            align-items: stretch;
+            border-bottom: 1px solid var(--border, #cbd5e1);
+        }
+        .make-list-sheet__cell {
+            padding: 12px 8px !important;
+            font-size: .9rem;
+            color: var(--text, #1e293b);
+            overflow-wrap: anywhere;
+            word-break: break-word;
+            min-width: 0 !important;
+            text-align: left !important;
+        }
+        .make-list-sheet__cell.boq-sheet__col-mapped-cat,
+        .make-list-sheet__cell.boq-sheet__col-mapped-sub,
+        .make-list-sheet__cell.boq-sheet__col-makes {
+            width: 100% !important;
+            max-width: none !important;
+            justify-self: stretch !important;
+            text-align: left !important;
+        }
+        .make-list-sheet__cell--head {
+            font-weight: 700 !important;
+            font-size: .85rem !important;
             position: sticky;
             top: 0;
             z-index: 1;
-            background: var(--surface, #fff);
-            text-transform: none !important;
-            font-size: .85rem !important;
-            letter-spacing: normal !important;
+            background: var(--surface, #fff) !important;
+            text-align: left !important;
+        }
+        .make-list-sheet__cell.boq-sheet__col-sno {
+            white-space: nowrap !important;
+            overflow-wrap: normal !important;
+        }
+        /* BOQ sheet: capped description indent (deep nesting used to look like random gaps). */
+        .table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__cell.boq-sheet__col-desc {
+            padding-left: 12px !important;
+        }
+        .table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__row--depth-1 .boq-sheet__col-desc {
+            padding-left: 20px !important;
+        }
+        .table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__row--depth-2 .boq-sheet__col-desc,
+        .table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__row--depth-3 .boq-sheet__col-desc,
+        .table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__row--depth-4 .boq-sheet__col-desc,
+        .table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__row--depth-5 .boq-sheet__col-desc,
+        .table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__row--depth-6 .boq-sheet__col-desc,
+        .table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__row--depth-7 .boq-sheet__col-desc,
+        .table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__row--depth-8 .boq-sheet__col-desc {
+            padding-left: 28px !important;
         }
         /* BOQ / Make List sheets: normal header styling vs list-table uppercase */
         .table.boq-sheet th {
@@ -403,7 +470,7 @@
         }
 
         .extraction-line:nth-child(even) {
-            background: var(--surface-alt);
+            background: var(--card-stripe, #e2e8f0);
         }
 
         .extraction-line__header {
@@ -603,6 +670,60 @@
             color: #fff;
         }
 
+        .extraction-product-tabs__pct {
+            margin-left: 4px;
+            font-size: 0.85em;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            opacity: .92;
+        }
+
+        /* Product match % bands: ≥95 green, 90–94.99 orange, <90 red */
+        .extraction-product-tabs__btn--green {
+            background: #dcfce7;
+            border-color: #16a34a;
+            color: #166534;
+        }
+        .extraction-product-tabs__btn--green:hover {
+            border-color: #15803d;
+            color: #14532d;
+        }
+        .extraction-product-tabs__btn--green.is-active {
+            background: #16a34a;
+            border-color: #15803d;
+            color: #fff;
+        }
+
+        .extraction-product-tabs__btn--orange {
+            background: #f3e0c8;
+            border-color: #c2410c;
+            color: #7c2d12;
+        }
+        .extraction-product-tabs__btn--orange:hover {
+            border-color: #9a3412;
+            color: #7c2d12;
+        }
+        .extraction-product-tabs__btn--orange.is-active {
+            background: #c2410c;
+            border-color: #9a3412;
+            color: #fff;
+        }
+
+        .extraction-product-tabs__btn--red {
+            background: #fee2e2;
+            border-color: #dc2626;
+            color: #991b1b;
+        }
+        .extraction-product-tabs__btn--red:hover {
+            border-color: #b91c1c;
+            color: #7f1d1d;
+        }
+        .extraction-product-tabs__btn--red.is-active {
+            background: #dc2626;
+            border-color: #b91c1c;
+            color: #fff;
+        }
+
         .extraction-product-tabs__add {
             margin-left: 4px;
         }
@@ -753,6 +874,10 @@
             font-size: .78rem;
             border-radius: 5px;
             white-space: nowrap;
+        }
+
+        .analysis-tab-canvas .extraction-product-tabs__pct {
+            font-size: 0.85em;
         }
 
         .analysis-tab-canvas .extraction-product-tabs__add {
@@ -1126,12 +1251,14 @@
         }
 
         .make-vendor-tab-canvas .make-vendor-line__serial,
-        .labour-tab-canvas .make-vendor-line__serial {
+        .labour-tab-canvas .make-vendor-line__serial,
+        .review-tab-canvas .make-vendor-line__serial {
             font-size: .82rem;
         }
 
         .make-vendor-tab-canvas .make-vendor-line__description,
-        .labour-tab-canvas .make-vendor-line__description {
+        .labour-tab-canvas .make-vendor-line__description,
+        .review-tab-canvas .make-vendor-line__description {
             font-size: .82rem;
             line-height: 1.3;
             color: var(--text, #1e293b);
@@ -1144,19 +1271,22 @@
         }
 
         .make-vendor-tab-canvas .extraction-lineage,
-        .labour-tab-canvas .extraction-lineage {
+        .labour-tab-canvas .extraction-lineage,
+        .review-tab-canvas .extraction-lineage {
             font-size: .78rem;
-            color: #1e293b;
+            color: var(--text);
         }
 
         .make-vendor-tab-canvas .extraction-lineage__list,
-        .labour-tab-canvas .extraction-lineage__list {
-            color: #1e293b;
+        .labour-tab-canvas .extraction-lineage__list,
+        .review-tab-canvas .extraction-lineage__list {
+            color: var(--text);
             line-height: 1.3;
         }
 
         .make-vendor-tab-canvas .make-vendor-product-tabs__btn,
-        .labour-tab-canvas .make-vendor-product-tabs__btn {
+        .labour-tab-canvas .make-vendor-product-tabs__btn,
+        .review-tab-canvas .make-vendor-product-tabs__btn {
             height: 1.7rem;
             padding: 0 .65rem;
             font-size: .78rem;
@@ -1164,12 +1294,14 @@
         }
 
         .make-vendor-tab-canvas .make-vendor-card__title,
-        .labour-tab-canvas .make-vendor-card__title {
+        .labour-tab-canvas .make-vendor-card__title,
+        .review-tab-canvas .make-vendor-card__title {
             font-size: .85rem;
         }
 
         .make-vendor-tab-canvas .make-vendor-card__taxonomy,
-        .labour-tab-canvas .make-vendor-card__taxonomy {
+        .labour-tab-canvas .make-vendor-card__taxonomy,
+        .review-tab-canvas .make-vendor-card__taxonomy {
             font-size: .72rem;
         }
 
@@ -1179,12 +1311,14 @@
         .labour-tab-canvas .make-vendor-card__taxonomy-label,
         .labour-tab-canvas .make-vendor-readonly dt,
         .labour-tab-canvas .make-vendor-rates span,
-        .labour-tab-canvas .labour-rates span {
+        .labour-tab-canvas .labour-rates span,
+        .review-tab-canvas .make-vendor-readonly dt {
             font-size: .68rem;
         }
 
         .make-vendor-tab-canvas .make-vendor-readonly dd,
-        .labour-tab-canvas .make-vendor-readonly dd {
+        .labour-tab-canvas .make-vendor-readonly dd,
+        .review-tab-canvas .make-vendor-readonly dd {
             font-size: .78rem;
         }
 
@@ -1565,32 +1699,40 @@
             padding: 14px 16px;
             border: 1px solid var(--border);
             border-radius: 10px;
-            background: #ffffff;
+            background: var(--surface);
             box-shadow: var(--shadow, 0 1px 2px rgba(0, 0, 0, 0.04));
         }
 
+        /* White / slate card striping — same #e2e8f0 as Analysis even cards. */
+        .make-vendor-lines > .make-vendor-line:nth-of-type(even),
         .make-vendor-line--alt {
-            background: #f1f5f9;
+            background: var(--card-stripe, #e2e8f0) !important;
         }
 
+        /* Status stripe — same inset 3px format as Analysis confidence borders. */
         .make-vendor-line--matched {
-            border-left: 4px solid #22c55e;
+            border-color: rgba(34, 197, 94, 0.35);
+            box-shadow: inset 3px 0 0 #22c55e;
         }
 
         .make-vendor-line--not_found {
-            border-left: 4px solid #f59e0b;
+            border-color: #fdba74;
+            box-shadow: inset 3px 0 0 #f59e0b;
         }
 
         .make-vendor-line--same_price {
-            border-left: 4px solid #eab308;
+            border-color: rgba(234, 179, 8, 0.45);
+            box-shadow: inset 3px 0 0 #eab308;
         }
 
         .make-vendor-line--no_match {
-            border-left: 4px solid #ef4444;
+            border-color: rgba(239, 68, 68, 0.35);
+            box-shadow: inset 3px 0 0 #ef4444;
         }
 
         .make-vendor-line--no_labour {
-            border-left: 4px solid #f97316;
+            border-color: #fdba74;
+            box-shadow: inset 3px 0 0 #f97316;
         }
 
         .make-vendor-products {
@@ -1812,7 +1954,7 @@
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: .03em;
-            color: #64748b;
+            color: var(--text-muted);
         }
         .labour-rates strong {
             font-size: .95rem;
@@ -1842,7 +1984,7 @@
         .make-vendor-card__taxonomy {
             margin: 4px 0 0;
             font-size: .78rem;
-            color: #475569;
+            color: var(--text-muted);
             display: flex;
             flex-wrap: wrap;
             align-items: baseline;
@@ -1881,7 +2023,7 @@
 
         .make-vendor-readonly dt {
             font-size: .72rem;
-            color: #475569;
+            color: var(--text-muted);
             font-weight: 600;
         }
 
@@ -1910,6 +2052,59 @@
             margin-top: 10px;
         }
 
+        /* Review cards: denser grid for full Output-format columns. */
+        .review-tab-canvas .review-rate-fields {
+            margin-top: 10px;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        }
+        /* Headers darker/heavier; values lighter so they don't match header texture. */
+        .review-tab-canvas .make-vendor-readonly dt,
+        .review-tab-canvas .extraction-field__label {
+            font-weight: 700;
+            color: var(--text);
+        }
+        .review-tab-canvas .make-vendor-readonly dd {
+            overflow-wrap: anywhere;
+            font-weight: 400;
+            color: var(--text-muted);
+        }
+        .review-tab-canvas .make-vendor-fields .extraction-input--readonly,
+        .review-tab-canvas .extraction-input--readonly {
+            color: var(--text-muted);
+            font-weight: 400;
+        }
+        .review-tab-canvas .review-rate-fields__amount .extraction-input--readonly {
+            color: #2563eb;
+            font-weight: 600;
+        }
+        .review-tab-canvas .review-boq-desc__text {
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 2;
+            overflow: hidden;
+        }
+        .review-tab-canvas .review-boq-desc__text.is-expanded {
+            display: block;
+            -webkit-line-clamp: unset;
+            overflow: visible;
+        }
+        .review-tab-canvas .review-boq-desc__toggle {
+            display: inline-block;
+            margin-top: 4px;
+            padding: 0;
+            border: 0;
+            background: none;
+            color: var(--primary, #2563eb);
+            font: inherit;
+            font-size: .8rem;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+        .review-tab-canvas .review-boq-desc__toggle:hover {
+            color: var(--primary-dark, #1d4ed8);
+        }
+
         .labour-mode-badge {
             margin-left: 4px;
             align-self: center;
@@ -1935,7 +2130,7 @@
         }
 
         .make-vendor-result__notes {
-            color: #475569;
+            color: var(--text-muted);
         }
 
         .make-vendor-rates {
@@ -1959,7 +2154,7 @@
         .make-vendor-rates span {
             display: block;
             font-size: .72rem;
-            color: #475569;
+            color: var(--text-muted);
             font-weight: 600;
         }
 
@@ -2550,6 +2745,12 @@
                 text-align: left !important;
                 white-space: normal !important;
             }
+            .table.boq-sheet .boq-sheet__col-sno,
+            .table.boq-sheet .boq-sheet__col-unit {
+                white-space: nowrap !important;
+                overflow-wrap: normal !important;
+                word-break: keep-all !important;
+            }
             .sidebar-backdrop {
                 position: fixed;
                 inset: 0;
@@ -2710,8 +2911,35 @@
             color: var(--text);
         }
 
-        .dark-mode .make-vendor-line--alt {
+        .dark-mode .extraction-line:nth-child(even) {
             background: #1e293b;
+        }
+
+        .dark-mode .make-vendor-lines > .make-vendor-line:nth-of-type(even),
+        .dark-mode .make-vendor-line--alt {
+            background: #1e293b !important;
+        }
+
+        /* Status stripe: match Analysis inset 3px (dark-mode border-color must not wipe). */
+        .dark-mode .make-vendor-line--matched {
+            border-color: rgba(34, 197, 94, 0.35);
+            box-shadow: inset 3px 0 0 #22c55e;
+        }
+        .dark-mode .make-vendor-line--not_found {
+            border-color: #fdba74;
+            box-shadow: inset 3px 0 0 #f59e0b;
+        }
+        .dark-mode .make-vendor-line--same_price {
+            border-color: rgba(234, 179, 8, 0.45);
+            box-shadow: inset 3px 0 0 #eab308;
+        }
+        .dark-mode .make-vendor-line--no_match {
+            border-color: rgba(239, 68, 68, 0.35);
+            box-shadow: inset 3px 0 0 #ef4444;
+        }
+        .dark-mode .make-vendor-line--no_labour {
+            border-color: #fdba74;
+            box-shadow: inset 3px 0 0 #f97316;
         }
 
         .dark-mode .make-vendor-card {
@@ -2752,8 +2980,9 @@
         .dark-mode .make-vendor-card__taxonomy-value,
         .dark-mode .make-vendor-readonly dd,
         .dark-mode .make-vendor-result__meta p,
-        .dark-mode .make-vendor-rates strong {
-            color: #e2e8f0;
+        .dark-mode .make-vendor-rates strong,
+        .dark-mode .labour-rates strong {
+            color: var(--text);
         }
 
         .dark-mode .make-vendor-card__taxonomy,
@@ -2761,8 +2990,77 @@
         .dark-mode .make-vendor-readonly dt,
         .dark-mode .make-vendor-result__notes,
         .dark-mode .make-vendor-rates span,
-        .dark-mode .make-vendor-line__description {
+        .dark-mode .labour-rates span,
+        .dark-mode .make-vendor-line__description,
+        .dark-mode .make-vendor-line__meta,
+        .dark-mode .extraction-line__qty-unit {
+            color: var(--text-muted);
+        }
+
+        /* Make & Vendor / Labour / Review: readable text on dark cards. */
+        .dark-mode .make-vendor-tab-canvas,
+        .dark-mode .labour-tab-canvas,
+        .dark-mode .review-tab-canvas {
+            color: var(--text);
+        }
+        .dark-mode .make-vendor-tab-canvas .extraction-lineage,
+        .dark-mode .make-vendor-tab-canvas .extraction-lineage__list,
+        .dark-mode .labour-tab-canvas .extraction-lineage,
+        .dark-mode .labour-tab-canvas .extraction-lineage__list,
+        .dark-mode .review-tab-canvas .extraction-lineage,
+        .dark-mode .review-tab-canvas .extraction-lineage__list,
+        .dark-mode .make-vendor-tab-canvas .make-vendor-line__serial,
+        .dark-mode .labour-tab-canvas .make-vendor-line__serial,
+        .dark-mode .review-tab-canvas .make-vendor-line__serial,
+        .dark-mode .make-vendor-tab-canvas .make-vendor-line__description,
+        .dark-mode .labour-tab-canvas .make-vendor-line__description,
+        .dark-mode .review-tab-canvas .make-vendor-line__description,
+        .dark-mode .make-vendor-tab-canvas .make-vendor-card__title,
+        .dark-mode .labour-tab-canvas .make-vendor-card__title,
+        .dark-mode .review-tab-canvas .make-vendor-card__title,
+        .dark-mode .make-vendor-tab-canvas .panel__text,
+        .dark-mode .labour-tab-canvas .panel__text,
+        .dark-mode .review-tab-canvas .panel__text {
+            color: var(--text);
+        }
+        .dark-mode .make-vendor-tab-canvas .extraction-field__label,
+        .dark-mode .labour-tab-canvas .extraction-field__label,
+        .dark-mode .review-tab-canvas .extraction-field__label,
+        .dark-mode .make-vendor-tab-canvas .make-vendor-readonly dt,
+        .dark-mode .labour-tab-canvas .make-vendor-readonly dt,
+        .dark-mode .review-tab-canvas .make-vendor-readonly dt {
+            color: #f1f5f9;
+        }
+        .dark-mode .make-vendor-tab-canvas .make-vendor-readonly dd,
+        .dark-mode .labour-tab-canvas .make-vendor-readonly dd,
+        .dark-mode .review-tab-canvas .make-vendor-readonly dd,
+        .dark-mode .make-vendor-tab-canvas .make-vendor-fields .extraction-input--readonly,
+        .dark-mode .labour-tab-canvas .make-vendor-fields .extraction-input--readonly,
+        .dark-mode .review-tab-canvas .make-vendor-fields .extraction-input--readonly,
+        .dark-mode .review-tab-canvas .extraction-input--readonly {
+            color: #cbd5e1;
+        }
+        .dark-mode .review-tab-canvas .review-rate-fields__amount .extraction-input--readonly {
+            color: #93c5fd;
+            font-weight: 600;
+        }
+        .dark-mode .badge--soft {
+            background: #334155;
             color: #e2e8f0;
+            border-color: #475569;
+        }
+        .dark-mode .make-vendor-summary__default { color: #fbbf24; }
+        .dark-mode .make-vendor-summary__filtered { color: #93c5fd; }
+        .dark-mode .make-vendor-summary__not-found { color: #fdba74; }
+        .dark-mode .make-vendor-summary__no-match { color: #fca5a5; }
+        .dark-mode .make-vendor-summary__vendor-review,
+        .dark-mode .make-vendor-summary__same-price { color: #fcd34d; }
+        .dark-mode .make-vendor-summary__muted,
+        .dark-mode .make-vendor-summary__found-rates {
+            color: var(--text-muted);
+        }
+        .dark-mode .make-vendor-card__same-price-note {
+            color: #fde68a;
         }
 
         .dark-mode .make-vendor-card__no-make-note {
@@ -2836,6 +3134,37 @@
         .dark-mode .extraction-product-tabs__btn.is-active {
             background: var(--primary, #3b82f6);
             border-color: var(--primary, #3b82f6);
+            color: #fff;
+        }
+
+        .dark-mode .extraction-product-tabs__btn--green {
+            background: rgba(34, 197, 94, 0.18);
+            border-color: #22c55e;
+            color: #86efac;
+        }
+        .dark-mode .extraction-product-tabs__btn--green.is-active {
+            background: #16a34a;
+            border-color: #15803d;
+            color: #fff;
+        }
+        .dark-mode .extraction-product-tabs__btn--orange {
+            background: rgba(194, 65, 12, 0.22);
+            border-color: #c2410c;
+            color: #e8b48a;
+        }
+        .dark-mode .extraction-product-tabs__btn--orange.is-active {
+            background: #c2410c;
+            border-color: #9a3412;
+            color: #fff;
+        }
+        .dark-mode .extraction-product-tabs__btn--red {
+            background: rgba(239, 68, 68, 0.18);
+            border-color: #f87171;
+            color: #fca5a5;
+        }
+        .dark-mode .extraction-product-tabs__btn--red.is-active {
+            background: #dc2626;
+            border-color: #b91c1c;
             color: #fff;
         }
 

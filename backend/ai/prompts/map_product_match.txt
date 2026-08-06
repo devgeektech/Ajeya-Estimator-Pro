@@ -24,8 +24,11 @@ Rules:
 - Prefer evidence from extracted category, sub_category, class, size, unit, capacity,
   description_hint, and attributes. Category and sub_category should already align with
   Rate_Master_Output labels from extraction; map them onto the closest candidate when meaning aligns.
-- Extracted ``class`` is Rate_Master_Output Class (often material: MS, SS, CI, GI, Brass).
-  If material appears only under attributes, treat it as class evidence for matching.
+- Extracted ``class`` is Rate_Master_Output Class for that category/sub_category
+  (PIPE → C; VALVE Ball → Brass; some families use material as Class). Do **not**
+  treat sub_category material tokens (PIPE MS/GI) as Class unless candidates also
+  use that token as Class. If material appears only under attributes, treat it as
+  class evidence only when candidate Class is material.
 - When attributes were filled by an expert, weight them heavily for rematch.
 - Ignore make/vendor for pricing decisions.
 - Map each extracted attribute key to the closest DB attribute key when the

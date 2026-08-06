@@ -5,6 +5,286 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
+## 2026-08-06 — Review S. No. uses qty-row parent
+
+- Review/export Ser no qualifies letter slots with the qty row's nearest
+  structural parent (`5.1 a)`), not the broader group serial (`5 a)(A)`).
+
+## 2026-08-06 — Export Rate/Amount on qty rows + red unmatched
+
+- BOQ export fills Rate/Amount on each product's Unit/Qty row (`qty_row_id`),
+  not the parent section row. Rows with no matched product are highlighted red
+  on both BOQ and Review exports.
+
+## 2026-08-06 — Export sheet format (Review + BOQ)
+
+- Review/breakdown export headers follow `Output format.xlsx`: red labels kept
+  (and styled red); long Rate_Master instructional headers shortened to field
+  names. BOQ export copies the uploaded workbook and fills Rate/Amount only on
+  rows that have both Qty and Unit.
+
+## 2026-08-06 — Product_Helper → Product_ID Make/Vendor flow
+
+- Required import of `Product_Helper` (alias `Product_Master`). Analysis stores
+  `catalog_product_id`. Make & Vendor loads Make/Vendor Rate_IDs by Product_ID
+  (`Final_Material_Amount`). Not found / No match show **Find in DB**. Labour
+  prefers `Total_Labour_Per_Unit`.
+
+## 2026-08-05 — Status stripes match Analysis (3px inset)
+
+- Make & Vendor / Labour / Review status stripes use Analysis format
+  (`box-shadow: inset 3px 0 0` + soft border tint). Analysis is the UI reference
+  for shared BOQ detail chrome on later tabs.
+
+## 2026-08-05 — Card status color lines (dark mode)
+
+- Dark mode no longer wipes Make & Vendor / Labour / Review left status stripes.
+- Review cards map matched / pending products onto the same stripe classes.
+
+## 2026-08-05 — Dark mode text on MV / Labour / Review
+
+- Make & Vendor, Labour, and Review use theme text tokens and dark-mode
+  overrides so labels, values, lineage, badges, and summary stay readable.
+
+## 2026-08-05 — Review values lighter than headers
+
+- Review values (dd / readonly inputs) use muted slate; headers stay darker so
+  label and value textures differ (dark mode included).
+
+## 2026-08-05 — Review field labels slightly bolder
+
+- Review card headers (S. No., BOQ Description, amounts, etc.) use heavier
+  label weight so they stand out from values.
+
+## 2026-08-05 — Extract Class snap + DB context classes
+
+- AI extract DB context now includes `classes_by_category_sub_category` and omits
+  material-owned attribute keys. Post-extract snap corrects mis-filed class
+  (e.g. PIPE sub_category MS copied into Class → catalog Class C). Full context
+  payload is logged to `application.log` on each extract.
+
+## 2026-08-05 — Make & Vendor Auto/filtered line badge
+
+- Each product section header shows soft badge **Auto** or **filtered** after
+  “N lines grouped” (filtered when any product uses a make-list pick).
+
+## 2026-08-05 — Review S. No. with parent + qty-row desc
+
+- Review S. No. includes the parent section (e.g. `1.1 a)` instead of only `a)`).
+- BOQ Description uses the Unit/Qty rows (`a) 150mm dia — 350 Metre`), not the
+  parent header text.
+
+## 2026-08-05 — Review BOQ Description from qty row
+
+- Review BOQ Description now comes from the Unit/Qty workbook row for that
+  product, not the parent section header above it.
+
+## 2026-08-04 — Review labels + BOQ description see more
+
+- Review cards: S. No., Material amount, Total Amount. Long BOQ Description
+  clamps to 2 lines with see more… / see less (export column headers unchanged).
+
+## 2026-08-04 — Remove Review page hint text
+
+- Removed the Review tab intro hint about product-wise review / export when ready.
+
+## 2026-08-04 — Labour: drop duplicate Next; status right
+
+- Removed upper Labour Next (Apply labour / Next stay in the labour toolbar).
+- Status badge (Ready to Export) is right-aligned on the same row as the
+  product/mode summary.
+
+## 2026-08-04 — Fix hang: revert soft tab nav + refresh static
+
+- Soft tab navigation (fetch + Alpine.initTree of full 0.6–1.5MB pages) caused
+  UI freezes; reverted to normal `window.location` tab switches. CSS `?v=96`
+  and collectstatic refreshed.
+
+## 2026-08-04 — Remove duplicate Make & Vendor Next
+
+- Removed the upper tab-context Next on Make & Vendor (kept the summary-bar Next).
+
+## 2026-08-04 — Smaller match % on product tabs
+
+- Match percentage after Product 1 / Product 2 on Analysis tabs is one size
+  smaller than the label (`0.85em`).
+
+## 2026-08-04 — Hide Analyse on MV/Labour/Review; restore Next
+
+- Analyse BOQ no longer appears on Make & Vendor / Labour / Review (those tabs
+  had empty extraction payloads so the button wrongly showed). Top-bar Next is
+  restored for Make & Vendor and Labour; Review keeps Export actions.
+
+## 2026-08-04 — MV/Labour/Review card stripe matches Analysis
+
+- Make & Vendor, Labour, and Review even line cards use the same `#e2e8f0`
+  background as Analysis alternating cards. CSS `v=95`.
+
+## 2026-08-04 — Fast BOQ tab switching
+
+- Make & Vendor tab build preloads Rate_Master_Output once (was ~1205 queries /
+  ~2.2s per open). Detail view loads extract JSON only for tabs that need it.
+- Tab clicks soft-fetch and swap `.boq-view` instead of a full page reload.
+
+## 2026-08-04 — Make List column gap increased
+
+- Make List `column-gap` raised from `1.5rem` to `2.75rem`. CSS `v=94`.
+
+## 2026-08-04 — Make List column gap
+
+- Make List grid uses `column-gap: 1.5rem` so Category / Subcategory / Makes are
+  spaced farther apart. CSS `v=93`.
+
+## 2026-08-04 — Make List all left-aligned
+
+- Make List headers and cell values are both left-aligned. CSS `v=92`.
+
+## 2026-08-04 — Make List content left-aligned
+
+- Category, Subcategory, and Approved Makes values are left-aligned; headers
+  remain center-aligned. CSS `v=91`.
+
+## 2026-08-04 — Make List Category/Subcategory labels + align
+
+- Make List columns renamed Mapped Category → Category, Mapped Sub-category →
+  Subcategory. All headers center-aligned; Category, Subcategory, and Approved
+  Makes values right-aligned. CSS `v=90`.
+
+## 2026-08-04 — Make List Approved Makes header centered
+
+- Approved Makes header is center-aligned; cell values remain right-aligned.
+  CSS `v=89`.
+
+## 2026-08-04 — Make List Approved Makes right-aligned
+
+- Approved Makes column content is right-aligned so values sit on the panel’s
+  right edge (column already filled remaining width with `1fr`). CSS `v=88`.
+
+## 2026-08-04 — Make List row borders align
+
+- Make List CSS grid cells stretch to equal height; horizontal border is on the
+  row (not each cell) so wrapped descriptions and empty Mapped Sub-category
+  cells no longer show a line cutting through mid-row text. CSS `v=87`.
+
+## 2026-08-04 — Per-tab BOQ detail (faster tab switching)
+
+- BOQ detail loads only the active tab’s data and HTML (BOQ / Make List /
+  Analysis / Make & Vendor / Labour / Review). Tab clicks navigate to `?tab=…`
+  without embedding every other tab (~3.4MB combined → single-tab payloads).
+
+## 2026-08-04 — Make List CSS grid + smaller Make List page
+
+- Make List uses a CSS grid so columns fill the panel; Approved Makes takes the
+  remaining width (no right-side table gap).
+- Make List tab HTML no longer embeds other BOQ tabs (~3.4MB → ~180KB), reducing
+  cancelled loads / Broken pipe noise; log filter skips Broken pipe INFO lines.
+  CSS `v=85`.
+
+## 2026-08-04 — BOQ sheet indent capped
+
+- BOQ Description indent no longer grows unbounded with nesting depth (was up to
+  depth 6 × 14px). Visual levels are 0 / 1 / 2+ (12 / 20 / 28px) so serial and
+  description stay aligned; CSS `v=84`.
+
+## 2026-08-04 — Make List fills panel width
+
+- Make List uses fixed rem widths for S.No / Mapped Category / Sub-category and
+  `width: auto` for Approved Makes so the last column reaches the panel’s right
+  edge (inline col widths + CSS `v=83`).
+
+## 2026-08-04 — Review grouped lines + Analysis card grey
+
+- Review attaches serial-lineage fields and shows “View N grouped lines” like
+  Analysis / Make & Vendor / Labour (was missing on Review).
+- Make & Vendor / Labour / Review line cards use the same `--card-stripe`
+  (`#e8edf3`) grey as Analysis; CSS cache `v=82`.
+
+## 2026-08-04 — Make List only on its own tab
+
+- Make List table is no longer embedded in BOQ / Analysis / other tab HTML.
+  It loads only for `?tab=make_list` (tab switch navigates to that URL).
+
+## 2026-08-04 — Make List layout scoped + full-width columns
+
+- Make List column CSS no longer applies to the BOQ sheet (or other tabs).
+- Make List columns use percentages that sum to 100% so Approved Makes reaches
+  the right edge (no rem max-width gap).
+
+## 2026-08-04 — Per-product quantity on all BOQ tabs
+
+- Restored blank product quantities from BOQ Unit/Qty slots (products had
+  `qty_row_id` but lost `quantity` after mapping/rematch).
+- Make & Vendor, Labour, and Review now use the same per-product slot qty as
+  Analysis, including header switch when Product tabs change.
+
+## 2026-08-04 — Softer match-band orange
+
+- Product match % orange (90–94.99 tabs/badges) toned down from bright
+  `#ea580c` / `#ffedd5` to muted `#c2410c` / `#f3e0c8`.
+
+## 2026-08-04 — Labour → Review gate fix
+
+- Labour Apply and Next were blocked in the UI when status was still
+  `MAKE_VENDOR` (service already allowed it), and Next could no-op with no
+  error. Gates aligned; complete always posts so Review can unlock.
+
+## 2026-08-04 — Make List Approved Makes fills right edge
+
+- Make List left columns use fixed rem widths; Approved Makes takes all
+  remaining width so the column reaches the panel’s right edge.
+
+## 2026-08-04 — Re-analyse refreshes Product tab match %
+
+- Analysis Re-analyse now updates the Product tab match percentage and color
+  band (and section confidence border) when the product panel is swapped in.
+
+## 2026-08-04 — Visible white/grey card striping
+
+- Product line cards on Make & Vendor, Labour, and Review use a stronger grey
+  stripe (`#e8edf3`) matching Analysis, with explicit odd/even `--alt` classes.
+
+## 2026-08-04 — Review UI slim fields + product tabs
+
+- Review page cards no longer show Rate_ID or material breakdown fields (Base
+  Purchase through Profit); they keep Make, Vendor, final rates and totals.
+  Full Output-format columns remain on the Review sheet Excel export.
+- Fixed missing Product tabs on some Review rows by normalizing product indices
+  and simplifying Alpine (first product always visible).
+
+## 2026-08-04 — Make List Approved Makes full width
+
+- Make List sheet spans the full panel; Approved Makes widened (~58%) so the
+  column reaches the right edge instead of leaving empty space.
+
+## 2026-08-04 — Analysis match % colors + export serials
+
+- Analysis Product tabs and match badges show product match percentage with
+  client bands: ≥95% green, 90–94.99% orange, <90% red. Section border turns
+  green only when every product in the section is ≥95%.
+- Review / Review-sheet export Ser no uses each product's original BOQ slot
+  serial (`1`, `1.1`, `a`, `b`, `c`). When multiple products share one serial,
+  export uses `1.1(A)`, `1.1(B)`, `1.1(C)`.
+
+## 2026-08-03 — Card white/grey striping + darker borders
+
+- Make & Vendor, Labour, and Review product line cards use the same white /
+  grey (`--surface` / `--surface-alt`) alternating pattern as Analysis.
+- Default `--border` darkened slightly (`#e2e8f0` → `#cbd5e1`) so card edges
+  read more clearly; CSS cache bumped to `?v=75`.
+
+## 2026-08-03 — Review UI product cards
+
+- Review tab UI switched from the wide sheet table to product-wise cards
+  (BOQ line groups + Product tabs), matching Make & Vendor / Labour. Cards show
+  all Output-format fields; Excel export format is unchanged.
+
+## 2026-08-03 — Fix missing Rate_Master_Output tables
+
+- Local DB had `database_manager.0001` marked applied but only legacy
+  `Rate_Master` / `Labour_Master` tables existed. Created
+  `Rate_Master_Output` / `Labour_master_Output` and applied `0002`. Importer
+  surfaces a migrate hint if those relations are missing again.
+
 ## 2026-08-03 — Master workbook column/sheet alignment
 
 - Confirmed `docs/BOQ_Master_03 Aug_2026.xlsx` Rate_Master_Output columns and

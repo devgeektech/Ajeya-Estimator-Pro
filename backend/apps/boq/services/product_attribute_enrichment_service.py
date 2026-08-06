@@ -20,12 +20,27 @@ def humanize_attribute_key(key: str) -> str:
 
 
 def confidence_band(score: float) -> str:
-    """Map attribute confidence to UI color band."""
+    """Map attribute-fill confidence to UI color band (legacy attribute fill)."""
     if score >= 80:
         return "green"
     if score > 70:
         return "yellow"
     if score > 50:
+        return "orange"
+    return "red"
+
+
+def match_percentage_band(score: float) -> str:
+    """Map product match percentage to Analysis tab/card color band.
+
+    Client criteria:
+    - ≥ 95 → green (high confidence)
+    - 90–94.99 → orange (medium — review)
+    - < 90 → red (needs review)
+    """
+    if score >= 95:
+        return "green"
+    if score >= 90:
         return "orange"
     return "red"
 

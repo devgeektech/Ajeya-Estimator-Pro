@@ -91,11 +91,11 @@ cd backend
 
 ### 3b. Dev server log notes
 
-- `- Broken pipe from ('127.0.0.1', <port>)` at INFO is **not** an error. Django's
-  dev server logs `ConnectionResetError` / `ConnectionAbortedError` under that
-  message, and browsers trigger it whenever they close idle HTTP/1.1 keep-alive
-  sockets or cancel an in-flight request by navigating away. Look for a missing
-  or non-200 request line before treating it as a failure.
+- `- Broken pipe from ('127.0.0.1', <port>)` at INFO is **not** an application
+  error (browser cancelled an in-flight request). The Make List tab now loads a
+  slim page (~180KB) so cancels are rarer, and `SkipBrokenPipeFilter` hides those
+  INFO lines from the console / application log. Still treat a missing or non-200
+  request line as a real failure.
 - Edited `static/css/app.css` but the browser still shows old styles? Re-run
   `collectstatic`. `ManifestStaticFilesStorage` resolves `{% static %}` through
   `staticfiles/staticfiles.json`, so a stale manifest keeps serving the previous

@@ -2,9 +2,10 @@
 
 Validate -> Backup -> Import -> Activate -> Generate Embeddings
 
-Only ``Rate_Master_Output`` and ``Labour_Master_Output`` are ingested. Other
-workbook sheets may exist and are counted for the database detail UI only.
-Older workbooks that still use ``Labour_master_Output`` are accepted via alias.
+Only ``Product_Helper``, ``Rate_Master_Output``, and ``Labour_Master_Output``
+are ingested. Other workbook sheets may exist and are counted for the database
+detail UI only. Older workbooks that still use ``Labour_master_Output`` are
+accepted via alias; ``Product_Master`` is accepted as ``Product_Helper``.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from .activation import (
 from ..models import (
     DatabaseVersion,
     Labour_master_Output,
+    Product_Helper,
     Rate_Master_Output,
 )
 from .validator import resolve_master_sheet_name, validate_workbook
@@ -105,6 +107,20 @@ def _to_optional_datetime(value) -> datetime | None:
     if timezone.is_naive(parsed):
         return timezone.make_aware(parsed, timezone.get_current_timezone())
     return parsed
+
+
+def _product_helper_fields(row: dict) -> dict:
+    return {
+        "Product_ID": _to_optional_id(row.get("product_id")),
+        "Category": _to_optional_str(row.get("category")),
+        "Sub_Category": _to_optional_str(row.get("sub_category")),
+        "Class": _to_optional_str(row.get("class")),
+        "Size": _to_optional_decimal(_row_value(row, "size")),
+        "Unit": _to_optional_str(row.get("unit")),
+        "Capacity": _to_optional_str(row.get("capacity")),
+        "Attribute": _to_optional_str(_row_value(row, "attribute", "attributes")),
+        "Status": _to_optional_str(row.get("status")),
+    }
 
 
 def _rate_fields(row: dict) -> dict:
@@ -189,11 +205,13 @@ def _labour_fields(row: dict) -> dict:
 # Preferred workbook sheet name → (model, row builder). Actual sheet title may
 # differ by alias (see MASTER_SHEET_ALIASES / resolve_master_sheet_name).
 VERSIONED_SHEETS = {
+    "Product_Helper": (Product_Helper, _product_helper_fields),
     "Rate_Master_Output": (Rate_Master_Output, _rate_fields),
     "Labour_Master_Output": (Labour_master_Output, _labour_fields),
 }
 
 REQUIRED_MODEL_FIELDS = {
+    Product_Helper: ("Product_ID", "Category"),
     Rate_Master_Output: ("Product_ID", "Category"),
     Labour_master_Output: ("Product_ID",),
 }
@@ -301,6 +319,14 @@ class DatabaseImportService:
             raise
         except Exception as exc:  # pragma: no cover - defensive
             logger.exception("Database import failed")
+            message = str(exc)
+            if "does not exist" in message and (
+                "Rate_Master_Output" in message or "Labour_master_Output" in message
+            ):
+                raise ImportError_(
+                    "Master database tables are missing. Run "
+                    "`python manage.py migrate` then upload again."
+                ) from exc
             raise ImportError_(f"Database import failed: {exc}") from exc
 
         logger.info("Database import completed: v%s", version.version_number)

@@ -87,7 +87,7 @@
     <div class="make-vendor-lines labour-lines" id="labour-lines">
         <h3 class="make-vendor-lines__title">Products</h3>
         {% for line in labour_display.lines %}
-        <article class="make-vendor-line{% if forloop.counter|divisibleby:2 %} make-vendor-line--alt{% endif %} make-vendor-line--{{ line.line_status|default:'default' }}" id="labour-{{ line.row_id }}">
+        <article class="make-vendor-line{% cycle '' ' make-vendor-line--alt' %} make-vendor-line--{{ line.line_status|default:'default' }}" id="labour-{{ line.row_id }}">
             <header class="make-vendor-line__header">
                 <div class="make-vendor-line__title">
                     <span class="make-vendor-line__serial">{{ line.serial|default:"—" }}</span>
@@ -96,7 +96,13 @@
                     {% endif %}
                 </div>
                 <div class="make-vendor-line__meta">
-                    {% if line.show_qty_unit %}
+                    {% if line.product_count >= 2 %}
+                    <span
+                        class="extraction-line__qty-unit"
+                        data-active-product-qty
+                        {% if not line.products.0.show_quantity %}hidden{% endif %}
+                    >Quantity: {{ line.products.0.quantity_display }}, Unit: {{ line.products.0.quantity_unit_display }}</span>
+                    {% elif line.show_qty_unit %}
                     <span class="extraction-line__qty-unit">Quantity: {{ line.qty_display }}, Unit: {{ line.unit_display }}</span>
                     {% endif %}
                     <span class="badge badge--soft">{{ line.product_count }} product{{ line.product_count|pluralize }}</span>
@@ -150,7 +156,14 @@
                         role="tab"
                         :class="tabClass({{ product.product_index }})"
                         :aria-selected="activeProduct === {{ product.product_index }}"
-                        @click="activeProduct = {{ product.product_index }}"
+                        @click="
+                            activeProduct = {{ product.product_index }};
+                            const qtyEl = $el.closest('.make-vendor-line').querySelector('[data-active-product-qty]');
+                            if (qtyEl) {
+                                qtyEl.textContent = 'Quantity: {{ product.quantity_display|escapejs }}, Unit: {{ product.quantity_unit_display|escapejs }}';
+                                qtyEl.hidden = {{ product.show_quantity|yesno:'false,true' }};
+                            }
+                        "
                     >Product {{ product.display_number }}</button>
                     {% endfor %}
                     {% for product in line.products %}
@@ -319,6 +332,8 @@ document.addEventListener('alpine:init', () => {
             if (!(this.canComplete || this.labourReady)) return;
             const root = this.$root;
             if (root && typeof root.completeLabour === 'function') {
+                // Keep root flag in sync when labour was applied but status lagged.
+                if (this.labourReady) root.canCompleteLabour = true;
                 await root.completeLabour();
                 return;
             }

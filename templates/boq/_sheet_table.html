@@ -5,8 +5,26 @@
 {% endif %}
 
 {% if structure.rows %}
-<div class="boq-sheet-wrap{% if sheet_variant == 'make_list' %} boq-sheet-wrap--make-list{% endif %}">
-    <table class="table boq-sheet{% if sheet_variant == 'make_list' %} boq-sheet--make-list{% endif %}">
+{% if sheet_variant == 'make_list' %}
+{# CSS grid — always fills the panel; Approved Makes takes remaining width. #}
+<div class="make-list-sheet" role="table" aria-label="Make List">
+    <div class="make-list-sheet__head" role="row">
+        {% for header in structure.headers %}
+        <div class="make-list-sheet__cell make-list-sheet__cell--head {{ header.col_class }}" role="columnheader">{{ header.label }}</div>
+        {% endfor %}
+    </div>
+    {% for row in structure.rows %}
+    <div class="make-list-sheet__row" role="row">
+        {% for cell in row.display_cells %}
+        <div class="make-list-sheet__cell {{ cell.col_class }}" role="cell">{{ cell.text }}</div>
+        {% endfor %}
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+{# BOQ workbook sheet — never use Make List column layout here. #}
+<div class="boq-sheet-wrap">
+    <table class="table boq-sheet">
         <colgroup>
             {% for header in structure.headers %}
             <col class="{{ header.col_class }}">
@@ -23,13 +41,14 @@
             {% for row in structure.rows %}
             <tr class="boq-sheet__row boq-sheet__row--depth-{{ row.depth|default:0 }}">
                 {% for cell in row.display_cells %}
-                <td class="boq-sheet__cell {{ cell.col_class }}" style="--row-depth: {{ row.depth|default:0 }};">{{ cell.text }}</td>
+                <td class="boq-sheet__cell {{ cell.col_class }}">{{ cell.text }}</td>
                 {% endfor %}
             </tr>
             {% endfor %}
         </tbody>
     </table>
 </div>
+{% endif %}
 {% else %}
 <p class="panel__text">No rows parsed yet.</p>
 {% endif %}

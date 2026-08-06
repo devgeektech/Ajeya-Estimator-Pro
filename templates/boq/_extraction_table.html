@@ -74,6 +74,46 @@ document.addEventListener('alpine:init', () => {
     };
 
     // Swap one product panel only so other tabs stay interactive and the page does not blink.
+    window.syncExtractionProductTab = function syncExtractionProductTab(line, nextLine, productIndex) {
+        if (!line || !nextLine) {
+            return;
+        }
+        const index = Number(productIndex);
+        if (!Number.isFinite(index)) {
+            return;
+        }
+        const selector = '.extraction-product-tabs__btn[data-product-index="' + index + '"]';
+        const nextBtn = nextLine.querySelector(selector);
+        const currentBtn = line.querySelector(selector);
+        if (!nextBtn || !currentBtn) {
+            return;
+        }
+        ['green', 'orange', 'red'].forEach((band) => {
+            const cls = 'extraction-product-tabs__btn--' + band;
+            currentBtn.classList.toggle(cls, nextBtn.classList.contains(cls));
+        });
+        const nextPct = nextBtn.querySelector('.extraction-product-tabs__pct');
+        const currentPct = currentBtn.querySelector('.extraction-product-tabs__pct');
+        if (nextPct && currentPct) {
+            currentPct.textContent = nextPct.textContent;
+        } else if (nextPct && !currentPct) {
+            currentBtn.appendChild(document.createTextNode(' '));
+            currentBtn.appendChild(nextPct.cloneNode(true));
+        }
+        if (nextBtn.getAttribute('title')) {
+            currentBtn.setAttribute('title', nextBtn.getAttribute('title'));
+        }
+    };
+
+    window.syncExtractionLineConfidence = function syncExtractionLineConfidence(line, nextLine) {
+        if (!line || !nextLine) {
+            return;
+        }
+        ['extraction-line--confidence-green', 'extraction-line--confidence-red', 'extraction-line--multiproduct-review'].forEach((cls) => {
+            line.classList.toggle(cls, nextLine.classList.contains(cls));
+        });
+    };
+
     window.replaceExtractionProductPanel = function replaceExtractionProductPanel(rowId, productIndex, lineHtml, options) {
         if (!rowId || lineHtml == null || productIndex == null || productIndex === '') {
             return false;
@@ -108,6 +148,9 @@ document.addEventListener('alpine:init', () => {
         if (window.Alpine && typeof Alpine.initTree === 'function') {
             Alpine.initTree(nextPanel);
         }
+        // Panel swap keeps the old Product tab; refresh match % + band from rematch HTML.
+        window.syncExtractionProductTab(line, nextLine, index);
+        window.syncExtractionLineConfidence(line, nextLine);
         const forceActive = !(options && options.preserveActiveTab);
         if (window.Alpine) {
             const productsRoot = line.querySelector('.extraction-products');

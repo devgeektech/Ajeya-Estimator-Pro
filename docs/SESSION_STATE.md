@@ -14,9 +14,10 @@ History: `docs/CHANGELOG.md` (do not duplicate session diaries here).
 
 ## Active Workflows
 
-**Database:** upload → validate → import **Rate_Master_Output** +
-**Labour_master_Output** only → activate → embeddings (sync). Other sheets counted
-for UI. Stored file stamped `_{YYYYMMDD_HHMMSS}`. Last 10 uploads retained.
+**Database:** upload → validate → import **Product_Helper** +
+**Rate_Master_Output** + **Labour_master_Output** → activate → embeddings (sync).
+Other sheets counted for UI. Stored file stamped `_{YYYYMMDD_HHMMSS}`. Last 10
+uploads retained.
 
 **BOQ tabs:** BOQ → Make list → Analysis → Make & Vendor → Labour → Review → Export
 
@@ -32,13 +33,13 @@ for UI. Stored file stamped `_{YYYYMMDD_HHMMSS}`. Last 10 uploads retained.
 | Area | Current behaviour |
 | --- | --- |
 | Sections | Serial-lineage groups with qty **slots**; empty slots show Add + Re-analyse |
-| Analysis | Product tabs; confidence border (all-green → green else red); Qty/Unit + count header |
+| Analysis | Product tabs show match % + per-product slot Qty/Unit in header |
 | Re-analyse | Rematch vs Rate_Master_Output; empty sections fall back to workbook extract |
 | Select candidate | Keeps BOQ class/size/unit/capacity; uses analysis `database_version_id` |
 | Make list map | Heuristic + AI category/sub-category; retries `pending` stubs only — `unmapped` is final |
-| Make & Vendor | Lowest price defaults; same-price radio ties; status borders; Product rate view-only |
-| Labour | Product rate → Labour rate → Total → Qty → Final; mode badge; aligned headers |
-| Review | Client Output format columns; Export Review sheet + Export BOQ |
+| Make & Vendor | Same per-product slot qty as Analysis; lowest price defaults; status borders; line header Auto/filtered badge |
+| Labour | Same per-product slot qty; Product rate → Labour → Total → Qty → Final |
+| Review | Same per-product slot qty + lineage UI; export uses short/red Output headers; BOQ export fills original file on qty+unit rows |
 | Detail open | Default tab follows `BOQ.status`; renders stored data only — no AI in the GET |
 | Jobs | Stuck analysis heal/fail; progress reset; Celery concurrency 8 |
 | Upload | `.xlsx` / `.xlsm` / legacy `.xls` (converted); **not** `.xlsb`; single sheet |
@@ -62,15 +63,11 @@ for UI. Stored file stamped `_{YYYYMMDD_HHMMSS}`. Last 10 uploads retained.
 
 Keep only the latest entry below. Older work is in `docs/CHANGELOG.md`.
 
-### 2026-08-03 — Master DB workbook alignment + Review export
+### 2026-08-06 — Review serial from qty-row parent
 
-Completed: Verified `BOQ_Master_03 Aug_2026.xlsx` against models/importer.
-Rate columns/types OK (no migration). Fixed labour sheet title alias
-(`Labour_Master_Output`) and `Labour_With_State_Multiplier` mapping. Dry-map:
-184/184 rates, 101/101 labour buildable. Review dual-export also local.
-Pending: Upload the new workbook in UI to activate; restore tests.
-Issues: Workbook labour Product_ID `101` has no matching rate row (data).
-Next: Upload master DB; UAT Make & Vendor / Labour / Review exports.
-
-Branch: `user/vikas/new_database` = `origin/user/vikas/new_database` (`9f08fe7`).
-Uncommitted local work is Review export + this import fix only.
+Completed: Review S. No. / export Ser no now use each product's qty-row serial
+qualified by its nearest structural parent (`5.1 a)` instead of wrong group
+`5 a)(A)`).
+Pending: UAT Review S. No. against uploaded BOQ numbering.
+Issues: None new.
+Next: UAT Review serials on multi-level sections (e.g. 5.1 / 5.2).

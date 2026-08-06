@@ -407,7 +407,9 @@ class ProductAIMappingService:
             "match_status": DB_MATCH_MATCHED,
             "selection_source": "expert",
         }
-        return align_product_taxonomy_from_rate(enriched, rate, overwrite_core_fields=False)
+        return self._attach_catalog_product_id(
+            align_product_taxonomy_from_rate(enriched, rate, overwrite_core_fields=False)
+        )
 
     def map_products(
         self,
@@ -453,10 +455,12 @@ class ProductAIMappingService:
         for item in prepared:
             ai_result = ai_by_ref.get(item["product_ref"])
             mapped.append(
-                self._apply_mapping(
-                    item["source_product"],
-                    item["candidates"],
-                    ai_result,
+                self._attach_catalog_product_id(
+                    self._apply_mapping(
+                        item["source_product"],
+                        item["candidates"],
+                        ai_result,
+                    )
                 )
             )
         return mapped
@@ -1123,3 +1127,50 @@ class ProductAIMappingService:
             category=top.get("category"),
             sub_category=top.get("sub_category"),
         )
+
+    def _attach_catalog_product_id(self, product: dict[str, Any]) -> dict[str, Any]:
+        """Resolve Product_Helper Product_ID for Make & Vendor / Labour joins."""
+        from apps.boq.services.product_helper_matching_service import (
+            ProductHelperMatchingService,
+        )
+
+        enriched = dict(product)
+        helper_service = ProductHelperMatchingService(self.database_version_id)
+
+        # Prefer Product_ID from the confirmed Rate_Master_Output row.
+        rate_pk = enriched.get("db_product_id")
+        if rate_pk not in (None, ""):
+            try:
+                rate = Rate_Master_Output.objects.filter(
+                    pk=int(rate_pk),
+                    database_version_id=self.database_version_id,
+                ).first()
+            except (TypeError, ValueError):
+                rate = None
+            if rate and str(rate.Product_ID or "").strip():
+                helper = helper_service.get_by_product_id(str(rate.Product_ID).strip())
+                if helper is not None:
+                    enriched["catalog_product_id"] = helper.Product_ID
+                    enriched["product_helper_id"] = helper.pk
+                    enriched["catalog_match_confidence"] = float(
+                        enriched.get("db_match_confidence") or 100.0
+                    )
+                    return enriched
+                enriched["catalog_product_id"] = str(rate.Product_ID).strip()
+                return enriched
+
+        # Fall back to structured Product_Helper match from BOQ taxonomy.
+        match = helper_service.match_product(enriched)
+        best = match.get("best") or {}
+        product_id = str(best.get("product_id") or "").strip()
+        if product_id and float(match.get("confidence") or 0) >= MATCH_CONFIDENCE_THRESHOLD:
+            enriched["catalog_product_id"] = product_id
+            enriched["product_helper_id"] = best.get("product_helper_id")
+            enriched["catalog_match_confidence"] = match.get("confidence")
+            enriched["catalog_candidates"] = match.get("candidates") or []
+        elif product_id:
+            # Keep a suggested Product_ID for Find in DB without claiming a match.
+            enriched["suggested_catalog_product_id"] = product_id
+            enriched["catalog_match_confidence"] = match.get("confidence")
+            enriched["catalog_candidates"] = match.get("candidates") or []
+        return enriched

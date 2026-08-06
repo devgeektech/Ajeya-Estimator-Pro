@@ -9,6 +9,11 @@ from django.db import transaction
 
 from apps.boq.models import BOQ
 from apps.boq.services.boq_analysis_store import save_boq_analysis_json
+from apps.boq.services.boq_extraction_service import (
+    quantity_display_fields,
+    rehydrate_analysis_rows_quantity,
+    rehydrate_products_quantity_from_group,
+)
 from apps.boq.services.boq_line_output_service import (
     BOQLineOutputService,
     quantity_is_rate_sum_only,
@@ -131,6 +136,10 @@ class BOQLabourService:
 
         labour_service = LabourDetailRetrievalService(database_version_id)
         analysis = dict(boq.analysis_data or {})
+        analysis["rows"] = rehydrate_analysis_rows_quantity(
+            boq.boq_data or {},
+            list(analysis.get("rows") or []),
+        )
         rows = list(analysis.get("rows") or [])
         boq_by_id = {
             str(row.get("row_id")): row
@@ -452,11 +461,13 @@ class BOQLabourService:
             boq_row = boq_by_id.get(row_id) or {}
             fields = analysis_fields(boq_row)
             description = _field_from_map(fields, _DESCRIPTION_KEYS) or ""
+            group = group_by_row.get(row_id, {})
+            products = rehydrate_products_quantity_from_group(
+                list(analysis_row.get("products") or []),
+                group,
+            )
             products_out: list[dict[str, Any]] = []
-            for display_number, product in enumerate(
-                analysis_row.get("products") or [],
-                start=1,
-            ):
+            for display_number, product in enumerate(products, start=1):
                 product_count += 1
                 category = str(product.get("category") or "").strip() or "Uncategorised"
                 categories[category] = categories.get(category, 0) + 1
@@ -472,6 +483,14 @@ class BOQLabourService:
                 )
                 if product_qty in (None, ""):
                     product_qty = _field_from_map(fields, _QTY_KEYS)
+                qty_fields = quantity_display_fields(
+                    {
+                        **product,
+                        "quantity": product_qty,
+                        "quantity_unit": product.get("quantity_unit")
+                        or _field_from_map(fields, _UNIT_KEYS),
+                    }
+                )
                 unit_total = None
                 material_dec = _to_decimal(material_rate)
                 labour_dec = _to_decimal(labour_rate)
@@ -525,7 +544,7 @@ class BOQLabourService:
                         "labour_mode": labour_mode,
                         "labour_percent": labour_percent,
                         "mode_label": mode_label,
-                        "quantity": product_qty if product_qty not in (None, "") else "",
+                        **qty_fields,
                         "material_rate": material_rate,
                         "product_rate": material_rate,
                         "material_amount": line_output.get("material_amount"),
@@ -540,7 +559,6 @@ class BOQLabourService:
                     }
                 )
             if products_out:
-                group = group_by_row.get(row_id, {})
                 qty = group.get("qty")
                 unit = group.get("unit")
                 qty_status = str(group.get("qty_status") or "empty")
@@ -566,7 +584,15 @@ class BOQLabourService:
 
                 for item in products_out:
                     if item.get("quantity") in (None, ""):
-                        item["quantity"] = qty if qty not in (None, "") else ""
+                        item.update(
+                            quantity_display_fields(
+                                {
+                                    "quantity": qty if qty not in (None, "") else "",
+                                    "quantity_unit": unit,
+                                    "rate_only": False,
+                                }
+                            )
+                        )
 
                 if any(item.get("highlight_no_labour") for item in products_out):
                     line_status = "no_labour"

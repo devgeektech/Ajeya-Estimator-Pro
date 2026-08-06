@@ -1,70 +1,176 @@
 {% if not analysis_display.has_analysis %}
 <p class="panel__text">No review data yet. Finish Make &amp; Vendor and Labour, then click <strong>Next</strong>.</p>
 {% else %}
-<div class="analysis-summary">
-    <p class="panel__text panel__text--muted">
-        Review product rates and labour in the client output format.
-        Export <strong>Review sheet</strong> (full breakdown) or <strong>BOQ</strong> (original upload with prices filled).
-    </p>
-</div>
 
-<div class="boq-sheet-wrap boq-sheet-wrap--fit">
-    <table class="table boq-sheet analysis-table analysis-table--compact analysis-table--review-output">
-        <thead>
-            <tr>
-                {% for header in analysis_display.review_headers %}
-                <th{% if forloop.counter == 2 or forloop.counter == 3 %} class="analysis-col-desc"{% elif forloop.counter >= 7 %} class="analysis-col-num"{% endif %}>{{ header }}</th>
-                {% endfor %}
-            </tr>
-        </thead>
-        <tbody>
-            {% for line in analysis_display.lines %}
-                {% if line.products %}
-                    {% for product in line.products %}
-                    {% with row=product.review_output %}
-                    <tr class="boq-sheet__row boq-sheet__row--depth-{{ line.depth|default:0 }} analysis-row analysis-row--{{ product.status }}">
-                        <td>{{ row.serial|default:line.serial }}</td>
-                        <td class="boq-sheet__cell analysis-col-desc" style="--row-depth: {{ line.depth|default:0 }};" title="{{ row.boq_description|default:line.description }}">
-                            {{ row.boq_description|default:line.description|truncatechars:80 }}
-                        </td>
-                        <td class="boq-sheet__cell analysis-col-desc" title="{{ row.ai_interpretation }}">
-                            {{ row.ai_interpretation|default:"—"|truncatechars:80 }}
-                        </td>
-                        <td>{{ row.rate_id|default:"—" }}</td>
-                        <td>{{ row.make|default:"—" }}</td>
-                        <td>{{ row.vendor|default:"—" }}</td>
-                        <td class="analysis-col-num">{{ row.base_purchase_rate|default:"—" }}</td>
-                        <td class="analysis-col-num">{{ row.discount|default:"—" }}</td>
-                        <td class="analysis-col-num">{{ row.net_material_rate|default:"—" }}</td>
-                        <td class="analysis-col-num">{{ row.procurement_value|default:"—" }}</td>
-                        <td class="analysis-col-num">{{ row.commercial_material_base|default:"—" }}</td>
-                        <td class="analysis-col-num">{{ row.accessories_value|default:"—" }}</td>
-                        <td class="analysis-col-num">{{ row.handling_value|default:"—" }}</td>
-                        <td class="analysis-col-num">{{ row.wastage_value|default:"—" }}</td>
-                        <td class="analysis-col-num">{{ row.sub_total|default:"—" }}</td>
-                        <td class="analysis-col-num">{{ row.profit_value|default:"—" }}</td>
-                        <td class="analysis-col-num">{{ row.final_material_amount|default:"—" }}</td>
-                        <td class="analysis-col-num">{{ row.labour|default:"—" }}</td>
-                        <td class="analysis-col-num">{{ row.qty|default:"—" }}</td>
-                        <td class="analysis-col-num">{{ row.total_material|default:"—" }}</td>
-                        <td class="analysis-col-num">{{ row.total_labour|default:"—" }}</td>
-                        <td class="analysis-col-num"><strong>{{ row.amount|default:"—" }}</strong></td>
-                    </tr>
-                    {% endwith %}
-                    {% endfor %}
-                {% else %}
-                    <tr class="boq-sheet__row boq-sheet__row--depth-{{ line.depth|default:0 }} analysis-row analysis-row--{{ line.status }}">
-                        <td>{{ line.serial }}</td>
-                        <td class="boq-sheet__cell analysis-col-desc" style="--row-depth: {{ line.depth|default:0 }};" title="{{ line.description }}">
-                            {{ line.description|truncatechars:80 }}
-                        </td>
-                        <td colspan="20" class="panel__text panel__text--muted">No products</td>
-                    </tr>
+<div class="make-vendor-lines review-lines" id="review-lines">
+    <h3 class="make-vendor-lines__title">Products</h3>
+    {% for line in analysis_display.lines %}
+        {% if line.products %}
+        <article
+            class="make-vendor-line{% cycle '' ' make-vendor-line--alt' %} make-vendor-line--{{ line.status|default:'default' }}"
+            id="review-{{ line.row_id }}"
+        >
+            <header class="make-vendor-line__header">
+                <div class="make-vendor-line__title">
+                    <span class="make-vendor-line__serial">{{ line.serial|default:"—" }}</span>
+                    {% if line.lineage_count > 1 %}
+                        <span class="badge badge--soft">{{ line.lineage_count }} lines grouped</span>
+                    {% endif %}
+                </div>
+                <div class="make-vendor-line__meta">
+                    {% if line.product_count >= 2 %}
+                    <span
+                        class="extraction-line__qty-unit"
+                        data-active-product-qty
+                        {% if not line.products.0.show_quantity %}hidden{% endif %}
+                    >Quantity: {{ line.products.0.quantity_display }}, Unit: {{ line.products.0.quantity_unit_display }}</span>
+                    {% elif line.show_qty_unit %}
+                    <span class="extraction-line__qty-unit">
+                        Quantity: {{ line.qty_display|default:line.qty|default:"—" }}{% if line.unit_display or line.unit %}, Unit: {{ line.unit_display|default:line.unit }}{% endif %}
+                    </span>
+                    {% endif %}
+                    <span class="badge badge--soft">{{ line.products|length }} product{{ line.products|length|pluralize }}</span>
+                </div>
+                <p class="make-vendor-line__description">{{ line.description|default:"—" }}</p>
+                {% if line.lineage_count > 1 %}
+                <details class="extraction-lineage">
+                    <summary>View {{ line.lineage_count }} grouped lines</summary>
+                    <ul class="extraction-lineage__list">
+                        {% for part in line.lineage_parts %}
+                        <li>
+                            <span class="extraction-lineage__serial">{{ part.serial|default:"—" }}</span>
+                            {{ part.description }}
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </details>
+                {% elif line.full_description|length > 140 or line.description|length > 140 %}
+                <details class="extraction-lineage">
+                    <summary>Full description</summary>
+                    <p>{{ line.full_description|default:line.description }}</p>
+                </details>
                 {% endif %}
-            {% empty %}
-            <tr><td colspan="22">No lines.</td></tr>
-            {% endfor %}
-        </tbody>
-    </table>
+            </header>
+
+            <div
+                class="make-vendor-products"
+                x-data="{ activeProduct: {{ line.products.0.product_index|default:0 }} }"
+            >
+                <div class="make-vendor-product-tabs" role="tablist" aria-label="Products">
+                    {% for product in line.products %}
+                    <button
+                        type="button"
+                        class="make-vendor-product-tabs__btn{% if product.status == 'matched' %} is-matched{% else %} is-unmatched{% endif %}"
+                        role="tab"
+                        :class="{ 'is-active': activeProduct === {{ product.product_index }} }"
+                        :aria-selected="activeProduct === {{ product.product_index }}"
+                        @click="
+                            activeProduct = {{ product.product_index }};
+                            const qtyEl = $el.closest('.make-vendor-line').querySelector('[data-active-product-qty]');
+                            if (qtyEl) {
+                                qtyEl.textContent = 'Quantity: {{ product.quantity_display|escapejs }}, Unit: {{ product.quantity_unit_display|escapejs }}';
+                                qtyEl.hidden = {{ product.show_quantity|yesno:'false,true' }};
+                            }
+                        "
+                    >Product {{ product.display_number|default:forloop.counter }}</button>
+                    {% endfor %}
+                </div>
+
+                {% for product in line.products %}
+                {% with row=product.review_output %}
+                <div
+                    class="make-vendor-product-panel"
+                    {% if not forloop.first %}x-cloak{% endif %}
+                    x-show="activeProduct === {{ product.product_index }}"
+                >
+                    <section class="make-vendor-card review-card" role="tabpanel">
+                        <div class="make-vendor-card__head">
+                            <div class="make-vendor-card__heading">
+                                <h4 class="make-vendor-card__title">
+                                    {{ row.ai_interpretation|default:product.summary|default:"Product" }}
+                                </h4>
+                            </div>
+                            <span class="badge {% if product.status == 'matched' %}badge--green{% elif product.status == 'pending' %}badge--yellow{% else %}badge--red{% endif %}">
+                                {{ product.status|default:"—" }}
+                            </span>
+                        </div>
+
+                        <dl class="make-vendor-readonly">
+                            <div>
+                                <dt>S. No.</dt>
+                                <dd>{{ row.serial|default:line.serial|default:"—" }}</dd>
+                            </div>
+                            <div
+                                class="review-boq-desc"
+                                x-data="{ open: false }"
+                            >
+                                <dt>BOQ Description</dt>
+                                <dd>
+                                    {% with desc=row.boq_description|default:product.description|default:"—" %}
+                                    <span
+                                        class="review-boq-desc__text"
+                                        :class="{ 'is-expanded': open }"
+                                    >{{ desc }}</span>
+                                    {% if desc|length > 160 %}
+                                    <button
+                                        type="button"
+                                        class="review-boq-desc__toggle"
+                                        @click="open = !open"
+                                        x-text="open ? 'see less' : 'see more…'"
+                                    >see more…</button>
+                                    {% endif %}
+                                    {% endwith %}
+                                </dd>
+                            </div>
+                            <div>
+                                <dt>AI Interpretation</dt>
+                                <dd>{{ row.ai_interpretation|default:"—" }}</dd>
+                            </div>
+                            <div>
+                                <dt>Make</dt>
+                                <dd>{{ row.make|default:"—" }}</dd>
+                            </div>
+                            <div>
+                                <dt>Vendor</dt>
+                                <dd>{{ row.vendor|default:"—" }}</dd>
+                            </div>
+                        </dl>
+
+                        <div class="make-vendor-fields review-rate-fields">
+                            <label class="extraction-field">
+                                <span class="extraction-field__label">Material amount</span>
+                                <input type="text" class="extraction-input extraction-input--readonly" value="{{ row.final_material_amount|default:'—' }}" readonly tabindex="-1" aria-readonly="true">
+                            </label>
+                            <label class="extraction-field">
+                                <span class="extraction-field__label">Labour</span>
+                                <input type="text" class="extraction-input extraction-input--readonly" value="{{ row.labour|default:'—' }}" readonly tabindex="-1" aria-readonly="true">
+                            </label>
+                            <label class="extraction-field">
+                                <span class="extraction-field__label">Qty (as in BOQ)</span>
+                                <input type="text" class="extraction-input extraction-input--readonly" value="{{ row.qty|default:'—' }}" readonly tabindex="-1" aria-readonly="true">
+                            </label>
+                            <label class="extraction-field">
+                                <span class="extraction-field__label">TOTAL MATERIAL</span>
+                                <input type="text" class="extraction-input extraction-input--readonly" value="{{ row.total_material|default:'—' }}" readonly tabindex="-1" aria-readonly="true">
+                            </label>
+                            <label class="extraction-field">
+                                <span class="extraction-field__label">TOTAL LABOUR</span>
+                                <input type="text" class="extraction-input extraction-input--readonly" value="{{ row.total_labour|default:'—' }}" readonly tabindex="-1" aria-readonly="true">
+                            </label>
+                            <label class="extraction-field review-rate-fields__amount">
+                                <span class="extraction-field__label">Total Amount</span>
+                                <input type="text" class="extraction-input extraction-input--readonly" value="{{ row.amount|default:'—' }}" readonly tabindex="-1" aria-readonly="true">
+                            </label>
+                        </div>
+                    </section>
+                </div>
+                {% endwith %}
+                {% endfor %}
+            </div>
+        </article>
+        {% endif %}
+    {% empty %}
+        <p class="panel__text">No review lines.</p>
+    {% endfor %}
 </div>
 {% endif %}

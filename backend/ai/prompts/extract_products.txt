@@ -42,7 +42,7 @@ Rules:
   spec lines as attributes.
 - Do **NOT** extract labour/installation activities. Products only.
 
-Category / sub_category (required when a product exists):
+Category / sub_category / class (required when a product exists):
 - Always set **category** and **sub_category** from the BOQ meaning (what the item is).
 - **category** MUST be chosen from `categories` in the database context when any value
   reasonably fits. Do not invent a new category name if a listed one matches.
@@ -51,7 +51,14 @@ Category / sub_category (required when a product exists):
   style labels as listed; PUMP → Hydrant Pump / Jockey Pump).
 - Use null for sub_category only when none of the listed sub-categories for that
   category fit. Prefer an exact listed label over a free-text paraphrase.
-- Downstream matching uses these labels against Rate_Master_Output Category / Sub_Category.
+- **class** MUST be chosen from
+  `classes_by_category_sub_category[category][sub_category]` when that list has a fit.
+  Do **NOT** copy sub_category into class. Example: for PIPE, MS/GI are
+  **sub_category**; Class is typically **C** (pipe class), not MS.
+  Material goes in class only when the catalog Class for that family is material
+  (e.g. VALVE Ball → Brass; HYDRANT Landing Valve → SS).
+- Downstream matching uses these labels against Rate_Master_Output
+  Category / Sub_Category / Class.
 
 Field discipline (important — be rigid and evidence-based):
 - Fill a field ONLY when the BOQ text clearly supports it. Prefer null over guessing.
@@ -61,11 +68,10 @@ Field discipline (important — be rigid and evidence-based):
 - description_hint: concise product name phrase from the BOQ (required when a product exists).
 - size: nominal size when stated (numeric or with unit, e.g. 63 or 63mm); else null.
 - capacity: flow/power capacity when stated (lpm, gpm, kW); else null.
-- class: material / construction / grade that aligns with Rate_Master_Output ``Class``
-  (MS, SS, CI, DI, GI, Brass, GRP, Rubber, pipe class C, schedule, etc.).
-  Put material here — NOT in attributes. Prefer short catalog-style tokens
-  (MS, SS, CI, GI, DI) when abbreviations are clear; else the BOQ phrase.
-  Also use class for explicit class/grade/schedule. Else null.
+- class: Rate_Master_Output ``Class`` token from the database context list for the
+  chosen category/sub_category (pipe class C, Brass, CI, SS, TYPE 2, etc.).
+  Prefer listed catalog tokens. Put BOQ “Class C” / “C class” as ``C`` when listed.
+  Else null — never put MS/GI in class when those are already the sub_category.
 - unit: measurement unit for size/spec that aligns with Rate_Master_Output ``Unit``
   (mm, cm, NB, inch, liter, lpm, KG, etc.). Derive from size text when clear
   (e.g. size "63mm" → unit "mm"). NEVER put BOQ quantity UOM here (Each, Nos, Rm).
@@ -85,16 +91,17 @@ Field discipline (important — be rigid and evidence-based):
   (required Rate_Master_Output Attribute keys). Map evidenced BOQ specs onto those keys.
   Prefer null/omit over inventing free-form extra attribute keys.
   Do NOT invent additional attributes outside `attribute_keys`.
-  Do NOT use attributes.material / body_material / construction — those go in ``class``.
+  Do NOT use attributes.material / body_material / construction — those go in ``class``
+  when Class is material for that family, otherwise leave them out of attributes.
   Omit keys with unknown/null values — do not include empty attributes.
-- Normalize common material abbreviations into ``class`` when clear
-  (MS→MS, mild steel→MS, DI→DI, ductile iron→DI, CI→CI, cast iron→CI,
-  GI→GI, galvanised iron→GI, SS→SS, stainless steel→SS).
+- Normalize common material abbreviations when they belong in **sub_category** or
+  **class** per the database context lists (mild steel→MS as PIPE sub_category;
+  Class C→C for PIPE class; brass→Brass for valve class when listed).
 - When `is` / IS standard is in attribute_keys and stated in the BOQ, put it in attributes.is.
 - skip_matching=true only when the entire group is a section header or has no purchasable product.
 - Do not calculate prices or choose vendors.
 
-Database context (categories, sub_categories_by_category, attribute_keys):
+Database context (categories, sub_categories_by_category, classes_by_category_sub_category, attribute_keys):
 {{DATABASE_CONTEXT}}
 
 Respond with:

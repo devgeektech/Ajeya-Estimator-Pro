@@ -57,6 +57,10 @@
     <table class="table table--plain">
         <tbody>
             <tr>
+                <th style="text-align: left;">Product_Helper</th>
+                <td style="text-align: right;">{{ product_helper_count }}</td>
+            </tr>
+            <tr>
                 <th style="text-align: left;">Rate_Master_Output</th>
                 <td style="text-align: right;">{{ rates_count }}</td>
             </tr>
@@ -70,8 +74,8 @@
     {% if sheet_stats %}
     <h3 style="margin-top: 24px;" class="panel__title">Workbook Sheet Counts</h3>
     <p class="panel__text" style="margin-bottom: 12px;">
-        Only Rate_Master_Output and Labour_master_Output are imported. Other sheets are
-        counted from the workbook for reference.
+        Product_Helper, Rate_Master_Output, and Labour_Master_Output are imported.
+        Other sheets are counted from the workbook for reference.
     </p>
     <table class="table table--plain">
         <thead>

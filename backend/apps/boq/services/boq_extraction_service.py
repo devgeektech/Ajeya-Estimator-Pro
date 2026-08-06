@@ -182,6 +182,71 @@ def _apply_one_qty(
     return item
 
 
+def quantity_display_fields(product: dict[str, Any]) -> dict[str, Any]:
+    """Shared Analysis / Make & Vendor / Labour / Review quantity display fields."""
+    quantity = product.get("quantity")
+    quantity_unit = product.get("quantity_unit")
+    has_quantity = quantity not in (None, "")
+    return {
+        "quantity": quantity,
+        "quantity_unit": quantity_unit or "",
+        "quantity_display": str(quantity) if has_quantity else "—",
+        "quantity_unit_display": (
+            str(quantity_unit).strip() if quantity_unit not in (None, "") else "—"
+        ),
+        "show_quantity": has_quantity or bool(str(quantity_unit or "").strip()),
+        "rate_only": bool(product.get("rate_only")),
+    }
+
+
+def rehydrate_products_quantity_from_group(
+    products: list[dict[str, Any]],
+    group: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """
+    Fill blank product ``quantity`` / ``quantity_unit`` from BOQ Unit/Qty slots.
+
+    Safe to call repeatedly: only blank quantity fields are filled. Used when
+    products kept ``qty_row_id`` but lost quantity after mapping/rematch.
+    """
+    if not products or not group:
+        return list(products or [])
+    return _apply_row_qty_unit(
+        list(products),
+        qty=group.get("qty", group.get("anchor_qty")),
+        unit=group.get("unit", group.get("anchor_unit")),
+        qty_status=group.get("qty_status"),
+        boq_rate=group.get("boq_rate"),
+        qty_rows=list(group.get("qty_rows") or []),
+        slots=list(group.get("slots") or group.get("qty_rows") or []),
+    )
+
+
+def rehydrate_analysis_rows_quantity(
+    boq_data: dict[str, Any],
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Re-bind every analysis row's products to their BOQ Unit/Qty slots."""
+    group_by_row = {
+        str(group.get("row_id") or ""): group
+        for group in grouped_anchor_rows(boq_data or {})
+        if group.get("row_id")
+    }
+    updated: list[dict[str, Any]] = []
+    for row in rows or []:
+        row_id = str(row.get("row_id") or "")
+        products = list(row.get("products") or [])
+        if not products:
+            updated.append(row)
+            continue
+        filled = rehydrate_products_quantity_from_group(
+            products,
+            group_by_row.get(row_id),
+        )
+        updated.append({**row, "products": filled})
+    return updated
+
+
 def _apply_row_qty_unit(
     products: list[dict[str, Any]],
     *,
@@ -234,6 +299,9 @@ def _apply_row_qty_unit(
                 item["qty_row_id"] = slot_row_id or item.get("qty_row_id")
                 item["slot_index"] = qty_row.get("slot_index", index)
                 item["slot_id"] = qty_row.get("slot_id") or item.get("slot_id")
+                slot_serial = str(qty_row.get("serial") or "").strip()
+                if slot_serial:
+                    item["boq_serial"] = slot_serial
                 used_slot_ids.add(slot_row_id)
             filled.append(item)
         return filled
@@ -245,6 +313,7 @@ def _apply_row_qty_unit(
         qty_status = only.get("qty_status", qty_status)
         boq_rate = only.get("boq_rate", boq_rate)
         slot_row_id = str(only.get("qty_row_id") or only.get("row_id") or "")
+        slot_serial = str(only.get("serial") or "").strip()
         return [
             {
                 **_apply_one_qty(
@@ -258,6 +327,7 @@ def _apply_row_qty_unit(
                 "slot_index": only.get("slot_index", 0),
                 "slot_id": only.get("slot_id"),
                 "source_row_id": product.get("source_row_id") or slot_row_id,
+                **({"boq_serial": slot_serial} if slot_serial else {}),
             }
             for product in products
         ]
@@ -433,6 +503,16 @@ def _promote_material_to_class(product: dict[str, Any]) -> dict[str, Any]:
                 material_value = value
             continue
         remaining[key] = value
+
+    # Do not copy material into class when it only restates sub_category (PIPE/MS).
+    sub_norm = re.sub(r"[^0-9a-zA-Z]+", " ", str(item.get("sub_category") or "").lower())
+    sub_norm = re.sub(r"\s+", " ", sub_norm).strip()
+    material_norm = ""
+    if material_value is not None:
+        material_norm = re.sub(r"[^0-9a-zA-Z]+", " ", str(material_value).lower())
+        material_norm = re.sub(r"\s+", " ", material_norm).strip()
+        if sub_norm and material_norm == sub_norm:
+            material_value = None
 
     if _is_blank_value(item.get("class")) and material_value is not None:
         item["class"] = _normalize_class_material(material_value)
@@ -634,6 +714,7 @@ def _slot_fallback_product(
         "qty_row_id": row_id,
         "slot_index": slot.get("slot_index", product_index),
         "slot_id": slot.get("slot_id"),
+        "boq_serial": str(slot.get("serial") or "").strip() or None,
         "description_hint": evidence[:500],
         "category": None,
         "sub_category": None,
@@ -711,8 +792,13 @@ class BOQExtractionService:
             raise AIServiceError("OPENAI_API_KEY is not configured.")
 
         # Build once for the whole extract job (not once per AI batch).
-        self._database_context_text()
+        context_text = self._database_context_text()
         self._rate_master_taxonomy()
+        logger.info(
+            "BOQ extract AI database context ready chars=%s",
+            len(context_text),
+        )
+        logger.info("BOQ extract AI database context payload=%s", context_text)
 
         flat_rows = self.boq_data.get("rows") or []
         anchor_groups = _build_anchor_groups(self.boq_data)

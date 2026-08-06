@@ -134,16 +134,25 @@
 <div class="make-vendor-lines" id="make-vendor-lines">
     <h3 class="make-vendor-lines__title">Products</h3>
     {% for line in make_vendor_display.lines %}
-    <article class="make-vendor-line{% if forloop.counter|divisibleby:2 %} make-vendor-line--alt{% endif %} make-vendor-line--{{ line.line_status|default:'default' }}" id="make-vendor-{{ line.row_id }}">
+    <article class="make-vendor-line{% cycle '' ' make-vendor-line--alt' %} make-vendor-line--{{ line.line_status|default:'default' }}" id="make-vendor-{{ line.row_id }}">
         <header class="make-vendor-line__header">
             <div class="make-vendor-line__title">
                 <span class="make-vendor-line__serial">{{ line.serial|default:"—" }}</span>
                 {% if line.lineage_count > 1 %}
                     <span class="badge badge--soft">{{ line.lineage_count }} lines grouped</span>
                 {% endif %}
+                {% if line.selection_mode %}
+                    <span class="badge badge--soft">{{ line.selection_mode }}</span>
+                {% endif %}
             </div>
             <div class="make-vendor-line__meta">
-                {% if line.show_qty_unit %}
+                {% if line.product_count >= 2 %}
+                <span
+                    class="extraction-line__qty-unit"
+                    data-active-product-qty
+                    {% if not line.products.0.show_quantity %}hidden{% endif %}
+                >Quantity: {{ line.products.0.quantity_display }}, Unit: {{ line.products.0.quantity_unit_display }}</span>
+                {% elif line.show_qty_unit %}
                 <span class="extraction-line__qty-unit">Quantity: {{ line.qty_display }}, Unit: {{ line.unit_display }}</span>
                 {% endif %}
                 <span class="badge badge--soft">{{ line.product_count }} product{{ line.product_count|pluralize }}</span>
@@ -206,7 +215,14 @@
                     role="tab"
                     :class="tabClass({{ product.product_index }})"
                     :aria-selected="activeProduct === {{ product.product_index }}"
-                    @click="activeProduct = {{ product.product_index }}"
+                    @click="
+                        activeProduct = {{ product.product_index }};
+                        const qtyEl = $el.closest('.make-vendor-line').querySelector('[data-active-product-qty]');
+                        if (qtyEl) {
+                            qtyEl.textContent = 'Quantity: {{ product.quantity_display|escapejs }}, Unit: {{ product.quantity_unit_display|escapejs }}';
+                            qtyEl.hidden = {{ product.show_quantity|yesno:'false,true' }};
+                        }
+                    "
                 >Product {{ product.display_number }}</button>
                 {% endfor %}
             </div>
@@ -262,9 +278,9 @@
                         </p>
                         {% endif %}
                         {% if product.highlight_no_make %}
-                        <p class="make-vendor-card__no-make-note">No Approved Make Found in Make List — enter make and vendor below, then Find rates. You can edit and retry anytime.</p>
+                        <p class="make-vendor-card__no-make-note">No Approved Make Found in Make List — enter make and vendor below, then Find rates, or use <strong>Find in DB</strong> to resolve Product_ID from Product_Helper.</p>
                         {% elif product.is_no_match %}
-                        <p class="make-vendor-card__no-make-note">No Rate_Master_Output match — edit make/vendor and Find rates again.</p>
+                        <p class="make-vendor-card__no-make-note">No Rate_Master_Output match — edit make/vendor and Find rates again, or use <strong>Find in DB</strong>.</p>
                         {% endif %}
                     </div>
                     <span
@@ -385,6 +401,17 @@
                             <span x-show="!saving">Find rates</span>
                             <span x-show="saving" x-cloak>Searching…</span>
                         </button>
+                        {% if product.show_find_in_db %}
+                        <button
+                            type="button"
+                            class="btn btn--small btn--ghost"
+                            :disabled="saving"
+                            @click="findInDb()"
+                        >
+                            <span x-show="!saving">Find in DB</span>
+                            <span x-show="saving" x-cloak>Searching…</span>
+                        </button>
+                        {% endif %}
                         <span class="extraction-save-hint extraction-save-hint--error" x-show="error" x-text="error" x-cloak></span>
                     </div>
                 </div>
@@ -760,6 +787,38 @@ document.addEventListener('alpine:init', () => {
             } catch (error) {
                 this.error = error.message || 'Search failed.';
             } finally {
+                this.saving = false;
+            }
+        },
+        async findInDb() {
+            if (this.saving) return;
+            this.saving = true;
+            this.error = '';
+            try {
+                const body = new FormData();
+                body.append('ajax', '1');
+                body.append('action', 'find_in_db');
+                body.append('row_id', this.rowId);
+                body.append('product_index', String(this.productIndex));
+                const response = await fetch(this.url, {
+                    method: 'POST',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-CSRFToken': csrfToken(),
+                        'Accept': 'application/json',
+                    },
+                    credentials: 'same-origin',
+                    body,
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || !data.ok) {
+                    throw new Error(data.message || 'Find in DB failed.');
+                }
+                window.location.assign(
+                    '{% url "boq:detail" boq.pk %}?tab=make_vendor&_t=' + Date.now()
+                );
+            } catch (error) {
+                this.error = error.message || 'Find in DB failed.';
                 this.saving = false;
             }
         },

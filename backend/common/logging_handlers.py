@@ -6,6 +6,17 @@ import time
 from logging.handlers import RotatingFileHandler
 
 
+class SkipBrokenPipeFilter(logging.Filter):
+    """Drop Django runserver 'Broken pipe' INFO noise from cancelled browser requests."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            message = record.getMessage()
+        except Exception:
+            return True
+        return "Broken pipe" not in message
+
+
 class SafeRotatingFileHandler(RotatingFileHandler):
     """
     RotatingFileHandler that skips rename when another process holds the file.

@@ -19,6 +19,7 @@ from .forms import DatabaseUploadForm
 from .models import (
     DatabaseVersion,
     Labour_master_Output,
+    Product_Helper,
     Rate_Master_Output,
 )
 from .services.activation import repair_duplicate_active_versions
@@ -171,11 +172,15 @@ class DatabaseVersionDetailView(LoginRequiredMixin, View):
 
         rates_count = 0
         labour_count = 0
+        product_helper_count = 0
         if version.is_active:
             rates_count = Rate_Master_Output.objects.filter(
                 database_version=version
             ).count()
             labour_count = Labour_master_Output.objects.filter(
+                database_version=version
+            ).count()
+            product_helper_count = Product_Helper.objects.filter(
                 database_version=version
             ).count()
 
@@ -184,5 +189,6 @@ class DatabaseVersionDetailView(LoginRequiredMixin, View):
             "sheet_stats": sheet_stats,
             "rates_count": rates_count,
             "labour_count": labour_count,
+            "product_helper_count": product_helper_count,
         }
         return render(request, "database/version_detail.html", context)

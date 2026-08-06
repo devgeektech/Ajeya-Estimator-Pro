@@ -108,6 +108,59 @@ def cell_value(row: dict, key: str) -> Any:
     return value
 
 
+def workbook_serial(row: dict[str, Any], *, serial_key: str | None = None) -> str:
+    """Original BOQ serial text for Review/export (preserve client numbering)."""
+    if serial_key:
+        text = normalize_serial_text(cell_value(row, serial_key))
+        if text:
+            return text
+    attached = normalize_serial_text(row.get("serial"))
+    if attached:
+        return attached
+    return str(row.get("serial") or "").strip()
+
+
+def nearest_structural_serial(
+    row_id: str,
+    rows_by_id: dict[str, dict[str, Any]],
+    *,
+    serial_key: str | None = None,
+    start_at_parent: bool = True,
+) -> str:
+    """
+    Walk ``parent_row_id`` to the nearest structural serial (``1``, ``1.1``, ``5.2``).
+
+    When ``start_at_parent`` is True (default), skip the starting row itself so a
+    lettered qty row like ``a)`` resolves to its section parent (``5.1``), not ``a)``.
+    """
+    current_id = str(row_id or "").strip()
+    if not current_id:
+        return ""
+    start = rows_by_id.get(current_id)
+    if start_at_parent and start is not None:
+        current_id = str(start.get("parent_row_id") or "").strip()
+    seen: set[str] = set()
+    while current_id and current_id not in seen:
+        seen.add(current_id)
+        row = rows_by_id.get(current_id)
+        if row is None:
+            break
+        serial = workbook_serial(row, serial_key=serial_key)
+        if serial and _is_structural_serial(serial):
+            return serial
+        current_id = str(row.get("parent_row_id") or "").strip()
+    return ""
+
+
+def export_serial_with_suffix(base_serial: str, occurrence_index: int, total_for_base: int) -> str:
+    """Keep original serial; suffix (A)/(B)/(C) only when multiple products share it."""
+    base = str(base_serial or "").strip() or "—"
+    if total_for_base <= 1:
+        return base
+    letter = chr(ord("A") + max(0, int(occurrence_index)))
+    return f"{base}({letter})"
+
+
 def _sheet_col_class(header: dict) -> str:
     """CSS column class for a BOQ sheet header (drives column width)."""
     blob = re.sub(
@@ -130,10 +183,19 @@ def _sheet_col_class(header: dict) -> str:
     return "boq-sheet__col-other"
 
 
+def _display_cell_text(value: Any) -> Any:
+    """Normalize cell text for UI (drop leading/trailing Excel whitespace)."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value.strip()
+    return value
+
+
 def _with_display_cells(headers: list[dict], cells: list) -> list[dict]:
     """Pair each cell with its header column class for template rendering."""
     return [
-        {"text": value, "col_class": header.get("col_class") or ""}
+        {"text": _display_cell_text(value), "col_class": header.get("col_class") or ""}
         for header, value in zip(headers, cells)
     ]
 
@@ -205,8 +267,8 @@ def _make_list_sheet_col_class(header: dict, serial_key: str | None) -> str:
 
 def structure_for_make_list_display(structure: dict) -> dict:
     """
-    Make List tab: S.No, Description/Material, Mapped Category,
-    Mapped Sub-category, and Approved Makes.
+    Make List tab: S.No, Description/Material, Category,
+    Subcategory, and Approved Makes.
 
     Ignores leftover rate/estimate columns from older multi-sheet merges.
     """
@@ -259,8 +321,8 @@ def structure_for_make_list_display(structure: dict) -> dict:
     elif "material" in str(material_key).lower():
         material_label = "Material"
     display_headers.append({"key": material_key, "label": material_label})
-    display_headers.append({"key": "_mapped_category", "label": "Mapped Category"})
-    display_headers.append({"key": "_mapped_sub_category", "label": "Mapped Sub-category"})
+    display_headers.append({"key": "_mapped_category", "label": "Category"})
+    display_headers.append({"key": "_mapped_sub_category", "label": "Subcategory"})
     display_headers.append({"key": "_approved_makes", "label": "Approved Makes"})
     display_headers = [
         {**header, "col_class": _make_list_sheet_col_class(header, serial_key)}
@@ -314,6 +376,8 @@ def structure_for_make_list_display(structure: dict) -> dict:
         rows.append(
             {
                 **row,
+                # Make List is a flat sheet — never inherit BOQ hierarchy indent.
+                "depth": 0,
                 "cells": cells,
                 "display_cells": _with_display_cells(display_headers, cells),
                 "approved_makes_list": list(makes or []),

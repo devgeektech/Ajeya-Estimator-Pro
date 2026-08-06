@@ -30,16 +30,18 @@ Schema and import rules for PostgreSQL. Update when models or migrations change.
 
 ## Master Workbook Sheets
 
-Uploaded workbooks may contain many sheets. **Only these two are ingested** into
-PostgreSQL (both required). Other sheets are counted for the database detail UI
+Uploaded workbooks may contain many sheets. **These three are ingested** into
+PostgreSQL (all required). Other sheets are counted for the database detail UI
 only.
 
 | Sheet (workbook) | Model / table | Required |
 | --- | --- | --- |
+| `Product_Helper` | `Product_Helper` | **Yes** |
 | `Rate_Master_Output` | `Rate_Master_Output` | **Yes** |
 | `Labour_Master_Output` | `Labour_master_Output` | **Yes** |
 
-Alias: older workbooks titled `Labour_master_Output` are still accepted.
+Aliases: older workbooks titled `Labour_master_Output` are still accepted;
+`Product_Master` is accepted as an alias for `Product_Helper`.
 
 **Removed (no longer imported or modeled):** `Rate_Master`, `Labour_Master`,
 `TOR_Main`, `TOR_Labour`, `TOR_Accessories`, `Labour_Structure_Source`,
@@ -47,18 +49,30 @@ Alias: older workbooks titled `Labour_master_Output` are still accepted.
 
 **Import rules:**
 
-- Validate that both required sheets are present before any DB write.
+- Validate that all required sheets are present before any DB write.
 - Blank / non-numeric formula placeholders (`<<`, `Base_Rate missing`, …) → `NULL`.
 - All master rows carry `database_version_id`.
 - Model / table names keep historical spellings; workbook sheet titles follow
   the current client file (with aliases above).
-- `Product_ID` (both sheets) and `Rate_ID` are **text** (`varchar(64)`): codes
+- `Product_ID` (all three sheets) and `Rate_ID` are **text** (`varchar(64)`): codes
   like `P1001` and plain numbers like `1001` are both accepted. Whole numbers
   read from Excel as `1001.0` are trimmed to `1001` so rate and labour rows stay
-  linked. Rows without a `Product_ID` (plus `Category` for rates) are skipped.
+  linked. Rows without a `Product_ID` (plus `Category` for Product_Helper / rates)
+  are skipped.
 - If a required sheet has rows but **none** are importable, the import fails
   with the offending column names and nothing is activated; the previous active
   version stays intact.
+
+### `Product_Helper`
+
+One catalog product identity (no Make/Vendor). Key fields:
+
+`Product_ID`, `Category`, `Sub_Category`, `Class`, `Size`, `Unit`, `Capacity`,
+`Attribute`, `Status`.
+
+- **`Product_ID`** — product identity used to load all Make/Vendor rate rows and
+  labour. Analysis / Find in DB resolve BOQ extracts onto this sheet first.
+- Active rows (`Status` = Active) are preferred for matching.
 
 ### `Rate_Master_Output`
 
@@ -91,10 +105,10 @@ One priced Make/Vendor row. Key fields:
 ### `Labour_Master_Output`
 
 One labour row per `Product_ID`. Taxonomy fields plus labour charges. BOQ Auto
-labour uses **`Labour_With_State_Multiplier`** (mapped to model field
-`Total_Labour_per_unit_with_labour_Multipler`; falls back to
-`Total_Labour_Per_Unit` when blank). Category-wise labour % remains a Labour-page
-UI feature (not this sheet).
+labour uses **`Total_Labour_Per_Unit`** (falls back to
+`Labour_With_State_Multiplier` / model
+`Total_Labour_per_unit_with_labour_Multipler` when blank). Category-wise labour %
+remains a Labour-page UI feature (not this sheet).
 
 | Excel column | Model field |
 | --- | --- |
@@ -152,8 +166,8 @@ After each successful import, `generate_embeddings_for_version()` indexes active
 **Embedded text fields:** Product_ID, Category, Sub Category, Class, Size, Make,
 Capacity, Unit, Attribute, Vendor.
 
-Taxonomy for AI extract/map comes from distinct Category / Sub_Category on
-`Rate_Master_Output`.
+Taxonomy for AI extract/map comes from distinct Category / Sub_Category / Class on
+`Rate_Master_Output` (`classes_by_category_sub_category` in the extract DB context).
 
 ---
 

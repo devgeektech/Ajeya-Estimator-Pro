@@ -250,10 +250,16 @@ LOGGING = {
             "style": "{",
         },
     },
+    "filters": {
+        "skip_broken_pipe": {
+            "()": "common.logging_handlers.SkipBrokenPipeFilter",
+        },
+    },
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
             "formatter": "verbose",
+            "filters": ["skip_broken_pipe"],
         },
         "app_file": {
             "class": "common.logging_handlers.SafeRotatingFileHandler",
@@ -261,6 +267,7 @@ LOGGING = {
             "maxBytes": 5 * 1024 * 1024,
             "backupCount": 5,
             "formatter": "verbose",
+            "filters": ["skip_broken_pipe"],
         },
         "error_file": {
             "class": "common.logging_handlers.SafeRotatingFileHandler",
@@ -302,6 +309,12 @@ LOGGING = {
             "handlers": ["console", "error_file"],
             "level": "ERROR",
             "propagate": False,
+        },
+        "django.server": {
+            "handlers": ["console", "app_file"],
+            "level": "INFO",
+            "propagate": False,
+            "filters": ["skip_broken_pipe"],
         },
     },
 }

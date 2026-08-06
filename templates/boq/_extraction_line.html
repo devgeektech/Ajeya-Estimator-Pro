@@ -120,13 +120,15 @@
                 {% for product in line.products %}
                 <button
                     type="button"
-                    class="extraction-product-tabs__btn"
+                    class="extraction-product-tabs__btn extraction-product-tabs__btn--{{ product.match_percentage_band|default:'red' }}"
                     role="tab"
+                    data-product-index="{{ product.product_index }}"
                     :class="{
                         'is-active': activeProduct === {{ product.product_index }},
                         'is-busy': !!reanalysingByProduct[{{ product.product_index }}],
                     }"
                     :aria-selected="activeProduct === {{ product.product_index }}"
+                    title="Match {{ product.match_percentage|floatformat:1 }}%"
                     @click="
                         activeProduct = {{ product.product_index }};
                         clearSaveStatus();
@@ -136,7 +138,7 @@
                             qtyEl.hidden = {{ product.show_quantity|yesno:'false,true' }};
                         }
                     "
-                >Product {{ product.display_number }}</button>
+                >Product {{ product.display_number }} <span class="extraction-product-tabs__pct">{{ product.match_percentage|floatformat:0 }}%</span></button>
                 {% endfor %}
                 {% if can_edit_extraction and line.status != 'skipped' %}
                 <button
@@ -222,8 +224,8 @@
                         {% if product.db_match.summary %}
                         <span class="extraction-db-match__summary">{{ product.db_match.summary }}</span>
                         {% endif %}
-                        <span class="badge badge--{{ product.attribute_confidence_band }}">
-                            {{ product.attribute_confidence|floatformat:0 }}% {% if product.db_match.status == 'matched' %}match{% else %}fill{% endif %}
+                        <span class="badge badge--{{ product.match_percentage_band|default:product.attribute_confidence_band }} extraction-confidence-badge">
+                            {{ product.match_percentage|default:product.attribute_confidence|floatformat:0 }}% match
                         </span>
                     </div>
                     {% if product.missing_attribute_count %}

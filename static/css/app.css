@@ -2,7 +2,8 @@
     --bg: #0f172a;
     --surface: #ffffff;
     --surface-alt: #f8fafc;
-    --border: #e2e8f0;
+    --card-stripe: #e2e8f0;
+    --border: #cbd5e1;
     --text: #1e293b;
     --text-muted: #64748b;
     --input-bg: #ffffff;
@@ -1175,10 +1176,11 @@ body:has(.auth) {
 .analysis-row--matched td { background: rgba(34, 197, 94, .04); }
 .analysis-row--reviewed td { background: rgba(37, 99, 235, .05); }
 
-.boq-sheet-wrap { overflow-x: auto; }
+.boq-sheet-wrap { overflow-x: auto; width: 100%; }
 .boq-sheet-wrap--fit {
     overflow-x: hidden;
     max-width: 100%;
+    width: 100%;
 }
 .table.boq-sheet { width: 100%; table-layout: fixed; }
 .table.boq-sheet > thead > tr > th,
@@ -1204,25 +1206,68 @@ body:has(.auth) {
 .dark-mode .table.boq-sheet tbody tr:nth-child(even) td {
     background-color: transparent;
 }
-.boq-sheet__cell {
-    padding-left: calc(12px + var(--row-depth, 0) * 18px) !important;
+/* Indent hierarchy on Description only (BOQ tab). Cap deep nesting so serial
+   and description stay aligned — unlimited depth*14px looked like random gaps. */
+.table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__cell.boq-sheet__col-desc {
+    padding-left: 12px !important;
+}
+.table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__row--depth-1 .boq-sheet__col-desc {
+    padding-left: 20px !important;
+}
+.table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__row--depth-2 .boq-sheet__col-desc,
+.table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__row--depth-3 .boq-sheet__col-desc,
+.table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__row--depth-4 .boq-sheet__col-desc,
+.table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__row--depth-5 .boq-sheet__col-desc,
+.table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__row--depth-6 .boq-sheet__col-desc,
+.table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__row--depth-7 .boq-sheet__col-desc,
+.table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__row--depth-8 .boq-sheet__col-desc {
+    padding-left: 28px !important;
+}
+.table.boq-sheet.boq-sheet--make-list .boq-sheet__cell.boq-sheet__col-desc {
+    padding-left: 12px !important;
 }
 .boq-sheet__row--depth-0 td { background: transparent !important; }
 .boq-sheet__row--depth-1 td { background: rgba(37, 99, 235, .03) !important; }
-.boq-sheet__row--depth-2 td { background: rgba(37, 99, 235, .06) !important; }
-.boq-sheet__row--depth-3 td { background: rgba(37, 99, 235, .09) !important; }
+.boq-sheet__row--depth-2 td,
+.boq-sheet__row--depth-3 td,
+.boq-sheet__row--depth-4 td,
+.boq-sheet__row--depth-5 td,
+.boq-sheet__row--depth-6 td,
+.boq-sheet__row--depth-7 td,
+.boq-sheet__row--depth-8 td { background: rgba(37, 99, 235, .06) !important; }
 .dark-mode .boq-sheet__row--depth-1 td { background: rgba(37, 99, 235, .08) !important; }
-.dark-mode .boq-sheet__row--depth-2 td { background: rgba(37, 99, 235, .12) !important; }
-.dark-mode .boq-sheet__row--depth-3 td { background: rgba(37, 99, 235, .16) !important; }
+.dark-mode .boq-sheet__row--depth-2 td,
+.dark-mode .boq-sheet__row--depth-3 td,
+.dark-mode .boq-sheet__row--depth-4 td,
+.dark-mode .boq-sheet__row--depth-5 td,
+.dark-mode .boq-sheet__row--depth-6 td,
+.dark-mode .boq-sheet__row--depth-7 td,
+.dark-mode .boq-sheet__row--depth-8 td { background: rgba(37, 99, 235, .12) !important; }
 
-/* BOQ sheet column widths — description keeps the remaining space */
-.table.boq-sheet .boq-sheet__col-sno { width: 5%; }
-.table.boq-sheet .boq-sheet__col-desc { width: 47%; }
-.table.boq-sheet .boq-sheet__col-unit { width: 8%; }
-.table.boq-sheet .boq-sheet__col-qty { width: 8%; }
-.table.boq-sheet .boq-sheet__col-rate { width: 11%; }
-.table.boq-sheet .boq-sheet__col-amount { width: 11%; }
-.table.boq-sheet .boq-sheet__col-other { width: 10%; }
+/* BOQ sheet only (not Make List): widths sum to 100%. Keep S.No on one line. */
+.table.boq-sheet:not(.boq-sheet--make-list) col.boq-sheet__col-sno,
+.table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__col-sno {
+    width: 7%;
+    white-space: nowrap !important;
+    overflow-wrap: normal !important;
+    word-break: keep-all !important;
+}
+.table.boq-sheet:not(.boq-sheet--make-list) col.boq-sheet__col-desc,
+.table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__col-desc { width: 45%; }
+.table.boq-sheet:not(.boq-sheet--make-list) col.boq-sheet__col-unit,
+.table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__col-unit {
+    width: 10%;
+    white-space: nowrap !important;
+    overflow-wrap: normal !important;
+}
+.table.boq-sheet:not(.boq-sheet--make-list) col.boq-sheet__col-qty,
+.table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__col-qty { width: 8%; }
+.table.boq-sheet:not(.boq-sheet--make-list) col.boq-sheet__col-rate,
+.table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__col-rate { width: 15%; }
+.table.boq-sheet:not(.boq-sheet--make-list) col.boq-sheet__col-amount,
+.table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__col-amount { width: 15%; }
+.table.boq-sheet:not(.boq-sheet--make-list) col.boq-sheet__col-other,
+.table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__col-other { width: 10%; }
 
 .analysis-table--compact {
     table-layout: fixed;
@@ -1460,43 +1505,55 @@ body:has(.auth) {
 .table__empty { text-align: center; color: var(--text-muted); padding: 32px; }
 .inline-form { display: inline; }
 
-/* Make List: S.No, Description, Mapped Category, Mapped Sub-category, Approved Makes */
-.boq-sheet-wrap--make-list {
-    overflow-x: auto;
-    width: 100% !important;
-    max-width: 100% !important;
+/* Make List tab: CSS grid fills panel; last column takes remaining width.
+   Stretch cells + row-level border so wrapped descriptions never get mid-row
+   lines from shorter/empty neighbouring cells. */
+.make-list-sheet {
+    display: block;
+    width: 100%;
+    max-width: none;
+    box-sizing: border-box;
+    margin: 0;
 }
-.table.boq-sheet.boq-sheet--make-list {
-    width: 100% !important;
-    min-width: 100% !important;
-    max-width: 100% !important;
-    table-layout: fixed !important;
-    margin: 0 !important;
+.make-list-sheet__head,
+.make-list-sheet__row {
+    display: grid;
+    width: 100%;
+    box-sizing: border-box;
+    /* Last column (Approved Makes) is 1fr — fills remaining width to the right edge. */
+    grid-template-columns: 3.5rem minmax(0, 28%) 9rem 10rem 1fr;
+    column-gap: 2.75rem;
+    align-items: stretch;
+    border-bottom: 1px solid var(--border);
 }
-.table.boq-sheet.boq-sheet--make-list th,
-.table.boq-sheet.boq-sheet--make-list td {
-    text-align: left !important;
-    vertical-align: top;
-    white-space: normal !important;
-    overflow-wrap: break-word;
+.make-list-sheet__cell {
+    padding: 12px 8px;
+    font-size: .9rem;
+    color: var(--text);
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    min-width: 0;
+    text-align: left;
 }
-.table.boq-sheet.boq-sheet--make-list col.boq-sheet__col-sno,
-.table.boq-sheet.boq-sheet--make-list .boq-sheet__col-sno {
-    width: 5% !important;
+.make-list-sheet__cell.boq-sheet__col-mapped-cat,
+.make-list-sheet__cell.boq-sheet__col-mapped-sub,
+.make-list-sheet__cell.boq-sheet__col-makes {
+    width: 100%;
+    max-width: none;
+    justify-self: stretch;
 }
-.table.boq-sheet.boq-sheet--make-list col.boq-sheet__col-desc,
-.table.boq-sheet.boq-sheet--make-list .boq-sheet__col-desc {
-    width: 22% !important;
+.make-list-sheet__cell--head {
+    font-weight: 700;
+    font-size: .85rem;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--surface);
 }
-.table.boq-sheet.boq-sheet--make-list col.boq-sheet__col-mapped-cat,
-.table.boq-sheet.boq-sheet--make-list .boq-sheet__col-mapped-cat,
-.table.boq-sheet.boq-sheet--make-list col.boq-sheet__col-mapped-sub,
-.table.boq-sheet.boq-sheet--make-list .boq-sheet__col-mapped-sub {
-    width: 16% !important;
-}
-.table.boq-sheet.boq-sheet--make-list col.boq-sheet__col-makes,
-.table.boq-sheet.boq-sheet--make-list .boq-sheet__col-makes {
-    width: 41% !important;
+.make-list-sheet__cell.boq-sheet__col-sno {
+    white-space: nowrap;
+    overflow-wrap: normal;
+    word-break: keep-all;
 }
 
 /* ---------- Status toggle ---------- */
@@ -1529,7 +1586,7 @@ body:has(.auth) {
 .badge--green { background: var(--green-bg); color: var(--green); border-color: transparent; }
 .badge--red { background: var(--red-bg); color: var(--red); border-color: transparent; }
 .badge--yellow { background: var(--yellow-bg); color: #854d0e; border-color: transparent; }
-.badge--orange { background: #ffedd5; color: #9a3412; border-color: transparent; }
+.badge--orange { background: #f3e0c8; color: #7c2d12; border-color: transparent; }
 .badge--blank { background: var(--surface-alt); color: var(--text-muted); }
 .badge--warn { background: #ffedd5; color: #9a3412; border-color: transparent; }
 .badge--purple { background: #f3e8ff; color: #7e22ce; border-color: transparent; }
@@ -1554,7 +1611,7 @@ body:has(.auth) {
 .review-row__desc { max-width: 320px; }
 .review-row--green { border-left: 3px solid var(--green); }
 .review-row--yellow { border-left: 3px solid #ca8a04; }
-.review-row--orange { border-left: 3px solid #ea580c; }
+.review-row--orange { border-left: 3px solid #c2410c; }
 .review-row--red { border-left: 3px solid var(--red); }
 .review-row--blank { border-left: 3px solid var(--border); }
 .review-row--nested td { background: var(--surface-alt); }
@@ -1615,6 +1672,20 @@ body:has(.auth) {
 }
 .review-meta-list dt { color: var(--text-muted); font-weight: 500; }
 .review-meta-list dd { margin: 0; }
+
+/* Make & Vendor / Labour / Review line cards — same white/grey as Analysis. */
+.make-vendor-line {
+    margin: 0;
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+}
+.make-vendor-lines > .make-vendor-line:nth-of-type(even),
+.make-vendor-line--alt {
+    background: var(--card-stripe, #e2e8f0) !important;
+}
 
 /* ---------- Alerts / messages ---------- */
 .messages { display: flex; flex-direction: column; gap: 10px; padding: 16px 28px 0; }
@@ -1765,10 +1836,21 @@ body:has(.auth) {
         max-width: 100%;
         table-layout: fixed !important;
     }
+    .make-list-sheet__head,
+    .make-list-sheet__row {
+        grid-template-columns: 3rem minmax(0, 26%) 7.5rem 8.5rem 1fr !important;
+        column-gap: 1.75rem !important;
+    }
     .table.boq-sheet th,
     .table.boq-sheet td {
         text-align: left !important;
         white-space: normal !important;
+    }
+    .table.boq-sheet .boq-sheet__col-sno,
+    .table.boq-sheet .boq-sheet__col-unit {
+        white-space: nowrap !important;
+        overflow-wrap: normal !important;
+        word-break: keep-all !important;
     }
     .analysis-table--compact {
         table-layout: auto;

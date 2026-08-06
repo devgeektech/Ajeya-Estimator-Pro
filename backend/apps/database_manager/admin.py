@@ -3,6 +3,7 @@ from django.contrib import admin
 from .models import (
     DatabaseVersion,
     Labour_master_Output,
+    Product_Helper,
     Rate_Master_Output,
 )
 
@@ -26,6 +27,28 @@ class DatabaseVersionAdmin(admin.ModelAdmin):
             from .services.activation import activate_database_version
 
             activate_database_version(obj)
+
+
+@admin.register(Product_Helper)
+class ProductHelperAdmin(admin.ModelAdmin):
+    list_display = (
+        "Product_ID",
+        "Category",
+        "Sub_Category",
+        "Class",
+        "Size",
+        "Unit",
+        "Status",
+        "database_version",
+    )
+    list_filter = ("Category", "Status", "database_version")
+    search_fields = (
+        "Product_ID",
+        "Category",
+        "Sub_Category",
+        "Class",
+        "Attribute",
+    )
 
 
 @admin.register(Rate_Master_Output)

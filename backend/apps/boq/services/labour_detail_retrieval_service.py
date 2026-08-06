@@ -38,12 +38,11 @@ def gather_labour_charges(row: Labour_master_Output) -> dict[str, Any]:
     for snapshot_key, model_field in LABOUR_CHARGE_COLUMN_MAP:
         components[snapshot_key] = _model_value(row, model_field)
 
-    # Preferred BOQ labour unit amount (Excel Labour_With_State_Multiplier,
-    # stored on Total_Labour_per_unit_with_labour_Multipler). Fall back to
-    # Total_Labour_per_Unit when the multiplier column is blank.
-    effective = components.get("total_labour_per_unit_with_multiplier")
+    # Preferred BOQ labour unit amount: Total_Labour_Per_Unit (Product_ID join).
+    # Fall back to Labour_With_State_Multiplier when Total_Labour_Per_Unit is blank.
+    effective = components.get("total_labour_per_unit")
     if effective in (None, ""):
-        effective = components.get("total_labour_per_unit")
+        effective = components.get("total_labour_per_unit_with_multiplier")
 
     return {
         "components": components,

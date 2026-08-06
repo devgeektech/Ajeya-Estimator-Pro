@@ -7,12 +7,14 @@ DATABASE_UPLOADS_TO_RETAIN = 10
 # Master workbook sheets that are ingested into PostgreSQL (docs/DATABASE.md).
 # Preferred names match the current client workbook; aliases cover older files.
 REQUIRED_MASTER_SHEETS = [
+    "Product_Helper",
     "Rate_Master_Output",
     "Labour_Master_Output",
 ]
 
 # Alternate workbook sheet titles accepted as the same ingested sheet.
 MASTER_SHEET_ALIASES: dict[str, tuple[str, ...]] = {
+    "Product_Helper": ("Product_Helper", "Product_Master"),
     "Rate_Master_Output": ("Rate_Master_Output",),
     "Labour_Master_Output": (
         "Labour_Master_Output",
