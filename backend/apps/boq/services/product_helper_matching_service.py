@@ -116,7 +116,8 @@ def structured_helper_match_score(
     attr_weight = _TEXT_WEIGHTS["attributes"]
     if extracted_attrs:
         weight_total += attr_weight
-        attr_score = attribute_overlap_score(extracted_attrs, helper_attrs)
+        attr_ratio, _attr_details = attribute_overlap_score(extracted_attrs, helper_attrs)
+        attr_score = float(attr_ratio)
         weighted += attr_weight * attr_score
         breakdown["attributes"] = {"score": round(attr_score, 3), "weight": attr_weight}
 

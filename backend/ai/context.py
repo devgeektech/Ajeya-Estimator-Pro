@@ -112,6 +112,11 @@ _SUB_CATEGORY_SYNONYMS: dict[str, tuple[str, ...]] = {
     "ss": ("stainless", "stainless steel", "s s"),
     "ci": ("cast iron", "c i"),
     "di": ("ductile iron", "d i"),
+    "nrv": ("non return", "non-return", "check valve"),
+    "non return valve": ("nrv", "check valve", "non-return"),
+    "sluice valve": ("sluice", "gate valve", "gate"),
+    "ball valve": ("ball",),
+    "butterfly valve": ("butterfly",),
 }
 
 
@@ -314,13 +319,16 @@ def align_product_taxonomy_from_db_labels(
     category: Any = None,
     sub_category: Any = None,
     taxonomy: dict[str, Any] | None = None,
+    fill_blanks_only: bool = False,
 ) -> dict[str, Any]:
     """Align extracted taxonomy with matched Rate_Master_Output labels."""
     item = dict(product)
     if category not in (None, ""):
-        item["category"] = str(category).strip()
+        if not fill_blanks_only or _is_blank(item.get("category")):
+            item["category"] = str(category).strip()
     if sub_category not in (None, ""):
-        item["sub_category"] = str(sub_category).strip()
+        if not fill_blanks_only or _is_blank(item.get("sub_category")):
+            item["sub_category"] = str(sub_category).strip()
     return snap_product_taxonomy(item, taxonomy)
 
 

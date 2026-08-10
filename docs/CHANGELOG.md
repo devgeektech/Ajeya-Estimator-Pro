@@ -5,6 +5,275 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
+## 2026-08-10 — Backend synonym / matching cleanup
+
+- Make-list description/sub-category hints live only in `utils/product_synonyms.py`
+  (no duplicated local lists).
+- Removed unused synonym hint wrappers, write-only `catalog_candidates`, and
+  leftover Top-5 candidate slice; shared `CANDIDATE_LIMIT=3`.
+- No UI/template/CSS changes.
+
+## 2026-08-10 — Top-3 candidates + broader synonyms
+
+- Top database candidates limited to **3** again.
+- Shared synonym groups (materials + product phrases like NRV/check valve,
+  sluice/gate) used for Analysis matching/recall and Make List category mapping.
+- Make-list mapping version **v4** remaps stored lists so correct category/sub
+  drive Make & Vendor makes.
+
+## 2026-08-10 — Top-5 candidates + rematch prefills DB product
+
+- Top database candidates are consistently up to **5**, with match % re-scored
+  from filled Analysis fields.
+- Re-analyse prefills the selected Rate_Master row into UI inputs (core fields +
+  attributes) and scores confidence from those filled fields.
+- Broader SQL recall (category+size and Class/Sub/Attribute synonym search) so
+  products present in the DB are less likely to be missed (DI ↔ ductile iron).
+
+## 2026-08-10 — Synonym-aware Analysis matching
+
+- Material/class synonyms treated as identical for scoring and recall
+  (DI↔ductile iron, CI↔cast iron, MS↔mild steel, GI, SS).
+- Chroma query + SQL fallback expand synonyms so nearest Rate_Master rows are
+  found; structured score weighted higher than sparse attributes.
+- Top database candidates increased to 5; rematch prompt must not lower
+  confidence for synonym wording alone.
+
+## 2026-08-07 — Analysis Capacity last + Unit in candidates
+
+- Analysis product inputs order: Category → Sub-category → Class → Size → Unit →
+  Capacity.
+- Top database candidates include Unit after Size; dotted separators use a darker
+  style. Display key is ``Category|Sub|Class|Size|Unit|Capacity|Attribute``.
+
+## 2026-08-07 — Re-analyse fresh DB search with filled inputs
+
+- Product **Re-analyse** re-queries Chroma/SQL using filled Analysis fields and
+  the BOQ section/slot text instead of locking the previous top-3 candidates.
+- AI rematch picks the best new match, re-scores confidence, and prefills
+  Analysis inputs from that Rate_Master row.
+
+## 2026-08-07 — Prefill selected DB candidate into Analysis inputs
+
+- Selecting a top database candidate loads that Rate_Master row into Analysis
+  inputs (category/class/size/unit/capacity + Attribute values) and keeps the
+  candidate’s listed match %.
+- The Selected candidate is clickable to reload the same product into the form.
+- Confirmed AI matches fill blank Attribute schema keys from Rate_Master while
+  keeping filled BOQ values.
+
+## 2026-08-07 — Analysis progress tracks real extract work
+
+- Analysis loading starts at **1%** (not an immediate **8%** jump).
+- Extract progress maps **3% → 55%** as AI batches finish; matching remains
+  **55% → 95%**. UI soft-creep follows the last server target instead of a
+  fixed mid-band floor.
+
+## 2026-08-07 — Fix corrupt BOQ result Excel export
+
+- BOQ result export no longer leaves broken ``#REF!`` defined names / external
+  links from the uploaded workbook (Excel “We found a problem with some
+  content…”). Loads with ``keep_links=False``, clears defined names, writes
+  Rate/Amount as numbers.
+
+## 2026-08-07 — Product-wise Re-analyse + stable candidate confidence
+
+- **Re-analyse** rematches one product: BOQ row description + UI fields/attrs +
+  prior Product_IDs via ``rematch_product`` (not section-wide).
+- Confirmed match / candidate select loads Rate_Master category/class/size/unit/
+  capacity into Analysis columns.
+- Selecting a top DB candidate keeps that candidate’s listed match % instead of
+  recomputing a new blended score.
+
+## 2026-08-07 — Match % color band rounding
+
+- Analysis match colour uses the rounded display percentage so a shown **95%**
+  is green (≥95), **90–94** orange, **<90** red (fixes 94.5–94.9 showing as
+  orange while the label read 95%).
+
+## 2026-08-07 — Section-wide Re-analyse rematch
+
+- Analysis **Re-analyse** rematches every product in the section after saving all
+  product forms (filled blanks + prior Product_ID seeds). No longer product-wise.
+- Empty-section Re-analyse still re-extracts from the workbook.
+
+## 2026-08-07 — Optimal product Re-analyse (rematch)
+
+- Product **Re-analyse** rematches using saved product fields, expert-filled blank
+  attributes, and seeded prior Product_IDs / candidates (not a fresh BOQ extract).
+- Empty-section Re-analyse still re-extracts from the workbook.
+- Wider Chroma recall on rematch; ``map_product_match`` payload includes
+  ``rematch`` / ``prior_match`` / ``expert_filled_attributes``.
+
+## 2026-08-06 — Make-list category/sub-category mapping fix
+
+- Hardened make-list Category / Subcategory assignment: specific phrase hints,
+  no weak shared-token subs (Alarm Valve ≠ Ball Valve), keep solid heuristic
+  category when AI disagrees weakly, hyphen-safe phrase match, sprinkler-only
+  flexible-pipe hint.
+- ``category_mapping_version`` remaps stored make lists when rules change.
+- Prompt ``map_make_list_categories.txt`` prefers null sub over wrong guesses.
+
+## 2026-08-06 — Labour charges by Product_ID (Postgres)
+
+- Auto labour resolves Product_ID from Analysis ``catalog_product_id`` /
+  suggested id as well as ``vendor_selection`` / rate_detail.
+- Make & Vendor **Next** unlocks Labour and auto-loads Labour_master_Output by
+  that Product_ID.
+- Docs: Chroma/vector search is only for finding Product_ID; Make/Vendor amounts
+  and labour always come from PostgreSQL.
+
+## 2026-08-06 — Product_ID Make/Vendor dropdown cascade
+
+- Analysis **Next** and **Find in DB** load Make/Vendor from Rate_Master_Output by
+  Analysis ``Product_ID``; selecting one dropdown filters the other to matching
+  pairs. Find in DB button is yellow (``btn--boq-analyse``).
+
+## 2026-08-06 — Not-found Make/Vendor dropdown format
+
+- Not-found Make & Vendor cards use the same Make/Vendor ``<select>`` dropdowns as
+  matched products when Rate_Master options exist (free-text only if the list is empty).
+
+## 2026-08-06 — Optimized extract + match recall
+
+- Tightened ``extract_products.txt`` and ``map_product_match.txt`` (same rigor,
+  less repetition; one multi-slot example; hard size rule on map).
+- Extract payloads drop duplicate ``qty_rows``; weak size-only hints are enriched
+  with product type for better Chroma recall.
+- Matching: higher size/capacity weight, size-mismatch penalty + filter, PN soft
+  match, ignore Class ``0``, keep material on attributes, Product_ID dedupe, SQL
+  same-size boost into the candidate pool; provisional taxonomy fills blanks only.
+
+## 2026-08-06 — Section extract + shared Re-analyse
+
+- Multi-slot extraction binds each product's size/unit from its letter slot,
+  prefers BOQ PN rating for capacity, clears placeholder class ``0``, and copies
+  shared parent attributes (IS / seat / connection) onto every product.
+- Analysis **Re-analyse** re-extracts the whole section with the same
+  ``extract_products.txt`` instructions as initial Analyse (then remaps), instead
+  of product-wise Rate_Master rematch.
+
+## 2026-08-06 — Export Qty + orange zero/rate-only rows
+
+- BOQ result export writes resolved numeric Qty on qty+unit rows (replacing
+  floor ``SUM`` formulas that looked blank until Excel calculated).
+- Zero-qty and Rate Only rows are highlighted orange on both BOQ and Review
+  exports; unmatched product rows stay red.
+
+## 2026-08-06 — Export rates + Review section rows
+
+- BOQ result export fills Rate/Amount for headers like ``RATE (Rs.)`` /
+  ``AMOUNT (Rs.)`` (not only bare ``rate`` / ``amount`` keys).
+- Review/breakdown export includes other BOQ section text rows (Material,
+  Fittings, Painting, notes) in addition to product lines.
+
+## 2026-08-06 — Review export name includes review
+
+- Review sheet download is now ``{upload}_review result sheet.xlsx`` (BOQ export
+  remains ``{upload}_result.xlsx``).
+
+## 2026-08-06 — Notifications auto-read on open
+
+- Opening the Notifications page marks all as read (nav unread badge clears).
+- Removed Mark all read and the header select-all control; per-row select and
+  Clear selected / Clear all remain.
+
+## 2026-08-06 — Remove Cancel on database upload
+
+- Removed the Cancel button from the Upload Database page.
+
+## 2026-08-06 — Export filenames from uploaded BOQ
+
+- Export downloads are named from the uploaded workbook:
+  ``{upload}_result.xlsx`` (BOQ) and ``{upload}_review result sheet.xlsx`` (Review).
+
+## 2026-08-06 — Review BOQ Description without qty/unit
+
+- Review BOQ Description shows only the row text (e.g. ``a) 150 mm dia``);
+  quantity and unit are not appended (they stay in Qty / Unit fields).
+
+## 2026-08-06 — Find in DB keeps scroll position
+
+- Make & Vendor **Find in DB** (and Find rates / same-price / filter reloads)
+  restore the previous scroll position after refresh instead of jumping to top.
+
+## 2026-08-06 — Analysis mapping + Make & Vendor Next
+
+- Initial Analyse was dropping mapped candidates for whole chunks when
+  Product_Helper attribute scoring treated `attribute_overlap_score`'s
+  `(ratio, details)` tuple as a number. Unpacked correctly (same as Rate
+  matching). Re-analyse still works; re-run Analyse on older runs to remap.
+- Analysis **Next** opened an empty Make & Vendor page because display used
+  missing `self.make_list`; now uses `make_list_service` /
+  `_approved_makes_for_subcategory` like the rest of the service.
+
+## 2026-08-06 — Analysis tab opens after BOQ/Make List
+
+- Fixed Analysing-stage tab switch: BOQ/Make List no longer desync URL to
+  Analysis, so the Analysis tab opens again when clicked. Starting Analyse from
+  BOQ/Make List navigates to the Analysis progress panel.
+
+## 2026-08-06 — PDF make-list multi-format wrap fix
+
+- Wrapped PDF rows re-split after merge so brands on later lines
+  (Thermaflex/Vidoflex, Minimax/Newage, Tyco/Rapidrop) land in Approved Makes.
+- Category banners no longer bleed into prior rows; short labels like
+  ``Plumbing pumps`` are section rows. Manufacturer-only Material lines keep
+  the company name in Description. fire_kitchen re-parsed.
+
+## 2026-08-06 — Make List peel + responsive grid
+
+- Stopped material words (Bolts, Rods, Extinguishers, Accessories, FM…) leaking
+  into Approved Makes; kept them in Description. Restored fluid Make List column
+  grid so resizing no longer crushes/warps text (`app.css` `?v=107`).
+
+## 2026-08-06 — Make List brands no longer stuck in Description
+
+- PDF make-list parsing moves manufacturer-only lines and fused/slash brands
+  into Approved Makes (e.g. Grundfoss/KSB, Tata/Jindal, Spraysafe/System Sensor,
+  ASR Italy) instead of leaving them in Description.
+
+## 2026-08-06 — BOQ tab hides Excel-hidden columns
+
+- BOQ tab now matches the workbook UI: columns hidden in Excel (e.g. UNIT,
+  EXTERNAL + TERRACE + PUMP ROOM, GF, 1ST on `New_test_cpu_kitchen.xlsx`) stay
+  in stored JSON for analysis but are not shown on the BOQ tab. fire_kitchen
+  re-parsed.
+
+## 2026-08-06 — BOQ headers match uploaded workbook
+
+- BOQ tab shows workbook header text as uploaded (e.g. `EXTERNAL + TERRACE +
+  PUMP ROOM`, `GF`, `1ST`, `QTY`); only Excel newlines are collapsed. Removed
+  earlier invented short/Title-Case renames.
+
+## 2026-08-06 — Make List shows empty-makes / section rows
+
+- PDF section banners and description-only make-list lines (empty Approved Makes)
+  now appear in the Make List UI without Category mapping or approved-make
+  constraints. fire_kitchen make list re-parsed.
+
+## 2026-08-06 — Block BOQ upload without active database
+
+- BOQ upload refuses to run when no active master database exists; the upload
+  form warns the user and links to database upload.
+
+## 2026-08-06 — BOQ tab header labels cleaned
+
+- BOQ sheet headers normalized: Title Case, short location labels
+  (`Ext. + Terrace + Pump`, `GF`, `1st`), and compact floor-column styling.
+
+## 2026-08-06 — Make List PDF parse (Title Case brands)
+
+- PDF make-list splitting now recognizes Title Case brands (Jaquar/Kohler),
+  hyphenated Brand-Country tokens, and section headings so Approved Makes
+  separate cleanly from Description across varied PDF layouts.
+
+## 2026-08-06 — BOQ tab layout for multi-qty columns
+
+- BOQ sheet display no longer crushes Unit/Qty when floor columns (GF, 1ST,
+  EXTERNAL…) are present; headers cleaned of Excel newlines; inferred ``a)``
+  serials shown in S.No when the Excel cell is blank.
+
 ## 2026-08-06 — Review S. No. uses qty-row parent
 
 - Review/export Ser no qualifies letter slots with the qty row's nearest

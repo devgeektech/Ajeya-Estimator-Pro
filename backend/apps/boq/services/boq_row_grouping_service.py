@@ -40,6 +40,33 @@ _RATE_ONLY = re.compile(
 _TOTAL_LABEL = re.compile(r"^\s*totals?\s*:?\s*$", re.IGNORECASE)
 _STRUCTURAL_SERIAL = re.compile(r"^(\d+(?:\.\d+)*)$")
 _DOTTED_STRUCTURAL = re.compile(r"^(\d+(?:\.\d+)+)$")
+# Letter/size row text → size_hint for AI + deterministic binding.
+_SIZE_HINT_FROM_TEXT = re.compile(
+    r"(?i)(?:^|[^0-9])(\d+(?:\.\d+)?)\s*(?:mm|nb|inch|in|cm)?\b"
+)
+
+
+def _parse_size_hint_from_description(text: Any) -> tuple[str | None, str | None]:
+    """Return (size_hint, unit) from a slot description like ``200mm dia``."""
+    blob = str(text or "").strip()
+    if not blob:
+        return None, None
+    match = _SIZE_HINT_FROM_TEXT.search(blob)
+    if not match:
+        return None, None
+    size = match.group(1)
+    try:
+        number = float(size)
+        if number.is_integer():
+            size = str(int(number))
+    except ValueError:
+        pass
+    unit = None
+    if re.search(r"(?i)\bmm\b", blob):
+        unit = "mm"
+    elif re.search(r"(?i)\bnb\b", blob):
+        unit = "NB"
+    return size, unit
 
 
 def qty_cell_status(fields: dict[str, Any]) -> tuple[str, Any, Any]:
@@ -428,13 +455,16 @@ def build_slots_for_section(
             local_ids.append(row_id)
 
         evidence_ids = [*local_ids, qty_row_id] if qty_row_id else list(local_ids)
+        description = qty_row.get("description") or ""
+        size_hint, _size_unit = _parse_size_hint_from_description(description)
         slots.append(
             {
                 "slot_index": slot_index,
                 "slot_id": f"{qty_row_id or 'slot'}:{slot_index}",
                 "qty_row_id": qty_row_id,
                 "serial": qty_row.get("serial") or "",
-                "description": qty_row.get("description") or "",
+                "description": description,
+                "size_hint": size_hint,
                 "qty": qty_row.get("qty"),
                 "unit": qty_row.get("unit"),
                 "qty_status": qty_row.get("qty_status"),

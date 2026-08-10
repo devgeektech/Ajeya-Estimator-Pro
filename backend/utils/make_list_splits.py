@@ -335,12 +335,24 @@ def collect_approved_makes(
 ) -> list[str]:
     """Collect de-duplicated approved makes from resolved make columns."""
     source = row.get("display_values") or row.get("values") or {}
-    keys = make_keys
-    if keys is None:
+    keys = list(make_keys or [])
+    if not keys:
         keys = resolve_make_list_columns([row]).get("make_keys") or []
         if not keys:
             # Last resort: any column whose header alone looks like makes.
             keys = [key for key in source if score_make_header(str(key)) >= 20]
+
+    # Keep approved_makes, approved_makes_2… in column order (not score order).
+    def _make_key_order(key: str) -> tuple[int, int | str]:
+        match = re.match(r"^approved_makes(?:_(\d+))?$", _norm_key(key))
+        if match:
+            return (0, int(match.group(1) or 1))
+        try:
+            return (1, keys.index(key))
+        except ValueError:
+            return (2, _norm_key(key))
+
+    keys = sorted(keys, key=_make_key_order)
 
     makes: list[str] = []
     seen: set[str] = set()
@@ -351,6 +363,10 @@ def collect_approved_makes(
                 continue
             seen.add(fold)
             makes.append(token)
+    # Prefer parser-attached list when present and complete.
+    existing = row.get("approved_makes_list")
+    if isinstance(existing, list) and existing and len(existing) >= len(makes):
+        return [str(item).strip() for item in existing if str(item).strip()]
     return makes
 
 
@@ -363,7 +379,11 @@ def attach_approved_makes_list(
     make_keys = roles.get("make_keys") or []
     enriched: list[dict] = []
     for row in rows:
-        approved_makes_list = collect_approved_makes(row, make_keys=make_keys)
+        existing = row.get("approved_makes_list")
+        if isinstance(existing, list) and any(str(item).strip() for item in existing):
+            approved_makes_list = [str(item).strip() for item in existing if str(item).strip()]
+        else:
+            approved_makes_list = collect_approved_makes(row, make_keys=make_keys)
         enriched.append({**row, "approved_makes_list": approved_makes_list})
     return enriched, roles
 

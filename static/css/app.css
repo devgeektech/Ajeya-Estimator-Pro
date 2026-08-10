@@ -1182,7 +1182,7 @@ body:has(.auth) {
     max-width: 100%;
     width: 100%;
 }
-.table.boq-sheet { width: 100%; table-layout: fixed; }
+.table.boq-sheet { width: max-content; min-width: 100%; table-layout: auto; }
 .table.boq-sheet > thead > tr > th,
 .table.boq-sheet > tbody > tr > td {
     text-align: left !important;
@@ -1194,9 +1194,12 @@ body:has(.auth) {
 .boq-sheet th {
     font-weight: 700;
     text-transform: none !important;
-    font-size: .85rem !important;
+    font-size: .8rem !important;
     letter-spacing: normal !important;
     color: var(--text) !important;
+    line-height: 1.25;
+    white-space: normal;
+    hyphens: auto;
 }
 .boq-sheet td { font-weight: 500; }
 /* Keep sheet depth backgrounds; do not apply list zebra striping */
@@ -1244,30 +1247,62 @@ body:has(.auth) {
 .dark-mode .boq-sheet__row--depth-7 td,
 .dark-mode .boq-sheet__row--depth-8 td { background: rgba(37, 99, 235, .12) !important; }
 
-/* BOQ sheet only (not Make List): widths sum to 100%. Keep S.No on one line. */
+/* BOQ sheet: min-widths so extra floor/qty columns (GF, 1ST, …) do not crush
+   Unit/Qty/Rate. Horizontal scroll via .boq-sheet-wrap when needed. */
 .table.boq-sheet:not(.boq-sheet--make-list) col.boq-sheet__col-sno,
 .table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__col-sno {
-    width: 7%;
+    min-width: 4.5rem;
+    width: 4.5rem;
     white-space: nowrap !important;
     overflow-wrap: normal !important;
     word-break: keep-all !important;
 }
 .table.boq-sheet:not(.boq-sheet--make-list) col.boq-sheet__col-desc,
-.table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__col-desc { width: 45%; }
+.table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__col-desc {
+    min-width: 18rem;
+    width: 28rem;
+}
 .table.boq-sheet:not(.boq-sheet--make-list) col.boq-sheet__col-unit,
 .table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__col-unit {
-    width: 10%;
+    min-width: 3.5rem;
+    width: 4rem;
     white-space: nowrap !important;
     overflow-wrap: normal !important;
 }
 .table.boq-sheet:not(.boq-sheet--make-list) col.boq-sheet__col-qty,
-.table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__col-qty { width: 8%; }
+.table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__col-qty {
+    min-width: 4rem;
+    width: 4.5rem;
+}
 .table.boq-sheet:not(.boq-sheet--make-list) col.boq-sheet__col-rate,
-.table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__col-rate { width: 15%; }
+.table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__col-rate {
+    min-width: 5rem;
+    width: 6rem;
+}
 .table.boq-sheet:not(.boq-sheet--make-list) col.boq-sheet__col-amount,
-.table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__col-amount { width: 15%; }
+.table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__col-amount {
+    min-width: 5rem;
+    width: 6rem;
+}
 .table.boq-sheet:not(.boq-sheet--make-list) col.boq-sheet__col-other,
-.table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__col-other { width: 10%; }
+.table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__col-other {
+    min-width: 4.5rem;
+    width: 5.5rem;
+}
+.table.boq-sheet:not(.boq-sheet--make-list) col.boq-sheet__col-floor,
+.table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__col-floor {
+    min-width: 5.5rem;
+    width: auto;
+    max-width: 9.5rem;
+    text-align: center !important;
+    white-space: normal;
+    font-size: .78rem;
+}
+.table.boq-sheet:not(.boq-sheet--make-list) th.boq-sheet__col-floor {
+    font-size: .72rem !important;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+}
 
 .analysis-table--compact {
     table-layout: fixed;
@@ -1505,24 +1540,32 @@ body:has(.auth) {
 .table__empty { text-align: center; color: var(--text-muted); padding: 32px; }
 .inline-form { display: inline; }
 
-/* Make List tab: CSS grid fills panel; last column takes remaining width.
+/* Make List tab: fluid CSS grid — scales on resize; scroll only when needed.
    Stretch cells + row-level border so wrapped descriptions never get mid-row
    lines from shorter/empty neighbouring cells. */
 .make-list-sheet {
     display: block;
     width: 100%;
-    max-width: none;
+    max-width: 100%;
     box-sizing: border-box;
     margin: 0;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
 }
 .make-list-sheet__head,
 .make-list-sheet__row {
     display: grid;
     width: 100%;
+    min-width: min(100%, 36rem);
     box-sizing: border-box;
-    /* Last column (Approved Makes) is 1fr — fills remaining width to the right edge. */
-    grid-template-columns: 3.5rem minmax(0, 28%) 9rem 10rem 1fr;
-    column-gap: 2.75rem;
+    /* S.No | Description | Category | Subcategory | Approved Makes */
+    grid-template-columns:
+        minmax(2.75rem, 3.5rem)
+        minmax(7rem, 1.35fr)
+        minmax(4.5rem, 0.55fr)
+        minmax(5rem, 0.65fr)
+        minmax(7rem, 1.25fr);
+    column-gap: clamp(0.5rem, 2vw, 2rem);
     align-items: stretch;
     border-bottom: 1px solid var(--border);
 }
@@ -1530,8 +1573,8 @@ body:has(.auth) {
     padding: 12px 8px;
     font-size: .9rem;
     color: var(--text);
-    overflow-wrap: anywhere;
-    word-break: break-word;
+    overflow-wrap: break-word;
+    word-break: normal;
     min-width: 0;
     text-align: left;
 }
@@ -1554,6 +1597,13 @@ body:has(.auth) {
     white-space: nowrap;
     overflow-wrap: normal;
     word-break: keep-all;
+}
+.make-list-sheet__row--section .make-list-sheet__cell.boq-sheet__col-desc {
+    font-weight: 700;
+    color: var(--text);
+}
+.make-list-sheet__row--section {
+    background: color-mix(in srgb, var(--surface-alt) 70%, transparent);
 }
 
 /* ---------- Status toggle ---------- */
@@ -1602,6 +1652,15 @@ body:has(.auth) {
 
 .extraction-list li + li {
     margin-top: 4px;
+}
+
+.extraction-db-candidates__sep {
+    color: #334155;
+    font-weight: 600;
+}
+
+.extraction-db-candidates__tech {
+    color: #1e293b;
 }
 
 /* ---------- Review ---------- */
@@ -1838,8 +1897,14 @@ body:has(.auth) {
     }
     .make-list-sheet__head,
     .make-list-sheet__row {
-        grid-template-columns: 3rem minmax(0, 26%) 7.5rem 8.5rem 1fr !important;
-        column-gap: 1.75rem !important;
+        grid-template-columns:
+            minmax(2.5rem, 3rem)
+            minmax(6rem, 1.2fr)
+            minmax(4rem, 0.5fr)
+            minmax(4.5rem, 0.55fr)
+            minmax(6rem, 1.1fr) !important;
+        column-gap: clamp(0.35rem, 1.5vw, 1.25rem) !important;
+        min-width: 0 !important;
     }
     .table.boq-sheet th,
     .table.boq-sheet td {

@@ -260,7 +260,10 @@
                     vendorRateReview: {{ product.vendor_rate_review|yesno:'true,false' }},
                     samePriceTie: {{ product.same_price_tie|yesno:'true,false' }},
                     samePriceChoices: {{ product.same_price_choices_json|default:'[]' }},
+                    makeOptions: {{ product.make_options_json|default:'[]' }},
+                    vendorOptionsAll: {{ product.vendor_options_json|default:'[]' }},
                     vendorsByMake: {{ product.vendors_by_make_json|default:'{}' }},
+                    makesByVendor: {{ product.makes_by_vendor_json|default:'{}' }},
                     rateMasterId: {{ product.rate_master_id|default:'null' }}
                 })"
             >
@@ -365,16 +368,16 @@
                         <span class="extraction-field__label">Make</span>
                         <select class="extraction-input" x-model="make" @change="onMakeChange()">
                             <option value="">Select make…</option>
-                            {% for option in product.make_options %}
-                            <option value="{{ option }}" {% if option == product.selected_make %}selected{% endif %}>{{ option }}</option>
-                            {% endfor %}
+                            <template x-for="option in makeOptions" :key="'make-' + option">
+                                <option :value="option" x-text="option" :selected="option === make"></option>
+                            </template>
                         </select>
                     </label>
                     <label class="extraction-field">
                         <span class="extraction-field__label">Vendor</span>
-                        <select class="extraction-input" x-model="vendor" :disabled="!make || isLowestMake(make)">
-                            <option value="">Auto (lowest price)</option>
-                            <template x-for="option in vendorOptions" :key="option">
+                        <select class="extraction-input" x-model="vendor" @change="onVendorChange()">
+                            <option value="">Select vendor…</option>
+                            <template x-for="option in vendorOptions" :key="'vendor-' + option">
                                 <option :value="option" x-text="option" :selected="option === vendor"></option>
                             </template>
                         </select>
@@ -404,7 +407,7 @@
                         {% if product.show_find_in_db %}
                         <button
                             type="button"
-                            class="btn btn--small btn--ghost"
+                            class="btn btn--small btn--boq-analyse"
                             :disabled="saving"
                             @click="findInDb()"
                         >
@@ -460,10 +463,28 @@
 document.addEventListener('alpine:init', () => {
     const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
     const LOWEST_LABEL = 'Lowest price';
+    const MAKE_VENDOR_SCROLL_KEY = 'boq-detail-scroll-{{ boq.pk }}-make_vendor';
+    const MAKE_VENDOR_URL = '{% url "boq:detail" boq.pk %}?tab=make_vendor&_t=';
 
     const isLowestMake = (value) => {
         const text = String(value || '').trim().toLowerCase();
         return !text || text === LOWEST_LABEL.toLowerCase() || text === 'lowest price';
+    };
+
+    const persistMakeVendorScroll = (rowId) => {
+        try {
+            const el = rowId ? document.getElementById('make-vendor-' + rowId) : null;
+            sessionStorage.setItem(MAKE_VENDOR_SCROLL_KEY, JSON.stringify({
+                y: window.scrollY,
+                rowId: rowId || '',
+                offset: el ? el.getBoundingClientRect().top : null,
+            }));
+        } catch (e) { /* ignore */ }
+    };
+
+    const reloadMakeVendor = (rowId) => {
+        persistMakeVendorScroll(rowId);
+        window.location.assign(MAKE_VENDOR_URL + Date.now());
     };
 
     window.removeMakeVendorAppliedFilter = async function removeMakeVendorAppliedFilter(url, category, subCategory) {
@@ -499,9 +520,7 @@ document.addEventListener('alpine:init', () => {
             if (!response.ok || !data.ok) {
                 throw new Error(data.message || 'Failed to remove filter.');
             }
-            window.location.assign(
-                '{% url "boq:detail" boq.pk %}?tab=make_vendor&_t=' + Date.now()
-            );
+            reloadMakeVendor('');
         } catch (error) {
             alert(error.message || 'Failed to remove filter.');
         }
@@ -613,9 +632,7 @@ document.addEventListener('alpine:init', () => {
                 if (!response.ok || !data.ok) {
                     throw new Error(data.message || 'Failed to apply selection.');
                 }
-                window.location.assign(
-                    '{% url "boq:detail" boq.pk %}?tab=make_vendor&_t=' + Date.now()
-                );
+                reloadMakeVendor('');
             } catch (error) {
                 this.error = error.message || 'Failed to apply selection.';
                 this.saving = false;
@@ -640,8 +657,13 @@ document.addEventListener('alpine:init', () => {
         vendorRateReview: Boolean(config.vendorRateReview),
         samePriceTie: Boolean(config.samePriceTie),
         samePriceChoices: Array.isArray(config.samePriceChoices) ? config.samePriceChoices : [],
+        allMakeOptions: Array.isArray(config.makeOptions) ? config.makeOptions : [],
+        allVendorOptions: Array.isArray(config.vendorOptionsAll) ? config.vendorOptionsAll : [],
         vendorsByMake: (config.vendorsByMake && typeof config.vendorsByMake === 'object')
             ? config.vendorsByMake
+            : {},
+        makesByVendor: (config.makesByVendor && typeof config.makesByVendor === 'object')
+            ? config.makesByVendor
             : {},
         chosenRateMasterId: config.rateMasterId || null,
         saving: false,
@@ -650,25 +672,51 @@ document.addEventListener('alpine:init', () => {
             const text = String(value || '').trim().toLowerCase();
             return !text || text === 'lowest price' || text === 'lowest make' || text === 'lowest';
         },
-        get vendorOptions() {
-            if (this.isLowestMake(this.make)) return [];
-            const byMake = this.vendorsByMake || {};
-            // Exact key first, then case-insensitive fallback for Rate_Master casing.
-            if (byMake[this.make]) return byMake[this.make];
-            const wanted = String(this.make || '').trim().toLowerCase();
-            for (const [key, values] of Object.entries(byMake)) {
-                if (String(key).trim().toLowerCase() === wanted) return values || [];
+        _lookupList(map, key) {
+            if (!key) return [];
+            if (map[key]) return map[key];
+            const wanted = String(key || '').trim().toLowerCase();
+            for (const [entry, values] of Object.entries(map || {})) {
+                if (String(entry).trim().toLowerCase() === wanted) return values || [];
             }
             return [];
         },
+        get makeOptions() {
+            if (this.vendor && !this.isLowestMake(this.vendor)) {
+                const filtered = this._lookupList(this.makesByVendor, this.vendor);
+                if (filtered.length) return filtered;
+            }
+            return this.allMakeOptions;
+        },
+        get vendorOptions() {
+            if (this.make && !this.isLowestMake(this.make)) {
+                const filtered = this._lookupList(this.vendorsByMake, this.make);
+                if (filtered.length) return filtered;
+            }
+            return this.allVendorOptions;
+        },
         onMakeChange() {
             if (this.isLowestMake(this.make)) {
-                this.vendor = '';
+                if (this.vendor && !this.vendorOptions.some((item) => String(item) === String(this.vendor))) {
+                    this.vendor = '';
+                }
                 return;
             }
             const options = this.vendorOptions;
             if (this.vendor && !options.some((item) => String(item) === String(this.vendor))) {
                 this.vendor = '';
+            }
+        },
+        onVendorChange() {
+            if (!this.vendor) {
+                if (this.make && !this.makeOptions.some((item) => String(item) === String(this.make))) {
+                    this.make = '';
+                }
+                return;
+            }
+            const options = this.makeOptions;
+            if (this.make && !options.some((item) => String(item) === String(this.make))) {
+                this.make = '';
             }
         },
         get statusLabel() {
@@ -703,9 +751,7 @@ document.addEventListener('alpine:init', () => {
                 if (!response.ok || !data.ok) {
                     throw new Error(data.message || 'Failed to save choice.');
                 }
-                window.location.assign(
-                    '{% url "boq:detail" boq.pk %}?tab=make_vendor&_t=' + Date.now()
-                );
+                reloadMakeVendor(this.rowId);
             } catch (error) {
                 this.error = error.message || 'Failed to save choice.';
                 this.saving = false;
@@ -757,9 +803,7 @@ document.addEventListener('alpine:init', () => {
                 // Refresh when not-found clears or rates match — vendor-review
                 // highlights compare material rates across all products.
                 if (wasNotFound || selection.status === 'matched' || selection.same_price_tie) {
-                    window.location.assign(
-                        '{% url "boq:detail" boq.pk %}?tab=make_vendor&_t=' + Date.now()
-                    );
+                    reloadMakeVendor(this.rowId);
                     return;
                 }
                 this.status = selection.status || 'unmatched';
@@ -814,9 +858,7 @@ document.addEventListener('alpine:init', () => {
                 if (!response.ok || !data.ok) {
                     throw new Error(data.message || 'Find in DB failed.');
                 }
-                window.location.assign(
-                    '{% url "boq:detail" boq.pk %}?tab=make_vendor&_t=' + Date.now()
-                );
+                reloadMakeVendor(this.rowId);
             } catch (error) {
                 this.error = error.message || 'Find in DB failed.';
                 this.saving = false;

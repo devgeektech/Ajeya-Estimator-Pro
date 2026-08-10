@@ -161,6 +161,22 @@ def export_serial_with_suffix(base_serial: str, occurrence_index: int, total_for
     return f"{base}({letter})"
 
 
+def _clean_header_label(label: Any) -> str:
+    """Collapse Excel multiline header cells to one line — keep workbook wording."""
+    text = str(label or "").replace("\r", " ").replace("\n", " ")
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _format_display_serial(serial: Any) -> str:
+    """Present inferred letter serials as ``a)`` for the BOQ sheet S.No column."""
+    text = str(serial or "").strip()
+    if not text:
+        return ""
+    if _ALPHA_SERIAL.match(text):
+        return f"{text.lower()})"
+    return text
+
+
 def _sheet_col_class(header: dict) -> str:
     """CSS column class for a BOQ sheet header (drives column width)."""
     blob = re.sub(
@@ -172,14 +188,32 @@ def _sheet_col_class(header: dict) -> str:
         return "boq-sheet__col-sno"
     if any(hint in blob for hint in ("description", "particular", "material", "item desc")):
         return "boq-sheet__col-desc"
-    if "unit" in blob:
+    if "unit" in blob and "quantity" not in blob:
         return "boq-sheet__col-unit"
     if "qty" in blob or "quantity" in blob:
         return "boq-sheet__col-qty"
     if "rate" in blob:
         return "boq-sheet__col-rate"
-    if "amount" in blob or "total" in blob:
+    if "amount" in blob or ("total" in blob and "qty" not in blob):
         return "boq-sheet__col-amount"
+    # Floor / location breakdown qty columns (GF, 1st, External+Terrace…).
+    if any(
+        hint in blob
+        for hint in (
+            "external",
+            "terrace",
+            "pump room",
+            "basement",
+            "ground",
+            " gf",
+            "gf ",
+            "1st",
+            "2nd",
+            "3rd",
+            "floor",
+        )
+    ) or blob in {"gf", "1st", "2nd", "3rd"}:
+        return "boq-sheet__col-floor"
     return "boq-sheet__col-other"
 
 
@@ -201,16 +235,44 @@ def _with_display_cells(headers: list[dict], cells: list) -> list[dict]:
 
 
 def structure_for_display(structure: dict) -> dict:
-    """Attach ordered ``cells`` lists to rows for template rendering."""
+    """Attach ordered ``cells`` lists to rows for template rendering.
+
+    Columns marked ``hidden`` (Excel-hidden in the uploaded workbook) are
+    omitted from the BOQ tab so the UI matches what the user sees in Excel.
+    Stored ``boq_data`` still keeps those columns for analysis / export.
+    """
     if not structure:
         return {}
-    headers = [
-        {**header, "col_class": _sheet_col_class(header)}
-        for header in (structure.get("headers") or [])
-    ]
+    serial_key = structure.get("serial_key") or detect_serial_key(
+        list(structure.get("headers") or [])
+    )
+    headers = []
+    for header in structure.get("headers") or []:
+        if header.get("hidden"):
+            continue
+        cleaned_label = _clean_header_label(header.get("label") or header.get("key") or "")
+        labeled = {**header, "label": cleaned_label}
+        headers.append(
+            {
+                **labeled,
+                "col_class": _sheet_col_class(labeled),
+            }
+        )
+
     rows = []
     for row in structure.get("rows") or []:
         cells = [cell_value(row, header["key"]) for header in headers]
+        # When Excel leaves S.No blank but we inferred ``a)`` / ``b)`` from the
+        # description, surface that serial in the S.No column for the BOQ tab.
+        if serial_key:
+            for index, header in enumerate(headers):
+                if header.get("key") != serial_key:
+                    continue
+                if cells[index] in (None, ""):
+                    inferred = _format_display_serial(row.get("serial"))
+                    if inferred:
+                        cells[index] = inferred
+                break
         rows.append(
             {
                 **row,
@@ -347,14 +409,17 @@ def structure_for_make_list_display(structure: dict) -> dict:
         "rate",
     }
     for row in flat_rows:
+        is_section = bool(row.get("is_section_heading"))
         makes = row.get("approved_makes_list")
-        if makes is None:
+        if makes is None and not is_section:
             from utils.make_list_splits import collect_approved_makes
 
             makes = collect_approved_makes(
                 row,
                 make_keys=list(roles.get("make_keys") or []) or None,
             )
+        if is_section:
+            makes = []
         makes_text = " / ".join(str(item).strip() for item in (makes or []) if str(item).strip())
         material_text = cell_value(row, material_key)
         serial_text = cell_value(row, serial_key) if serial_key else ""
@@ -362,17 +427,18 @@ def structure_for_make_list_display(structure: dict) -> dict:
         serial_norm = str(serial_text or "").strip().casefold()
         if material_norm in header_like or serial_norm in header_like:
             continue
-        if not str(material_text or "").strip() and not makes_text:
+        # Keep description-only rows (empty Approved Makes) and section banners.
+        if not str(material_text or "").strip() and not makes_text and not is_section:
             continue
-        mapped_category = str(row.get("mapped_category") or "").strip()
-        mapped_sub = str(row.get("mapped_sub_category") or "").strip()
+        mapped_category = "" if is_section else str(row.get("mapped_category") or "").strip()
+        mapped_sub = "" if is_section else str(row.get("mapped_sub_category") or "").strip()
         cells = []
         if serial_key:
-            cells.append(serial_text)
+            cells.append("" if is_section else serial_text)
         cells.append(material_text)
         cells.append(mapped_category)
         cells.append(mapped_sub)
-        cells.append(makes_text)
+        cells.append("" if is_section else makes_text)
         rows.append(
             {
                 **row,
@@ -380,9 +446,11 @@ def structure_for_make_list_display(structure: dict) -> dict:
                 "depth": 0,
                 "cells": cells,
                 "display_cells": _with_display_cells(display_headers, cells),
-                "approved_makes_list": list(makes or []),
-                "mapped_category": mapped_category or None,
-                "mapped_sub_category": mapped_sub or None,
+                "approved_makes_list": [] if is_section else list(makes or []),
+                "mapped_category": None if is_section else (mapped_category or None),
+                "mapped_sub_category": None if is_section else (mapped_sub or None),
+                "is_section_heading": is_section,
+                "row_class": "make-list-sheet__row--section" if is_section else "",
             }
         )
 
@@ -415,6 +483,8 @@ def _analysis_node(row: dict) -> dict[str, Any]:
         node["sheet_name"] = row.get("sheet_name")
     if row.get("approved_makes_list") is not None:
         node["approved_makes_list"] = row.get("approved_makes_list") or []
+    if row.get("is_section_heading"):
+        node["is_section_heading"] = True
     return node
 
 
@@ -485,7 +555,8 @@ def _infer_serial_from_description(record: dict) -> str:
         return ""
     match = _DESC_ALPHA.match(text)
     if match:
-        return match.group(1).lower()
+        # Keep the common BOQ form ``a)`` so S.No / hierarchy match the sheet.
+        return f"{match.group(1).lower()})"
     return ""
 
 

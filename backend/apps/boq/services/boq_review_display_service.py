@@ -24,6 +24,20 @@ _DESCRIPTION_KEYS = ("description", "item_description", "particulars", "item")
 _QTY_KEYS = ("qty", "quantity", "qnty", "nos")
 _UNIT_KEYS = ("unit", "uom")
 
+
+def _qty_slot_row_ids(group_by_row: dict[str, dict[str, Any]]) -> set[str]:
+    """Row ids that are Unit/Qty slots already represented as Review products."""
+    ids: set[str] = set()
+    for group in group_by_row.values():
+        for slot in group.get("slots") or group.get("qty_rows") or []:
+            slot_id = str(slot.get("qty_row_id") or slot.get("row_id") or "").strip()
+            if slot_id:
+                ids.add(slot_id)
+        group_qty_id = str(group.get("qty_row_id") or "").strip()
+        if group_qty_id:
+            ids.add(group_qty_id)
+    return ids
+
 # Client Output format.xlsx columns for Review/breakdown export.
 # Red headers use the exact red text from the template; instructional black
 # headers are shortened to the field name only (text before the parenthetical).
@@ -197,8 +211,7 @@ def _qty_row_description(
     """
     Description from the Unit/Qty BOQ row (a/b/c…) — not the parent header.
 
-    Includes the letter serial and qty/unit when present, e.g.
-    ``a) 150mm dia — 350 Metre``.
+    Qty and unit stay in their own Review fields; do not append them here.
     """
     if not group:
         return fallback
@@ -231,18 +244,6 @@ def _qty_row_description(
             label = f"{serial} {text}".strip()
     else:
         label = text or serial
-
-    qty = slot.get("qty")
-    unit = slot.get("unit")
-    extras: list[str] = []
-    if qty not in (None, ""):
-        extras.append(str(qty).strip())
-    if unit not in (None, ""):
-        extras.append(str(unit).strip())
-    if extras:
-        joined = " ".join(extras)
-        if joined not in label:
-            label = f"{label} — {joined}".strip(" —") if label else joined
 
     return label or fallback
 
@@ -347,6 +348,7 @@ class BOQReviewDisplayService:
             for group in grouped_anchor_rows(boq_data)
             if group.get("row_id")
         }
+        qty_slot_ids = _qty_slot_row_ids(group_by_row)
 
         lines: list[dict[str, Any]] = []
         matched_count = 0
@@ -359,8 +361,18 @@ class BOQReviewDisplayService:
                 continue
 
             analysis_row = analysis_by_row.get(row_id, {})
+            # Qty letter slots (a)/b)) are shown as products under the parent —
+            # skip duplicates. Other lineage notes (Material, Fittings, Painting…)
+            # stay in Review/export so the sheet mirrors the BOQ section text.
             if analysis_row.get("skip_reason") == "lineage_child_row":
-                continue
+                if row_id in qty_slot_ids:
+                    continue
+                # Treat as a structural BOQ row (no products).
+                analysis_row = {
+                    **analysis_row,
+                    "skip_matching": True,
+                    "products": [],
+                }
 
             fields = analysis_fields(boq_row)
             serial = workbook_serial(boq_row, serial_key=serial_key)

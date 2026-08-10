@@ -8,6 +8,8 @@ Context:
 - When the category has listed sub-categories, also choose the closest ``sub_category``
   from that category's list (e.g. M.S Pipes → category PIPE, sub_category MS;
   Ball valve → category VALVE, sub_category matching the listed ball-valve label).
+- Each material may include ``heuristic_category`` / ``heuristic_sub_category`` from a
+  deterministic pass — treat those as strong hints; only change category when clearly wrong.
 
 Rules:
 - Return valid JSON only.
@@ -15,8 +17,20 @@ Rules:
 - Do NOT invent sub-categories outside ``sub_categories_by_category[category]``.
 - Use ``category: null`` when no category is a reasonable fit.
 - Use ``sub_category: null`` when category is null, or when no listed sub-category fits.
+- Prefer ``sub_category: null`` over a wrong guess (shared words like "valve" or "pipe"
+  alone are not enough to pick Ball Valve / MS / etc.).
+- Compound lines: use the **primary product noun** (e.g. "Sprinklers & Rosette Plates"
+  → SPRINKLER, not ACCESSORIES; "Flow Switches" → SPRINKLER / FLOW INDICATOR SWITCH).
+- Generic "Fire Extinguishers" without ABC/CO2/Foam/etc. → EXTINGUISHER with
+  ``sub_category: null``.
 - Do NOT invent makes, prices, vendors, or Product_ID values.
-- Prefer meaning over exact string match (synonyms allowed).
+- Prefer meaning over exact string match (synonyms allowed), including:
+  DI/ductile iron, CI/cast iron, MS/mild steel, GI/galvanised;
+  NRV/non-return/check valve, sluice/gate valve, PRV/pressure reducing,
+  flow switch/flow indicator, hose cabinet/hose box, ICV/alarm valve,
+  flex drop/sprinkler flexible, air vessel/air cushion/pressure vessel.
+- Map to the closest listed category and sub-category so Make & Vendor can apply
+  the correct approved makes later.
 - ``confidence`` is 0–100 for how sure you are about the category + sub-category pair.
 
 Respond with:

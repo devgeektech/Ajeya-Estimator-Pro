@@ -33,6 +33,23 @@ _UNIT_KEYS = ("unit", "uom")
 _DESCRIPTION_KEYS = ("description", "item_description", "particulars", "item")
 
 
+def _product_id_for_labour(product: dict[str, Any] | None) -> str:
+    """Resolve Product_ID for Labour_master_Output (Postgres join; not Chroma)."""
+    item = product or {}
+    selection = item.get("vendor_selection") or {}
+    rate_detail = selection.get("rate_detail") or {}
+    for source in (item, selection, rate_detail):
+        for key in (
+            "catalog_product_id",
+            "product_id",
+            "suggested_catalog_product_id",
+        ):
+            text = str(source.get(key) or "").strip()
+            if text:
+                return text
+    return ""
+
+
 def _to_decimal(value: Any) -> Decimal | None:
     if value in (None, ""):
         return None
@@ -100,7 +117,7 @@ class BOQLabourService:
         self.boq_id = boq_id
 
     def unlock(self) -> dict[str, Any]:
-        """Make & Vendor → Next: open Labour tab."""
+        """Make & Vendor → Next: open Labour and load charges by Product_ID."""
         boq = self._get_boq()
         self._ensure_pipeline_editable(boq)
         if not (boq.analysis_data or {}).get("rows"):
@@ -123,8 +140,14 @@ class BOQLabourService:
             boq.status = BOQStatus.LABOUR
             boq.save(update_fields=["analysis_data", "status"])
 
+        # Load Labour_master_Output amounts from PostgreSQL by Product_ID.
+        applied = self.apply_auto()
         logger.info("Labour unlocked for BOQ id=%s", boq.pk)
-        return {"status": BOQStatus.LABOUR, "mode": config.get("mode") or "auto"}
+        return {
+            "status": BOQStatus.LABOUR,
+            "mode": "auto",
+            **{k: v for k, v in applied.items() if k != "status"},
+        }
 
     def apply_auto(self) -> dict[str, Any]:
         """Fill labour from Labour_master_Output by each selected Product_ID."""
@@ -160,22 +183,16 @@ class BOQLabourService:
             for index, product in enumerate(products):
                 selection = dict(product.get("vendor_selection") or {})
                 rate_detail = selection.get("rate_detail")
-                product_id = selection.get("product_id") or (rate_detail or {}).get(
-                    "product_id"
+                # Product_ID from Analysis / Make & Vendor (Postgres join key).
+                product_id = _product_id_for_labour(
+                    {**product, "vendor_selection": selection}
                 )
                 labour_detail = None
-                if product_id not in (None, ""):
+                if product_id:
                     labour_detail = labour_service.get_by_product_id(product_id)
-                is_pending = not rate_detail or selection.get("status") not in {
-                    "matched",
-                    "pending",
-                }
+                    selection["product_id"] = product_id
+                    selection["catalog_product_id"] = product_id
                 # Keep material even when labour is missing.
-                if rate_detail and selection.get("status") == "matched":
-                    is_pending = False
-                elif rate_detail:
-                    is_pending = False
-
                 line_output = BOQLineOutputService.build(
                     quantity=(
                         product.get("quantity")
@@ -191,6 +208,8 @@ class BOQLabourService:
                 selection["line_output"] = line_output
                 updated_product = dict(product)
                 updated_product["vendor_selection"] = selection
+                if product_id and not updated_product.get("catalog_product_id"):
+                    updated_product["catalog_product_id"] = product_id
                 updated_product["labour_mode"] = "auto"
                 updated_product["labour_percent"] = None
                 products[index] = updated_product
@@ -198,8 +217,6 @@ class BOQLabourService:
                 updated += 1
                 if labour_detail and line_output.get("labour_rate"):
                     with_labour += 1
-                elif product_id not in (None, ""):
-                    missing += 1
                 else:
                     missing += 1
             if changed:
@@ -507,7 +524,9 @@ class BOQLabourService:
                 else:
                     mode_label = "Auto"
                 rate_detail = selection.get("rate_detail") or {}
-                product_id = selection.get("product_id") or rate_detail.get("product_id")
+                product_id = _product_id_for_labour(
+                    {**product, "vendor_selection": selection}
+                ) or None
                 tech_key = str(
                     selection.get("tech_key")
                     or rate_detail.get("product_display_key")

@@ -36,6 +36,12 @@ class NotificationListView(LoginRequiredMixin, ListView):
         "status": "is_read",
     }
 
+    def dispatch(self, request, *args, **kwargs):
+        # Opening Notifications marks everything read and clears nav/topbar counts.
+        if getattr(request.user, "is_authenticated", False):
+            mark_all_read(request.user)
+        return super().dispatch(request, *args, **kwargs)
+
     def get_queryset(self):
         qs = Notification.objects.filter(user=self.request.user)
 

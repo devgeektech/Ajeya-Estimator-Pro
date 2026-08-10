@@ -174,7 +174,8 @@ class BOQAnalysisService:
         """Extract products, then enrich attributes from Rate_Master."""
         boq = self._get_boq()
         self._set_status(boq, BOQStatus.PROCESSING)
-        set_boq_job_progress(boq.pk, percent=2, label="Starting analysis…", phase="extract")
+        # Start at 1% — do not jump ahead until extract/match units complete.
+        set_boq_job_progress(boq.pk, percent=1, label="Starting analysis…", phase="extract")
 
         # Pin active DB for this job so concurrent analyses stay on one version.
         active_version = get_active_database_version()
@@ -192,6 +193,7 @@ class BOQAnalysisService:
 
         try:
             # Always load this BOQ's own PostgreSQL / upload payloads (never shared).
+            set_boq_job_progress(boq.pk, percent=2, label="Loading BOQ data…", phase="extract")
             boq_payload, make_list_payload = load_extract_data(boq)
             logger.info(
                 "BOQ extraction inputs id=%s boq_rows=%s make_list_rows=%s",
@@ -200,16 +202,21 @@ class BOQAnalysisService:
                 len((make_list_payload or {}).get("rows") or []),
             )
             boq_data = structure_for_analysis(boq_payload)
-            set_boq_job_progress(boq.pk, percent=8, label="Extracting products…", phase="extract")
+            set_boq_job_progress(boq.pk, percent=3, label="Extracting products…", phase="extract")
 
             def _on_extract_progress(done: int, total: int) -> None:
                 total = max(total, 1)
-                # Extraction covers roughly 8% → 55%.
-                percent = 8 + int((done / total) * 47)
+                # Extraction covers roughly 3% → 55% as batches finish.
+                percent = 3 + int((done / total) * 52)
+                label = (
+                    "Extracting products…"
+                    if done <= 0
+                    else f"Extracting products ({done}/{total})…"
+                )
                 set_boq_job_progress(
                     boq.pk,
                     percent=percent,
-                    label=f"Extracting products ({done}/{total})…",
+                    label=label,
                     phase="extract",
                 )
 
@@ -247,7 +254,7 @@ class BOQAnalysisService:
                     phase="extract",
                 )
 
-            # One strong pass: rank top-3 Rate_Master neighbors and pick the best.
+            # One strong pass: rank top Rate_Master neighbors and pick the best.
             # Experts Re-analyse after editing attributes — no auto multi-pass refine.
             extracted_rows = self._enrich_extracted_attributes(
                 extracted_rows,
@@ -331,14 +338,15 @@ class BOQAnalysisService:
         force_reextract: bool = False,
     ) -> dict[str, Any]:
         """
-        Re-run DB candidate recall + AI mapping for one row using current products.
+        Rematch one product (or re-extract an empty section).
 
-        Preserves expert-filled fields/attributes and rematches against Rate_Master
-        (fill missing attrs → Re-analyse → better DB product). Does not re-extract
-        from the BOQ workbook text unless ``force_reextract`` or the row has no products.
+        Analysis product **Re-analyse** uses ``force_reextract=False`` with a
+        ``product_index``: rematches that product only via
+        ``ProductAIMappingService.rematch_product`` using UI fields, filled blank
+        attributes, prior Product_IDs, and the BOQ row description.
 
-        When ``product_index`` is set, only that product is rematched so other
-        product cards on the same row stay interactive.
+        Empty-section **Re-analyse** (or ``force_reextract=True``) rebuilds products
+        from the BOQ workbook via ``extract_products.txt`` (same as initial Analyse).
         """
         with transaction.atomic():
             try:
@@ -415,12 +423,44 @@ class BOQAnalysisService:
         rows = rematch_plan["rows"]
 
         try:
-            stub = {**target, "products": stub_products}
-            rematched = self._enrich_extracted_attributes(
-                [stub], database_version_id=stored_db_id
-            )
+            version_id = int(stored_db_id or 0)
+            if not version_id:
+                active_version = get_active_database_version()
+                version_id = int(active_version.pk) if active_version else 0
+            if not version_id:
+                raise ValidationError("No active master database. Upload a database first.")
+
+            mapper = ProductAIMappingService(version_id)
+            boq_obj = self._get_boq()
+
             if want is not None:
-                updated_product = (rematched[0].get("products") or stub_products)[0]
+                # Product-wise Re-analyse: one product + BOQ row + UI inputs.
+                source_product = stub_products[0]
+                boq_payload = boq_obj.boq_data or {}
+                section_text = _row_description(boq_payload, str(row_id))
+                slot_id = str(
+                    source_product.get("qty_row_id")
+                    or source_product.get("source_row_id")
+                    or ""
+                ).strip()
+                description_parts: list[str] = []
+                if section_text:
+                    description_parts.append(section_text)
+                if slot_id and slot_id != str(row_id):
+                    slot_text = _row_description(boq_payload, slot_id)
+                    if slot_text and slot_text not in description_parts:
+                        description_parts.append(slot_text)
+                boq_context = {
+                    "row_id": str(row_id),
+                    "description": "\n".join(description_parts),
+                    "serial": str(target.get("serial") or target.get("ser_no") or ""),
+                }
+                updated_product = mapper.rematch_product(
+                    source_product,
+                    boq_row=boq_context,
+                )
+                updated_product.pop("_boq_row", None)
+                updated_product.pop("_prior_match", None)
                 merged_products = []
                 for product in products:
                     if int(product.get("product_index", -1)) == want:
@@ -429,10 +469,12 @@ class BOQAnalysisService:
                         merged_products.append(product)
                 rematched_rows = [{**target, "products": merged_products}]
             else:
+                stub = {**target, "products": stub_products}
+                rematched = mapper.rematch_rows([stub])
                 rematched_rows = rematched
 
             rematched_rows = rehydrate_analysis_rows_quantity(
-                self._get_boq().boq_data or {},
+                boq_obj.boq_data or {},
                 rematched_rows,
             )
 

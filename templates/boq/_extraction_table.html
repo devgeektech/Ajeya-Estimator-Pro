@@ -229,7 +229,6 @@ document.addEventListener('alpine:init', () => {
         } catch (e) {
             /* errors surfaced in reanalyseRow */
         } finally {
-            // Prefer the live Alpine root — panel swap may have replaced the card.
             let liveLineData = lineData;
             if (productsRoot && window.Alpine) {
                 try {
@@ -258,7 +257,7 @@ document.addEventListener('alpine:init', () => {
             btn.textContent = 'Re-analysing…';
         }
         try {
-            await window.extractionAjaxPost(rematchUrl, {});
+            await window.extractionAjaxPost(rematchUrl, { mode: 'reextract' });
             try {
                 const el = rowId ? document.getElementById('line-' + rowId) : null;
                 const keyMatch = (rematchUrl || '').match(/\/boqs\/(\d+)\//);
@@ -541,43 +540,17 @@ document.addEventListener('alpine:init', () => {
             this.saveError = '';
             const activeIndex = productIndex != null ? Number(productIndex) : Number(this.productIndex);
             const scrollY = window.scrollY;
-            const productsRoot = this.$el && this.$el.closest
-                ? this.$el.closest('.extraction-products')
-                : null;
             try {
+                // Save UI inputs for this product, then rematch product-wise.
                 await this.persistProduct({ silent: true });
                 const data = await window.extractionAjaxPost(rematchUrl, {
+                    mode: 'rematch',
                     product_index: String(activeIndex),
                 });
                 const rowId = data.row_id || this.rowId;
                 const preferred = data.product_index != null ? Number(data.product_index) : activeIndex;
-                // If the user switched tabs while this rematch ran, keep their current tab.
-                let viewingIndex = preferred;
-                const liveRoot = document.getElementById('line-' + rowId)
-                    && document.getElementById('line-' + rowId).querySelector('.extraction-products');
-                if (liveRoot && window.Alpine) {
-                    try {
-                        const lineData = Alpine.$data(liveRoot);
-                        if (lineData && lineData.activeProduct != null) {
-                            viewingIndex = Number(lineData.activeProduct);
-                        }
-                    } catch (e) { /* ignore */ }
-                } else if (productsRoot && window.Alpine) {
-                    try {
-                        const lineData = Alpine.$data(productsRoot);
-                        if (lineData && lineData.activeProduct != null) {
-                            viewingIndex = Number(lineData.activeProduct);
-                        }
-                    } catch (e) { /* ignore */ }
-                }
-                const preserveActiveTab = Number.isFinite(viewingIndex) && viewingIndex !== preferred;
-                const replaced = window.replaceExtractionProductPanel(
-                    rowId,
-                    preferred,
-                    data.line_html,
-                    { preserveActiveTab }
-                ) || window.replaceExtractionLine(rowId, data.line_html, {
-                    activeProduct: preserveActiveTab ? viewingIndex : preferred,
+                const replaced = window.replaceExtractionLine(rowId, data.line_html, {
+                    activeProduct: Number.isFinite(preferred) ? preferred : 0,
                 });
                 if (!replaced) {
                     try {

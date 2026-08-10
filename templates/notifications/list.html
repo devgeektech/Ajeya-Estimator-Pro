@@ -2,14 +2,6 @@
 {% block title %}Notifications &middot; BOQ_AI{% endblock %}
 {% block heading %}Notifications{% endblock %}
 
-{% block topbar_actions %}
-<div class="topbar__actions">
-    <span class="badge{% if notifications_unread %} badge--blue{% endif %}">
-        {{ notifications_unread }} unread
-    </span>
-</div>
-{% endblock %}
-
 {% block content %}
 <style>
     .btn--clear-yellow {
@@ -104,8 +96,7 @@
     id="notif-clear-form"
     x-data="notifListPage({
         allIds: [{% for n in notifications %}{{ n.pk }}{% if not forloop.last %},{% endif %}{% endfor %}],
-        initialQuery: '{{ search_q|escapejs }}',
-        unreadCount: {{ notifications_unread|default:0 }}
+        initialQuery: '{{ search_q|escapejs }}'
     })"
     x-ref="clearForm"
 >
@@ -134,15 +125,6 @@
             </span>
             {% if notifications %}
             <button
-                type="submit"
-                formaction="{% url 'notifications:read' %}"
-                class="btn btn--small btn--primary"
-                x-show="selectedCount > 0 || unreadCount > 0"
-                x-cloak
-            >
-                <span x-text="selectedCount > 0 ? 'Mark read' : 'Mark all read'"></span>
-            </button>
-            <button
                 type="button"
                 class="btn btn--small btn--clear-yellow"
                 @click="clearSelected()"
@@ -157,19 +139,7 @@
         <table class="table">
             <thead>
                 <tr>
-                    <th class="notif-col-check">
-                        {% if notifications %}
-                        <label class="notif-check" title="Select all visible">
-                            <input
-                                type="checkbox"
-                                :checked="allVisibleSelected"
-                                @change="toggleAllVisible($event.target.checked)"
-                                aria-label="Select all visible notifications"
-                            >
-                            <span class="notif-check__circle" aria-hidden="true"></span>
-                        </label>
-                        {% endif %}
-                    </th>
+                    <th class="notif-col-check" aria-hidden="true"></th>
                     {% with base=request.path %}
                     <th style="text-align: left;">
                         <a
@@ -203,7 +173,7 @@
                 <tr
                     class="notif-list-row"
                     data-id="{{ n.pk }}"
-                    data-search="{{ n.title|lower }} {{ n.message|lower }}{% if not n.is_read %} new unread{% endif %}"
+                    data-search="{{ n.title|lower }} {{ n.message|lower }}"
                 >
                     <td class="notif-col-check">
                         <label class="notif-check" title="Select">
@@ -217,10 +187,7 @@
                             <span class="notif-check__circle" aria-hidden="true"></span>
                         </label>
                     </td>
-                    <td style="text-align: left;">
-                        {{ n.title }}
-                        {% if not n.is_read %}<span class="badge badge--green" style="margin-left: 8px;">New</span>{% endif %}
-                    </td>
+                    <td style="text-align: left;">{{ n.title }}</td>
                     <td style="text-align: left;">{{ n.message|default:"—" }}</td>
                     <td style="text-align: left;">{{ n.created_at|date:"M d, H:i" }}</td>
                 </tr>
@@ -255,7 +222,6 @@ document.addEventListener('alpine:init', () => {
         selected: {},
         allIds: Array.isArray(config.allIds) ? config.allIds : [],
         query: config.initialQuery || '',
-        unreadCount: Number(config.unreadCount || 0),
         visibleCount: 0,
         totalCount: 0,
         noMatches: false,
@@ -266,10 +232,6 @@ document.addEventListener('alpine:init', () => {
             return Array.from(this.$el.querySelectorAll('tr.notif-list-row:not(.is-filtered-out)'))
                 .map((row) => Number(row.getAttribute('data-id')))
                 .filter((id) => Number.isFinite(id));
-        },
-        get allVisibleSelected() {
-            const ids = this.visibleIds;
-            return ids.length > 0 && ids.every((id) => this.selected[id]);
         },
         init() {
             this.$watch('query', () => this.applyFilter());
@@ -313,11 +275,6 @@ document.addEventListener('alpine:init', () => {
                 url.searchParams.delete('q');
             }
             window.history.replaceState({}, '', url);
-        },
-        toggleAllVisible(checked) {
-            this.visibleIds.forEach((id) => {
-                this.selected[id] = checked;
-            });
         },
         goSort(href) {
             const next = new URL(href, window.location.origin);

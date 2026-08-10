@@ -173,6 +173,7 @@ class MakeListConstraintService:
                     "mapped_sub_category": row.get("mapped_sub_category"),
                 }
                 for row in (make_list_data.get("rows") or [])
+                if not row.get("is_section_heading")
             ]
 
         for node in nodes:

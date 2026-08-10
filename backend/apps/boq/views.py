@@ -184,7 +184,7 @@ def _status_payload(boq: BOQ, session, *, expect: str = "extract") -> dict:
     if ready and boq.status != BOQStatus.ANALYSIS_FAILED:
         percent = 100
     elif boq.status in {BOQStatus.PROCESSING, BOQStatus.MATCHING} and percent <= 0:
-        percent = 3
+        percent = 1
     return {
         "status": boq.status,
         "ready": ready,
@@ -421,7 +421,7 @@ class BOQDetailView(LoginRequiredMixin, DetailView):
         job_progress = get_boq_job_progress(boq.pk)
         initial_progress = int(job_progress.get("percent") or 0)
         if context["is_extracting"] and initial_progress <= 0:
-            initial_progress = 2
+            initial_progress = 1
         if not context["is_extracting"]:
             initial_progress = 0
         context["analysis_progress_percent"] = initial_progress
@@ -608,8 +608,28 @@ class BOQRowExtractView(LoginRequiredMixin, View):
                 messages.error(request, message)
                 return HttpResponseRedirect(redirect_url)
         mode = (request.POST.get("mode") or "").strip().lower()
-        force_reextract = mode in {"reextract", "re-extract", "extract"}
+        # Product Re-analyse: rematch using saved fields + filled blanks.
+        # Empty-section / explicit reextract: rebuild from BOQ workbook text.
+        force_reextract = mode in {"reextract", "re-extract", "extract", "analyse", "analyze"}
+        if mode in {"", "rematch", "match", "reanalyse", "re-analyse", "reanalyze"}:
+            force_reextract = False
+        # Empty section has no products — must re-extract.
+        if not force_reextract:
+            analysis_rows = list((boq.analysis_data or {}).get("rows") or [])
+            target = next(
+                (row for row in analysis_rows if str(row.get("row_id")) == str(row_id)),
+                None,
+            )
+            if not target or not (target.get("products") or []):
+                force_reextract = True
+            elif product_index is None:
+                message = "Select a product to re-analyse."
+                if ajax:
+                    return _extraction_edit_json_error(message)
+                messages.error(request, message)
+                return HttpResponseRedirect(redirect_url)
         try:
+            # Product rematch uses product_index; empty section re-extracts.
             BOQAnalysisService(boq.pk).rematch_row(
                 row_id,
                 product_index=None if force_reextract else product_index,
@@ -618,7 +638,7 @@ class BOQRowExtractView(LoginRequiredMixin, View):
             message = (
                 "Section re-extracted from the BOQ workbook."
                 if force_reextract
-                else "Row re-analysed against the database."
+                else "Product re-analysed using BOQ row, filled attributes, and prior match details."
             )
             if ajax:
                 line_html = _render_extraction_line_html(request, boq, row_id)
@@ -1447,6 +1467,13 @@ class BOQExportView(LoginRequiredMixin, View):
 class BOQUploadView(LoginRequiredMixin, FormView):
     form_class = BOQUploadForm
     template_name = "boq/boq_form.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        from apps.database_manager.services.activation import get_active_database_version
+
+        context["has_active_database"] = get_active_database_version() is not None
+        return context
 
     def _wants_json(self) -> bool:
         """True for AJAX upload / name-check style requests (no full page reload)."""

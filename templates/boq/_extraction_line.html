@@ -147,6 +147,7 @@
                     title="Add product"
                     aria-label="Add product"
                     @click="window.extractionAjaxPost('{% url 'boq:extraction_edit' boq.pk %}', { action: 'add_product', row_id: '{{ line.row_id }}' }).then(() => { try { const el = document.getElementById('line-{{ line.row_id }}'); sessionStorage.setItem('boq-detail-scroll-{{ boq.pk }}-analysis', JSON.stringify({ y: window.scrollY, rowId: '{{ line.row_id }}', offset: el ? el.getBoundingClientRect().top : null })); } catch (e) {} window.location.reload(); })"
+                    :disabled="activeIsReanalysing"
                 >+</button>
                 {% endif %}
                 {% if can_edit_extraction %}
@@ -162,7 +163,7 @@
                         type="button"
                         class="btn btn--xsmall btn--boq-analyse"
                         :disabled="activeIsReanalysing"
-                        title="Rematch this product against Rate_Master_Output using current fields"
+                        title="Re-analyse this product using BOQ row text, filled fields, and prior DB match"
                         @click="window.reanalyseActiveExtractionProduct($el, '{% url "boq:row_extract" boq.pk line.row_id %}')"
                     >
                         <span x-text="activeIsReanalysing ? 'Re-analysing…' : 'Re-analyse'"></span>
@@ -231,7 +232,9 @@
                     {% if product.missing_attribute_count %}
                     <p class="extraction-db-match__missing">
                         {{ product.missing_attribute_count }} missing attribute(s) —
-                        fill them below to raise confidence, then click <strong>Re-analyse</strong>.
+                        fill them below, then click <strong>Re-analyse</strong> on
+                        this product to rematch using your filled values, the BOQ row,
+                        and prior DB match details.
                     </p>
                     {% endif %}
                     {% if product.db_match.notes %}
@@ -244,7 +247,9 @@
                         <span class="extraction-section-label">No database match yet</span>
                     </div>
                     <p class="extraction-db-match__notes">
-                        Fill known attributes, then click <strong>Re-analyse</strong> to search Rate_Master_Output again.
+                        Fill known attributes and product fields, then click
+                        <strong>Re-analyse</strong> on this product to rematch
+                        (keeps your edits; does not re-extract the whole section).
                     </p>
                 </div>
                 {% endif %}
@@ -255,22 +260,25 @@
                     <ul class="extraction-db-candidates__list">
                         {% for candidate in product.db_candidates %}
                         <li class="{% if candidate.is_selected %}is-selected{% endif %}">
-                            {% if can_edit_extraction and candidate.id and not candidate.is_selected %}
+                            {% if can_edit_extraction and candidate.id %}
                             <button
                                 type="button"
                                 class="extraction-db-candidates__link"
-                                title="Select this database product"
+                                title="{% if candidate.is_selected %}Reload this database product into the form{% else %}Select this database product{% endif %}"
                                 @click="window.selectExtractionCandidate($el, '{% url 'boq:extraction_edit' boq.pk %}', '{{ line.row_id }}', {{ product.product_index }}, {{ candidate.id }})"
                             >
                                 <span>{{ candidate.summary }}</span>
-                                {% if candidate.tech_key %}<span class="muted"> . {{ candidate.tech_key }}</span>{% endif %}
+                                {% if candidate.tech_key %}<span class="extraction-db-candidates__sep"> . </span><span class="extraction-db-candidates__tech">{{ candidate.tech_key }}</span>{% endif %}
                                 {% if candidate.confidence is not None %}
                                 <span class="extraction-db-candidates__pct">{{ candidate.confidence|floatformat:0 }}%</span>
+                                {% endif %}
+                                {% if candidate.is_selected %}
+                                <span class="extraction-db-candidates__selected">Selected</span>
                                 {% endif %}
                             </button>
                             {% else %}
                             <span>{{ candidate.summary }}</span>
-                            {% if candidate.tech_key %}<span class="muted"> . {{ candidate.tech_key }}</span>{% endif %}
+                            {% if candidate.tech_key %}<span class="extraction-db-candidates__sep"> . </span><span class="extraction-db-candidates__tech">{{ candidate.tech_key }}</span>{% endif %}
                             {% if candidate.confidence is not None %}
                             <span class="extraction-db-candidates__pct">{{ candidate.confidence|floatformat:0 }}%</span>
                             {% endif %}

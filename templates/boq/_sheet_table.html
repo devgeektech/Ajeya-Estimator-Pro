@@ -14,7 +14,7 @@
         {% endfor %}
     </div>
     {% for row in structure.rows %}
-    <div class="make-list-sheet__row" role="row">
+    <div class="make-list-sheet__row{% if row.row_class %} {{ row.row_class }}{% endif %}" role="row">
         {% for cell in row.display_cells %}
         <div class="make-list-sheet__cell {{ cell.col_class }}" role="cell">{{ cell.text }}</div>
         {% endfor %}

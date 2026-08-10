@@ -80,6 +80,14 @@ class BOQCreationService:
 
     @transaction.atomic
     def run(self) -> BOQ:
+        from apps.database_manager.services.activation import get_active_database_version
+
+        if get_active_database_version() is None:
+            raise ValidationError(
+                "No active master database is available. Upload and activate a "
+                "database first, then upload the BOQ."
+            )
+
         try:
             # Validate original files before convert/persist (visible sheets only).
             _ensure_single_excel_sheet(self.uploaded_file, detail_label="BOQ details")

@@ -8,6 +8,13 @@
         Upload a BOQ workbook and, optionally, its make list as Excel (.xlsx, .xlsm, .xls) or PDF.
         Each Excel file must contain <strong>exactly one sheet</strong>.
     </p>
+    {% if not has_active_database %}
+    <div class="alert alert--error" style="margin-bottom:16px;" role="alert">
+        No active master database is available. Upload and activate a database first,
+        then return here to upload the BOQ.
+        <a href="{% url 'database:upload' %}" style="margin-left:6px;">Upload database</a>
+    </div>
+    {% endif %}
     <form
         id="boq-upload-form"
         method="post"
@@ -15,6 +22,7 @@
         enctype="multipart/form-data"
         novalidate
         data-check-name-url="{% url 'boq:check_name' %}"
+        {% if not has_active_database %}data-blocked="1"{% endif %}
     >
         {% csrf_token %}
         <div id="boq-upload-form-error" class="field__error" hidden style="margin-bottom:12px;"></div>
@@ -39,7 +47,12 @@
 
         <div class="form-actions">
             {# type=button avoids native form submit (which reloads and clears file inputs) #}
-            <button type="button" class="btn btn--primary" id="boq-upload-submit">Upload BOQ</button>
+            <button
+                type="button"
+                class="btn btn--primary"
+                id="boq-upload-submit"
+                {% if not has_active_database %}disabled aria-disabled="true"{% endif %}
+            >Upload BOQ</button>
         </div>
     </form>
 </div>
@@ -48,6 +61,14 @@
     const form = document.getElementById('boq-upload-form');
     const submitBtn = document.getElementById('boq-upload-submit');
     if (!form || !submitBtn) return;
+    // Always block native submit so a reload cannot clear file inputs.
+    form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+    });
+    if (form.getAttribute('data-blocked') === '1') {
+        return;
+    }
 
     const formError = document.getElementById('boq-upload-form-error');
     const checkNameUrl = form.dataset.checkNameUrl;
@@ -88,10 +109,7 @@
         }
     }
 
-    // Block Enter-key native submit (would reload and clear files).
-    form.addEventListener('submit', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
+    form.addEventListener('submit', () => {
         submitBtn.click();
     });
 

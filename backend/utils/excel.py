@@ -115,6 +115,72 @@ def _display_value(value):
     return value
 
 
+def _hidden_column_indexes(worksheet) -> set[int]:
+    """Return 0-based column indexes hidden in the Excel UI for ``worksheet``."""
+    hidden: set[int] = set()
+    dimensions = getattr(worksheet, "column_dimensions", None) or {}
+    for dim in dimensions.values():
+        is_hidden = bool(getattr(dim, "hidden", False))
+        width = getattr(dim, "width", None)
+        width_hidden = False
+        try:
+            width_hidden = width is not None and float(width) == 0.0
+        except (TypeError, ValueError):
+            width_hidden = False
+        if not is_hidden and not width_hidden:
+            continue
+        start = int(getattr(dim, "min", None) or 0)
+        end = int(getattr(dim, "max", None) or start)
+        if start <= 0:
+            continue
+        for excel_col in range(start, max(start, end) + 1):
+            hidden.add(excel_col - 1)
+    return hidden
+
+
+def list_hidden_column_indexes(
+    file_path: str | Path,
+    sheet_name: str | None = None,
+) -> set[int]:
+    """
+    Return 0-based indexes of columns hidden in the workbook UI.
+
+    Requires a non-read-only openpyxl load (read_only worksheets omit dimensions).
+    """
+    by_sheet = list_hidden_column_indexes_by_sheet(file_path)
+    if sheet_name:
+        return by_sheet.get(str(sheet_name), set())
+    if not by_sheet:
+        return set()
+    return next(iter(by_sheet.values()))
+
+
+def list_hidden_column_indexes_by_sheet(file_path: str | Path) -> dict[str, set[int]]:
+    """Map worksheet title → 0-based hidden column indexes."""
+    with openxml_workbook_path(file_path) as workbook_path:
+        workbook = load_workbook(filename=workbook_path, read_only=False, data_only=False)
+        try:
+            return {
+                str(sheet.title): _hidden_column_indexes(sheet)
+                for sheet in workbook.worksheets
+            }
+        finally:
+            workbook.close()
+
+
+def _stamp_header_hidden_flags(
+    headers: list[dict],
+    hidden_indexes: set[int],
+) -> list[dict]:
+    """Attach ``hidden`` to each header from Excel column visibility."""
+    if not headers:
+        return headers
+    return [
+        {**header, "hidden": int(header.get("index") or 0) in hidden_indexes}
+        for header in headers
+    ]
+
+
 def _dedupe_headers(headers: list[dict]) -> list[dict]:
     seen: dict[str, int] = {}
     deduped: list[dict] = []
@@ -367,6 +433,11 @@ def _merge_headers(header_sets: list[list[dict]]) -> list[dict]:
                     "key": key,
                     "label": header.get("label") or key,
                     "index": len(merged),
+                    **(
+                        {"hidden": True}
+                        if header.get("hidden")
+                        else {"hidden": False}
+                    ),
                 }
             )
     return merged
@@ -400,12 +471,17 @@ def read_rows_with_metadata(
     with openxml_workbook_path(file_path) as workbook_path:
         workbook = load_workbook(filename=workbook_path, read_only=True, data_only=True)
         try:
+            hidden_by_sheet = list_hidden_column_indexes_by_sheet(file_path)
             if sheet_name:
                 worksheet = workbook[sheet_name]
                 headers, records = _read_worksheet_rows_with_metadata(
                     worksheet,
                     header_keys,
                     expand_columns=expand_columns,
+                )
+                headers = _stamp_header_hidden_flags(
+                    headers,
+                    hidden_by_sheet.get(str(sheet_name), set()),
                 )
                 for record in records:
                     record.setdefault("sheet_name", sheet_name)
@@ -417,6 +493,10 @@ def read_rows_with_metadata(
                     worksheet,
                     header_keys,
                     expand_columns=expand_columns,
+                )
+                headers = _stamp_header_hidden_flags(
+                    headers,
+                    hidden_by_sheet.get(str(worksheet.title), set()),
                 )
                 if sheet_score_fn is not None:
                     score = sheet_score_fn(headers, records, worksheet.title)

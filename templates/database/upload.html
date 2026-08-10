@@ -20,7 +20,6 @@
         </label>
         {% endfor %}
         <div class="form-actions">
-            <a href="{% url 'database:list' %}" class="btn btn--ghost" :class="{ 'btn--disabled': isUploading }">Cancel</a>
             <button type="submit" class="btn btn--primary" :disabled="isUploading">
                 <span x-show="!isUploading">Upload &amp; import</span>
                 <span x-show="isUploading" style="display: none; align-items: center; justify-content: center; gap: 8px;">
@@ -33,6 +32,5 @@
 </div>
 <style>
 @keyframes spin { 100% { transform: rotate(360deg); } }
-.btn--disabled { pointer-events: none; opacity: 0.6; }
 </style>
 {% endblock %}

@@ -60,10 +60,11 @@ def product_display_key(
     sub_category=None,
     class_value=None,
     size=None,
+    unit=None,
     capacity=None,
     attribute=None,
 ) -> str:
-    """UI composite: Category|Sub_Category|Class|Size|Capacity|Attribute."""
+    """UI composite: Category|Sub_Category|Class|Size|Unit|Capacity|Attribute."""
 
     def _part(value) -> str:
         if value is None:
@@ -77,6 +78,7 @@ def product_display_key(
             _part(sub_category),
             _part(class_value),
             _part(size),
+            _part(unit),
             _part(capacity),
             _part(attribute),
         ]
@@ -118,6 +120,7 @@ class Product_Helper(models.Model):
             self.Sub_Category,
             self.Class,
             self.Size,
+            self.Unit,
             self.Capacity,
             self.Attribute,
         )
@@ -203,6 +206,7 @@ class Rate_Master_Output(models.Model):
             self.Sub_Category,
             self.Class,
             self.Size,
+            self.Unit,
             self.Capacity,
             self.Attribute,
         )
@@ -288,6 +292,7 @@ class Labour_master_Output(models.Model):
             self.Sub_Category,
             self.Class,
             self.Size,
+            self.Unit,
             self.Capacity,
             self.Attribute,
         )

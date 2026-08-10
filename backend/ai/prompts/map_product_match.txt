@@ -1,55 +1,55 @@
-You validate extracted BOQ products against Rate_Master_Output candidate rows and map
-attributes onto the database Attribute schema.
+You pick the best Rate_Master_Output candidate for an extracted BOQ product and map
+attributes onto the candidate Attribute schema.
 
-Source of truth:
-- The extracted product fields come from the BOQ workbook row. Treat them as
-  authoritative evidence (description_hint, category, sub_category, class, size,
-  unit, capacity, attributes).
-- Candidates are the nearest Rate_Master_Output neighbors only. Pick the best fit; do
-  not invent catalog products or overwrite BOQ facts with catalog defaults.
+Source of truth: extracted BOQ fields (description_hint, category, sub_category, class,
+size, unit, capacity, attributes). Candidates are nearest neighbors only — never invent
+catalog rows, Product_ID, prices, or vendors.
 
-About candidate `id`:
-- Table columns include: Rate_ID, Product_ID, Category, Sub_Category, Class, Size,
-  Make, Capacity, Unit, Attribute, Vendor, rate fields, plus Django auto PK `id`.
-- In this prompt, candidate `id` is Rate_Master_Output.id (the primary key).
-- `selected_id` must be one of the candidate `id` values, or null.
-- Never invent a product, Product_ID, or Rate_Master_Output row. Only choose from candidates.
-- Candidates are already ranked best-first (at most 3). Prefer the first when ties.
+Candidate ``id`` is Rate_Master_Output.id (PK). ``selected_id`` must be one of those ids,
+or null. Candidates are ranked best-first (≤3, rematch may include prior seeds).
+Prefer the first on true ties.
+
+Synonyms / same meaning (treat as identical — do not lower confidence):
+- Materials: DI = ductile iron; CI = cast iron; MS = mild steel; GI = galvanised iron;
+  SS = stainless steel; CS = carbon steel; UPVC/CPVC/HDPE/PVC variants.
+- Products: NRV = non return / check valve; sluice = gate valve; PRV = pressure reducing;
+  ARV = air release/relief; ICV = installation control / alarm valve;
+  flow switch = flow indicator; hose cabinet = hose box; breeching = fire brigade inlet;
+  flex drop = sprinkler flexible connector.
+If the expert uses a synonym of the catalog wording, keep or raise confidence when the
+same catalog row still fits; never penalize synonym wording alone.
+
+Rematch mode (``extracted.rematch`` true):
+- The expert edited product fields and/or filled blank attributes — treat those as
+  the primary evidence together with ``boq_row`` (BOQ section / slot text).
+- Candidates were freshly recalled from the database for this evidence. Pick the
+  BEST / nearest fit for the NEW filled values + BOQ text.
+- ``prior_match`` is only context — do NOT keep it merely because it was selected
+  before. Keep it when it is still the strongest match among candidates (including
+  after synonym rewrites).
+- Weight ``expert_filled_attributes`` and core fields heavily.
+- Do NOT ignore filled blanks; they are intentional corrections.
+- Re-score ``match_confidence`` for the new fit (0–100). Do not copy the old
+  confidence from ``prior_match``, but do not drop score for DI↔ductile iron alone.
 
 Rules:
 - Return valid JSON only.
-- Do NOT invent prices, vendors, costs, Product_ID values, or catalog products.
-- Choose at most ONE candidate `id` that best matches the extracted BOQ product.
-  Use null when no candidate is a reasonable match (prefer null over a weak guess).
-- Prefer evidence from extracted category, sub_category, class, size, unit, capacity,
-  description_hint, and attributes. Category and sub_category should already align with
-  Rate_Master_Output labels from extraction; map them onto the closest candidate when meaning aligns.
-- Extracted ``class`` is Rate_Master_Output Class for that category/sub_category
-  (PIPE → C; VALVE Ball → Brass; some families use material as Class). Do **not**
-  treat sub_category material tokens (PIPE MS/GI) as Class unless candidates also
-  use that token as Class. If material appears only under attributes, treat it as
-  class evidence only when candidate Class is material.
-- When attributes were filled by an expert, weight them heavily for rematch.
-- Ignore make/vendor for pricing decisions.
-- Map each extracted attribute key to the closest DB attribute key when the
-  meaning matches, including synonyms
-  (examples: port_type / port / full_port → type;
-  minimum_working_pressure / working_pressure / pn → pressure_rating;
-  standard / is_no → is).
-  Do NOT map material / body_material / construction onto Attribute keys when the
-  value belongs on Rate_Master_Output Class — leave those for class matching.
-  If no DB key fits, leave it unmapped.
-- Put mapped values under DB keys in `mapped_attributes` (use extracted BOQ values,
-  not catalog Attribute defaults). Put leftover extracted keys in `unmapped_attributes`
-  for your notes only — the app discards unmapped keys and keeps schema attributes only.
-- Every DB schema key should appear in `mapped_attributes` only when a BOQ-extracted
-  value was mapped to it. Do not invent values for empty schema keys and do not copy
-  catalog Attribute values unless the same value is evidenced in the BOQ extract.
-- Do NOT invent additional attribute keys beyond the candidate attribute_schema.
-- `match_confidence` is your 0–100 judgment of how well the selected product fits
-  (not a price score). Use 0 when selected_id is null. Use below 30 when uncertain.
-  Be consistent: the same extracted product + same candidates should yield a stable
-  confidence; do not inflate confidence without stronger evidence.
+- Choose at most ONE candidate. Prefer null over a weak guess.
+- **Hard size rule:** when extracted size is filled, do not select a candidate whose
+  nominal size digits differ (e.g. 100 vs 150). Prefer null if none match size.
+- Prefer matching category, sub_category, size, then class/capacity/attributes.
+  PIPE MS/GI are sub_category, not Class, unless the candidate Class is that token.
+- Weight expert-filled attributes heavily on rematch.
+- When ``boq_row`` is present, use its description as supporting context with the
+  edited product fields — do not ignore expert UI values.
+- Ignore make/vendor for product choice.
+- Map extracted attribute keys onto schema keys (synonyms OK: port_type→type,
+  working_pressure/pn→pressure_rating, standard/is_no→is). Do not map material onto
+  Attribute when it belongs on Class. Unmapped leftovers go in ``unmapped_attributes``
+  (app discards them). Never invent schema values from catalog defaults.
+- ``match_confidence`` 0–100 for the selected fit (0 when selected_id is null; <30 if
+  uncertain). Do not inflate without stronger evidence. Do not deflate for material
+  synonyms listed above.
 
 Respond with:
 {
@@ -58,19 +58,13 @@ Respond with:
       "product_ref": "p0",
       "selected_id": 73,
       "match_confidence": 78,
-      "attribute_map": {
-        "port_type": "type"
-      },
-      "mapped_attributes": {
-        "type": "full port"
-      },
-      "unmapped_attributes": {
-        "minimum_working_pressure": "20 bar"
-      },
-      "notes": "Size and sub-category align; material has no DB attribute key."
+      "attribute_map": {"port_type": "type"},
+      "mapped_attributes": {"type": "full port"},
+      "unmapped_attributes": {},
+      "notes": "Size and sub-category align."
     }
   ]
 }
 
-Extracted products with Rate_Master_Output candidates (PRODUCTS_PAYLOAD — injected at runtime):
+PRODUCTS_PAYLOAD:
 {{PRODUCTS_PAYLOAD}}

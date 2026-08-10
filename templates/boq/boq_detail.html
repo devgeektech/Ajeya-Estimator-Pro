@@ -36,18 +36,25 @@
     .make-list-sheet {
         display: block !important;
         width: 100% !important;
-        max-width: none !important;
+        max-width: 100% !important;
         box-sizing: border-box !important;
         margin: 0 !important;
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch;
     }
     .make-list-sheet__head,
     .make-list-sheet__row {
         display: grid !important;
         width: 100% !important;
+        min-width: min(100%, 36rem);
         box-sizing: border-box !important;
-        /* Last column (Approved Makes) is 1fr — fills all remaining width to the right edge. */
-        grid-template-columns: 3.5rem minmax(0, 28%) 9rem 10rem 1fr !important;
-        column-gap: 2.75rem !important;
+        grid-template-columns:
+            minmax(2.75rem, 3.5rem)
+            minmax(7rem, 1.35fr)
+            minmax(4.5rem, 0.55fr)
+            minmax(5rem, 0.65fr)
+            minmax(7rem, 1.25fr) !important;
+        column-gap: clamp(0.5rem, 2vw, 2rem) !important;
         align-items: stretch;
         border-bottom: 1px solid var(--border, #cbd5e1);
     }
@@ -55,8 +62,8 @@
         padding: 12px 8px !important;
         font-size: .9rem;
         color: var(--text, #1e293b);
-        overflow-wrap: anywhere;
-        word-break: break-word;
+        overflow-wrap: break-word;
+        word-break: normal;
         min-width: 0 !important;
         text-align: left !important;
     }
@@ -80,6 +87,12 @@
     .make-list-sheet__cell.boq-sheet__col-sno {
         white-space: nowrap !important;
         overflow-wrap: normal !important;
+    }
+    .make-list-sheet__row--section {
+        background: color-mix(in srgb, var(--surface-alt, #f1f5f9) 70%, transparent);
+    }
+    .make-list-sheet__row--section .make-list-sheet__cell.boq-sheet__col-desc {
+        font-weight: 700 !important;
     }
     .boq-detail-header {
         position: sticky !important;
@@ -175,6 +188,17 @@
         .boq-tab-context__actions .btn {
             min-height: 40px;
         }
+        .make-list-sheet__head,
+        .make-list-sheet__row {
+            grid-template-columns:
+                minmax(2.5rem, 3rem)
+                minmax(6rem, 1.2fr)
+                minmax(4rem, 0.5fr)
+                minmax(4.5rem, 0.55fr)
+                minmax(6rem, 1.1fr) !important;
+            column-gap: clamp(0.35rem, 1.5vw, 1.25rem) !important;
+            min-width: 0 !important;
+        }
     }
 
     @media (max-width: 560px) {
@@ -187,6 +211,20 @@
             flex: 1 1 calc(50% - 4px);
             min-width: 140px;
             width: auto;
+        }
+        .make-list-sheet__head,
+        .make-list-sheet__row {
+            grid-template-columns:
+                minmax(2.25rem, 2.75rem)
+                minmax(5rem, 1fr)
+                minmax(3.5rem, 0.45fr)
+                minmax(3.75rem, 0.5fr)
+                minmax(5rem, 1fr) !important;
+            column-gap: 0.4rem !important;
+        }
+        .make-list-sheet__cell {
+            padding: 10px 4px !important;
+            font-size: .82rem;
         }
     }
     /* Distinct alternating card colors - Light Mode (Analysis + Make & Vendor / Labour / Review) */
@@ -366,11 +404,14 @@
                     this.writeStoredProgress();
                     return;
                 }
-                // Soft creep up to 90% while waiting for the next real server tick
-                // (sync Analyse POST, or worker progress not yet visible).
+                // Soft creep only a little ahead of the last server target so the
+                // bar does not jump to a mid-band % before real extract ticks.
                 const started = Number(this.analysisStartedAt) || Date.now();
                 const elapsedSec = Math.max(0, (Date.now() - started) / 1000);
-                const softCap = Math.min(90, 3 + Math.floor(elapsedSec / 1.5));
+                const softCap = Math.min(
+                    90,
+                    Math.max(1, target) + 1 + Math.floor(elapsedSec / 5)
+                );
                 if (softCap > current) {
                     this.analysisProgress = Math.min(90, current + 1);
                     this.writeStoredProgress();
@@ -395,7 +436,15 @@
         },
         persistScroll(tabName) {
             try {
-                sessionStorage.setItem(this.scrollStorageKey(tabName || this.tab), String(window.scrollY));
+                const y = Number(window.scrollY) || 0;
+                const key = this.scrollStorageKey(tabName || this.tab);
+                // Browsers often reset scroll to 0 before unload — do not wipe a
+                // position saved intentionally before a same-tab reload.
+                if (y <= 0) {
+                    const existing = sessionStorage.getItem(key);
+                    if (existing) return;
+                }
+                sessionStorage.setItem(key, String(y));
             } catch (e) { /* ignore */ }
         },
         restoreScroll(tabName) {
@@ -488,9 +537,12 @@
             if (name === 'labour' && !this.labourEnabled) return;
             if ((name === 'review' || name === 'match_results') && !this.reviewEnabled) return;
             if (name === 'match_results') name = 'review';
-            // Each tab is server-rendered alone — navigate to that tab URL.
-            if (name === this.activeTabPage || name === this.tab) {
+            // Each tab is server-rendered alone — navigate unless this page
+            // already rendered that tab. Do not use Alpine `tab` here: during
+            // analysis polling it can diverge from the rendered panel.
+            if (name === this.activeTabPage) {
                 this.tab = name;
+                this.syncTabUrl(name);
                 return;
             }
             const urls = {
@@ -503,7 +555,7 @@
             };
             const url = urls[name];
             if (!url) return;
-            this.persistScroll(this.tab);
+            this.persistScroll(this.activeTabPage || this.tab);
             window.location.href = url;
         },
         applyStatus(data) {
@@ -605,8 +657,11 @@
                 this.pollTimer = null;
             }
             if (this.analysing) {
-                this.tab = 'analysis';
-                this.syncTabUrl('analysis');
+                // Keep the opened tab (BOQ / Make List / Analysis). Forcing
+                // tab=analysis here rewrote the URL while leaving BOQ/Make List
+                // HTML on screen, so clicking Analysis looked like a no-op.
+                this.tab = this.activeTabPage || this.tab || 'analysis';
+                this.syncTabUrl(this.tab);
                 // Resume only when session progress matches the live server run.
                 // Ignore stale 99% left from a previous Analyse / stalled heal.
                 const stored = this.readStoredProgress();
@@ -617,7 +672,7 @@
                     resumePct = Math.max(serverPct, storedPct, Number(this.analysisProgress) || 0);
                 } else {
                     this.clearStoredProgress();
-                    resumePct = Math.max(serverPct, Number(this.analysisProgress) || 0, 2);
+                    resumePct = Math.max(serverPct, Number(this.analysisProgress) || 0, 1);
                 }
                 this.analysisProgress = Math.min(99, resumePct);
                 this.analysisTargetPercent = Math.min(
@@ -652,12 +707,10 @@
             this.clearStoredProgress();
             this.analysing = true;
             this.analysisEnabled = true;
-            this.tab = 'analysis';
-            this.syncTabUrl('analysis');
             this.statusLabel = 'Analysing...';
             this.statusBadge = 'badge--yellow';
-            this.analysisProgress = 2;
-            this.analysisTargetPercent = 2;
+            this.analysisProgress = 1;
+            this.analysisTargetPercent = 1;
             this.analysisProgressLabel = 'Starting analysis…';
             this.analysisStartedAt = Date.now();
             this.writeStoredProgress();
@@ -670,7 +723,9 @@
                     this.reloadWithCacheBust(this.detailAnalysisUrl);
                     return;
                 }
-                this.startPolling();
+                // Analysis spinner lives on the Analysis tab panel — open it.
+                this.persistScroll(this.activeTabPage || this.tab);
+                this.reloadWithCacheBust(this.detailAnalysisUrl);
             } catch (error) {
                 this.analysing = false;
                 this.stopProgressTicker();

@@ -131,6 +131,11 @@ def slim_make_list_payload(payload: dict) -> dict:
                 "display_values": slim_display,
                 "values": slim_values,
                 "approved_makes_list": list(makes),
+                **(
+                    {"is_section_heading": True}
+                    if row.get("is_section_heading")
+                    else {}
+                ),
             }
         )
 

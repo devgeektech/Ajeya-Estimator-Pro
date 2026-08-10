@@ -23,7 +23,7 @@ uploads retained.
 
 1. Upload workbook (+ optional make list) → parse to JSON
 2. **Analyse** → AI extract products + map top Rate_Master_Output candidates (Celery)
-3. Expert edit / **Re-analyse** (rematch; empty sections fall back to workbook extract)
+3. Expert edit / **Re-analyse** (product rematch with filled attrs; empty section re-extract)
 4. Analysis **Next** → lowest-price Make & Vendor defaults
 5. Make & Vendor **Next** → unlock Labour → complete → Review → dual Export
    (Review sheet | priced BOQ)
@@ -34,15 +34,16 @@ uploads retained.
 | --- | --- |
 | Sections | Serial-lineage groups with qty **slots**; empty slots show Add + Re-analyse |
 | Analysis | Product tabs show match % + per-product slot Qty/Unit in header |
-| Re-analyse | Rematch vs Rate_Master_Output; empty sections fall back to workbook extract |
-| Select candidate | Keeps BOQ class/size/unit/capacity; uses analysis `database_version_id` |
-| Make list map | Heuristic + AI category/sub-category; retries `pending` stubs only — `unmapped` is final |
-| Make & Vendor | Same per-product slot qty as Analysis; lowest price defaults; status borders; line header Auto/filtered badge |
-| Labour | Same per-product slot qty; Product rate → Labour → Total → Qty → Final |
-| Review | Same per-product slot qty + lineage UI; export uses short/red Output headers; BOQ export fills original file on qty+unit rows |
+| Re-analyse | Product-wise: fresh DB recall with filled fields + BOQ section; synonym-aware (DI=ductile iron); AI nearest match + prefill; empty section: workbook re-extract |
+| Select candidate | Prefills Rate_Master core fields + Attribute values into Analysis inputs; keeps that candidate's listed match % |
+
+| Make list map | Heuristic + AI category/sub-category (v4 synonym rules); remaps on version bump; `unmapped` final per version |
+| Make & Vendor | Product_ID → Rate_Master Make/Vendor/amounts from Postgres; Find in DB yellow; cascade; Chroma not used for rates |
+| Labour | Product_ID → Labour_master_Output from Postgres (auto on Make & Vendor Next); Apply labour reloads |
+| Review | Same per-product slot qty + lineage UI; export uses short/red Output headers; BOQ export writes Qty/Rate/Amount on qty+unit rows; zero-qty / Rate Only rows orange on both exports |
 | Detail open | Default tab follows `BOQ.status`; renders stored data only — no AI in the GET |
 | Jobs | Stuck analysis heal/fail; progress reset; Celery concurrency 8 |
-| Upload | `.xlsx` / `.xlsm` / legacy `.xls` (converted); **not** `.xlsb`; single sheet |
+| Upload | Requires active DB; `.xlsx` / `.xlsm` / legacy `.xls` (converted); **not** `.xlsb`; single sheet |
 
 ## Pending
 
@@ -63,11 +64,11 @@ uploads retained.
 
 Keep only the latest entry below. Older work is in `docs/CHANGELOG.md`.
 
-### 2026-08-06 — Review serial from qty-row parent
+### 2026-08-10 — Backend synonym / matching cleanup (no UI)
 
-Completed: Review S. No. / export Ser no now use each product's qty-row serial
-qualified by its nearest structural parent (`5.1 a)` instead of wrong group
-`5 a)(A)`).
-Pending: UAT Review S. No. against uploaded BOQ numbering.
-Issues: None new.
-Next: UAT Review serials on multi-level sections (e.g. 5.1 / 5.2).
+Completed: Deduped make-list hint tables into `utils/product_synonyms.py`; removed
+unused synonym wrappers, write-only `catalog_candidates`, and leftover Top-5 slice;
+single `CANDIDATE_LIMIT=3` shared by matching + AI mapping.
+Pending: UAT Analyse / Re-analyse / Make List after Celery restart.
+Issues: None.
+Next: UAT Make List → correct makes on Analysis Make & Vendor.

@@ -33,14 +33,21 @@ def confidence_band(score: float) -> str:
 def match_percentage_band(score: float) -> str:
     """Map product match percentage to Analysis tab/card color band.
 
-    Client criteria:
+    Client criteria (band follows the rounded % shown in the UI via floatformat):
     - ≥ 95 → green (high confidence)
-    - 90–94.99 → orange (medium — review)
+    - 90–94 → orange (medium — review)
     - < 90 → red (needs review)
     """
-    if score >= 95:
+    try:
+        value = float(score or 0.0)
+    except (TypeError, ValueError):
+        value = 0.0
+    # Match Django ``floatformat:0`` (round half up) so a shown "95%" is green.
+    # Python's ``round`` uses banker's rounding (94.5 → 94) and would disagree.
+    display = int(value + 0.5) if value >= 0 else int(value - 0.5)
+    if display >= 95:
         return "green"
-    if score >= 90:
+    if display >= 90:
         return "orange"
     return "red"
 

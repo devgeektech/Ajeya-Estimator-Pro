@@ -40,7 +40,46 @@ def _format_tech_key_for_display(tech_key: Any) -> str:
     text = str(tech_key or "").strip()
     if not text:
         return ""
-    return " . ".join(part.strip() for part in text.split("|"))
+    return " . ".join(part.strip() for part in text.split("|") if part.strip())
+
+
+def _candidate_summary_for_display(item: dict[str, Any]) -> str:
+    """Short candidate label: Category / Sub / Class / Size / Unit."""
+    parts: list[str] = []
+    for key in ("category", "sub_category", "class", "size", "unit"):
+        value = item.get(key)
+        if value in (None, ""):
+            continue
+        text = str(value).strip()
+        if text:
+            parts.append(text)
+    if parts:
+        return " / ".join(parts)
+    return str(item.get("summary") or "").strip() or "Matched product"
+
+
+def _candidate_tech_key_for_display(item: dict[str, Any]) -> str:
+    """Dotted tech line with Unit after Size (from candidate fields when present)."""
+    parts: list[str] = []
+    for key in ("category", "sub_category", "class", "size", "unit", "capacity"):
+        value = item.get(key)
+        if value in (None, ""):
+            continue
+        text = str(value).strip()
+        if text:
+            parts.append(text)
+    attrs = item.get("attributes")
+    if isinstance(attrs, dict) and attrs:
+        attr_bits = [
+            f"{str(key).strip()}={str(value).strip()}"
+            for key, value in attrs.items()
+            if str(key).strip() and value not in (None, "") and str(value).strip()
+        ]
+        if attr_bits:
+            parts.append(", ".join(attr_bits))
+    if parts:
+        return " . ".join(parts)
+    return _format_tech_key_for_display(item.get("tech_key") or "")
 
 
 def _backfill_candidate_confidences(
@@ -92,8 +131,8 @@ _PRODUCT_FIELDS: tuple[tuple[str, str], ...] = (
     ("sub_category", "Sub-category"),
     ("class", "Class"),
     ("size", "Size"),
-    ("capacity", "Capacity"),
     ("unit", "Unit"),
+    ("capacity", "Capacity"),
 )
 
 # All product property fields are optional — products differ in which apply.
@@ -203,13 +242,14 @@ def _shape_product(
             "rate_master_id": product.get("db_product_id"),
             "suggested_id": product.get("suggested_db_product_id"),
             "status": db_match_status,
-            "summary": product.get("db_product_summary")
-            or _product_summary(
+            "summary": _candidate_summary_for_display(
                 {
                     "category": product.get("category"),
                     "sub_category": product.get("sub_category"),
                     "class": product.get("class"),
                     "size": product.get("size"),
+                    "unit": product.get("unit"),
+                    "summary": product.get("db_product_summary"),
                 }
             ),
             "make": product.get("db_product_make") or "",
@@ -245,9 +285,10 @@ def _shape_product(
         candidates.append(
             {
                 "id": cand_id,
-                "summary": item.get("summary")
-                or _product_summary(item),
-                "tech_key": _format_tech_key_for_display(item.get("tech_key") or ""),
+                "summary": _candidate_summary_for_display(item)
+                if (item.get("category") or item.get("size") or item.get("unit"))
+                else (item.get("summary") or _product_summary(item)),
+                "tech_key": _candidate_tech_key_for_display(item),
                 "confidence": confidence,
                 "is_selected": is_selected,
             }

@@ -99,7 +99,7 @@ One priced Make/Vendor row. Key fields:
   Internal references (`rate_master_id`, `db_product_id`) use the integer PK and
   are unaffected by the text IDs.
 - UI display key (not stored as Tech_Key):  
-  `Category|Sub_Category|Class|Size|Capacity|Attribute` via `product_display_key()`.
+  `Category|Sub_Category|Class|Size|Unit|Capacity|Attribute` via `product_display_key()`.
 - Embeddings: **one Chroma vector per rate row**, metadata includes `Product_ID`.
 
 ### `Labour_Master_Output`

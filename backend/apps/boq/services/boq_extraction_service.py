@@ -10,6 +10,7 @@ from ai.context import build_database_context, load_rate_master_taxonomy, snap_p
 from ai.service import AIService
 from common.exceptions import AIServiceError
 from utils.attribute_parser import coerce_attributes_dict
+from utils.product_synonyms import display_material_label
 
 from apps.boq.services.boq_row_grouping_service import (
     anchor_qty_unit,
@@ -25,16 +26,34 @@ _QTY_KEYS = ("qty", "quantity", "qnty", "nos")
 _MAX_BATCH_CHARS = 14000
 _MINIMUM_SLOT_RETRY_INSTRUCTION = """
 
-CORRECTION — MINIMUM SLOT COVERAGE IS MANDATORY:
-- The previous response may have omitted products.
-- For every input section, return at least ``slot_count`` products.
-- Every object in ``slots`` must be represented by at least one product carrying
-  that slot's ``qty_row_id``, quantity, and quantity_unit.
-- Preserve every separately purchasable extra product evidenced by the BOQ; the
-  slot count is a minimum, not a cap.
-- Return the complete corrected rows JSON, not only the missing products.
+CORRECTION — slot coverage required:
+- Return ≥ slot_count products; every slots[].qty_row_id must appear on a product.
+- Per-product size/description_hint from that slot only; shared PN/seat/IS on all.
+- Return the full corrected rows JSON.
 """
 
+# Nominal size from letter/qty row text: "200mm dia", "a) 150 mm", "80 NB".
+_SIZE_FROM_TEXT = re.compile(
+    r"(?i)(?:^|[^0-9])(\d+(?:\.\d+)?)\s*(mm|nb|inch|in|cm)?\b"
+)
+_PN_RATING_FROM_TEXT = re.compile(r"(?i)\bPN\s*[- ]?\s*(\d+)\b")
+_PLACEHOLDER_CLASS_VALUES = frozenset(
+    {"0", "00", "-", "--", "n/a", "na", "none", "null", "nil"}
+)
+# Section-level attributes copied onto every slot product when missing.
+_SHARED_SECTION_ATTR_KEYS = frozenset(
+    {
+        "is",
+        "seat_type",
+        "connection_type",
+        "material",
+        "body_material",
+        "spindle_type",
+        "rating",
+        "pressure_rating",
+        "end_connection",
+    }
+)
 
 def _extract_batch_size() -> int:
     from django.conf import settings
@@ -372,6 +391,240 @@ def _is_blank_value(value: Any) -> bool:
     return False
 
 
+def _is_placeholder_class(value: Any) -> bool:
+    if _is_blank_value(value):
+        return True
+    return str(value).strip().casefold() in _PLACEHOLDER_CLASS_VALUES
+
+
+def _parse_size_from_text(text: Any) -> tuple[str | None, str | None]:
+    """
+    Return (size, measurement_unit) from BOQ letter/size text.
+
+    Prefers the first clear nominal size (e.g. ``200`` from ``200mm dia``).
+    """
+    blob = str(text or "").strip()
+    if not blob:
+        return None, None
+    match = _SIZE_FROM_TEXT.search(blob)
+    if not match:
+        return None, None
+    size = match.group(1)
+    try:
+        number = float(size)
+        if number.is_integer():
+            size = str(int(number))
+    except ValueError:
+        pass
+    unit_token = (match.group(2) or "").strip().lower()
+    unit = None
+    if unit_token in {"mm", "cm", "nb"}:
+        unit = "NB" if unit_token == "nb" else unit_token
+    elif unit_token in {"inch", "in"}:
+        unit = "inch"
+    elif re.search(r"(?i)\bmm\b", blob):
+        unit = "mm"
+    return size, unit
+
+
+def _parse_pn_capacity(text: Any) -> str | None:
+    match = _PN_RATING_FROM_TEXT.search(str(text or ""))
+    if not match:
+        return None
+    return f"PN{match.group(1)}"
+
+
+_SIZE_ONLY_HINT = re.compile(
+    r"(?i)^\s*(?:[a-z]\)?\s*)?\d+(?:\.\d+)?\s*(?:mm|nb|inch|in|cm)?\s*(?:dia(?:meter)?)?\s*$"
+)
+
+
+def _section_product_noun(section_text: str) -> str:
+    """Pull a short product noun from parent BOQ text for weak size-only hints."""
+    blob = str(section_text or "").strip()
+    if not blob:
+        return ""
+    patterns = (
+        r"(?i)\b(sluice\s+valve|butterfly\s+valve|ball\s+valve|gate\s+valve|"
+        r"non[\s-]?return\s+valve|check\s+valve|y[\s-]?strainer|strainer|"
+        r"hydrant|landing\s+valve|hose\s+reel|sprinkler|fire\s+pump|jockey\s+pump|"
+        r"pressure\s+switch|flow\s+switch|ms\s+pipe|gi\s+pipe|pipework|pipe)\b"
+    )
+    match = re.search(patterns, blob)
+    if match:
+        return re.sub(r"\s+", " ", match.group(1)).strip()
+    return ""
+
+
+def _enrich_description_hint(
+    product: dict[str, Any],
+    *,
+    section_text: str,
+    slot_desc: str,
+) -> str:
+    """Ensure description_hint carries product type + size for better DB recall."""
+    hint = str(product.get("description_hint") or "").strip()
+    size = str(product.get("size") or "").strip()
+    unit = str(product.get("unit") or "").strip() or "mm"
+    sub = str(product.get("sub_category") or "").strip()
+    cat = str(product.get("category") or "").strip()
+    noun = sub or _section_product_noun(section_text) or cat
+    size_phrase = ""
+    if size:
+        size_phrase = f"{size}{unit}" if unit and unit.lower() not in size.lower() else size
+        if "dia" not in (hint or slot_desc).lower() and unit.lower() == "mm":
+            size_phrase = f"{size}mm dia"
+
+    weak = (not hint) or bool(_SIZE_ONLY_HINT.match(hint))
+    if weak and noun and size_phrase:
+        return f"{size_phrase} {noun}".strip()[:500]
+    if weak and noun:
+        base = slot_desc or hint or noun
+        if noun.lower() not in base.lower():
+            return f"{base} {noun}".strip()[:500]
+        return base[:500]
+    if hint and noun and noun.lower() not in hint.lower() and _SIZE_ONLY_HINT.match(hint):
+        return f"{hint} {noun}".strip()[:500]
+    return hint[:500] if hint else (slot_desc or "")[:500]
+
+
+def _slot_size_hint(slot: dict[str, Any]) -> str | None:
+    """Prefer an explicit size_hint, else parse the slot's own description."""
+    hint = slot.get("size_hint")
+    if not _is_blank_value(hint):
+        return str(hint).strip()
+    size, _unit = _parse_size_from_text(
+        slot.get("description") or slot.get("evidence_text") or ""
+    )
+    return size
+
+
+def _apply_slot_evidence_fields(
+    products: list[dict[str, Any]],
+    *,
+    group: dict[str, Any],
+    slots: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Bind per-slot size/unit/description from BOQ evidence and share parent specs.
+
+    AI sometimes copies the first letter size onto later products, or fills only
+    product 0 with shared PN / seat / IS attributes. This pass repairs those
+    using the section's authoritative slots + full description.
+    """
+    if not products:
+        return products
+
+    rows = list(slots or group.get("slots") or group.get("qty_rows") or [])
+    by_qty_row = {
+        str(item.get("qty_row_id") or item.get("row_id") or ""): item
+        for item in rows
+        if item.get("qty_row_id") or item.get("row_id")
+    }
+    section_text = str(
+        group.get("full_description")
+        or group.get("description")
+        or ""
+    )
+    section_pn = _parse_pn_capacity(section_text)
+
+    filled: list[dict[str, Any]] = []
+    for index, product in enumerate(products):
+        item = dict(product)
+        if _is_placeholder_class(item.get("class")):
+            item["class"] = None
+
+        qty_row_id = str(item.get("qty_row_id") or item.get("source_row_id") or "").strip()
+        slot = by_qty_row.get(qty_row_id) if qty_row_id else None
+        if slot is None and index < len(rows):
+            slot = rows[index]
+
+        if slot:
+            slot_desc = str(slot.get("description") or "").strip()
+            evidence = str(
+                slot.get("evidence_text") or slot_desc or section_text
+            ).strip()
+            size_hint = _slot_size_hint(slot)
+            size_from_slot, unit_from_slot = _parse_size_from_text(
+                slot_desc or evidence
+            )
+            if size_hint and not size_from_slot:
+                size_from_slot = size_hint
+            if size_from_slot:
+                current_size = str(item.get("size") or "").strip()
+                current_digits = re.sub(r"[^0-9.]", "", current_size)
+                hint_digits = re.sub(r"[^0-9.]", "", str(size_from_slot))
+                if _is_blank_value(item.get("size")) or (
+                    hint_digits and current_digits and hint_digits != current_digits
+                ):
+                    item["size"] = size_from_slot
+                if unit_from_slot and (
+                    _is_blank_value(item.get("unit")) or _is_qty_uom(item.get("unit"))
+                ):
+                    item["unit"] = unit_from_slot
+            item["description_hint"] = _enrich_description_hint(
+                item,
+                section_text=section_text,
+                slot_desc=slot_desc if slot else "",
+            )
+
+        if section_pn:
+            current_cap = str(item.get("capacity") or "").strip()
+            current_pn = _parse_pn_capacity(current_cap)
+            if _is_blank_value(item.get("capacity")) or (
+                current_pn and current_pn != section_pn
+            ):
+                item["capacity"] = section_pn
+
+        filled.append(_normalize_product_fields(item))
+
+    return _share_section_attributes(filled)
+
+
+def _share_section_attributes(
+    products: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Copy shared parent attributes onto sibling products that are missing them."""
+    if len(products) < 2:
+        return products
+    shared: dict[str, Any] = {}
+    for product in products:
+        attrs = coerce_attributes_dict(product.get("attributes"))
+        for key, value in attrs.items():
+            key_norm = str(key).strip().lower()
+            if key_norm not in _SHARED_SECTION_ATTR_KEYS:
+                continue
+            if _is_blank_value(value):
+                continue
+            if key_norm not in shared:
+                shared[key_norm] = value
+    if not shared:
+        return products
+
+    updated: list[dict[str, Any]] = []
+    for product in products:
+        item = dict(product)
+        attrs = coerce_attributes_dict(item.get("attributes"))
+        changed = False
+        for key, value in shared.items():
+            # Keep original key casing when already present; else use canonical key.
+            existing_key = next(
+                (
+                    candidate
+                    for candidate in attrs
+                    if str(candidate).strip().lower() == key
+                ),
+                key,
+            )
+            if _is_blank_value(attrs.get(existing_key)):
+                attrs[existing_key] = value
+                changed = True
+        if changed:
+            item["attributes"] = attrs
+        updated.append(item)
+    return updated
+
+
 # BOQ quantity UOMs — must never populate product ``unit`` (Rate_Master measurement).
 _QTY_UOM_TOKENS = frozenset(
     {
@@ -449,35 +702,6 @@ def _normalize_product_unit_fields(product: dict[str, Any]) -> dict[str, Any]:
 
 
 # Material / construction phrases → Rate_Master Class tokens.
-_MATERIAL_CLASS_ALIASES: dict[str, str] = {
-    "ms": "MS",
-    "m.s": "MS",
-    "m.s.": "MS",
-    "mild steel": "MS",
-    "ms sheet": "MS Sheet",
-    "ss": "SS",
-    "s.s": "SS",
-    "s.s.": "SS",
-    "stainless steel": "SS",
-    "ci": "CI",
-    "c.i": "CI",
-    "c.i.": "CI",
-    "cast iron": "CI",
-    "di": "DI",
-    "d.i": "DI",
-    "d.i.": "DI",
-    "ductile iron": "DI",
-    "gi": "GI",
-    "g.i": "GI",
-    "g.i.": "GI",
-    "galvanised iron": "GI",
-    "galvanized iron": "GI",
-    "brass": "Brass",
-    "grp": "GRP",
-    "rubber": "Rubber",
-    "forged steel": "Forged Steel",
-}
-
 _MATERIAL_ATTR_KEYS = frozenset(
     {"material", "body_material", "construction", "material_of_construction", "moc"}
 )
@@ -486,28 +710,26 @@ _MATERIAL_ATTR_KEYS = frozenset(
 def _normalize_class_material(value: Any) -> str | None:
     if _is_blank_value(value):
         return None
-    text = str(value).strip()
-    alias = _MATERIAL_CLASS_ALIASES.get(text.lower())
-    return alias or text
+    return display_material_label(value) or None
 
 
 def _promote_material_to_class(product: dict[str, Any]) -> dict[str, Any]:
-    """Move attributes.material (and synonyms) onto product class for Rate_Master."""
+    """
+    Fill blank class from material attributes when useful.
+
+    Keep material keys on attributes so Rate_Master rows that store Class=0 and
+    material in Attribute still overlap during matching.
+    """
     item = dict(product)
     attrs = coerce_attributes_dict(item.get("attributes"))
     material_value = None
-    remaining: dict[str, Any] = {}
     for key, value in attrs.items():
         if str(key).strip().lower() in _MATERIAL_ATTR_KEYS and not _is_blank_value(value):
-            if material_value is None:
-                material_value = value
-            continue
-        remaining[key] = value
+            material_value = value
+            break
 
-    # Do not copy material into class when it only restates sub_category (PIPE/MS).
     sub_norm = re.sub(r"[^0-9a-zA-Z]+", " ", str(item.get("sub_category") or "").lower())
     sub_norm = re.sub(r"\s+", " ", sub_norm).strip()
-    material_norm = ""
     if material_value is not None:
         material_norm = re.sub(r"[^0-9a-zA-Z]+", " ", str(material_value).lower())
         material_norm = re.sub(r"\s+", " ", material_norm).strip()
@@ -519,13 +741,16 @@ def _promote_material_to_class(product: dict[str, Any]) -> dict[str, Any]:
     elif not _is_blank_value(item.get("class")):
         item["class"] = _normalize_class_material(item.get("class"))
 
-    item["attributes"] = remaining
+    item["attributes"] = attrs
     return item
 
 
 def _normalize_product_fields(product: dict[str, Any]) -> dict[str, Any]:
     """Normalize unit/qty UOM and promote material into class."""
-    return _normalize_product_unit_fields(_promote_material_to_class(product))
+    item = _normalize_product_unit_fields(_promote_material_to_class(product))
+    if _is_placeholder_class(item.get("class")):
+        item["class"] = None
+    return item
 
 
 def _consolidate_to_anchors(
@@ -632,20 +857,35 @@ def _build_anchor_groups(boq_data: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _compact_anchor_payload(group: dict[str, Any]) -> dict[str, Any]:
+    """Compact section payload for extract — slots carry qty/size; skip duplicate qty_rows."""
+    slots = []
+    for slot in group.get("slots") or []:
+        slots.append(
+            {
+                "slot_index": slot.get("slot_index"),
+                "qty_row_id": slot.get("qty_row_id"),
+                "serial": slot.get("serial"),
+                "description": slot.get("description"),
+                "size_hint": slot.get("size_hint"),
+                "qty": slot.get("qty"),
+                "unit": slot.get("unit"),
+                "qty_status": slot.get("qty_status"),
+                "rate_only": bool(slot.get("rate_only")),
+                "boq_rate": slot.get("boq_rate"),
+                "evidence_text": slot.get("evidence_text"),
+            }
+        )
+    lineage = group.get("lineage_parts") or []
+    # Keep lineage short — full text already lives in description.
+    if len(lineage) > 8:
+        lineage = lineage[:3] + lineage[-5:]
     return {
         "row_id": group.get("row_id"),
         "serial": group.get("serial"),
-        "depth": group.get("depth", 0),
         "description": group.get("full_description"),
-        "lineage_lines": group.get("lineage_parts") or [],
-        "qty": group.get("anchor_qty"),
-        "unit": group.get("anchor_unit"),
-        "qty_status": group.get("qty_status"),
-        "rate_only": bool(group.get("rate_only")),
-        "boq_rate": group.get("boq_rate"),
-        "qty_rows": group.get("qty_rows") or [],
-        "slots": group.get("slots") or [],
-        "slot_count": int(group.get("slot_count") or len(group.get("slots") or [])),
+        "lineage_lines": lineage,
+        "slot_count": int(group.get("slot_count") or len(slots)),
+        "slots": slots,
         "heuristic_skip": should_skip_anchor_group(
             group,
             lineage_has_qty=bool(group.get("lineage_has_qty")),
@@ -708,6 +948,16 @@ def _slot_fallback_product(
         or "Product from BOQ Unit/Qty row"
     ).strip()
     row_id = _slot_row_id(slot)
+    size_hint = _slot_size_hint(slot)
+    size, size_unit = _parse_size_from_text(
+        slot.get("description") or evidence
+    )
+    if size_hint and not size:
+        size = size_hint
+    capacity = _parse_pn_capacity(
+        group.get("full_description") or group.get("description") or evidence
+    )
+    hint = str(slot.get("description") or "").strip() or evidence
     product = {
         "product_index": product_index,
         "source_row_id": row_id,
@@ -715,13 +965,13 @@ def _slot_fallback_product(
         "slot_index": slot.get("slot_index", product_index),
         "slot_id": slot.get("slot_id"),
         "boq_serial": str(slot.get("serial") or "").strip() or None,
-        "description_hint": evidence[:500],
+        "description_hint": hint[:500],
         "category": None,
         "sub_category": None,
         "class": None,
-        "size": None,
-        "unit": None,
-        "capacity": None,
+        "size": size,
+        "unit": size_unit,
+        "capacity": capacity,
         "make_hint": None,
         "attributes": {},
         "extraction_confidence": 0.0,
@@ -755,7 +1005,11 @@ def _ensure_minimum_slot_products(
                 product_index=len(products),
             )
         )
-    updated["products"] = products
+    updated["products"] = _apply_slot_evidence_fields(
+        products,
+        group=group,
+        slots=_group_slots(group),
+    )
     updated["skip_matching"] = False
     updated["slot_shortfall_fallback_count"] = len(missing_slots)
     updated.pop("skip_reason", None)
@@ -813,7 +1067,11 @@ class BOQExtractionService:
 
         extracted_by_id: dict[str, dict[str, Any]] = {}
         batches = _iter_extract_batches(actionable_groups)
+        extract_total = max(len(actionable_groups), 1)
         done = 0
+        # Report 0/total immediately so the UI does not sit on a fake mid-band %.
+        if progress_callback:
+            progress_callback(0, extract_total)
         for batch in batches:
             for row in self._extract_batch(batch):
                 row_id = row.get("row_id")
@@ -821,7 +1079,7 @@ class BOQExtractionService:
                     extracted_by_id[str(row_id)] = row
             done += len(batch)
             if progress_callback:
-                progress_callback(done, max(len(actionable_groups), 1))
+                progress_callback(done, extract_total)
 
         _consolidate_to_anchors(anchor_groups, extracted_by_id)
 
@@ -1085,13 +1343,17 @@ class BOQExtractionService:
                 list(row.get("products") or []),
                 taxonomy=taxonomy,
             )
-            row["products"] = _apply_row_qty_unit(
-                products,
-                qty=group.get("anchor_qty"),
-                unit=group.get("anchor_unit"),
-                qty_status=group.get("qty_status"),
-                boq_rate=group.get("boq_rate"),
-                qty_rows=list(group.get("qty_rows") or []),
+            row["products"] = _apply_slot_evidence_fields(
+                _apply_row_qty_unit(
+                    products,
+                    qty=group.get("anchor_qty"),
+                    unit=group.get("anchor_unit"),
+                    qty_status=group.get("qty_status"),
+                    boq_rate=group.get("boq_rate"),
+                    qty_rows=list(group.get("qty_rows") or []),
+                    slots=list(group.get("slots") or []),
+                ),
+                group=group,
                 slots=list(group.get("slots") or []),
             )
             row["activities"] = []
