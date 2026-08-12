@@ -4,10 +4,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from ai.context import load_rate_master_taxonomy, snap_product_taxonomy
+from ai.context import load_rate_master_taxonomy
 from apps.boq.models import BOQ
 from apps.boq.services.boq_extraction_service import (
-    _normalize_product_fields,
     quantity_display_fields,
     rehydrate_products_quantity_from_group,
 )
@@ -35,51 +34,64 @@ def _candidate_confidence_value(raw: Any) -> float | None:
         return None
 
 
-def _format_tech_key_for_display(tech_key: Any) -> str:
-    """Show product keys with `` . `` separators instead of pipes."""
-    text = str(tech_key or "").strip()
+def _candidate_display_part(value: Any) -> str:
+    """Show stored tokens as-is, including ``0``, ``null``, ``NA``, ``NB``."""
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "null"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        if value != value or value in (float("inf"), float("-inf")):
+            return "null"
+        if value.is_integer():
+            return str(int(value))
+        return str(value)
+    text = str(value).strip()
     if not text:
-        return ""
-    return " . ".join(part.strip() for part in text.split("|") if part.strip())
+        return "null"
+    return text
 
 
-def _candidate_summary_for_display(item: dict[str, Any]) -> str:
-    """Short candidate label: Category / Sub / Class / Size / Unit."""
-    parts: list[str] = []
-    for key in ("category", "sub_category", "class", "size", "unit"):
-        value = item.get(key)
-        if value in (None, ""):
-            continue
-        text = str(value).strip()
-        if text:
-            parts.append(text)
-    if parts:
-        return " / ".join(parts)
-    return str(item.get("summary") or "").strip() or "Matched product"
-
-
-def _candidate_tech_key_for_display(item: dict[str, Any]) -> str:
-    """Dotted tech line with Unit after Size (from candidate fields when present)."""
-    parts: list[str] = []
-    for key in ("category", "sub_category", "class", "size", "unit", "capacity"):
-        value = item.get(key)
-        if value in (None, ""):
-            continue
-        text = str(value).strip()
-        if text:
-            parts.append(text)
+def _candidate_attribute_bits(item: dict[str, Any]) -> list[str]:
     attrs = item.get("attributes")
-    if isinstance(attrs, dict) and attrs:
-        attr_bits = [
-            f"{str(key).strip()}={str(value).strip()}"
-            for key, value in attrs.items()
-            if str(key).strip() and value not in (None, "") and str(value).strip()
-        ]
-        if attr_bits:
-            parts.append(", ".join(attr_bits))
-    if parts:
-        return " . ".join(parts)
-    return _format_tech_key_for_display(item.get("tech_key") or "")
+    if not isinstance(attrs, dict):
+        return []
+    bits: list[str] = []
+    for key, value in attrs.items():
+        label = str(key).strip()
+        if label:
+            bits.append(f"{label}={_candidate_display_part(value)}")
+    return bits
+
+
+def _candidate_summary_for_display(
+    item: dict[str, Any],
+    *,
+    include_empty: bool = False,
+) -> str:
+    """Rate ID / Product ID / Category / Sub / Class / Size / Unit / Capacity attrs."""
+    identity: list[str] = []
+    for key in (
+        "rate_id",
+        "product_id",
+        "category",
+        "sub_category",
+        "class",
+        "size",
+        "unit",
+        "capacity",
+    ):
+        if not include_empty and key not in item:
+            continue
+        identity.append(_candidate_display_part(item.get(key)))
+    label = " / ".join(identity)
+    attr_bits = _candidate_attribute_bits(item)
+    if attr_bits:
+        attrs = ", ".join(attr_bits)
+        return f"{label} {attrs}" if label else attrs
+    return label or str(item.get("summary") or "").strip() or "Matched product"
 
 
 def _backfill_candidate_confidences(
@@ -88,7 +100,7 @@ def _backfill_candidate_confidences(
     *,
     database_version_id: int | None,
 ) -> None:
-    """Fill missing candidate % from structured score (legacy wiped scores)."""
+    """Fill missing candidate % from structured score (legacy wiped scores only)."""
     if not database_version_id:
         return
     missing_ids: list[int] = []
@@ -96,10 +108,9 @@ def _backfill_candidate_confidences(
         if item.get("confidence") is not None:
             continue
         try:
-            cand_id = int(item.get("id"))
+            missing_ids.append(int(item.get("id")))
         except (TypeError, ValueError):
             continue
-        missing_ids.append(cand_id)
     if not missing_ids:
         return
     rates = {
@@ -168,7 +179,7 @@ def _shape_attribute_fields(product: dict[str, Any]) -> dict[str, Any]:
         {
             "key": key,
             "label": _attribute_label(key),
-            "value": "" if _is_blank(attrs.get(key)) else str(attrs.get(key)),
+            "value": "" if attrs.get(key) is None else str(attrs.get(key)),
             "filled": not _is_blank(attrs.get(key)),
             "removable": False,
         }
@@ -203,7 +214,8 @@ def _shape_product(
     database_version_id: int | None = None,
     taxonomy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    product = snap_product_taxonomy(_normalize_product_fields(product), taxonomy)
+    # Show stored fields as-is. Do not wipe Class=0 or promote material on render.
+    product = dict(product)
     fields: list[dict[str, Any]] = []
     missing_count = 0
     for key, label in _PRODUCT_FIELDS:
@@ -215,7 +227,7 @@ def _shape_product(
             {
                 "key": key,
                 "label": label,
-                "value": value if value is not None else "",
+                "value": "" if value is None else str(value),
                 "missing": missing,
             }
         )
@@ -285,15 +297,22 @@ def _shape_product(
         candidates.append(
             {
                 "id": cand_id,
-                "summary": _candidate_summary_for_display(item)
-                if (item.get("category") or item.get("size") or item.get("unit"))
+                "summary": _candidate_summary_for_display(item, include_empty=True)
+                if (
+                    item.get("rate_id")
+                    or item.get("product_id")
+                    or item.get("category")
+                    or item.get("size")
+                    or item.get("unit")
+                    or "class" in item
+                )
                 else (item.get("summary") or _product_summary(item)),
-                "tech_key": _candidate_tech_key_for_display(item),
                 "confidence": confidence,
                 "is_selected": is_selected,
             }
         )
-    # Skip invented scores after an expert pick — keep other candidates' stored %.
+    # Only fill missing candidate % (legacy wiped scores). Never re-score stored
+    # percentages — one product rematch must not change sibling product %.
     selection_source = str((product.get("ai_mapping") or {}).get("selection_source") or "")
     if selection_source != "expert":
         _backfill_candidate_confidences(
@@ -506,16 +525,16 @@ class BOQExtractionDisplayService:
             qty_row_count = len(qty_rows)
             # Multi-product review = product count and Unit/Qty slots disagree:
             # e.g. 1 qty row → 2+ products, or 2 qty rows → only 1 product.
+            # Equal counts (3 products for 3 dia slots) are not flagged.
+            # Slot-fallback review is cleared once matching fills a real product.
             multiproduct_review = (
-                (
-                    qty_row_count > 0
-                    and product_total > 0
-                    and product_total != qty_row_count
-                )
-                or any(
-                    bool(product.get("needs_extraction_review"))
-                    for product in products
-                )
+                qty_row_count > 0
+                and product_total > 0
+                and product_total != qty_row_count
+            ) or any(
+                bool(product.get("needs_extraction_review"))
+                and not str(product.get("category") or "").strip()
+                for product in products
             )
 
             shaped_products = [

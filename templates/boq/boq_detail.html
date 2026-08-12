@@ -246,6 +246,10 @@
     .dark-mode .make-vendor-line--alt {
         background-color: #334155 !important;
     }
+    .extraction-lines,
+    .extraction-line {
+        overflow-anchor: none;
+    }
     .extraction-product-card {
         background-color: transparent !important;
     }
@@ -432,56 +436,111 @@
             this.clearStoredProgress();
         },
         scrollStorageKey(tabName) {
-            return 'boq-detail-scroll-{{ boq.pk }}-' + (tabName || this.tab || 'analysis');
+            return 'boq-detail-scroll-{{ boq.pk }}-' + (tabName || this.activeTabPage || this.tab || 'analysis');
+        },
+        readPageScroll() {
+            const root = document.scrollingElement || document.documentElement;
+            return Number(window.scrollY || (root && root.scrollTop) || document.body.scrollTop || 0) || 0;
+        },
+        writePageScroll(y) {
+            const top = Math.max(0, Number(y) || 0);
+            window.scrollTo(0, top);
+            const root = document.scrollingElement || document.documentElement;
+            if (root) root.scrollTop = top;
+            if (document.documentElement) document.documentElement.scrollTop = top;
+            if (document.body) document.body.scrollTop = top;
+        },
+        captureVisibleAnalysisLine() {
+            const lines = document.querySelectorAll('.extraction-line[id^="line-"]');
+            if (!lines.length) {
+                return { rowId: '', offset: null };
+            }
+            const header = document.querySelector('.boq-detail-header');
+            const floor = header ? header.getBoundingClientRect().bottom : 80;
+            let chosen = null;
+            Array.from(lines).forEach((el) => {
+                const box = el.getBoundingClientRect();
+                if (box.bottom <= floor) return;
+                if (!chosen || box.top < chosen.getBoundingClientRect().top) {
+                    chosen = el;
+                }
+            });
+            if (!chosen) chosen = lines[lines.length - 1];
+            return {
+                rowId: String(chosen.id || '').replace(/^line-/, ''),
+                offset: chosen.getBoundingClientRect().top,
+            };
         },
         persistScroll(tabName) {
             try {
-                const y = Number(window.scrollY) || 0;
-                const key = this.scrollStorageKey(tabName || this.tab);
-                // Browsers often reset scroll to 0 before unload — do not wipe a
-                // position saved intentionally before a same-tab reload.
-                if (y <= 0) {
-                    const existing = sessionStorage.getItem(key);
-                    if (existing) return;
+                const tab = tabName || this.activeTabPage || this.tab;
+                const key = this.scrollStorageKey(tab);
+                const y = this.readPageScroll();
+                const payload = { y };
+                if (tab === 'analysis') {
+                    const vis = this.captureVisibleAnalysisLine();
+                    payload.rowId = vis.rowId;
+                    payload.offset = vis.offset;
                 }
-                sessionStorage.setItem(key, String(y));
+                if (y <= 0 && !payload.rowId) {
+                    if (sessionStorage.getItem(key)) return;
+                }
+                sessionStorage.setItem(key, JSON.stringify(payload));
             } catch (e) { /* ignore */ }
+        },
+        parseScrollPayload(raw) {
+            if (raw == null || raw === '') return null;
+            try {
+                const parsed = JSON.parse(raw);
+                if (typeof parsed === 'number') return { y: parsed };
+                if (parsed && typeof parsed === 'object') return parsed;
+            } catch (e) { /* plain number string from older saves */ }
+            const y = Number(raw);
+            return Number.isFinite(y) ? { y } : null;
         },
         restoreScroll(tabName) {
             try {
-                const key = this.scrollStorageKey(tabName || this.tab);
-                const raw = sessionStorage.getItem(key);
-                if (raw == null || raw === '') return;
-                let payload = null;
-                try {
-                    payload = JSON.parse(raw);
-                } catch (e) {
-                    payload = { y: Number(raw) };
-                }
-                const y = Number(payload && payload.y);
-                if (!Number.isFinite(y) || y < 0) return;
-                const rowId = payload && payload.rowId ? String(payload.rowId) : '';
-                const offset = Number(payload && payload.offset);
+                const tab = tabName || this.activeTabPage || this.tab;
+                const payload = this.parseScrollPayload(
+                    sessionStorage.getItem(this.scrollStorageKey(tab))
+                );
+                if (!payload) return;
+                const y = Number(payload.y);
+                const rowId = payload.rowId ? String(payload.rowId) : '';
+                const offset = Number(payload.offset);
+                if ((!Number.isFinite(y) || y < 0) && !rowId) return;
+                let tries = 0;
                 const apply = () => {
-                    if (rowId && Number.isFinite(offset)) {
+                    tries += 1;
+                    if (rowId) {
                         const el = document.getElementById('line-' + rowId)
                             || document.getElementById('make-vendor-' + rowId);
-                        if (el) {
-                            const top = el.getBoundingClientRect().top + window.scrollY;
-                            window.scrollTo(0, Math.max(0, top - offset));
-                            return;
+                        if (el && Number.isFinite(offset)) {
+                            const top = el.getBoundingClientRect().top + this.readPageScroll();
+                            this.writePageScroll(Math.max(0, top - offset));
+                        } else if (Number.isFinite(y) && y > 0) {
+                            this.writePageScroll(y);
                         }
+                    } else if (Number.isFinite(y) && y > 0) {
+                        this.writePageScroll(y);
                     }
-                    window.scrollTo(0, y);
+                    if (tries < 16) {
+                        setTimeout(apply, 100);
+                    }
                 };
-                this.$nextTick(() => {
-                    apply();
-                    requestAnimationFrame(apply);
-                    setTimeout(apply, 50);
-                    setTimeout(apply, 200);
-                    setTimeout(apply, 500);
-                });
+                this.$nextTick(apply);
             } catch (e) { /* ignore */ }
+        },
+        bindScrollPersist() {
+            if (this._scrollPersistBound) return;
+            this._scrollPersistBound = true;
+            let timer = null;
+            window.addEventListener('scroll', () => {
+                if (timer) clearTimeout(timer);
+                timer = setTimeout(() => {
+                    this.persistScroll(this.activeTabPage || this.tab);
+                }, 120);
+            }, { passive: true });
         },
         persistScrollForRow(rowId, tabName) {
             try {
@@ -489,7 +548,7 @@
                     ? (document.getElementById('line-' + rowId) || document.getElementById('make-vendor-' + rowId))
                     : null;
                 const payload = {
-                    y: window.scrollY,
+                    y: this.readPageScroll(),
                     rowId: rowId || '',
                     offset: el ? el.getBoundingClientRect().top : null,
                 };
@@ -556,7 +615,7 @@
             const url = urls[name];
             if (!url) return;
             this.persistScroll(this.activeTabPage || this.tab);
-            window.location.href = url;
+            window.location.assign(url);
         },
         applyStatus(data) {
             if (data.label) this.statusLabel = data.label;
@@ -803,15 +862,21 @@
             try {
                 const url = new URL(window.location.href);
                 if (url.searchParams.get('tab') === name && !url.searchParams.has('_t')) return;
+                const y = this.readPageScroll();
                 url.searchParams.set('tab', name);
                 url.searchParams.delete('_t');
                 window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+                this.writePageScroll(y);
             } catch (e) { /* ignore */ }
         }
     }"
     x-init="
+        try { history.scrollRestoration = 'manual'; } catch (e) { /* ignore */ }
+        bindScrollPersist();
         startPolling();
         restoreScroll();
+        window.addEventListener('pageshow', () => restoreScroll());
+        window.addEventListener('load', () => restoreScroll());
         window.addEventListener('beforeunload', () => persistScroll());
     "
 >
@@ -821,6 +886,7 @@
                 type="button"
                 class="boq-tabs__btn"
                 :class="{ 'is-active': tab === 'boq' }"
+                @pointerdown="persistScroll(activeTabPage)"
                 @click="selectTab('boq')"
                 role="tab"
                 :aria-selected="tab === 'boq'"
@@ -831,6 +897,7 @@
                 type="button"
                 class="boq-tabs__btn"
                 :class="{ 'is-active': tab === 'make_list' }"
+                @pointerdown="persistScroll(activeTabPage)"
                 @click="selectTab('make_list')"
                 role="tab"
                 :aria-selected="tab === 'make_list'"
@@ -841,6 +908,7 @@
                 type="button"
                 class="boq-tabs__btn"
                 :class="{ 'is-active': tab === 'analysis', 'is-disabled': !analysisEnabled }"
+                @pointerdown="persistScroll(activeTabPage)"
                 @click="selectTab('analysis')"
                 role="tab"
                 :aria-selected="tab === 'analysis'"
@@ -853,6 +921,7 @@
                 type="button"
                 class="boq-tabs__btn"
                 :class="{ 'is-active': tab === 'make_vendor', 'is-disabled': !makeVendorEnabled }"
+                @pointerdown="persistScroll(activeTabPage)"
                 @click="selectTab('make_vendor')"
                 role="tab"
                 :aria-selected="tab === 'make_vendor'"
@@ -865,6 +934,7 @@
                 type="button"
                 class="boq-tabs__btn"
                 :class="{ 'is-active': tab === 'labour', 'is-disabled': !labourEnabled }"
+                @pointerdown="persistScroll(activeTabPage)"
                 @click="selectTab('labour')"
                 role="tab"
                 :aria-selected="tab === 'labour'"
@@ -877,6 +947,7 @@
                 type="button"
                 class="boq-tabs__btn"
                 :class="{ 'is-active': tab === 'review', 'is-disabled': !reviewEnabled }"
+                @pointerdown="persistScroll(activeTabPage)"
                 @click="selectTab('review')"
                 role="tab"
                 :aria-selected="tab === 'review'"
@@ -917,11 +988,10 @@
                 {% endif %}
             </div>
 
-            <div class="boq-tab-context__status" x-show="tab !== 'make_list' && tab !== 'make_vendor' && statusLabel" x-cloak>
+            <div class="boq-tab-context__status" x-show="tab !== 'make_list' && tab !== 'make_vendor' && statusLabel && !analysing" x-cloak>
                 <span
                     class="badge"
                     :class="statusBadge"
-                    x-show="!(analysing && tab === 'analysis')"
                     x-text="statusLabel"
                 >{% if not is_extracting and status_display.label %}{{ status_display.label }}{% endif %}</span>
             </div>
@@ -970,18 +1040,11 @@
                 <span x-show="tab === 'review'" x-cloak class="boq-export-actions">
                     <a
                         href="{% url 'boq:export' boq.pk %}?kind=review"
-                        class="btn btn--small btn--boq-export"
-                        x-show="canExport"
-                        x-cloak
-                        title="Client Output format — full product rate breakdown"
-                    >Export Review sheet</a>
-                    <a
-                        href="{% url 'boq:export' boq.pk %}?kind=boq"
                         class="btn btn--small btn--primary"
                         x-show="canExport"
                         x-cloak
-                        title="Original uploaded BOQ with Rate and Amount filled"
-                    >Export BOQ</a>
+                        title="One workbook: Review tab plus original BOQ. Edit Review Amount or Labour to update Result Rate/Amount."
+                    >Export</a>
                 </span>
             </div>
         </div>

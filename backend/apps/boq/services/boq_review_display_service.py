@@ -381,9 +381,17 @@ class BOQReviewDisplayService:
             qty = _field_from_map(fields, _QTY_KEYS)
             unit = _field_from_map(fields, _UNIT_KEYS)
             group = group_by_row.get(row_id, {})
+            # Only copy group qty onto the actual Unit/Qty slot — never the
+            # section header (that put the first child's qty on row 1 of each section).
             if qty in (None, "") and group:
-                qty = group.get("qty")
-                unit = unit or group.get("unit")
+                slot_ids = {
+                    str(slot.get("qty_row_id") or slot.get("row_id") or "").strip()
+                    for slot in (group.get("slots") or group.get("qty_rows") or [])
+                }
+                group_qty_id = str(group.get("qty_row_id") or "").strip()
+                if row_id in slot_ids or (group_qty_id and row_id == group_qty_id):
+                    qty = group.get("qty")
+                    unit = unit or group.get("unit")
 
             line_description = group.get("description") or description
             full_description = group.get("full_description") or description

@@ -22,7 +22,7 @@ logger = logging.getLogger("boq_ai")
 _BATCH_SIZE = 20
 
 # Bump when mapping rules change so ensure_mappings remaps stored make lists.
-_MAPPING_VERSION = 4
+_MAPPING_VERSION = 5
 
 # Tokens too generic to pick a sub-category by overlap alone (e.g. "Alarm Valve"
 # must not become BALL VALVE just because both share "valve").

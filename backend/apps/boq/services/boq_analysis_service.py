@@ -377,10 +377,9 @@ class BOQAnalysisService:
                 previous_status = boq.status
                 stored_db_id = int(existing.get("database_version_id") or 0) or None
                 target = dict(target)
-                products = [
-                    _normalize_product_fields(product)
-                    for product in products
-                ]
+                # Do not normalize sibling products — rematch must not rewrite
+                # their Class or stored match %. Keep expert Class (including 0).
+                products = [dict(product) for product in products]
                 work_product_index = product_index
                 if work_product_index is not None:
                     want = int(work_product_index)
@@ -394,9 +393,14 @@ class BOQAnalysisService:
                     )
                     if selected is None:
                         raise ValidationError(f"Unknown product index: {product_index}")
-                    stub_products = [selected]
+                    stub_products = [
+                        _normalize_product_fields(selected, preserve_class=True)
+                    ]
                 else:
-                    stub_products = products
+                    stub_products = [
+                        _normalize_product_fields(product, preserve_class=True)
+                        for product in products
+                    ]
                     want = None
                 # Drop out of the lock before OpenAI/Chroma work.
                 rematch_plan = {
@@ -461,29 +465,42 @@ class BOQAnalysisService:
                 )
                 updated_product.pop("_boq_row", None)
                 updated_product.pop("_prior_match", None)
-                merged_products = []
-                for product in products:
-                    if int(product.get("product_index", -1)) == want:
-                        merged_products.append(updated_product)
-                    else:
-                        merged_products.append(product)
-                rematched_rows = [{**target, "products": merged_products}]
+                rematched_rows = None
+                rematched_product = updated_product
             else:
                 stub = {**target, "products": stub_products}
                 rematched = mapper.rematch_rows([stub])
                 rematched_rows = rematched
+                rematched_product = None
 
-            rematched_rows = rehydrate_analysis_rows_quantity(
-                boq_obj.boq_data or {},
-                rematched_rows,
-            )
+            if rematched_rows is not None:
+                rematched_rows = rehydrate_analysis_rows_quantity(
+                    boq_obj.boq_data or {},
+                    rematched_rows,
+                )
 
             persist_status = self._status_after_row_work(previous_status)
             with transaction.atomic():
                 boq = BOQ.objects.select_for_update().get(pk=self.boq_id)
                 latest = dict(boq.analysis_data or {})
                 latest_rows = list(latest.get("rows") or rows)
-                updated_rows = _replace_rows(latest_rows, rematched_rows)
+                if rematched_product is not None and want is not None:
+                    # Replace only the rematched product; leave sibling % / fields intact.
+                    updated_rows = []
+                    for row in latest_rows:
+                        if str(row.get("row_id")) != str(row_id):
+                            updated_rows.append(row)
+                            continue
+                        latest_products = list(row.get("products") or [])
+                        merged = []
+                        for product in latest_products:
+                            if int(product.get("product_index", -1)) == want:
+                                merged.append(rematched_product)
+                            else:
+                                merged.append(product)
+                        updated_rows.append({**row, "products": merged})
+                else:
+                    updated_rows = _replace_rows(latest_rows, rematched_rows or [])
                 extraction_meta = dict(latest.get("extraction") or existing.get("extraction") or {})
                 extraction_meta["last_row_rematch"] = str(row_id)
                 extraction_meta["last_product_rematch"] = product_index

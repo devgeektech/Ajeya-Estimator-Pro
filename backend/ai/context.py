@@ -12,12 +12,6 @@ from utils.attribute_parser import learn_aliases_from_attributes, parse_attribut
 
 logger = logging.getLogger("boq_ai.ai.context")
 
-# Attribute keys that belong on Rate_Master Class, not Attribute JSON.
-_CLASS_OWNED_ATTR_KEYS = frozenset(
-    {"material", "body_material", "construction", "material_of_construction", "moc"}
-)
-
-
 def _normalize_label(text: str) -> str:
     cleaned = re.sub(r"[^0-9a-zA-Z]+", " ", (text or "").lower())
     return re.sub(r"\s+", " ", cleaned).strip()
@@ -37,6 +31,7 @@ def load_rate_master_taxonomy(
               "PIPE": {"MS": ["C"], "GI": ["C"], ...},
               ...
           },
+          "classes": ["0", "C", "CI", ...],
         }
     """
     version = None
@@ -52,6 +47,7 @@ def load_rate_master_taxonomy(
             "categories": [],
             "sub_categories_by_category": {},
             "classes_by_category_sub_category": {},
+            "classes": [],
         }
 
     rows = Rate_Master_Output.objects.filter(database_version=version).values_list(
@@ -69,8 +65,9 @@ def load_rate_master_taxonomy(
         sub_text = str(sub_category or "").strip()
         if sub_text:
             by_category[category_text].add(sub_text)
-        class_text = str(class_value or "").strip()
-        if sub_text and class_text:
+        # Class ``0`` is a real Rate_Master token (valves) — do not drop it.
+        class_text = "" if class_value is None else str(class_value).strip()
+        if sub_text and class_text != "":
             classes_by_cat_sub.setdefault(category_text, {}).setdefault(sub_text, set())
             classes_by_cat_sub[category_text][sub_text].add(class_text)
 
@@ -85,10 +82,15 @@ def load_rate_master_taxonomy(
         }
         for category in sorted(classes_by_cat_sub)
     }
+    distinct_classes: set[str] = set()
+    for by_sub in classes_by_category_sub_category.values():
+        for values in by_sub.values():
+            distinct_classes.update(values)
     return {
         "categories": categories,
         "sub_categories_by_category": sub_categories_by_category,
         "classes_by_category_sub_category": classes_by_category_sub_category,
+        "classes": sorted(distinct_classes),
     }
 
 
@@ -188,6 +190,28 @@ def _classes_for_taxonomy(
     return ordered
 
 
+def is_catalog_class(
+    value: Any,
+    *,
+    category: Any = None,
+    sub_category: Any = None,
+    taxonomy: dict[str, Any] | None = None,
+) -> bool:
+    """True when value is a listed Rate_Master Class for this category / sub."""
+    text = "" if value is None else str(value).strip()
+    if not text:
+        return False
+    taxonomy = taxonomy or load_rate_master_taxonomy()
+    candidates = _classes_for_taxonomy(
+        category=str(category or "").strip() or None,
+        sub_category=str(sub_category or "").strip() or None,
+        classes_by_category_sub_category=dict(
+            taxonomy.get("classes_by_category_sub_category") or {}
+        ),
+    )
+    return _class_in_catalog(text, candidates) is not None
+
+
 def resolve_class_label(
     hint: str,
     *,
@@ -223,6 +247,16 @@ def resolve_class_label(
     return None
 
 
+def _class_in_catalog(value: str, candidates: list[str]) -> str | None:
+    want = _normalize_label(value)
+    if not want:
+        return None
+    for item in candidates:
+        if _normalize_label(item) == want:
+            return item
+    return None
+
+
 def _correct_misfiled_class(
     *,
     class_value: str,
@@ -231,33 +265,22 @@ def _correct_misfiled_class(
     classes_by_category_sub_category: dict[str, dict[str, list[str]]],
 ) -> str | None:
     """
-    Fix class when AI copied sub_category material into Class (e.g. PIPE/MS → MS).
+    Snap Class onto the Rate_Master list for this category / sub-category.
 
-    When the only Rate_Master Class for that cat/sub is a different token (C),
-    snap to that sole class. Otherwise clear the mis-filed value.
+    Material tokens (DI, CI, MS) are not Class when the catalog uses ``0``.
+    A single listed Class — including ``0`` — wins over a guessed material.
     """
-    class_norm = _normalize_label(class_value)
-    sub_norm = _normalize_label(sub_category or "")
-    if not class_norm or not sub_norm or class_norm != sub_norm:
-        return class_value
-
     candidates = _classes_for_taxonomy(
         category=category,
         sub_category=sub_category,
         classes_by_category_sub_category=classes_by_category_sub_category,
     )
     if not candidates:
-        return None
-    if any(_normalize_label(item) == class_norm for item in candidates):
-        # Class really is the same token as sub_category in this catalog.
-        for item in candidates:
-            if _normalize_label(item) == class_norm:
-                return item
-        return class_value
+        return class_value or None
 
-    meaningful = [item for item in candidates if _normalize_label(item) not in {"", "0"}]
-    if len(meaningful) == 1:
-        return meaningful[0]
+    listed = _class_in_catalog(class_value, candidates)
+    if listed is not None:
+        return listed
     if len(candidates) == 1:
         return candidates[0]
     return None
@@ -293,9 +316,10 @@ def snap_product_taxonomy(
 
     sub_category = str(item.get("sub_category") or "").strip() or None
     raw_class = item.get("class")
-    if raw_class not in (None, ""):
+    raw_text = "" if raw_class is None else str(raw_class).strip()
+    if raw_text:
         resolved_class = resolve_class_label(
-            str(raw_class),
+            raw_text,
             category=category,
             sub_category=sub_category,
             classes_by_category_sub_category=classes_by,
@@ -303,13 +327,20 @@ def snap_product_taxonomy(
         if resolved_class:
             item["class"] = resolved_class
         else:
-            corrected = _correct_misfiled_class(
-                class_value=str(raw_class),
+            item["class"] = _correct_misfiled_class(
+                class_value=raw_text,
                 category=category,
                 sub_category=sub_category,
                 classes_by_category_sub_category=classes_by,
             )
-            item["class"] = corrected
+    else:
+        catalog_classes = _classes_for_taxonomy(
+            category=category,
+            sub_category=sub_category,
+            classes_by_category_sub_category=classes_by,
+        )
+        if len(catalog_classes) == 1:
+            item["class"] = catalog_classes[0]
     return item
 
 
@@ -357,7 +388,7 @@ def fill_product_core_fields_from_rate(
     item = dict(product)
 
     def _as_text(raw: Any) -> str:
-        if raw in (None, ""):
+        if raw is None or raw == "":
             return ""
         if hasattr(raw, "normalize"):
             try:
@@ -417,6 +448,7 @@ def build_database_context() -> str:
             "categories": [],
             "sub_categories_by_category": {},
             "classes_by_category_sub_category": {},
+            "classes": [],
             "attribute_keys": [],
         }
         payload_json = json.dumps(empty, ensure_ascii=False)
@@ -434,12 +466,8 @@ def build_database_context() -> str:
         learn_aliases_from_attributes(parsed, aliases)
         attribute_keys.update(parsed.keys())
 
-    # material / construction belong on Class — do not offer them as Attribute keys.
-    filtered_keys = sorted(
-        key
-        for key in attribute_keys
-        if str(key).strip().lower() not in _CLASS_OWNED_ATTR_KEYS
-    )
+    # Keep material on Attribute (valves use Class=0 + MATERIAL=DI).
+    filtered_keys = sorted(attribute_keys)
 
     payload = {
         "categories": taxonomy.get("categories") or [],
@@ -448,6 +476,7 @@ def build_database_context() -> str:
             "classes_by_category_sub_category"
         )
         or {},
+        "classes": list(taxonomy.get("classes") or []),
         "attribute_keys": filtered_keys,
     }
     payload_json = json.dumps(payload, ensure_ascii=False)

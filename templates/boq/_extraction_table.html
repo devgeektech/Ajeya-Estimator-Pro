@@ -32,6 +32,41 @@ document.addEventListener('alpine:init', () => {
         return data;
     };
 
+    window.captureExtractionScroll = function captureExtractionScroll(rowId) {
+        const el = rowId ? document.getElementById('line-' + rowId) : null;
+        return {
+            y: Number(window.scrollY) || 0,
+            rowId: rowId || '',
+            offset: el ? el.getBoundingClientRect().top : null,
+        };
+    };
+
+    window.restoreExtractionScroll = function restoreExtractionScroll(state) {
+        if (!state) {
+            return;
+        }
+        const apply = () => {
+            const rowId = state.rowId ? String(state.rowId) : '';
+            const offset = Number(state.offset);
+            if (rowId && Number.isFinite(offset)) {
+                const el = document.getElementById('line-' + rowId);
+                if (el) {
+                    const top = el.getBoundingClientRect().top + window.scrollY;
+                    window.scrollTo(0, Math.max(0, top - offset));
+                    return;
+                }
+            }
+            const y = Number(state.y);
+            if (Number.isFinite(y) && y >= 0) {
+                window.scrollTo(0, y);
+            }
+        };
+        apply();
+        requestAnimationFrame(apply);
+        setTimeout(apply, 50);
+        setTimeout(apply, 200);
+    };
+
     window.replaceExtractionLine = function replaceExtractionLine(rowId, lineHtml, options) {
         if (!rowId || !lineHtml) {
             return false;
@@ -40,7 +75,7 @@ document.addEventListener('alpine:init', () => {
         if (!current) {
             return false;
         }
-        const scrollY = window.scrollY;
+        const scrollState = window.captureExtractionScroll(rowId);
         const preferredProduct = options && options.activeProduct != null
             ? Number(options.activeProduct)
             : null;
@@ -68,8 +103,7 @@ document.addEventListener('alpine:init', () => {
                 } catch (e) { /* ignore */ }
             }
         }
-        // Keep viewport stable — avoid scroll correction that causes page blink/shift.
-        window.scrollTo(0, scrollY);
+        window.restoreExtractionScroll(scrollState);
         return true;
     };
 
@@ -122,7 +156,7 @@ document.addEventListener('alpine:init', () => {
         if (!line) {
             return false;
         }
-        const scrollY = window.scrollY;
+        const scrollState = window.captureExtractionScroll(rowId);
         const index = Number(productIndex);
         const holder = document.createElement('div');
         holder.innerHTML = String(lineHtml).trim();
@@ -168,7 +202,7 @@ document.addEventListener('alpine:init', () => {
                 } catch (e) { /* ignore */ }
             }
         }
-        window.scrollTo(0, scrollY);
+        window.restoreExtractionScroll(scrollState);
         return true;
     };
 
@@ -539,7 +573,7 @@ document.addEventListener('alpine:init', () => {
             this.reanalysing = true;
             this.saveError = '';
             const activeIndex = productIndex != null ? Number(productIndex) : Number(this.productIndex);
-            const scrollY = window.scrollY;
+            const scrollState = window.captureExtractionScroll(this.rowId);
             try {
                 // Save UI inputs for this product, then rematch product-wise.
                 await this.persistProduct({ silent: true });
@@ -549,15 +583,20 @@ document.addEventListener('alpine:init', () => {
                 });
                 const rowId = data.row_id || this.rowId;
                 const preferred = data.product_index != null ? Number(data.product_index) : activeIndex;
-                const replaced = window.replaceExtractionLine(rowId, data.line_html, {
-                    activeProduct: Number.isFinite(preferred) ? preferred : 0,
-                });
+                const replaced = window.replaceExtractionProductPanel(
+                    rowId,
+                    Number.isFinite(preferred) ? preferred : activeIndex,
+                    data.line_html,
+                    { preserveActiveTab: true }
+                );
                 if (!replaced) {
                     try {
+                        const latest = window.captureExtractionScroll(rowId);
                         sessionStorage.setItem(
                             'boq-detail-scroll-{{ boq.pk }}-analysis',
                             JSON.stringify({
-                                y: scrollY,
+                                ...scrollState,
+                                ...latest,
                                 rowId: rowId,
                                 productIndex: preferred,
                             })
@@ -566,7 +605,7 @@ document.addEventListener('alpine:init', () => {
                     window.location.assign('{% url "boq:detail" boq.pk %}?tab=analysis&_t=' + Date.now());
                     return;
                 }
-                window.scrollTo(0, scrollY);
+                window.restoreExtractionScroll(scrollState);
             } catch (error) {
                 this.reanalysing = false;
                 this.saveError = error.message || 'Re-analyse failed.';

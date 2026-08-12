@@ -5,6 +5,85 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
+## 2026-08-11 — Electrical panel must not match rosette at 100%
+
+- Section 4.6 extracted two identical panel products and confirmed
+  ACCESSORIES / ROSETTEE PLATE at 100%. Rate_Master has no control-panel
+  row; scoring after copying catalog fields minted a false 100%.
+- Match % now uses extract/expert fields plus a description-vs-sub-category
+  gate so unrelated types stay provisional. Duplicate products on the same
+  slot are collapsed. Make-list no longer maps bare ``panel`` to ACCESSORIES.
+
+## 2026-08-11 — Analysis scroll survives tab switch
+
+- Tab switch saves the visible Analysis section (not only ``window.scrollY``)
+  and restores it after layout. Leaving via BOQ / Make List no longer opens
+  Analysis at the top.
+
+## 2026-08-11 — Show 0 / null / NA / NB on candidates
+
+- Candidate identity slots always include ``0``, ``null``, ``NA``, and ``NB``
+  instead of dropping them. Analysis fields keep those tokens as stored.
+
+## 2026-08-11 — Candidate label: Rate ID / Product ID / …
+
+- Top database candidates show one line: Rate ID / Product ID / Category /
+  Sub-category / Class / Size / Unit / Capacity, then attributes after a space.
+  The duplicate slash + dotted tech-key line is removed.
+
+## 2026-08-11 — Re-analyse keeps scroll position
+
+- Product Re-analyse swaps only that product panel and restores the section’s
+  viewport offset so the page does not jump on the first click.
+
+## 2026-08-11 — Valve Class 0 from Rate_Master
+
+- Extract DB context now sends deduped ``classes`` plus
+  ``classes_by_category_sub_category`` (includes Class ``0``).
+- Class ``0`` is no longer wiped as a placeholder or replaced with material
+  (DI). Sluice / butterfly Class snaps to the catalog value; material stays on
+  Attribute.
+
+## 2026-08-11 — Hide duplicate Analysing badge
+
+- While Analyse is running, the pale status badge no longer repeats
+  “Analysing…”. The action button is the only label.
+
+## 2026-08-11 — Review Discount/Base edits recalc Amount
+
+- Review Net → Final material → TOTAL MATERIAL/LABOUR → Amount are Excel
+  formulas. Changing Discount, Base, Labour, or Qty updates Review Amount and
+  the linked BOQ Rate/Amount cells.
+
+## 2026-08-11 — Linked Review + BOQ export workbook
+
+- Export is one ``{upload}_result.xlsx`` with **Review** and original **BOQ** tabs.
+- Result **Amount** formulas point at Review Amount; Result **Rate** is
+  Final_Material_Amount + Labour (summed when several products share a slot).
+- Rate/Amount columns detected across client header formats; qty/rate/amount
+  written only on Unit/Qty rows.
+- Muted green (amount found), orange (zero / Rate Only), red (missing).
+- Section header rows no longer show the first child's quantity.
+
+## 2026-08-11 — Rematch keeps expert inputs; isolate product %
+
+- Class ``0`` is a real expert/Rate_Master value — no longer wiped or replaced
+  with material on save, rematch, or Analysis render.
+- Product Re-analyse keeps the filled inputs used for search; fetched DB details
+  remain on the match banner and candidate list.
+- Rematch updates only that product. Sibling products and their match % are
+  unchanged (no section-wide normalize or display re-score).
+
+## 2026-08-10 — Honest candidate % + Multi-product flag
+
+- Structured match uses fixed core-field weights so size+unit alone cannot score
+  100% (e.g. pressure gauge vs MS pipe now ~34% vs ~100%).
+- Analysis display refreshes candidate % from current product fields; mapping
+  re-scores after Rate_Master fill.
+- **Multi-product review** only when product count ≠ Unit/Qty slots, or a hollow
+  slot-fallback still has no category — matched 3-for-3 dia sections are not
+  flagged.
+
 ## 2026-08-10 — Backend synonym / matching cleanup
 
 - Make-list description/sub-category hints live only in `utils/product_synonyms.py`

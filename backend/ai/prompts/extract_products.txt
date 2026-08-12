@@ -13,7 +13,12 @@ Section / slots:
   purchasable item on the same slot; bind extras to that slot's ``qty_row_id``.
 - Spec-only lines (Speed, Head, Capacity, Pressure, notes, Incomings) are attributes,
   not products — unless the name is a real device (e.g. "Pressure switch") with a slot.
-- Lettered sizes (``a)``/``b)``) with qty are separate products. One Set/1 panel = one product.
+- Lettered sizes (``a)``/``b)``) with qty are separate products. One Set / 1 panel /
+  electrical control panel = one product. Do not emit two copies of the same product
+  on one slot.
+- Never map electrical / control / MCC / starter panels onto ACCESSORIES /
+  ROSETTEE PLATE. If no listed category/sub fits, keep the BOQ wording and leave
+  matching unmatched/provisional.
 - Products only — no labour/installation activities.
 - ``skip_matching``=true only for empty/header sections with no purchasable product.
 
@@ -30,10 +35,14 @@ Per product (required when a product exists):
 
 Taxonomy (from DATABASE_CONTEXT lists — exact listed labels when they fit):
 - ``category`` + ``sub_category`` required when a product exists.
-- ``class`` from ``classes_by_category_sub_category[category][sub_category]`` when fit;
-  else null. Never invent ``0``, ``-``, ``N/A``. For PIPE, MS/GI are sub_category;
-  Class is usually C — do not put MS/GI in class.
-- Material abbreviations: mild steel→MS (PIPE sub), Class C→C, brass→Brass when listed.
+- ``class`` MUST be an exact label from
+  ``classes_by_category_sub_category[category][sub_category]`` (also listed
+  deduped in ``classes``). ``0`` is a real Rate_Master Class for valves — use it
+  when listed. Never invent ``-`` / ``N/A``. Never put body material (DI, CI,
+  ductile iron, MS) in ``class`` unless that token is listed for that pair.
+- For PIPE, MS/GI stay in sub_category; Class is usually C.
+- Body material goes in ``attributes.material`` when the listed Class is ``0``
+  or another non-material token.
 
 Fields:
 - ``size``: nominal size from the bound slot (``200`` from ``200mm dia``); else null.
@@ -60,12 +69,12 @@ Respond with:
           "description_hint": "200mm dia double flanged sluice valve PN16",
           "category": "VALVE",
           "sub_category": "SLUICE VALVE",
-          "class": null,
+          "class": "0",
           "size": "200",
           "capacity": "PN16",
           "unit": "mm",
           "make_hint": null,
-          "attributes": {"connection_type": "flanged", "seat_type": "bronze/gun metal", "is": "14846"},
+          "attributes": {"connection_type": "flanged", "material": "ductile iron", "seat_type": "bronze/gun metal", "is": "14846"},
           "quantity": 0,
           "quantity_unit": "Each",
           "qty_row_id": "r17",
@@ -78,12 +87,12 @@ Respond with:
           "description_hint": "150mm dia double flanged sluice valve PN16",
           "category": "VALVE",
           "sub_category": "SLUICE VALVE",
-          "class": null,
+          "class": "0",
           "size": "150",
           "capacity": "PN16",
           "unit": "mm",
           "make_hint": null,
-          "attributes": {"connection_type": "flanged", "seat_type": "bronze/gun metal", "is": "14846"},
+          "attributes": {"connection_type": "flanged", "material": "ductile iron", "seat_type": "bronze/gun metal", "is": "14846"},
           "quantity": 9,
           "quantity_unit": "Each",
           "qty_row_id": "r18",

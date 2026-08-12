@@ -35,17 +35,22 @@ Rematch mode (``extracted.rematch`` true):
 Rules:
 - Return valid JSON only.
 - Choose at most ONE candidate. Prefer null over a weak guess.
+- If ``description_hint`` names a different product than the candidate
+  sub-category (e.g. electrical control panel vs ROSETTEE PLATE), set
+  ``selected_id`` null. Do not confirm an unrelated ACCESSORIES row.
 - **Hard size rule:** when extracted size is filled, do not select a candidate whose
   nominal size digits differ (e.g. 100 vs 150). Prefer null if none match size.
 - Prefer matching category, sub_category, size, then class/capacity/attributes.
   PIPE MS/GI are sub_category, not Class, unless the candidate Class is that token.
+  Candidate Class ``0`` is a real valve Class — do not treat it as missing or
+  replace it with DI/CI/material.
 - Weight expert-filled attributes heavily on rematch.
 - When ``boq_row`` is present, use its description as supporting context with the
   edited product fields — do not ignore expert UI values.
 - Ignore make/vendor for product choice.
 - Map extracted attribute keys onto schema keys (synonyms OK: port_type→type,
-  working_pressure/pn→pressure_rating, standard/is_no→is). Do not map material onto
-  Attribute when it belongs on Class. Unmapped leftovers go in ``unmapped_attributes``
+  working_pressure/pn→pressure_rating, standard/is_no→is). Map material onto
+  Attribute when the candidate Class is ``0`` or not a material token. Unmapped leftovers go in ``unmapped_attributes``
   (app discards them). Never invent schema values from catalog defaults.
 - ``match_confidence`` 0–100 for the selected fit (0 when selected_id is null; <30 if
   uncertain). Do not inflate without stronger evidence. Do not deflate for material

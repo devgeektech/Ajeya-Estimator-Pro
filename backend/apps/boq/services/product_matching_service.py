@@ -38,8 +38,54 @@ _TEXT_WEIGHTS = {
 _CHROMA_WEIGHT = 0.25
 _STRUCTURED_WEIGHT = 0.75
 _SIZE_MISMATCH_PENALTY = 45.0
-_PLACEHOLDER_CLASS = frozenset({"0", "00", "-", "--", "n/a", "na", "none", "null", "nil"})
+# Class ``0`` is a real Rate_Master token (valves). Only wipe non-class junk.
+_PLACEHOLDER_CLASS = frozenset({"-", "--", "n/a", "na", "none", "null", "nil"})
 _PN_CAPACITY = re.compile(r"(?i)\bPN\s*[- ]?\s*(\d+)\b")
+# Words that do not identify a catalog product type.
+_TYPE_STOPWORDS = frozenset(
+    {
+        "the",
+        "and",
+        "for",
+        "with",
+        "from",
+        "that",
+        "this",
+        "into",
+        "onto",
+        "all",
+        "any",
+        "set",
+        "sets",
+        "item",
+        "items",
+        "type",
+        "made",
+        "out",
+        "dia",
+        "mm",
+        "nb",
+        "inch",
+        "inches",
+        "nos",
+        "each",
+        "complete",
+        "required",
+        "above",
+        "below",
+        "including",
+        "approved",
+        "heavy",
+        "duty",
+        "as",
+        "per",
+        "its",
+        "etc",
+        "size",
+        "unit",
+        "class",
+    }
+)
 
 
 def _normalize_text(value: Any) -> str:
@@ -106,6 +152,34 @@ def _size_match_score(left: Any, right: Any) -> float:
     return 0.0
 
 
+def _significant_type_tokens(value: Any) -> set[str]:
+    """Product-type nouns from a hint or catalog label, plus synonym expansions."""
+    tokens: set[str] = set()
+    texts = [str(value or "")]
+    texts.extend(expand_query_terms(value))
+    for text in texts:
+        for raw in re.findall(r"[a-z0-9]+", _normalize_text(text)):
+            if len(raw) < 4 or raw in _TYPE_STOPWORDS:
+                continue
+            tokens.add(raw)
+    return tokens
+
+
+def product_type_conflicts(extracted: dict[str, Any], rate: Rate_Master_Output) -> bool:
+    """True when BOQ wording names a different product than the Rate_Master row.
+
+    Stops ACCESSORIES / ROSETTEE PLATE confirming at high % against an
+    electrical control panel just because category or overwritten fields match.
+    """
+    hint_tokens = _significant_type_tokens(extracted.get("description_hint"))
+    if not hint_tokens:
+        return False
+    catalog_tokens = _significant_type_tokens(rate.Sub_Category)
+    if not catalog_tokens:
+        return False
+    return hint_tokens.isdisjoint(catalog_tokens)
+
+
 def _capacity_match_score(left: Any, right: Any) -> float:
     """Soft-match PN ratings and exact capacity text; treat catalog ``0`` as blank."""
     left_text = _normalize_text(left)
@@ -129,11 +203,25 @@ def _class_for_score(value: Any) -> Any:
     return None if _is_placeholder_class(value) else value
 
 
+def _capacity_for_score(value: Any) -> Any:
+    """Ignore blank / sentinel Capacity ``0`` so it does not dilute pipe matches."""
+    if not _is_filled(value):
+        return None
+    if _normalize_text(value) in {"0", "0.0"}:
+        return None
+    return value
+
+
 def structured_match_score(
     extracted: dict[str, Any],
     rate: Rate_Master_Output,
 ) -> tuple[float, dict[str, Any]]:
-    """Return 0-100 structured score using product fields only (never make/vendor)."""
+    """Return 0-100 structured score using product fields only (never make/vendor).
+
+    Core field weights stay in the denominator even when the extract leaves a
+    field blank. Otherwise size+unit alone normalize to 100% for every same-size
+    neighbor (including unrelated categories).
+    """
     extracted_attrs = {
         str(key): str(value)
         for key, value in (extracted.get("attributes") or {}).items()
@@ -157,7 +245,12 @@ def structured_match_score(
         ),
         ("size", extracted.get("size"), rate.Size, _size_match_score),
         ("unit", extracted.get("unit"), rate.Unit, _text_match_score),
-        ("capacity", extracted.get("capacity"), rate.Capacity, _capacity_match_score),
+        (
+            "capacity",
+            _capacity_for_score(extracted.get("capacity")),
+            _capacity_for_score(rate.Capacity),
+            _capacity_match_score,
+        ),
     ]
 
     breakdown: dict[str, Any] = {}
@@ -165,13 +258,17 @@ def structured_match_score(
     weight_total = 0.0
 
     for name, left, right, scorer in field_checks:
-        if not _is_filled(left):
-            continue
         weight = _TEXT_WEIGHTS[name]
+        # Class/capacity: omit from the denom when neither side has a real value.
+        if name in {"class", "capacity"} and not _is_filled(left) and not _is_filled(right):
+            continue
+        weight_total += weight
+        if not _is_filled(left):
+            breakdown[name] = 0.0
+            continue
         points = scorer(left, right) * weight
         breakdown[name] = points
         weighted_score += points
-        weight_total += weight
 
     if extracted_attrs:
         attr_ratio, attr_scores = attribute_overlap_score(extracted_attrs, rate_attrs)
@@ -192,6 +289,13 @@ def structured_match_score(
     ):
         total = max(0.0, total - _SIZE_MISMATCH_PENALTY)
         breakdown["size_mismatch_penalty"] = _SIZE_MISMATCH_PENALTY
+
+    # BOQ description vs catalog sub-category: never auto-confirm a different product.
+    if product_type_conflicts(extracted, rate):
+        cap = max(0.0, float(MATCH_CONFIDENCE_THRESHOLD) - 1.0)
+        if total > cap:
+            total = cap
+        breakdown["description_type_mismatch"] = True
 
     return total, breakdown
 

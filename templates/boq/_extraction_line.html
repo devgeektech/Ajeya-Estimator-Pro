@@ -268,7 +268,6 @@
                                 @click="window.selectExtractionCandidate($el, '{% url 'boq:extraction_edit' boq.pk %}', '{{ line.row_id }}', {{ product.product_index }}, {{ candidate.id }})"
                             >
                                 <span>{{ candidate.summary }}</span>
-                                {% if candidate.tech_key %}<span class="extraction-db-candidates__sep"> . </span><span class="extraction-db-candidates__tech">{{ candidate.tech_key }}</span>{% endif %}
                                 {% if candidate.confidence is not None %}
                                 <span class="extraction-db-candidates__pct">{{ candidate.confidence|floatformat:0 }}%</span>
                                 {% endif %}
@@ -278,7 +277,6 @@
                             </button>
                             {% else %}
                             <span>{{ candidate.summary }}</span>
-                            {% if candidate.tech_key %}<span class="extraction-db-candidates__sep"> . </span><span class="extraction-db-candidates__tech">{{ candidate.tech_key }}</span>{% endif %}
                             {% if candidate.confidence is not None %}
                             <span class="extraction-db-candidates__pct">{{ candidate.confidence|floatformat:0 }}%</span>
                             {% endif %}
@@ -408,7 +406,7 @@
                     {% for field in product.fields %}
                     <div class="extraction-readonly-item {% if field.key == 'description_hint' %}extraction-readonly-item--full{% endif %}{% if field.missing %} extraction-field--missing{% endif %}">
                         <dt>{{ field.label }}</dt>
-                        <dd class="extraction-readonly-item__wrap">{{ field.value|default:"—" }}</dd>
+                        <dd class="extraction-readonly-item__wrap">{{ field.value|default_if_none:"—" }}</dd>
                     </div>
                     {% endfor %}
                 </dl>

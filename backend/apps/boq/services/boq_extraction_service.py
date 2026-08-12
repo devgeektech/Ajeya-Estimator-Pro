@@ -6,7 +6,12 @@ import logging
 import re
 from typing import Any
 
-from ai.context import build_database_context, load_rate_master_taxonomy, snap_product_taxonomy
+from ai.context import (
+    build_database_context,
+    is_catalog_class,
+    load_rate_master_taxonomy,
+    snap_product_taxonomy,
+)
 from ai.service import AIService
 from common.exceptions import AIServiceError
 from utils.attribute_parser import coerce_attributes_dict
@@ -29,6 +34,7 @@ _MINIMUM_SLOT_RETRY_INSTRUCTION = """
 CORRECTION — slot coverage required:
 - Return ≥ slot_count products; every slots[].qty_row_id must appear on a product.
 - Per-product size/description_hint from that slot only; shared PN/seat/IS on all.
+- Do not return two copies of the same product on one slot.
 - Return the full corrected rows JSON.
 """
 
@@ -38,7 +44,7 @@ _SIZE_FROM_TEXT = re.compile(
 )
 _PN_RATING_FROM_TEXT = re.compile(r"(?i)\bPN\s*[- ]?\s*(\d+)\b")
 _PLACEHOLDER_CLASS_VALUES = frozenset(
-    {"0", "00", "-", "--", "n/a", "na", "none", "null", "nil"}
+    {"-", "--", "n/a", "na", "none", "null", "nil"}
 )
 # Section-level attributes copied onto every slot product when missing.
 _SHARED_SECTION_ATTR_KEYS = frozenset(
@@ -297,7 +303,7 @@ def _apply_row_qty_unit(
         used_slot_ids: set[str] = set()
         filled: list[dict[str, Any]] = []
         for index, product in enumerate(products):
-            item = _normalize_product_fields(product)
+            item = _normalize_product_fields(product, preserve_class=True)
             qty_row = None
             source_id = str(item.get("source_row_id") or item.get("qty_row_id") or "")
             if source_id and source_id in by_qty_row:
@@ -336,7 +342,7 @@ def _apply_row_qty_unit(
         return [
             {
                 **_apply_one_qty(
-                    _normalize_product_fields(product),
+                    _normalize_product_fields(product, preserve_class=True),
                     qty=qty,
                     unit=unit,
                     qty_status=qty_status,
@@ -353,7 +359,7 @@ def _apply_row_qty_unit(
 
     return [
         _apply_one_qty(
-            _normalize_product_fields(product),
+            _normalize_product_fields(product, preserve_class=True),
             qty=qty,
             unit=unit,
             qty_status=qty_status,
@@ -361,6 +367,63 @@ def _apply_row_qty_unit(
         )
         for product in products
     ]
+
+
+def _product_slot_identity(product: dict[str, Any]) -> tuple[str, str, str, str]:
+    """Same BOQ product on the same slot — used to drop duplicate extracts."""
+    hint = re.sub(
+        r"\s+",
+        " ",
+        str(product.get("description_hint") or "").strip().lower(),
+    )
+    return (
+        hint,
+        str(product.get("category") or "").strip().lower(),
+        str(product.get("sub_category") or "").strip().lower(),
+        str(product.get("size") or "").strip().lower(),
+    )
+
+
+def _qty_rank(product: dict[str, Any]) -> float:
+    """Prefer the copy that kept the BOQ slot quantity."""
+    raw = product.get("quantity")
+    if raw in (None, ""):
+        return -1.0
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        text = str(raw).strip().lower()
+        if text in {"rate only", "ro"}:
+            return 0.0
+        return -1.0
+
+
+def _collapse_duplicate_slot_products(
+    products: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Keep one product when AI emitted the same item twice on one Unit/Qty slot."""
+    if len(products) <= 1:
+        return products
+    kept: list[dict[str, Any]] = []
+    seen: dict[tuple[str, tuple[str, str, str, str]], int] = {}
+    for product in products:
+        item = dict(product)
+        slot_id = str(item.get("qty_row_id") or item.get("source_row_id") or "")
+        identity = _product_slot_identity(item)
+        if not identity[0]:
+            kept.append(item)
+            continue
+        key = (slot_id, identity)
+        prior_index = seen.get(key)
+        if prior_index is None:
+            seen[key] = len(kept)
+            kept.append(item)
+            continue
+        if _qty_rank(item) > _qty_rank(kept[prior_index]):
+            kept[prior_index] = item
+    for index, item in enumerate(kept):
+        item["product_index"] = index
+    return kept
 
 
 def _filter_spec_products(
@@ -378,8 +441,8 @@ def _filter_spec_products(
         for key in ("category", "sub_category", "class", "size", "unit", "capacity", "make_hint"):
             if key in product and product.get(key) is not None and str(product.get(key)).strip() == "":
                 product[key] = None
-        product = _normalize_product_fields(product)
-        cleaned.append(snap_product_taxonomy(product, taxonomy))
+        product = snap_product_taxonomy(product, taxonomy)
+        cleaned.append(_normalize_product_fields(product, preserve_class=True))
     return cleaned
 
 
@@ -531,8 +594,6 @@ def _apply_slot_evidence_fields(
     filled: list[dict[str, Any]] = []
     for index, product in enumerate(products):
         item = dict(product)
-        if _is_placeholder_class(item.get("class")):
-            item["class"] = None
 
         qty_row_id = str(item.get("qty_row_id") or item.get("source_row_id") or "").strip()
         slot = by_qty_row.get(qty_row_id) if qty_row_id else None
@@ -576,7 +637,7 @@ def _apply_slot_evidence_fields(
             ):
                 item["capacity"] = section_pn
 
-        filled.append(_normalize_product_fields(item))
+        filled.append(_normalize_product_fields(item, preserve_class=True))
 
     return _share_section_attributes(filled)
 
@@ -713,12 +774,25 @@ def _normalize_class_material(value: Any) -> str | None:
     return display_material_label(value) or None
 
 
-def _promote_material_to_class(product: dict[str, Any]) -> dict[str, Any]:
+def _material_is_catalog_class(product: dict[str, Any], value: Any) -> bool:
+    return is_catalog_class(
+        value,
+        category=product.get("category"),
+        sub_category=product.get("sub_category"),
+    )
+
+
+def _promote_material_to_class(
+    product: dict[str, Any],
+    *,
+    preserve_class: bool = False,
+) -> dict[str, Any]:
     """
     Fill blank class from material attributes when useful.
 
     Keep material keys on attributes so Rate_Master rows that store Class=0 and
-    material in Attribute still overlap during matching.
+    material in Attribute still overlap during matching. Never replace an
+    expert-entered class (including ``0``) with a material token.
     """
     item = dict(product)
     attrs = coerce_attributes_dict(item.get("attributes"))
@@ -736,19 +810,34 @@ def _promote_material_to_class(product: dict[str, Any]) -> dict[str, Any]:
         if sub_norm and material_norm == sub_norm:
             material_value = None
 
-    if _is_blank_value(item.get("class")) and material_value is not None:
-        item["class"] = _normalize_class_material(material_value)
-    elif not _is_blank_value(item.get("class")):
-        item["class"] = _normalize_class_material(item.get("class"))
+    class_value = item.get("class")
+    class_is_empty = _is_blank_value(class_value) or (
+        not preserve_class and _is_placeholder_class(class_value)
+    )
+    if class_is_empty and material_value is not None:
+        # Only copy material into Class when that token is a Rate_Master Class
+        # for this category / sub-category (not for valves where Class is ``0``).
+        material_class = _normalize_class_material(material_value)
+        if material_class and _material_is_catalog_class(item, material_class):
+            item["class"] = material_class
+    elif not class_is_empty and _material_is_catalog_class(item, class_value):
+        item["class"] = _normalize_class_material(class_value) or class_value
 
     item["attributes"] = attrs
     return item
 
 
-def _normalize_product_fields(product: dict[str, Any]) -> dict[str, Any]:
-    """Normalize unit/qty UOM and promote material into class."""
-    item = _normalize_product_unit_fields(_promote_material_to_class(product))
-    if _is_placeholder_class(item.get("class")):
+def _normalize_product_fields(
+    product: dict[str, Any],
+    *,
+    preserve_class: bool = False,
+) -> dict[str, Any]:
+    """Normalize unit/qty UOM and optionally promote material into class."""
+    item = _normalize_product_unit_fields(
+        _promote_material_to_class(product, preserve_class=preserve_class)
+    )
+    # Extract-only: AI often dumps Class=0. Expert edit / rematch must keep ``0``.
+    if not preserve_class and _is_placeholder_class(item.get("class")):
         item["class"] = None
     return item
 
@@ -1343,18 +1432,20 @@ class BOQExtractionService:
                 list(row.get("products") or []),
                 taxonomy=taxonomy,
             )
-            row["products"] = _apply_slot_evidence_fields(
-                _apply_row_qty_unit(
-                    products,
-                    qty=group.get("anchor_qty"),
-                    unit=group.get("anchor_unit"),
-                    qty_status=group.get("qty_status"),
-                    boq_rate=group.get("boq_rate"),
-                    qty_rows=list(group.get("qty_rows") or []),
+            row["products"] = _collapse_duplicate_slot_products(
+                _apply_slot_evidence_fields(
+                    _apply_row_qty_unit(
+                        products,
+                        qty=group.get("anchor_qty"),
+                        unit=group.get("anchor_unit"),
+                        qty_status=group.get("qty_status"),
+                        boq_rate=group.get("boq_rate"),
+                        qty_rows=list(group.get("qty_rows") or []),
+                        slots=list(group.get("slots") or []),
+                    ),
+                    group=group,
                     slots=list(group.get("slots") or []),
-                ),
-                group=group,
-                slots=list(group.get("slots") or []),
+                )
             )
             row["activities"] = []
             row.setdefault("skip_matching", not row.get("products"))

@@ -7,11 +7,16 @@ import re
 from decimal import Decimal
 from typing import Any
 
-from ai.context import align_product_taxonomy_from_db_labels, align_product_taxonomy_from_rate
+from ai.context import (
+    align_product_taxonomy_from_db_labels,
+    align_product_taxonomy_from_rate,
+    is_catalog_class,
+)
 from ai.service import AIService
 from apps.boq.services.product_matching_service import (
     CANDIDATE_LIMIT,
     ProductMatchingService,
+    product_type_conflicts,
     structured_match_score,
 )
 from apps.database_manager.models import Rate_Master_Output
@@ -21,7 +26,7 @@ from utils.attribute_parser import (
     parse_attributes,
     coerce_attributes_dict,
 )
-from utils.product_synonyms import display_material_label
+from utils.product_synonyms import display_material_label, is_known_material_label
 
 from .product_attribute_enrichment_service import (
     compute_attribute_confidence,
@@ -73,6 +78,42 @@ def _is_filled(value: Any) -> bool:
     if isinstance(value, str):
         return bool(value.strip())
     return True
+
+
+_EXPERT_IDENTITY_FIELDS = (
+    "description_hint",
+    "category",
+    "sub_category",
+    "class",
+    "size",
+    "unit",
+    "capacity",
+)
+
+
+def _restore_expert_identity(
+    product: dict[str, Any],
+    original: dict[str, Any],
+) -> dict[str, Any]:
+    """Keep expert-filled Analysis inputs after rematch (including Class=0)."""
+    restored = dict(product)
+    for key in _EXPERT_IDENTITY_FIELDS:
+        value = original.get(key)
+        if not _is_filled(value):
+            continue
+        if (
+            key == "class"
+            and is_known_material_label(value)
+            and not is_catalog_class(
+                value,
+                category=restored.get("category") or original.get("category"),
+                sub_category=restored.get("sub_category") or original.get("sub_category"),
+            )
+        ):
+            # Keep Rate_Master Class (e.g. 0) instead of extracted material (DI).
+            continue
+        restored[key] = value
+    return restored
 
 
 def _missing_attribute_keys(schema_keys: list[str], attributes: dict[str, Any]) -> list[str]:
@@ -264,6 +305,8 @@ def _compute_match_confidence(
             blended = structured
         if ai_confidence is not None:
             blended = (0.92 * blended) + (0.08 * float(ai_confidence))
+        if product_type_conflicts(product_only, rate):
+            blended = min(blended, float(MATCH_CONFIDENCE_THRESHOLD) - 1.0)
         return round(max(0.0, min(100.0, blended)), 2)
 
     # Prefer product identity (cat/sub/class/size) over sparse attribute fill so
@@ -280,11 +323,41 @@ def _compute_match_confidence(
         # AI may under-score synonym rewrites; keep structured dominant when strong.
         ai_weight = 0.15 if structured >= 75 else 0.30
         blended = ((1.0 - ai_weight) * blended) + (ai_weight * float(ai_confidence))
+    # Description names a different catalog product — do not let AI/attr blend confirm it.
+    if product_type_conflicts(product_only, rate):
+        blended = min(blended, float(MATCH_CONFIDENCE_THRESHOLD) - 1.0)
     return round(max(0.0, min(100.0, blended)), 2)
 
 
 def _normalize_text_key(value: str) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip().lower())
+
+
+def _downgrade_unrelated_auto_match(
+    product: dict[str, Any],
+    confidence: float,
+) -> dict[str, Any]:
+    """Clear a confirmed pick when description and catalog product disagree."""
+    source = str((product.get("ai_mapping") or {}).get("selection_source") or "")
+    if source == "expert":
+        return product
+    if confidence >= MATCH_CONFIDENCE_THRESHOLD:
+        return product
+    if str(product.get("db_match_status") or "") != DB_MATCH_MATCHED:
+        return product
+    updated = dict(product)
+    updated["db_match_status"] = DB_MATCH_PROVISIONAL
+    updated["db_product_id"] = None
+    updated["db_product_tech_key"] = ""
+    summary = str(updated.get("db_product_summary") or "").strip()
+    if summary and not summary.lower().startswith("suggested:"):
+        updated["db_product_summary"] = f"Suggested: {summary}"
+    mapping = dict(updated.get("ai_mapping") or {})
+    mapping["match_status"] = DB_MATCH_PROVISIONAL
+    mapping["selected_id"] = None
+    mapping["selected_rate_master_id"] = None
+    updated["ai_mapping"] = mapping
+    return updated
 
 
 def _map_attrs_onto_schema(
@@ -482,6 +555,8 @@ class ProductAIMappingService:
             "match_status": DB_MATCH_MATCHED,
             "selection_source": "expert",
         }
+        enriched["needs_extraction_review"] = False
+        enriched["slot_fallback"] = False
         # Show fetched Rate_Master details in Analysis columns for the selected product.
         return self._attach_catalog_product_id(
             align_product_taxonomy_from_rate(enriched, rate, overwrite_core_fields=True)
@@ -1160,13 +1235,13 @@ class ProductAIMappingService:
             for key, value in mapped_attributes.items()
             if normalize_attribute_key(str(key)) in schema_set and _is_filled(value)
         }
-        # Fill schema attributes: on rematch prefer Rate_Master values so UI shows
-        # the fetched product (DI input → ductile-iron DB row details appear).
+        # Rematch keeps expert-filled values; only fill blanks from Rate_Master.
+        # Candidate Select still prefers DB values via apply_selected_candidate.
         attributes = _schema_attributes_from_rate(
             schema_keys=schema_keys,
             rate_attrs=parse_attributes(rate.Attribute),
             existing_attrs=attributes,
-            prefer_rate=bool(rematch),
+            prefer_rate=False,
         )
         confidence = _compute_match_confidence(
             enriched,
@@ -1192,7 +1267,7 @@ class ProductAIMappingService:
         # Confirm only when blended confidence clears the threshold — never stamp
         # Product identity from a weak / unrelated candidate.
         if confidence < MATCH_CONFIDENCE_THRESHOLD:
-            return self._provisional_schema_match(
+            provisional = self._provisional_schema_match(
                 enriched,
                 rate=rate,
                 snapshot=summary_source,
@@ -1206,6 +1281,9 @@ class ProductAIMappingService:
                 notes=notes or "Suggested DB product — fill missing attributes, then Re-analyse to rematch.",
                 ai_confidence=ai_confidence,
             )
+            if rematch:
+                return _restore_expert_identity(provisional, product)
+            return provisional
 
         enriched["attributes"] = attributes
         enriched["attribute_schema"] = schema_keys
@@ -1221,6 +1299,9 @@ class ProductAIMappingService:
         enriched["db_product_summary"] = _product_summary(summary_source)
         enriched["suggested_db_product_id"] = rate.pk
         enriched["db_candidates"] = slim_candidates
+        # Matched products are no longer hollow slot placeholders.
+        enriched["needs_extraction_review"] = False
+        enriched["slot_fallback"] = False
         enriched["ai_mapping"] = {
             "selected_id": rate.pk,
             "selected_rate_master_id": rate.pk,
@@ -1231,8 +1312,147 @@ class ProductAIMappingService:
             "match_status": DB_MATCH_MATCHED,
             "selection_source": "rematch" if rematch else "ai",
         }
-        # Show fetched Rate_Master category/class/size/unit/capacity in Analysis columns.
-        return align_product_taxonomy_from_rate(enriched, rate, overwrite_core_fields=True)
+        # Initial Analyse fills blanks/core from Rate_Master. Rematch keeps the
+        # expert inputs used for search; DB identity stays on match + candidates.
+        # Score candidates against pre-align extract/expert fields so copying
+        # Rate_Master identity cannot mint a 100% match.
+        score_against = {
+            key: enriched.get(key)
+            for key in (
+                "description_hint",
+                "category",
+                "sub_category",
+                "class",
+                "size",
+                "unit",
+                "capacity",
+                "attributes",
+            )
+        }
+        aligned = align_product_taxonomy_from_rate(
+            enriched,
+            rate,
+            overwrite_core_fields=not rematch,
+        )
+        if rematch:
+            aligned = _restore_expert_identity(aligned, product)
+            score_against = {
+                key: product.get(key)
+                for key in score_against
+            }
+        return self._finalize_candidate_scores(
+            aligned,
+            rate,
+            score_against=score_against,
+        )
+
+    def _finalize_candidate_scores(
+        self,
+        product: dict[str, Any],
+        selected_rate: Rate_Master_Output | None = None,
+        *,
+        score_against: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Re-score listed candidates against extract/expert fields.
+
+        Do not score the Rate_Master-overwritten identity against the same row —
+        that always looks like 100% even when the BOQ product is unrelated.
+        """
+        candidates = list(product.get("db_candidates") or [])
+        if not candidates:
+            return product
+        rate_ids: list[int] = []
+        for item in candidates:
+            try:
+                rate_ids.append(int(item.get("id")))
+            except (TypeError, ValueError):
+                continue
+        rate_map = {
+            rate.pk: rate
+            for rate in Rate_Master_Output.objects.filter(
+                pk__in=rate_ids,
+                database_version_id=self.database_version_id,
+            )
+        }
+        product_only = dict(score_against or product)
+        product_only["description_hint"] = product.get("description_hint")
+        product_only["make_hint"] = None
+        selected_id = product.get("db_product_id") or product.get("suggested_db_product_id")
+        refreshed: list[dict[str, Any]] = []
+        for item in candidates:
+            try:
+                cid = int(item.get("id"))
+            except (TypeError, ValueError):
+                continue
+            rate = rate_map.get(cid)
+            if rate is None:
+                refreshed.append(dict(item))
+                continue
+            score, _ = structured_match_score(product_only, rate)
+            updated = dict(item)
+            updated["confidence"] = round(float(score), 2)
+            refreshed.append(updated)
+        refreshed.sort(
+            key=lambda row: float(row.get("confidence") or 0.0),
+            reverse=True,
+        )
+        if selected_id is not None:
+            try:
+                selected_pk = int(selected_id)
+            except (TypeError, ValueError):
+                selected_pk = None
+            if selected_pk is not None:
+                head = [
+                    item
+                    for item in refreshed
+                    if int(item.get("id") or 0) == selected_pk
+                ]
+                tail = [
+                    item
+                    for item in refreshed
+                    if int(item.get("id") or 0) != selected_pk
+                ]
+                refreshed = (head + tail)[:_CANDIDATE_LIMIT]
+            else:
+                refreshed = refreshed[:_CANDIDATE_LIMIT]
+        else:
+            refreshed = refreshed[:_CANDIDATE_LIMIT]
+
+        rate = selected_rate
+        if rate is None and selected_id is not None:
+            try:
+                rate = rate_map.get(int(selected_id))
+            except (TypeError, ValueError):
+                rate = None
+        if rate is not None and selected_id is not None:
+            confidence = _compute_match_confidence(
+                product_only,
+                rate,
+                mapped_attributes=coerce_attributes_dict(product.get("attributes")),
+                schema_keys=list(product.get("attribute_schema") or []),
+                ai_confidence=(product.get("ai_mapping") or {}).get("ai_confidence"),
+                prefer_filled_fields=str(
+                    (product.get("ai_mapping") or {}).get("selection_source") or ""
+                )
+                == "rematch",
+            )
+            try:
+                selected_pk = int(selected_id)
+            except (TypeError, ValueError):
+                selected_pk = None
+            if selected_pk is not None:
+                for item in refreshed:
+                    try:
+                        if int(item.get("id") or 0) == selected_pk:
+                            item["confidence"] = confidence
+                            break
+                    except (TypeError, ValueError):
+                        continue
+            product["db_match_confidence"] = confidence
+            product["attribute_confidence"] = confidence
+            product = _downgrade_unrelated_auto_match(product, confidence)
+        product["db_candidates"] = refreshed
+        return product
 
     def _provisional_schema_match(
         self,

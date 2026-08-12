@@ -201,7 +201,7 @@ MAKE_LIST_DESCRIPTION_HINTS: tuple[tuple[str, str], ...] = (
     ("coupling", "PIPE"),
     ("tank", "TANK"),
     ("cable tray", "ACCESSORIES"),
-    ("panel", "ACCESSORIES"),
+    ("rosette plate", "ACCESSORIES"),
 )
 
 MAKE_LIST_SUB_CATEGORY_HINTS: tuple[tuple[str, str], ...] = (
@@ -325,6 +325,13 @@ def display_material_label(value: Any) -> str:
     if canon in _CANONICAL_DISPLAY:
         return _CANONICAL_DISPLAY[canon]
     return str(value).strip()
+
+
+def is_known_material_label(value: Any) -> bool:
+    """True for DI / ductile iron / MS / … — not for Class tokens like 0 or 9."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return False
+    return canonicalize_material_label(value) in _CANONICAL_DISPLAY
 
 
 def labels_equivalent(left: Any, right: Any) -> bool:

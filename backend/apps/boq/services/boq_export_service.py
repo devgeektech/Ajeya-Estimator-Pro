@@ -11,7 +11,7 @@ from django.core.files.storage import default_storage
 from django.db import transaction
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import get_column_letter, quote_sheetname
 from openpyxl.worksheet.worksheet import Worksheet
 
 from apps.boq.models import BOQ
@@ -58,23 +58,68 @@ _DARK_BORDER = Border(
 _CELL_ALIGNMENT = Alignment(horizontal="left", vertical="top", wrap_text=True)
 _HEADER_FONT = Font(bold=True)
 _RED_HEADER_FONT = Font(bold=True, color="FFFF0000")
+# Muted fills — not bright Excel reds/greens/oranges.
 _MISSING_PRODUCT_FILL = PatternFill(
-    start_color="FFFFC7CE",
-    end_color="FFFFC7CE",
+    start_color="F2D7D5",
+    end_color="F2D7D5",
     fill_type="solid",
 )
-# Zero-qty / Rate Only rows on BOQ result and Review exports.
 _ZERO_OR_RATE_ONLY_FILL = PatternFill(
-    start_color="FFFCE4D6",
-    end_color="FFFCE4D6",
+    start_color="F3E6D8",
+    end_color="F3E6D8",
     fill_type="solid",
 )
+_FOUND_AMOUNT_FILL = PatternFill(
+    start_color="DCE8D8",
+    end_color="DCE8D8",
+    fill_type="solid",
+)
+
+# Review Output columns (1-based). G–Q follow Rate_Master build-up; T–V from the
+# Output format headers (TOTAL MATERIAL Q*S, TOTAL LABOUR R*S, Amount T+U).
+_REVIEW_BASE_COL = 7
+_REVIEW_DISCOUNT_COL = 8
+_REVIEW_NET_COL = 9
+_REVIEW_PROCUREMENT_COL = 10
+_REVIEW_COMMERCIAL_COL = 11
+_REVIEW_ACCESSORIES_COL = 12
+_REVIEW_HANDLING_COL = 13
+_REVIEW_WASTAGE_COL = 14
+_REVIEW_SUBTOTAL_COL = 15
+_REVIEW_PROFIT_COL = 16
+_REVIEW_FINAL_MATERIAL_COL = 17
+_REVIEW_LABOUR_COL = 18
+_REVIEW_QTY_COL = 19
+_REVIEW_TOTAL_MATERIAL_COL = 20
+_REVIEW_TOTAL_LABOUR_COL = 21
+_REVIEW_AMOUNT_COL = 22
+
+_RATE_BLOB_RE = re.compile(
+    r"\b(unit[_\s-]?rate|rate|price|rs\.?\s*/\s*(unit|qty|no))\b",
+    re.IGNORECASE,
+)
+_AMOUNT_BLOB_RE = re.compile(
+    r"\b(amount|amt|total\s*amount|amount\s*\(?\s*rs)\b",
+    re.IGNORECASE,
+)
+_QTY_BLOB_RE = re.compile(r"\b(qty|quantity|qnty|nos\.?)\b", re.IGNORECASE)
+_UNIT_BLOB_RE = re.compile(r"\b(unit|uom)\b", re.IGNORECASE)
+
+
+def _header_blob(header: dict[str, Any]) -> str:
+    key = str(header.get("key") or "")
+    label = str(header.get("label") or "").replace("\n", " ")
+    return f"{key} {label}".casefold()
+
+
+def _is_description_header(blob: str) -> bool:
+    return "description" in blob or "particular" in blob
 
 
 def _header_keys(
     headers: list[dict[str, Any]],
 ) -> tuple[str | None, str | None, str | None, str | None]:
-    """Resolve Rate/Amount/Qty/Unit keys — including labels like ``RATE (Rs.)``."""
+    """Resolve Rate/Amount/Qty/Unit keys across client header formats."""
     rate_key = amount_key = qty_key = unit_key = None
     for header in headers:
         key = str(header.get("key") or "").lower()
@@ -87,22 +132,109 @@ def _header_keys(
         if not unit_key and key in _UNIT_KEYS:
             unit_key = header["key"]
 
-    # Client workbooks often use rate_rs / amount_rs (from ``RATE (Rs.)``).
     for header in headers:
         key = str(header.get("key") or "")
-        label = str(header.get("label") or "").replace("\n", " ")
-        blob = f"{key} {label}".casefold()
-        if not rate_key and "rate" in blob and "amount" not in key.casefold():
+        blob = _header_blob(header)
+        if _is_description_header(blob):
+            continue
+        if not rate_key and _RATE_BLOB_RE.search(blob) and "amount" not in key.casefold():
             rate_key = key or header.get("key")
-        if not amount_key and "amount" in blob:
+        if not amount_key and _AMOUNT_BLOB_RE.search(blob):
             amount_key = key or header.get("key")
-        if not qty_key and any(token in blob for token in ("qty", "quantity", "qnty")):
+        if not qty_key and _QTY_BLOB_RE.search(blob):
             qty_key = key or header.get("key")
-        if not unit_key and (
-            key.casefold() in _UNIT_KEYS or blob.strip() in {"unit", "uom"}
-        ):
+        if not unit_key and _UNIT_BLOB_RE.search(blob) and "qty" not in blob:
             unit_key = key or header.get("key")
     return rate_key, amount_key, qty_key, unit_key
+
+
+def _scan_sheet_column(
+    sheet: Worksheet,
+    matcher: re.Pattern[str],
+    *,
+    exclude: re.Pattern[str] | None = None,
+    max_header_rows: int = 6,
+) -> int | None:
+    """Find a header column by scanning the first rows of the original sheet."""
+    last_col = min(int(sheet.max_column or 1), 40)
+    for row_idx in range(1, max_header_rows + 1):
+        for col_idx in range(1, last_col + 1):
+            raw = sheet.cell(row=row_idx, column=col_idx).value
+            if raw in (None, ""):
+                continue
+            blob = str(raw).replace("\n", " ").casefold()
+            if _is_description_header(blob):
+                continue
+            if exclude and exclude.search(blob):
+                continue
+            if matcher.search(blob):
+                return col_idx
+    return None
+
+
+def _resolve_excel_columns(
+    headers: list[dict[str, Any]],
+    sheet: Worksheet | None = None,
+) -> tuple[int | None, int | None, int | None]:
+    """Rate / Amount / Qty Excel columns from JSON headers, then sheet scan."""
+    rate_key, amount_key, qty_key, _unit_key = _header_keys(headers)
+    rate_col = _header_excel_column(headers, rate_key)
+    amount_col = _header_excel_column(headers, amount_key)
+    qty_col = _header_excel_column(headers, qty_key)
+    if sheet is None:
+        return rate_col, amount_col, qty_col
+    if rate_col is None:
+        rate_col = _scan_sheet_column(sheet, _RATE_BLOB_RE, exclude=_AMOUNT_BLOB_RE)
+    if amount_col is None:
+        amount_col = _scan_sheet_column(sheet, _AMOUNT_BLOB_RE)
+    if qty_col is None:
+        qty_col = _scan_sheet_column(sheet, _QTY_BLOB_RE)
+    return rate_col, amount_col, qty_col
+
+
+def _slot_row_ids(boq_data: dict[str, Any]) -> set[str]:
+    """Unit/Qty slot row ids — the only BOQ rows that receive Rate/Amount."""
+    from apps.boq.services.boq_row_grouping_service import grouped_anchor_rows
+
+    ids: set[str] = set()
+    for group in grouped_anchor_rows(boq_data or {}):
+        for slot in group.get("slots") or group.get("qty_rows") or []:
+            slot_id = str(slot.get("qty_row_id") or slot.get("row_id") or "").strip()
+            if slot_id:
+                ids.add(slot_id)
+    return ids
+
+
+def _review_cell_ref(sheet_title: str, column: int, row_number: int) -> str:
+    return f"{quote_sheetname(sheet_title)}!{get_column_letter(column)}{row_number}"
+
+
+def _review_amount_formula(sheet_title: str, rows: list[int]) -> str | None:
+    if not rows:
+        return None
+    if len(rows) == 1:
+        return f"={_review_cell_ref(sheet_title, _REVIEW_AMOUNT_COL, rows[0])}"
+    sequential = rows == list(range(rows[0], rows[-1] + 1))
+    if sequential:
+        start = _review_cell_ref(sheet_title, _REVIEW_AMOUNT_COL, rows[0])
+        end = f"{get_column_letter(_REVIEW_AMOUNT_COL)}{rows[-1]}"
+        return f"=SUM({start}:{end})"
+    parts = [_review_cell_ref(sheet_title, _REVIEW_AMOUNT_COL, row) for row in rows]
+    return "=" + "+".join(parts)
+
+
+def _review_rate_formula(sheet_title: str, rows: list[int]) -> str | None:
+    """Result Rate = Final_Material_Amount + Labour (summed across mapped products)."""
+    if not rows:
+        return None
+    parts = [
+        (
+            f"({_review_cell_ref(sheet_title, _REVIEW_FINAL_MATERIAL_COL, row)}"
+            f"+{_review_cell_ref(sheet_title, _REVIEW_LABOUR_COL, row)})"
+        )
+        for row in rows
+    ]
+    return "=" + "+".join(parts)
 
 
 def _header_excel_column(headers: list[dict[str, Any]], key: str | None) -> int | None:
@@ -180,6 +312,149 @@ def _excel_number_value(value: Any) -> Any:
     if number.is_integer():
         return int(number)
     return number
+
+
+def _as_ratio(numerator: Any, denominator: Any) -> float | None:
+    """Literal % baked into Review formulas so Discount edits rescale add-ons."""
+    top = _excel_number_value(numerator)
+    bottom = _excel_number_value(denominator)
+    if not isinstance(top, (int, float)) or not isinstance(bottom, (int, float)):
+        return None
+    if bottom == 0:
+        return None
+    return float(top) / float(bottom)
+
+
+def _review_a1(column: int, row_number: int) -> str:
+    return f"{get_column_letter(column)}{row_number}"
+
+
+def _apply_review_calc_formulas(
+    sheet: Worksheet,
+    row_number: int,
+    review_row: dict[str, Any],
+    *,
+    rate_sum: bool,
+) -> None:
+    """
+    Make Review derived cells live Excel formulas.
+
+    Inputs stay as values: Base, Discount, Labour, Qty.
+    Discount may be 0.44 or 44 — both mean 44%.
+    """
+    base = _excel_number_value(review_row.get("base_purchase_rate"))
+    if not isinstance(base, (int, float)):
+        _apply_review_amount_formulas(sheet, row_number, rate_sum=rate_sum)
+        return
+
+    g = _review_a1(_REVIEW_BASE_COL, row_number)
+    h = _review_a1(_REVIEW_DISCOUNT_COL, row_number)
+    i = _review_a1(_REVIEW_NET_COL, row_number)
+    j = _review_a1(_REVIEW_PROCUREMENT_COL, row_number)
+    k = _review_a1(_REVIEW_COMMERCIAL_COL, row_number)
+    l = _review_a1(_REVIEW_ACCESSORIES_COL, row_number)
+    m = _review_a1(_REVIEW_HANDLING_COL, row_number)
+    n = _review_a1(_REVIEW_WASTAGE_COL, row_number)
+    o = _review_a1(_REVIEW_SUBTOTAL_COL, row_number)
+    p = _review_a1(_REVIEW_PROFIT_COL, row_number)
+    q = _review_a1(_REVIEW_FINAL_MATERIAL_COL, row_number)
+
+    proc_pct = _as_ratio(review_row.get("procurement_value"), review_row.get("base_purchase_rate"))
+    acc_pct = _as_ratio(review_row.get("accessories_value"), review_row.get("net_material_rate"))
+    hand_pct = _as_ratio(
+        review_row.get("handling_value"),
+        review_row.get("commercial_material_base"),
+    )
+    wast_pct = _as_ratio(
+        review_row.get("wastage_value"),
+        review_row.get("commercial_material_base"),
+    )
+    profit_pct = _as_ratio(review_row.get("profit_value"), review_row.get("sub_total"))
+
+    sheet.cell(
+        row=row_number,
+        column=_REVIEW_NET_COL,
+        value=f"=IF({g}=\"\",\"\",{g}*(1-IF({h}>1,{h}/100,{h})))",
+    )
+    if proc_pct is not None:
+        sheet.cell(
+            row=row_number,
+            column=_REVIEW_PROCUREMENT_COL,
+            value=f"=IF({g}=\"\",\"\",{g}*{proc_pct:.8f})",
+        )
+    sheet.cell(
+        row=row_number,
+        column=_REVIEW_COMMERCIAL_COL,
+        value=f"=IF({i}=\"\",\"\",{i}+N({j}))",
+    )
+    if acc_pct is not None:
+        sheet.cell(
+            row=row_number,
+            column=_REVIEW_ACCESSORIES_COL,
+            value=f"=IF({i}=\"\",\"\",{i}*{acc_pct:.8f})",
+        )
+    if hand_pct is not None:
+        sheet.cell(
+            row=row_number,
+            column=_REVIEW_HANDLING_COL,
+            value=f"=IF({k}=\"\",\"\",{k}*{hand_pct:.8f})",
+        )
+    if wast_pct is not None:
+        sheet.cell(
+            row=row_number,
+            column=_REVIEW_WASTAGE_COL,
+            value=f"=IF({k}=\"\",\"\",{k}*{wast_pct:.8f})",
+        )
+    sheet.cell(
+        row=row_number,
+        column=_REVIEW_SUBTOTAL_COL,
+        value=f"=N({k})+N({l})+N({m})+N({n})",
+    )
+    if profit_pct is not None:
+        sheet.cell(
+            row=row_number,
+            column=_REVIEW_PROFIT_COL,
+            value=f"=IF({o}=\"\",\"\",{o}*{profit_pct:.8f})",
+        )
+    sheet.cell(
+        row=row_number,
+        column=_REVIEW_FINAL_MATERIAL_COL,
+        value=f"=N({o})+N({p})",
+    )
+    _apply_review_amount_formulas(sheet, row_number, rate_sum=rate_sum)
+
+
+def _apply_review_amount_formulas(
+    sheet: Worksheet,
+    row_number: int,
+    *,
+    rate_sum: bool,
+) -> None:
+    """TOTAL MATERIAL / TOTAL LABOUR / Amount from Final, Labour, Qty."""
+    q = _review_a1(_REVIEW_FINAL_MATERIAL_COL, row_number)
+    r = _review_a1(_REVIEW_LABOUR_COL, row_number)
+    s = _review_a1(_REVIEW_QTY_COL, row_number)
+    t = _review_a1(_REVIEW_TOTAL_MATERIAL_COL, row_number)
+    u = _review_a1(_REVIEW_TOTAL_LABOUR_COL, row_number)
+    if rate_sum:
+        sheet.cell(row=row_number, column=_REVIEW_TOTAL_MATERIAL_COL, value=f"=N({q})")
+        sheet.cell(row=row_number, column=_REVIEW_TOTAL_LABOUR_COL, value=f"=N({r})")
+    else:
+        sheet.cell(
+            row=row_number,
+            column=_REVIEW_TOTAL_MATERIAL_COL,
+            value=f"=IF(OR({s}=\"\",{s}=0),N({q}),{q}*{s})",
+        )
+        sheet.cell(
+            row=row_number,
+            column=_REVIEW_TOTAL_LABOUR_COL,
+            value=f"=IF(OR({s}=\"\",{s}=0),N({r}),{r}*{s})",
+        )
+    sheet.cell(
+        row=row_number,
+        column=_REVIEW_AMOUNT_COL,
+        value=f"=N({t})+N({u})",
+    )
 
 
 def _sanitize_workbook_for_excel(workbook) -> None:
@@ -344,6 +619,15 @@ def _resolve_uploaded_path(uploaded_file) -> str | None:
     return path if path and Path(path).is_file() else None
 
 
+def _ensure_review_sheet(workbook) -> Worksheet:
+    """Put a clean Review tab first so experts edit it and Result follows."""
+    if _REVIEW_SHEET_TITLE in workbook.sheetnames:
+        existing = workbook[_REVIEW_SHEET_TITLE]
+        workbook.remove(existing)
+    sheet = workbook.create_sheet(_REVIEW_SHEET_TITLE, 0)
+    return sheet
+
+
 def _export_stem_from_upload(boq: BOQ) -> str:
     """Base download name from the uploaded BOQ workbook (not the BOQ title)."""
     source = str((boq.boq_data or {}).get("source_filename") or "").strip()
@@ -359,20 +643,13 @@ def _export_stem_from_upload(boq: BOQ) -> str:
 
 
 def _export_download_filename(boq: BOQ, kind: str) -> str:
-    """
-    Download names mirror the uploaded workbook:
-
-    - BOQ export: ``{upload}_result.xlsx``
-    - Review export: ``{upload}_review result sheet.xlsx``
-    """
+    """Combined workbook: ``{upload}_result.xlsx`` (Review + Result tabs)."""
     stem = _export_stem_from_upload(boq)
-    if kind == EXPORT_KIND_BOQ:
-        return f"{stem}_result.xlsx"
-    return f"{stem}_review result sheet.xlsx"
+    return f"{stem}_result.xlsx"
 
 
 class BOQExportService:
-    """Write either the priced original BOQ sheet or the client Review sheet."""
+    """Write one workbook: Review tab plus original BOQ tab linked by formulas."""
 
     def __init__(self, boq_id: int, confirmations: dict[str, dict[str, Any]] | None = None):
         self.boq_id = boq_id
@@ -394,39 +671,21 @@ class BOQExportService:
         if not display.get("has_analysis"):
             raise ValueError("Complete Make & Vendor and Labour before exporting.")
 
-        # Always rebuild from live Review display so Rate/Amount land on qty rows.
+        # Combined workbook: Review tab + original BOQ tab with live formulas.
         pricing = build_row_pricing(display)
         boq_data = boq.boq_data or {}
         highlight_ids = unmatched_qty_row_ids(display, boq_data=boq_data)
         orange_ids = _zero_or_rate_only_row_ids(display, boq_data=boq_data)
         filename = _export_download_filename(boq, kind)
-
-        if kind == EXPORT_KIND_BOQ:
-            payload = self._export_boq_workbook(
-                boq,
-                boq_data,
-                pricing,
-                highlight_ids,
-                orange_ids,
-            )
-            audit_label = "Exported BOQ sheet"
-        else:
-            workbook = Workbook()
-            sheet = workbook.active
-            if sheet is None:
-                sheet = workbook.create_sheet(_REVIEW_SHEET_TITLE)
-            else:
-                sheet.title = _REVIEW_SHEET_TITLE
-            self._write_review_sheet(
-                sheet,
-                display,
-                boq_data,
-                orange_ids=orange_ids,
-            )
-            buffer = BytesIO()
-            workbook.save(buffer)
-            payload = buffer.getvalue()
-            audit_label = "Exported Review sheet"
+        payload = self._export_combined_workbook(
+            boq,
+            boq_data,
+            display,
+            pricing,
+            highlight_ids,
+            orange_ids,
+        )
+        audit_label = "Exported Review + BOQ workbook"
 
         with transaction.atomic():
             if boq.status != BOQStatus.EXPORTED:
@@ -445,69 +704,85 @@ class BOQExportService:
         )
         return payload, filename
 
-    def _export_boq_workbook(
+    def _export_combined_workbook(
         self,
         boq: BOQ,
         boq_data: dict[str, Any],
+        display: dict[str, Any],
         pricing: dict[str, dict[str, Any]],
         highlight_ids: set[str],
         orange_ids: set[str] | None = None,
     ) -> bytes:
-        """Prefer the original upload layout; fall back to a rebuilt sheet."""
+        """One workbook: Review tab + original BOQ tab linked by formulas."""
         orange_ids = orange_ids or set()
         path = _resolve_uploaded_path(boq.uploaded_file)
+        workbook = None
         if path:
             try:
-                return self._fill_original_boq_workbook(
-                    path,
-                    boq_data,
-                    pricing,
-                    highlight_ids,
-                    orange_ids,
-                )
+                workbook = load_workbook(path, keep_links=False)
             except Exception:
                 logger.exception(
-                    "Original BOQ fill failed for id=%s; rebuilding from JSON",
+                    "Original BOQ load failed for id=%s; rebuilding from JSON",
                     boq.pk,
                 )
+                workbook = None
 
-        workbook = Workbook()
-        sheet = workbook.active
-        if sheet is None:
-            sheet = workbook.create_sheet(_BOQ_SHEET_TITLE)
-        else:
-            sheet.title = _BOQ_SHEET_TITLE
-        self._write_boq_sheet(sheet, boq_data, pricing, highlight_ids, orange_ids)
+        if workbook is None:
+            workbook = Workbook()
+            active = workbook.active
+            if active is not None:
+                active.title = _BOQ_SHEET_TITLE
+            else:
+                workbook.create_sheet(_BOQ_SHEET_TITLE)
+
+        review_sheet = _ensure_review_sheet(workbook)
+        review_rows = self._write_review_sheet(
+            review_sheet,
+            display,
+            boq_data,
+            orange_ids=orange_ids,
+        )
+        self._fill_boq_result_sheets(
+            workbook,
+            boq_data,
+            pricing,
+            highlight_ids,
+            orange_ids,
+            review_title=review_sheet.title,
+            review_rows=review_rows,
+        )
+        _sanitize_workbook_for_excel(workbook)
         buffer = BytesIO()
         workbook.save(buffer)
         return buffer.getvalue()
 
-    def _fill_original_boq_workbook(
+    def _fill_boq_result_sheets(
         self,
-        path: str,
+        workbook,
         boq_data: dict[str, Any],
         pricing: dict[str, dict[str, Any]],
         highlight_ids: set[str],
-        orange_ids: set[str] | None = None,
-    ) -> bytes:
-        """Copy the uploaded workbook and write Qty/Rate/Amount on qty+unit rows."""
-        orange_ids = orange_ids or set()
-        # keep_links=False avoids broken external-link XML that Excel must repair.
-        workbook = load_workbook(path, keep_links=False)
+        orange_ids: set[str],
+        *,
+        review_title: str,
+        review_rows: dict[str, list[int]],
+    ) -> None:
+        """Write Qty and Review-linked Rate/Amount on Unit/Qty rows only."""
         headers = list(boq_data.get("headers") or [])
-        rate_key, amount_key, qty_key, unit_key = _header_keys(headers)
-        rate_col = _header_excel_column(headers, rate_key)
-        amount_col = _header_excel_column(headers, amount_key)
-        qty_col = _header_excel_column(headers, qty_key)
-        if rate_col is None and amount_col is None and qty_col is None:
-            raise ValueError("Uploaded BOQ has no Qty, Rate, or Amount column to fill.")
-
+        slot_ids = _slot_row_ids(boq_data)
         sheets_by_name = {name: workbook[name] for name in workbook.sheetnames}
-        default_sheet = workbook.active
+        default_sheet = next(
+            (workbook[name] for name in workbook.sheetnames if name != review_title),
+            workbook.active,
+        )
         used_columns = max((int(h.get("index") or 0) + 1 for h in headers), default=1)
+        column_cache: dict[int, tuple[int | None, int | None, int | None]] = {}
+        _rate_key, _amount_key, qty_key, _unit_key = _header_keys(headers)
 
         for row in boq_data.get("rows") or []:
-            row_id = str(row.get("row_id") or "")
+            row_id = str(row.get("row_id") or "").strip()
+            if not row_id or row_id not in slot_ids:
+                continue
             excel_row = row.get("excel_row_number")
             try:
                 excel_row_number = int(excel_row)
@@ -518,75 +793,94 @@ class BOQExportService:
 
             sheet_name = str(row.get("sheet_name") or "").strip()
             sheet = sheets_by_name.get(sheet_name) if sheet_name else None
-            if sheet is None:
+            if sheet is None or sheet.title == review_title:
                 sheet = default_sheet
             if sheet is None:
                 continue
 
+            cache_key = id(sheet)
+            if cache_key not in column_cache:
+                column_cache[cache_key] = _resolve_excel_columns(headers, sheet)
+            rate_col, amount_col, qty_col = column_cache[cache_key]
+            if rate_col is None and amount_col is None and qty_col is None:
+                continue
+
+            mapped = list(review_rows.get(row_id) or [])
             qty_value = cell_value(row, qty_key) if qty_key else None
-            unit_value = cell_value(row, unit_key) if unit_key else None
-            has_qty = _is_filled(qty_value)
-            has_unit = (not unit_key) or _is_filled(unit_value)
-            can_price = has_qty and has_unit
+            if qty_col is not None:
+                written_qty = _excel_qty_value(qty_value)
+                if written_qty is not None:
+                    sheet.cell(row=excel_row_number, column=qty_col, value=written_qty)
 
-            if can_price:
-                # Write resolved qty so the QTY column shows a number (not only
-                # a floor SUM formula that may look blank until Excel calculates).
-                if qty_col is not None:
-                    written_qty = _excel_qty_value(qty_value)
-                    if written_qty is not None:
-                        sheet.cell(
-                            row=excel_row_number,
-                            column=qty_col,
-                            value=written_qty,
-                        )
-                priced = pricing.get(row_id)
-                if priced:
-                    if rate_col is not None and priced.get("rate") not in (None, ""):
-                        sheet.cell(
-                            row=excel_row_number,
-                            column=rate_col,
-                            value=_excel_number_value(priced.get("rate")),
-                        )
-                    if amount_col is not None and priced.get("amount") not in (None, ""):
-                        sheet.cell(
-                            row=excel_row_number,
-                            column=amount_col,
-                            value=_excel_number_value(priced.get("amount")),
-                        )
+            rate_formula = _review_rate_formula(review_title, mapped)
+            amount_formula = _review_amount_formula(review_title, mapped)
+            if rate_col is not None and rate_formula:
+                sheet.cell(row=excel_row_number, column=rate_col, value=rate_formula)
+            elif rate_col is not None and pricing.get(row_id, {}).get("rate") not in (None, ""):
+                sheet.cell(
+                    row=excel_row_number,
+                    column=rate_col,
+                    value=_excel_number_value(pricing[row_id].get("rate")),
+                )
+            if amount_col is not None and amount_formula:
+                sheet.cell(row=excel_row_number, column=amount_col, value=amount_formula)
+            elif amount_col is not None and pricing.get(row_id, {}).get("amount") not in (None, ""):
+                sheet.cell(
+                    row=excel_row_number,
+                    column=amount_col,
+                    value=_excel_number_value(pricing[row_id].get("amount")),
+                )
 
-            if can_price and row_id in orange_ids:
+            fill = None
+            if row_id in orange_ids:
+                fill = _ZERO_OR_RATE_ONLY_FILL
+            elif row_id in highlight_ids:
+                fill = _MISSING_PRODUCT_FILL
+            elif amount_formula or pricing.get(row_id, {}).get("amount") not in (None, ""):
+                fill = _FOUND_AMOUNT_FILL
+            if fill is not None:
                 _highlight_row(
                     sheet,
                     excel_row_number,
                     max_column=used_columns,
-                    fill=_ZERO_OR_RATE_ONLY_FILL,
+                    fill=fill,
                 )
-            elif can_price and row_id in highlight_ids:
-                _highlight_row(sheet, excel_row_number, max_column=used_columns)
 
-        _sanitize_workbook_for_excel(workbook)
-        buffer = BytesIO()
-        workbook.save(buffer)
-        return buffer.getvalue()
+        # Fallback rebuild when the original file had no usable BOQ sheet rows.
+        has_original_rows = any(
+            str(row.get("row_id") or "") in slot_ids
+            and row.get("excel_row_number")
+            for row in (boq_data.get("rows") or [])
+        )
+        if not has_original_rows and _BOQ_SHEET_TITLE in workbook.sheetnames:
+            self._write_boq_sheet_from_json(
+                workbook[_BOQ_SHEET_TITLE],
+                boq_data,
+                highlight_ids,
+                orange_ids,
+                review_title=review_title,
+                review_rows=review_rows,
+            )
 
     @staticmethod
-    def _write_boq_sheet(
+    def _write_boq_sheet_from_json(
         sheet: Worksheet,
         boq_data: dict[str, Any],
-        pricing: dict[str, dict[str, Any]],
         highlight_ids: set[str],
-        orange_ids: set[str] | None = None,
+        orange_ids: set[str],
+        *,
+        review_title: str,
+        review_rows: dict[str, list[int]],
     ) -> None:
-        """Fallback rebuild when the original workbook cannot be loaded."""
-        orange_ids = orange_ids or set()
+        """Rebuild a BOQ tab from parsed JSON when the upload cannot be filled."""
         headers = boq_data.get("headers") or []
-        rate_key, amount_key, qty_key, unit_key = _header_keys(headers)
+        rate_key, amount_key, qty_key, _unit_key = _header_keys(headers)
+        slot_ids = _slot_row_ids(boq_data)
         sheet.append([header.get("label") or header.get("key") or "" for header in headers])
         highlight_sheet_rows: list[tuple[int, PatternFill]] = []
 
         for row in boq_data.get("rows") or []:
-            row_id = str(row.get("row_id") or "")
+            row_id = str(row.get("row_id") or "").strip()
             row_values: dict[str, Any] = {}
             for header in headers:
                 key = header.get("key")
@@ -594,27 +888,26 @@ class BOQExportService:
                     continue
                 row_values[key] = cell_value(row, key)
 
-            qty_value = row_values.get(qty_key) if qty_key else None
-            unit_value = row_values.get(unit_key) if unit_key else None
-            can_price = _is_filled(qty_value) and (
-                not unit_key or _is_filled(unit_value)
-            )
-            if can_price and qty_key:
-                written_qty = _excel_qty_value(qty_value)
+            is_slot = row_id in slot_ids
+            if is_slot and qty_key:
+                written_qty = _excel_qty_value(row_values.get(qty_key))
                 if written_qty is not None:
                     row_values[qty_key] = written_qty
-            priced = pricing.get(row_id) if can_price else None
-            if priced:
-                if rate_key:
-                    row_values[rate_key] = priced.get("rate")
-                if amount_key:
-                    row_values[amount_key] = priced.get("amount")
+            mapped = list(review_rows.get(row_id) or []) if is_slot else []
+            if is_slot and rate_key:
+                row_values[rate_key] = _review_rate_formula(review_title, mapped)
+            if is_slot and amount_key:
+                row_values[amount_key] = _review_amount_formula(review_title, mapped)
 
             sheet.append([row_values.get(header.get("key")) for header in headers])
-            if can_price and row_id in orange_ids:
+            if not is_slot:
+                continue
+            if row_id in orange_ids:
                 highlight_sheet_rows.append((sheet.max_row, _ZERO_OR_RATE_ONLY_FILL))
-            elif can_price and row_id in highlight_ids:
+            elif row_id in highlight_ids:
                 highlight_sheet_rows.append((sheet.max_row, _MISSING_PRODUCT_FILL))
+            elif mapped:
+                highlight_sheet_rows.append((sheet.max_row, _FOUND_AMOUNT_FILL))
 
         for row_number, fill in highlight_sheet_rows:
             _highlight_row(
@@ -623,7 +916,6 @@ class BOQExportService:
                 max_column=len(headers) or 1,
                 fill=fill,
             )
-
         _style_used_range(sheet, skip_blank_rows=True)
         _autosize_columns(sheet)
 
@@ -634,7 +926,7 @@ class BOQExportService:
         boq_data: dict[str, Any] | None = None,
         *,
         orange_ids: set[str] | None = None,
-    ) -> None:
+    ) -> dict[str, list[int]]:
         orange_ids = orange_ids or set()
         sheet.append(list(REVIEW_OUTPUT_HEADERS))
         col_count = len(REVIEW_OUTPUT_HEADERS)
@@ -662,7 +954,6 @@ class BOQExportService:
             empty = [None] * col_count
             empty[0] = line.get("serial")
             empty[1] = line.get("description")
-            empty[18] = line.get("qty")
             sheet.append(empty)
             row_id = str(line.get("row_id") or "").strip()
             if row_id and row_id in orange_ids:
@@ -678,21 +969,44 @@ class BOQExportService:
                 emitted_products.add(marker)
                 review_row = product.get("review_output") or {}
                 sheet.append(review_output_values(review_row))
+                excel_row = int(sheet.max_row)
+                for col, key in (
+                    (_REVIEW_BASE_COL, "base_purchase_rate"),
+                    (_REVIEW_DISCOUNT_COL, "discount"),
+                    (_REVIEW_LABOUR_COL, "labour"),
+                    (_REVIEW_QTY_COL, "qty"),
+                ):
+                    number = _excel_number_value(review_row.get(key))
+                    if isinstance(number, (int, float)):
+                        sheet.cell(row=excel_row, column=col, value=number)
+                line_output = product.get("line_output") or {}
+                _apply_review_calc_formulas(
+                    sheet,
+                    excel_row,
+                    review_row,
+                    rate_sum=bool(line_output.get("amount_is_rate_sum"))
+                    or _product_is_zero_or_rate_only(product),
+                )
                 target = str(
                     product.get("qty_row_id")
                     or product.get("source_row_id")
                     or product.get("row_id")
                     or ""
                 ).strip()
+                if target:
+                    review_rows.setdefault(target, []).append(excel_row)
                 if _product_is_zero_or_rate_only(product) or (
                     target and target in orange_ids
                 ):
-                    highlight_sheet_rows.append((sheet.max_row, _ZERO_OR_RATE_ONLY_FILL))
+                    highlight_sheet_rows.append((excel_row, _ZERO_OR_RATE_ONLY_FILL))
                 elif _product_is_unmatched(product):
-                    highlight_sheet_rows.append((sheet.max_row, _MISSING_PRODUCT_FILL))
+                    highlight_sheet_rows.append((excel_row, _MISSING_PRODUCT_FILL))
+                else:
+                    highlight_sheet_rows.append((excel_row, _FOUND_AMOUNT_FILL))
 
         highlight_sheet_rows: list[tuple[int, PatternFill]] = []
         emitted_products: set[int] = set()
+        review_rows: dict[str, list[int]] = {}
         ordered = _ordered_boq_rows(boq_data or {})
         walk_rows = [
             row for row in ordered if str(row.get("row_id") or "").strip()
@@ -769,3 +1083,4 @@ class BOQExportService:
             red_header_columns=red_header_columns,
         )
         _autosize_columns(sheet, max_width=36)
+        return review_rows

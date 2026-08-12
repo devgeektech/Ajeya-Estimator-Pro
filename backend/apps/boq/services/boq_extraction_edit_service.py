@@ -132,8 +132,12 @@ class BOQExtractionEditService:
             if field not in fields:
                 continue
             updated[field] = _coerce_scalar(field, fields[field])
-        updated = _normalize_product_fields(updated)
+        submitted_class = updated.get("class")
+        updated = _normalize_product_fields(updated, preserve_class=True)
         updated = snap_product_taxonomy(updated)
+        # Expert Class (including ``0``) must survive taxonomy snap / material promote.
+        if not _is_blank(submitted_class):
+            updated["class"] = submitted_class
 
         if attributes is not None:
             updated["attributes"] = _normalize_attributes(attributes)

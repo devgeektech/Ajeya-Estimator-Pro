@@ -1437,7 +1437,7 @@ class BOQConfirmView(LoginRequiredMixin, View):
 
 
 class BOQExportView(LoginRequiredMixin, View):
-    """Download Review sheet or priced original BOQ Excel (`?kind=review|boq`)."""
+    """Download the combined Review + original BOQ workbook."""
 
     def get(self, request, pk: int):
         user = cast(User, request.user)

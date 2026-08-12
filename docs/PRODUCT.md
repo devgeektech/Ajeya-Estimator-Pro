@@ -194,6 +194,8 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
   - With products: **product rematch** (`mode=rematch` + `product_index`) — saves
     that product’s filled fields, sends BOQ row description + prior Product_IDs
     into ``ProductAIMappingService.rematch_product``, remaps that product only.
+    The Analysis page stays at the same scroll position after Re-analyse and
+    after leaving for BOQ / Make List and returning.
   - Empty section: **re-extract** (`mode=reextract`) via
     `BOQAnalysisService.re_extract_row` + `extract_products.txt`.
 - Celery task: `boq.process_extraction` (full BOQ only)
@@ -208,13 +210,17 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
   1. AI extract product fields/attributes from the **BOQ row as source of truth**
      (always includes `category` + `sub_category` from BOQ meaning; DB context lists
      **categories**, **sub_categories_by_category**, and
-     **classes_by_category_sub_category** so AI maps onto existing Rate_Master_Output
-     labels; values are snapped to DB labels after extract — e.g. PIPE material MS
-     stays in sub_category, Class snaps to catalog Class such as C)
+     **classes_by_category_sub_category** plus a deduped ``classes`` list so AI
+     maps onto existing Rate_Master_Output labels; values are snapped to DB
+     labels after extract — e.g. PIPE material MS stays in sub_category, Class
+     snaps to catalog Class such as C or ``0`` for sluice valves)
   2. Retrieve the **top 3** nearest Rate_Master_Output candidates (Chroma + structured/SQL
      size boost), ranked best-first — never invent catalog rows or Product_ID.
      Wrong nominal sizes are penalized / filtered when extract size is filled;
-     candidates are deduped by Product_ID; Class ``0`` is ignored for scoring.
+     candidates are deduped by Product_ID; Class ``0`` is a real score token.
+     A BOQ ``description_hint`` that names a different product than the
+     Rate_Master sub-category (electrical control panel vs ROSETTEE PLATE)
+     cannot confirm a match or show 100%.
   3. **AI mapping layer** (`ProductAIMappingService`) selects the best candidate when
      blended confidence ≥ 30%; otherwise status is `provisional` (schema for
      gap-fill, no confirmed `db_product_id` / Product_ID) or `unmatched`
@@ -227,30 +233,43 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
   6. If the wrong product was picked, the reviewer edits fields/attributes (blank
      columns) and clicks **Re-analyse** on **that product** — rematches using the
      BOQ row description, saved UI fields, filled attributes, and prior Product_IDs
-     (`rematch_product`). Empty sections with no products still **re-extract** from
-     the workbook.
+     (`rematch_product`). Expert-filled inputs (including Class ``0``) are kept on
+     the product; fetched Rate_Master details are shown on the match banner and
+     top candidates, not written over the expert Class/core fields. One-product
+     rematch does not change other products or their match %. Empty sections with
+     no products still **re-extract** from the workbook.
   7. Experts can **Select** any of the top 3 database candidates to confirm that
      Rate_Master_Output product (override AI pick). Selecting keeps that candidate’s
      listed match % (does not invent a new score) and loads its Rate_Master details
      into the UI columns.
 - Analysis UI shows matched / suggested / unmatched status, top **3** candidates
-  (selectable), confidence badge, and DB attribute fields (empty when missing). Experts add
+  (selectable) as ``Rate ID / Product ID / Category / Sub / Class / Size /
+  Unit / Capacity`` then attributes after a space (``0``, ``null``, ``NA``,
+  ``NB`` are shown as stored), confidence badge, and DB
+  attribute fields (empty when missing). Experts add
   more attributes with **+** beside the Attributes heading (no separate
   Additional Attributes section).
 - **Multi-product review:** when extracted product count and Unit/Qty row count
   disagree in a section — e.g. **1 qty row → 2+ products**, or **2 qty rows →
   only 1 product** — the card is flagged **Multi-product review** for expert
-  check. Initial extraction treats Unit/Qty slots as a **minimum**, not a cap:
-  every filled slot must produce at least one product, while separately evidenced
-  extra products are retained. If AI omits a slot, extraction retries that section
-  once with explicit slot coverage. If it still omits the slot, a BOQ-evidence
-  review product preserves that line rather than silently dropping it; this is
-  also flagged for review. Matching counts (1↔1, 2↔2, …) are not flagged unless
-  a fallback review product was required. Section-only header rows are hidden
-  (products live with the Unit/Qty groups).
+  check. Matching counts (1↔1, 2↔2, 3↔3, …) are not flagged. Hollow
+  slot-fallback products (AI omitted a slot, no category yet) still flag review
+  until matching fills identity fields. Initial extraction treats Unit/Qty slots
+  as a **minimum**, not a cap: every filled slot must produce at least one
+  product, while separately evidenced extra products are retained. Identical
+  copies of the same product on one slot are collapsed (one Set / one panel). If AI omits a
+  slot, extraction retries that section once with explicit slot coverage. If it
+  still omits the slot, a BOQ-evidence review product preserves that line rather
+  than silently dropping it. Section-only header rows are hidden (products live
+  with the Unit/Qty groups).
+- **Candidate match %:** each top database candidate is scored from filled product
+  fields against that Rate_Master row (fixed field weights — size+unit alone
+  cannot normalize to 100%). Scores use extract/expert fields, not fields copied
+  from Rate_Master after a pick. Unrelated product types stay below the 30%
+  confirm threshold even if category/size were overwritten.
 - **Per-slot details:** each lettered Unit/Qty slot carries a ``size_hint`` and
   local evidence. After AI extract, code rebinds size/unit from that slot,
-  prefers BOQ PN rating for capacity, clears placeholder class values (e.g. ``0``),
+  prefers BOQ PN rating for capacity, keeps catalog Class ``0``,
   and copies shared parent attributes (IS, seat, connection) onto every product
   in the section so later letter products are not left thinner than product 1.
 - **Product match percentage** on each Analysis Product tab/card uses
@@ -281,9 +300,10 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
   ``material_rate × qty`` and ``labour_rate × qty``. For qty ``0`` or Rate Only / RO,
   Review/Export show the **sum of unit rates only** (no quantity multiply), flagged
   with ``amount_is_rate_sum``.
-- **Class vs material:** product ``class`` maps to Rate_Master_Output ``Class`` (often
-  material: MS, SS, CI, GI, …). Material from BOQ goes into ``class``, not
-  free-text attribute keys.
+- **Class vs material:** product ``class`` maps to Rate_Master_Output ``Class``.
+  Use the listed Class for that category / sub-category (``0`` is real for
+  valves). Body material (DI, ductile iron) stays in ``attributes.material``
+  unless that token is itself the listed Class (e.g. NRV Class ``CI``).
 
 **Step 2 — Make & Vendor** (BOQ detail → **Make & Vendor** tab, after Analyse):
 
@@ -370,29 +390,24 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
 - **UI reference:** Analysis is the visual/format source of truth for shared BOQ
   detail patterns (cards, stripes, badges, tabs). Make & Vendor, Labour, and
   Review must follow Analysis when adding or changing shared chrome.
-- **Two exports** (`GET /boqs/<id>/export/?kind=…`):
-  - `kind=review` — Review/breakdown sheet using `Output format.xlsx` column order
-    (one row per product). Download name: ``{uploaded_boq}_review result sheet.xlsx``.
-    Export headers use the **red** labels from that
-    template (Ser no, BOQ Description, AI interpretation, Labour, TOTAL
-    MATERIAL/LABOUR); instructional Rate_Master headers are shortened to field
-    names only (Make, Vendor, …). Red header cells are written in red.
-    **Ser no of BOQ** uses each product's Unit/Qty row serial. Letter slots
-    (`a)`, `b)`) are qualified with that row's nearest structural parent
-    (`5.1 a)`, not the wider group `5`). When several products share one serial,
-    export uses `1.7(A)`, `1.7(B)` so hierarchy stays readable without renumbering.
-  - `kind=boq` — exact uploaded workbook layout (original file filled in place);
-    download name: ``{uploaded_boq}_result.xlsx``. Qty, Rate, and Amount written
-    on each product's Unit/Qty row (not the section header), including columns
-    labeled ``RATE (Rs.)`` / ``AMOUNT (Rs.)``. Resolved numeric Qty replaces
-    floor ``SUM`` formulas so the QTY column shows a value without Excel
-    recalculation.
-    Rows with no matched product are highlighted with a red background.
-    Zero-qty and Rate Only rows are highlighted orange on both exports.
-  - Review export also red-highlights product rows with no fetched match.
-  - Review/breakdown export includes structural BOQ section note rows (Material,
-    Fittings, Painting, etc.) as well as priced product lines.
-- Either download sets status `EXPORTED`.
+- **One export** (`GET /boqs/<id>/export/?kind=review|boq` — both return the same
+  file): ``{uploaded_boq}_result.xlsx`` with two tabs:
+  - **Review** — client Output format columns (one row per product). Red template
+    headers stay red. **Ser no of BOQ** uses each product's Unit/Qty row serial.
+    Letter slots (`a)`, `b)`) are qualified with that row's nearest structural
+    parent (`5.1 a)`). Shared serials use `1.7(A)`, `1.7(B)`. Structural section
+    rows do **not** copy the first child's quantity.
+  - **Original BOQ** — uploaded layout. Qty is written only on Unit/Qty slot
+    rows. **Rate** is an Excel formula: Review `Final_Material_Amount + Labour`
+    (summed when several products share one slot). **Amount** is an Excel formula
+    to Review `Amount`. Rate/Amount columns are detected across client header
+    formats (`RATE (Rs.)`, `Amount`, etc.).
+  - Review derived columns are Excel formulas: Discount (or Base) updates Net →
+    add-ons → Final material → TOTAL MATERIAL / Amount. Labour × Qty updates
+    TOTAL LABOUR. The BOQ tab Rate/Amount formulas follow those Review cells.
+  - Row fills (muted): **green** = amount found, **orange** = zero qty / Rate
+    Only, **red** = missing product.
+- Download sets status `EXPORTED`.
 - Gate: `READY_EXPORT` / `pricing_ready` after Labour → Next.
 
 Poll `GET /boqs/<id>/status/?expect=extract` while `PROCESSING`.
@@ -419,7 +434,7 @@ live analysis is edited before re-match.
 | `BOQLabourService` | Auto/Manual labour charges; unlock Review |
 | `BOQReviewDisplayService` | Review/export lines from vendor_selection + labour |
 | `BOQPriceCalculationService` | Aggregate line amounts onto original rows; unlock export |
-| `BOQExportService` | Excel export: Review sheet (`kind=review`) or priced BOQ (`kind=boq`) |
+| `BOQExportService` | Combined Excel export: Review + original BOQ tabs (formulas) |
 | `BOQAnalysisService` | Orchestrator |
 | `utils/attribute_parser.py` | Parse/normalize dynamic `Attribute` key-value text |
 
@@ -447,7 +462,8 @@ is mapped onto Rate_Master_Output ``Category`` and ``Sub_Category`` (heuristic +
 ``map_make_list_categories`` using the full taxonomy). Stored as ``category_mappings``
 on `make_list_data` and shown as separate **Category** and **Subcategory**
 columns on the Make List tab. Heuristics prefer specific product phrases, refuse
-weak shared-token sub-category guesses (e.g. Alarm Valve ≠ Ball Valve), and keep
+weak shared-token sub-category guesses (e.g. Alarm Valve ≠ Ball Valve), do not
+map a bare ``panel`` onto ACCESSORIES / ROSETTEE PLATE, and keep
 a solid heuristic category when AI disagrees weakly. ``category_mapping_version``
 triggers a full remap when mapping rules change. Only **pending** stubs (written
 when the Rate_Master_Output taxonomy was empty) are remapped for incompleteness;
@@ -495,16 +511,14 @@ labour prefers **`Total_Labour_Per_Unit`**, then
 `Total_Labour_per_unit_with_labour_Multipler`, then `Labour_Rate_Per_unit`.
 Component breakdown (testing, scaffolding, consumables, painting, buffer) is exposed for export.
 
-**Export:** After Labour → Next (`READY_EXPORT`), Review tab offers two downloads
-via `BOQExportService` (`?kind=`):
+**Export:** After Labour → Next (`READY_EXPORT`), Review tab **Export** downloads
+one workbook (`{upload}_result.xlsx`) via `BOQExportService`:
 
-- **Review sheet** (`kind=review`) — client Output format columns with short/red
-  headers (Rate_ID, Make, Vendor, material breakdown, Labour, Qty, TOTAL
-  MATERIAL/LABOUR, Amount); one row per product.
-- **BOQ** (`kind=boq`) — original upload workbook with rate/amount filled only on
-  rows that already have Qty and Unit.
+- **Review** tab — Output format columns (one row per product).
+- **BOQ** tab — original layout; Rate = Review Final material + Labour; Amount =
+  Review Amount (Excel formulas). Muted green / orange / red row fills.
 
-Either successful download sets `EXPORTED`.
+Successful download sets `EXPORTED`.
 
 ## Business Rules (stable)
 
@@ -596,7 +610,7 @@ BOQ_AI/
 | `apps/boq/services/boq_labour_service.py` | Labour Auto/Manual + complete → Review |
 | `apps/boq/services/boq_review_display_service.py` | Review/export from vendor_selection |
 | `apps/boq/services/boq_price_calculation_service.py` | Labour → Next row pricing / ready to export |
-| `apps/boq/services/boq_export_service.py` | Excel export (`kind=review` | `kind=boq`) |
+| `apps/boq/services/boq_export_service.py` | Combined Excel export (Review + BOQ tabs) |
 | `ai/openai_client.py` | OpenAI client + API key check |
 | `ai/embeddings/` | Chroma product index |
 | `config/settings.py` | Single settings module |

@@ -167,7 +167,8 @@ After each successful import, `generate_embeddings_for_version()` indexes active
 Capacity, Unit, Attribute, Vendor.
 
 Taxonomy for AI extract/map comes from distinct Category / Sub_Category / Class on
-`Rate_Master_Output` (`classes_by_category_sub_category` in the extract DB context).
+`Rate_Master_Output` (`classes_by_category_sub_category` plus a deduped `classes`
+list in the extract DB context). Class `0` is a real token (valves).
 
 ---
 

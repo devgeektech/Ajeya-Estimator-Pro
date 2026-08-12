@@ -459,6 +459,7 @@
             display: flex;
             flex-direction: column;
             gap: 14px;
+            overflow-anchor: none;
         }
 
         .extraction-line {
@@ -467,6 +468,7 @@
             padding: 14px;
             background: var(--surface);
             box-shadow: var(--shadow);
+            overflow-anchor: none;
         }
 
         .extraction-line:nth-child(even) {
@@ -811,6 +813,7 @@
             display: -webkit-box;
             -webkit-box-orient: vertical;
             -webkit-line-clamp: 1;
+            line-clamp: 1;
             overflow: hidden;
             white-space: normal;
         }
@@ -818,6 +821,7 @@
         .analysis-tab-canvas .extraction-line__description-text--full {
             display: block;
             -webkit-line-clamp: unset;
+            line-clamp: unset;
             overflow: visible;
             white-space: pre-wrap;
             margin: 4px 0 0;
@@ -1265,6 +1269,7 @@
             display: -webkit-box;
             -webkit-box-orient: vertical;
             -webkit-line-clamp: 1;
+            line-clamp: 1;
             overflow: hidden;
             white-space: normal;
             word-break: break-word;
@@ -1833,6 +1838,7 @@
             display: -webkit-box;
             -webkit-box-orient: vertical;
             -webkit-line-clamp: 2;
+            line-clamp: 2;
             overflow: hidden;
             white-space: normal;
             word-break: break-word;
@@ -2081,11 +2087,13 @@
             display: -webkit-box;
             -webkit-box-orient: vertical;
             -webkit-line-clamp: 2;
+            line-clamp: 2;
             overflow: hidden;
         }
         .review-tab-canvas .review-boq-desc__text.is-expanded {
             display: block;
             -webkit-line-clamp: unset;
+            line-clamp: unset;
             overflow: visible;
         }
         .review-tab-canvas .review-boq-desc__toggle {
@@ -2560,6 +2568,7 @@
             display: -webkit-box;
             -webkit-box-orient: vertical;
             -webkit-line-clamp: 2;
+            line-clamp: 2;
             overflow: hidden;
             white-space: normal;
         }
@@ -3296,10 +3305,6 @@
 
         .dark-mode .analysis-summary-line {
             color: var(--text-muted);
-        }
-
-        .dark-mode .analysis-tab-canvas {
-            /* Transparent canvas */
         }
 
         /* ---- Theme toggle button (sidebar profile row) ---- */
