@@ -10,6 +10,7 @@ from apps.boq.services.boq_extraction_service import (
     quantity_display_fields,
     rehydrate_products_quantity_from_group,
 )
+from apps.boq.services.boq_row_fields import is_blank as _is_blank
 from apps.boq.services.boq_row_grouping_service import grouped_anchor_rows
 from apps.boq.services.extraction_attribute_fields import COMMON_ATTRIBUTE_LABELS
 from apps.boq.services.make_list_constraint_service import MakeListConstraintService
@@ -21,6 +22,7 @@ from apps.boq.services.product_attribute_enrichment_service import (
 )
 from apps.boq.services.product_matching_service import structured_match_score
 from apps.database_manager.models import Rate_Master_Output
+from common.constants import ANALYSIS_INPUT_FILL_CONFIDENCE
 from utils.attribute_parser import coerce_attributes_dict
 
 
@@ -71,10 +73,12 @@ def _candidate_summary_for_display(
     *,
     include_empty: bool = False,
 ) -> str:
-    """Rate ID / Product ID / Category / Sub / Class / Size / Unit / Capacity attrs."""
+    """Product ID / Category / Sub / Class / Size / Unit / Capacity attrs.
+
+    Analysis identifies catalog products by Product_ID only — never show Rate_ID.
+    """
     identity: list[str] = []
     for key in (
-        "rate_id",
         "product_id",
         "category",
         "sub_category",
@@ -90,7 +94,8 @@ def _candidate_summary_for_display(
     attr_bits = _candidate_attribute_bits(item)
     if attr_bits:
         attrs = ", ".join(attr_bits)
-        return f"{label} {attrs}" if label else attrs
+        # Tab separates identity fields from Attribute key=value pairs.
+        return f"{label}\t{attrs}" if label else attrs
     return label or str(item.get("summary") or "").strip() or "Matched product"
 
 
@@ -104,11 +109,20 @@ def _backfill_candidate_confidences(
     if not database_version_id:
         return
     missing_ids: list[int] = []
+    def _confidence_missing(raw: Any) -> bool:
+        # Only fill when the score was never stored. Explicit 0.0 from retrieval
+        # must stay 0 — re-scoring on Select/rematch HTML refresh made sibling
+        # candidate percentages appear to jump.
+        return raw is None
+
     for item in candidates:
-        if item.get("confidence") is not None:
+        if not _confidence_missing(item.get("confidence")):
+            continue
+        raw_id = item.get("id")
+        if raw_id is None:
             continue
         try:
-            missing_ids.append(int(item.get("id")))
+            missing_ids.append(int(raw_id))
         except (TypeError, ValueError):
             continue
     if not missing_ids:
@@ -123,10 +137,13 @@ def _backfill_candidate_confidences(
     product_only = dict(product)
     product_only["make_hint"] = None
     for item in candidates:
-        if item.get("confidence") is not None:
+        if not _confidence_missing(item.get("confidence")):
+            continue
+        raw_id = item.get("id")
+        if raw_id is None:
             continue
         try:
-            cand_id = int(item.get("id"))
+            cand_id = int(raw_id)
         except (TypeError, ValueError):
             continue
         rate = rates.get(cand_id)
@@ -136,8 +153,70 @@ def _backfill_candidate_confidences(
         item["confidence"] = round(float(score), 2)
 
 
+def _recall_candidates_for_unmatched(
+    product: dict[str, Any],
+    *,
+    database_version_id: int | None,
+    limit: int = 3,
+) -> list[dict[str, Any]]:
+    """SQL-only Top-N Rate_Master neighbors when Analyse left db_candidates empty.
+
+    Unmatched / 0% products still need Select options from description_hint.
+    Never call embeddings / OpenAI here — Analysis tab GET must stay read-only.
+    """
+    if not database_version_id:
+        return []
+    hint = str(product.get("description_hint") or "").strip()
+    has_identity = any(
+        not _is_blank(product.get(key))
+        for key in ("category", "sub_category", "class", "size", "unit", "capacity")
+    )
+    if not hint and not has_identity:
+        return []
+
+    from apps.boq.services.product_ai_common import _candidate_snapshot, _slim_candidate
+    from apps.boq.services.product_matching_service import ProductMatchingService
+
+    recall = {
+        "description_hint": product.get("description_hint"),
+        "category": product.get("category"),
+        "sub_category": product.get("sub_category"),
+        "class": product.get("class"),
+        "size": product.get("size"),
+        "unit": product.get("unit"),
+        "capacity": product.get("capacity"),
+        "attributes": coerce_attributes_dict(product.get("attributes")),
+        "make_hint": None,
+    }
+    try:
+        matcher = ProductMatchingService(int(database_version_id))
+        raw_candidates = matcher.recall_sql_candidates(recall, limit=max(limit, 3))
+    except Exception:
+        return []
+
+    shaped: list[dict[str, Any]] = []
+    for item in raw_candidates[:limit]:
+        rate = item.get("rate")
+        if rate is None:
+            continue
+        try:
+            confidence = float(item.get("structured_score") or item.get("confidence") or 0.0)
+        except (TypeError, ValueError):
+            confidence = 0.0
+        slim = _slim_candidate(_candidate_snapshot(rate, confidence=round(confidence, 2)))
+        shaped.append(
+            {
+                "id": slim.get("id"),
+                "summary": _candidate_summary_for_display(slim, include_empty=True),
+                "confidence": slim.get("confidence"),
+                "is_selected": False,
+            }
+        )
+    return shaped
+
+
 _PRODUCT_FIELDS: tuple[tuple[str, str], ...] = (
-    ("description_hint", "Product description"),
+    ("description_hint", "AI Description"),
     ("category", "Category"),
     ("sub_category", "Sub-category"),
     ("class", "Class"),
@@ -148,14 +227,6 @@ _PRODUCT_FIELDS: tuple[tuple[str, str], ...] = (
 
 # All product property fields are optional — products differ in which apply.
 _REQUIRED_FIELDS: frozenset[str] = frozenset()
-
-
-def _is_blank(value: Any) -> bool:
-    if value is None:
-        return True
-    if isinstance(value, str):
-        return not value.strip()
-    return False
 
 
 def _attribute_label(key: str) -> str:
@@ -216,62 +287,6 @@ def _shape_product(
 ) -> dict[str, Any]:
     # Show stored fields as-is. Do not wipe Class=0 or promote material on render.
     product = dict(product)
-    fields: list[dict[str, Any]] = []
-    missing_count = 0
-    for key, label in _PRODUCT_FIELDS:
-        value = product.get(key)
-        missing = _is_blank(value) and key in _REQUIRED_FIELDS
-        if missing:
-            missing_count += 1
-        fields.append(
-            {
-                "key": key,
-                "label": label,
-                "value": "" if value is None else str(value),
-                "missing": missing,
-            }
-        )
-
-    attribute_fields = _shape_attribute_fields(product)
-    missing_attr_keys = [
-        str(key)
-        for key in (product.get("missing_attribute_keys") or [])
-        if str(key).strip()
-    ]
-    if not missing_attr_keys:
-        missing_attr_keys = [
-            field["key"]
-            for field in attribute_fields.get("fields") or []
-            if not field.get("filled")
-        ]
-
-    db_match_status = str(product.get("db_match_status") or "").strip() or (
-        "matched" if product.get("db_product_id") else "unmatched"
-    )
-    db_match = None
-    if product.get("db_product_id") or product.get("db_product_summary") or db_match_status == "provisional":
-        db_match = {
-            "rate_master_id": product.get("db_product_id"),
-            "suggested_id": product.get("suggested_db_product_id"),
-            "status": db_match_status,
-            "summary": _candidate_summary_for_display(
-                {
-                    "category": product.get("category"),
-                    "sub_category": product.get("sub_category"),
-                    "class": product.get("class"),
-                    "size": product.get("size"),
-                    "unit": product.get("unit"),
-                    "summary": product.get("db_product_summary"),
-                }
-            ),
-            "make": product.get("db_product_make") or "",
-            "tech_key": product.get("db_product_tech_key") or "",
-            "notes": ((product.get("ai_mapping") or {}).get("notes") or ""),
-            "missing_attribute_keys": missing_attr_keys,
-        }
-
-    candidates = []
-    selected_id = product.get("db_product_id") or product.get("suggested_db_product_id")
     selected_confidence = _candidate_confidence_value(
         product.get("db_match_confidence")
     )
@@ -279,8 +294,17 @@ def _shape_product(
         selected_confidence = _candidate_confidence_value(
             product.get("attribute_confidence")
         )
-    match_percentage = float(selected_confidence or 0.0)
-    match_band = match_percentage_band(match_percentage)
+    stored_match_percentage = float(selected_confidence or 0.0)
+    selection_source = str(
+        (product.get("ai_mapping") or {}).get("selection_source") or ""
+    )
+    db_match_status = str(product.get("db_match_status") or "").strip() or (
+        "matched" if product.get("db_product_id") else "unmatched"
+    )
+    fill_threshold = float(ANALYSIS_INPUT_FILL_CONFIDENCE)
+
+    candidates = []
+    selected_id = product.get("db_product_id") or product.get("suggested_db_product_id")
     for item in (product.get("db_candidates") or [])[:3]:
         cand_id = item.get("id")
         is_selected = False
@@ -299,8 +323,7 @@ def _shape_product(
                 "id": cand_id,
                 "summary": _candidate_summary_for_display(item, include_empty=True)
                 if (
-                    item.get("rate_id")
-                    or item.get("product_id")
+                    item.get("product_id")
                     or item.get("category")
                     or item.get("size")
                     or item.get("unit")
@@ -313,7 +336,6 @@ def _shape_product(
         )
     # Only fill missing candidate % (legacy wiped scores). Never re-score stored
     # percentages — one product rematch must not change sibling product %.
-    selection_source = str((product.get("ai_mapping") or {}).get("selection_source") or "")
     if selection_source != "expert":
         _backfill_candidate_confidences(
             product,
@@ -321,9 +343,136 @@ def _shape_product(
             database_version_id=database_version_id,
         )
 
+    top_candidate_pct = 0.0
+    for item in candidates:
+        try:
+            top_candidate_pct = max(
+                top_candidate_pct,
+                float(item.get("confidence") or 0.0),
+            )
+        except (TypeError, ValueError):
+            continue
+
+    # Badge should reflect the best listed neighbor when Analyse left product % at 0.
+    match_percentage = stored_match_percentage
+    if (
+        selection_source != "expert"
+        and not product.get("db_product_id")
+        and top_candidate_pct > match_percentage
+    ):
+        match_percentage = top_candidate_pct
+    match_band = match_percentage_band(match_percentage)
+
+    # Weak banner only when effective % is below the Analysis fill threshold.
+    # A 68% top candidate must not show "Unable to match…".
+    blank_inputs = (
+        selection_source != "expert"
+        and match_percentage < fill_threshold
+        and not product.get("db_product_id")
+    )
+    unable_to_match = blank_inputs
+
+    # Unmatched with no stored neighbors — recall live so Select is available.
+    if unable_to_match and not candidates:
+        candidates = _recall_candidates_for_unmatched(
+            product,
+            database_version_id=database_version_id,
+            limit=3,
+        )
+        for item in candidates:
+            try:
+                top_candidate_pct = max(
+                    top_candidate_pct,
+                    float(item.get("confidence") or 0.0),
+                )
+            except (TypeError, ValueError):
+                continue
+        if top_candidate_pct > match_percentage:
+            match_percentage = top_candidate_pct
+            match_band = match_percentage_band(match_percentage)
+            blank_inputs = (
+                selection_source != "expert"
+                and match_percentage < fill_threshold
+                and not product.get("db_product_id")
+            )
+            unable_to_match = blank_inputs
+
+    fields: list[dict[str, Any]] = []
+    missing_count = 0
+    for key, label in _PRODUCT_FIELDS:
+        value = product.get(key)
+        if blank_inputs and key != "description_hint":
+            value = None
+        missing = _is_blank(value) and key in _REQUIRED_FIELDS
+        if missing:
+            missing_count += 1
+        fields.append(
+            {
+                "key": key,
+                "label": label,
+                "value": "" if value is None else str(value),
+                "missing": missing,
+            }
+        )
+
+    attr_source = {**product, "attributes": {}} if blank_inputs else product
+    attribute_fields = _shape_attribute_fields(attr_source)
+    missing_attr_keys = [
+        str(key)
+        for key in (product.get("missing_attribute_keys") or [])
+        if str(key).strip()
+    ]
+    if not missing_attr_keys:
+        missing_attr_keys = [
+            field["key"]
+            for field in attribute_fields.get("fields") or []
+            if not field.get("filled")
+        ]
+
+    db_match = None
+    if product.get("db_product_id") or product.get("db_product_summary") or db_match_status == "provisional":
+        # Banner uses the stored DB summary — not the blanked Analysis inputs.
+        summary = str(product.get("db_product_summary") or "").strip()
+        if not summary:
+            summary = _candidate_summary_for_display(
+                {
+                    "product_id": product.get("catalog_product_id")
+                    or product.get("suggested_catalog_product_id"),
+                    "category": product.get("category"),
+                    "sub_category": product.get("sub_category"),
+                    "class": product.get("class"),
+                    "size": product.get("size"),
+                    "unit": product.get("unit"),
+                    "summary": product.get("db_product_summary"),
+                }
+            )
+        db_match = {
+            "rate_master_id": product.get("db_product_id"),
+            "suggested_id": product.get("suggested_db_product_id"),
+            "status": db_match_status,
+            "summary": summary,
+            "make": product.get("db_product_make") or "",
+            "tech_key": product.get("db_product_tech_key") or "",
+            "notes": ((product.get("ai_mapping") or {}).get("notes") or ""),
+            "missing_attribute_keys": missing_attr_keys,
+        }
+
     # Each product binds to its own Unit/Qty slot, so a multi-product section
     # shows different values per tab rather than the section header's figure.
     qty_fields = quantity_display_fields(product)
+    weak_match_message = ""
+    if unable_to_match:
+        if candidates:
+            weak_match_message = (
+                "Unable to match this product confidently. Similar products are "
+                "listed under Top database candidates — select any of them, or "
+                "enter the details in the input fields below and click Re-analyse."
+            )
+        else:
+            weak_match_message = (
+                "Unable to match this product confidently. Enter the details in "
+                "the input fields below and click Re-analyse."
+            )
     return {
         "product_index": int(product.get("product_index") or 0),
         "source_row_id": source_row_id,
@@ -345,6 +494,19 @@ def _shape_product(
         "attribute_confidence_band": attribute_fields["confidence_band"],
         "match_percentage": match_percentage,
         "match_percentage_band": match_band,
+        # Confirm → 100% when a product is already selected/suggested but not full credit.
+        "show_confirm_match": bool(
+            match_percentage < 99.5
+            and (
+                product.get("db_product_id")
+                or product.get("suggested_db_product_id")
+            )
+        ),
+        "show_weak_match_warning": unable_to_match,
+        "show_candidates_open": bool(
+            (unable_to_match or db_match_status == "unmatched") and candidates
+        ),
+        "weak_match_message": weak_match_message,
         "db_match": db_match,
         "db_match_status": db_match_status,
         "db_candidates": candidates,
@@ -430,6 +592,20 @@ def _shape_make_list(
     }
 
 
+def _product_boq_order_key(product: dict[str, Any]) -> tuple[int, int]:
+    """Sort key: BOQ qty slot order, then stored product_index (never match %)."""
+    raw_slot = product.get("slot_index")
+    try:
+        slot = int(raw_slot) if raw_slot not in (None, "") else 10**9
+    except (TypeError, ValueError):
+        slot = 10**9
+    try:
+        index = int(product.get("product_index") or 0)
+    except (TypeError, ValueError):
+        index = 0
+    return (slot, index)
+
+
 def _merge_lineage_analysis(
     lineage_ids: list[str],
     analysis_by_row: dict[str, dict[str, Any]],
@@ -448,6 +624,7 @@ def _merge_lineage_analysis(
                     str(product.get("category") or ""),
                     str(product.get("sub_category") or ""),
                     str(product.get("product_index") or ""),
+                    str(product.get("slot_index") or ""),
                 ]
             )
             if dedupe_key in seen:
@@ -455,8 +632,9 @@ def _merge_lineage_analysis(
             seen.add(dedupe_key)
             products.append({**product, "source_row_id": str(row_id)})
 
-    for index, product in enumerate(products):
-        product["product_index"] = index
+    # Keep BOQ / slot sequence — do not arrange tabs by match percentage.
+    products.sort(key=_product_boq_order_key)
+    # Preserve stored product_index for rematch/edit; display_number is visual only.
 
     # Activities are retired — Analysis extracts products only.
     return products, [], anchor_analysis
@@ -522,19 +700,17 @@ class BOQExtractionDisplayService:
             products = rehydrate_products_quantity_from_group(products, group)
             product_total = len(products)
             qty_rows = list(group.get("qty_rows") or [])
-            qty_row_count = len(qty_rows)
-            # Multi-product review = product count and Unit/Qty slots disagree:
-            # e.g. 1 qty row → 2+ products, or 2 qty rows → only 1 product.
-            # Equal counts (3 products for 3 dia slots) are not flagged.
-            # Slot-fallback review is cleared once matching fills a real product.
+            qty_row_count = int(group.get("slot_count") or 0) or len(
+                group.get("slots") or qty_rows
+            )
+            # Multi-product review ONLY when product count ≠ Unit/Qty slot count
+            # (e.g. 2 slots → 1 or 3 products). Equal counts are fine — including
+            # 1 product for 1 rate/qty row. Hollow slot-fallback / weak extract
+            # review must not reuse this badge (it mislabels single-product sections).
             multiproduct_review = (
                 qty_row_count > 0
                 and product_total > 0
                 and product_total != qty_row_count
-            ) or any(
-                bool(product.get("needs_extraction_review"))
-                and not str(product.get("category") or "").strip()
-                for product in products
             )
 
             shaped_products = [

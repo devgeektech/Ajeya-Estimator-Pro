@@ -370,6 +370,213 @@ def collect_approved_makes(
     return makes
 
 
+# Bump when description/make peel rules change so stored JSON is re-repaired.
+MAKE_LIST_SPLIT_REPAIR_VERSION = 2
+
+
+def approved_makes_column_keys(count: int) -> list[str]:
+    """Return ``approved_makes`` / ``approved_makes_2`` … keys for ``count`` makes.
+
+    There is **no fixed cap** — count may be 1, 4, 6, 10, ….
+    """
+    size = max(1, int(count or 0))
+    keys = ["approved_makes"]
+    for index in range(2, size + 1):
+        keys.append(f"approved_makes_{index}")
+    return keys
+
+
+def _material_key_for_row(
+    row: dict,
+    *,
+    material_keys: list[str] | None = None,
+) -> str:
+    display = row.get("display_values") or row.get("values") or {}
+    for key in (*(material_keys or ()), "description", "material", "particulars", "desc"):
+        if key and isinstance(display, dict) and display.get(key) not in (None, ""):
+            return str(key)
+    return "description"
+
+
+def _write_makes_into_columns(
+    display: dict[str, Any],
+    values: dict[str, Any],
+    makes: list[str],
+    *,
+    make_keys: list[str],
+) -> list[str]:
+    """Mirror approved makes into display/values make columns for UI consistency.
+
+    Expands ``approved_makes_N`` columns when ``makes`` is longer than ``make_keys``.
+    Returns the keys actually written (no fixed cap).
+    """
+    needed = max(len(makes), len([k for k in (make_keys or []) if str(k).startswith("approved_makes")]), 1)
+    keys = approved_makes_column_keys(needed)
+    for index, key in enumerate(keys):
+        value = makes[index] if index < len(makes) else None
+        display[key] = value
+        values[key] = value
+    keep = set(keys)
+    for key in list(display.keys()):
+        if str(key).startswith("approved_makes") and key not in keep:
+            display.pop(key, None)
+            values.pop(key, None)
+    return keys
+
+
+def expand_payload_make_columns(payload: dict | None) -> dict:
+    """Ensure headers / make_keys cover every entry in ``approved_makes_list``.
+
+    Source of truth is ``approved_makes_list`` (unlimited). Per-make columns are
+    only mirrors for Excel-like layouts and grow to the longest row.
+    """
+    if not payload:
+        return {}
+    rows = list(payload.get("rows") or [])
+    max_makes = max(
+        (len(row.get("approved_makes_list") or []) for row in rows),
+        default=0,
+    )
+    roles = dict(payload.get("column_roles") or {})
+    existing_make_keys = list(roles.get("make_keys") or [])
+    # Keep non-approved Excel make columns (e.g. ``make``) and always ensure
+    # approved_makes_* mirrors cover the longest list.
+    extra_keys = [
+        key for key in existing_make_keys if not str(key).startswith("approved_makes")
+    ]
+    make_keys = extra_keys + [
+        key
+        for key in approved_makes_column_keys(max(max_makes, 1))
+        if key not in extra_keys
+    ]
+
+    material_keys = list(roles.get("material_keys") or [])
+    updated_rows: list[dict] = []
+    for row in rows:
+        makes = [
+            str(item).strip()
+            for item in (row.get("approved_makes_list") or [])
+            if str(item).strip()
+        ]
+        display = dict(row.get("display_values") or {})
+        values = dict(row.get("values") or {})
+        _write_makes_into_columns(
+            display,
+            values,
+            makes,
+            make_keys=make_keys,
+        )
+        updated_rows.append(
+            {
+                **row,
+                "display_values": display,
+                "values": values,
+                "approved_makes_list": makes,
+            }
+        )
+
+    header_by_key = {
+        str(header.get("key")): header for header in (payload.get("headers") or [])
+    }
+    serial_key = payload.get("serial_key")
+    material_key = (material_keys[0] if material_keys else None) or "description"
+    ordered_keys: list[str] = []
+    for key in (serial_key, material_key, *make_keys):
+        if key and key not in ordered_keys:
+            ordered_keys.append(str(key))
+
+    headers: list[dict] = []
+    for index, key in enumerate(ordered_keys):
+        existing = header_by_key.get(key)
+        if existing:
+            headers.append({**existing, "index": index})
+            continue
+        if key == "approved_makes":
+            label = "Approved Makes"
+        elif str(key).startswith("approved_makes_"):
+            suffix = str(key).removeprefix("approved_makes_")
+            label = f"Approved Makes {suffix}"
+        else:
+            label = str(key).replace("_", " ").title()
+        headers.append({"key": key, "label": label, "index": index})
+
+    enriched = dict(payload)
+    enriched["rows"] = updated_rows
+    enriched["headers"] = headers
+    enriched["column_roles"] = {
+        **roles,
+        "make_keys": [key for key in make_keys if str(key).startswith("approved_makes")]
+        or make_keys,
+        "material_keys": material_keys or [material_key],
+    }
+    return enriched
+
+
+def repair_make_list_row_split(
+    row: dict,
+    *,
+    material_keys: list[str] | None = None,
+    make_keys: list[str] | None = None,
+) -> dict:
+    """
+    Move material nouns wrongly captured in ``approved_makes_list`` back into
+    the description (e.g. ``Drums SAFEGUARD`` → description gains ``Drums``).
+    """
+    if row.get("is_section_heading"):
+        return row
+
+    from utils.text_boundary import repair_description_and_makes
+
+    material_key = _material_key_for_row(row, material_keys=material_keys)
+    display = dict(row.get("display_values") or {})
+    values = dict(row.get("values") or {})
+    description = str(display.get(material_key) or values.get(material_key) or "").strip()
+    makes = [str(item).strip() for item in (row.get("approved_makes_list") or []) if str(item).strip()]
+    if not description and not makes:
+        return row
+
+    new_description, new_makes = repair_description_and_makes(description, makes)
+    if new_description == description and new_makes == makes:
+        return row
+
+    display[material_key] = new_description or None
+    values[material_key] = new_description or None
+    _write_makes_into_columns(
+        display,
+        values,
+        new_makes,
+        make_keys=list(make_keys or []),
+    )
+    return {
+        **row,
+        "display_values": display,
+        "values": values,
+        "approved_makes_list": new_makes,
+    }
+
+
+def repair_make_list_payload_splits(payload: dict | None) -> dict:
+    """Repair description/make peel mistakes on every make-list row."""
+    if not payload:
+        return {}
+    roles = payload.get("column_roles") or {}
+    material_keys = list(roles.get("material_keys") or [])
+    make_keys = list(roles.get("make_keys") or [])
+    rows = [
+        repair_make_list_row_split(
+            row,
+            material_keys=material_keys,
+            make_keys=make_keys,
+        )
+        for row in (payload.get("rows") or [])
+    ]
+    enriched = dict(payload)
+    enriched["rows"] = rows
+    enriched["split_repair_version"] = MAKE_LIST_SPLIT_REPAIR_VERSION
+    # Grow approved_makes_N columns to the longest approved_makes_list (no cap).
+    return expand_payload_make_columns(enriched)
+
+
 def attach_approved_makes_list(
     rows: list[dict],
     headers: list[dict] | None = None,
@@ -377,6 +584,7 @@ def attach_approved_makes_list(
     """Attach ``approved_makes_list`` using heuristically resolved columns."""
     roles = resolve_make_list_columns(rows, headers=headers)
     make_keys = roles.get("make_keys") or []
+    material_keys = roles.get("material_keys") or []
     enriched: list[dict] = []
     for row in rows:
         existing = row.get("approved_makes_list")
@@ -384,7 +592,12 @@ def attach_approved_makes_list(
             approved_makes_list = [str(item).strip() for item in existing if str(item).strip()]
         else:
             approved_makes_list = collect_approved_makes(row, make_keys=make_keys)
-        enriched.append({**row, "approved_makes_list": approved_makes_list})
+        repaired = repair_make_list_row_split(
+            {**row, "approved_makes_list": approved_makes_list},
+            material_keys=material_keys,
+            make_keys=make_keys,
+        )
+        enriched.append(repaired)
     return enriched, roles
 
 

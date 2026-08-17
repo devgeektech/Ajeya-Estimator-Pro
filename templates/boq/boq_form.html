@@ -22,10 +22,12 @@
         enctype="multipart/form-data"
         novalidate
         data-check-name-url="{% url 'boq:check_name' %}"
+        data-list-url="{% url 'boq:list' %}"
         {% if not has_active_database %}data-blocked="1"{% endif %}
     >
         {% csrf_token %}
         <div id="boq-upload-form-error" class="field__error" hidden style="margin-bottom:12px;"></div>
+        <div id="boq-upload-status" class="panel__text" hidden style="margin-bottom:12px;" aria-live="polite"></div>
 
         <label class="field" data-field="boq_name">
             <span class="field__label">{{ form.boq_name.label }}<span class="field__required" aria-hidden="true">*</span></span>
@@ -71,8 +73,11 @@
     }
 
     const formError = document.getElementById('boq-upload-form-error');
+    const statusEl = document.getElementById('boq-upload-status');
     const checkNameUrl = form.dataset.checkNameUrl;
+    const listUrl = form.dataset.listUrl || '/boqs/';
     const nameInput = form.querySelector('[name="boq_name"]');
+    let uploading = false;
 
     function clearErrors() {
         form.querySelectorAll('[data-error-for]').forEach((el) => { el.textContent = ''; });
@@ -80,6 +85,17 @@
             formError.hidden = true;
             formError.textContent = '';
         }
+    }
+
+    function setStatus(text) {
+        if (!statusEl) return;
+        if (!text) {
+            statusEl.hidden = true;
+            statusEl.textContent = '';
+            return;
+        }
+        statusEl.hidden = false;
+        statusEl.textContent = text;
     }
 
     function showErrors(errors, message) {
@@ -107,6 +123,12 @@
                 formError.textContent = message;
             }
         }
+    }
+
+    function goToBoqList(url) {
+        const target = url || listUrl;
+        // replace() avoids leaving the upload page in history after success.
+        window.location.replace(target);
     }
 
     form.addEventListener('submit', () => {
@@ -146,7 +168,9 @@
     }
 
     submitBtn.addEventListener('click', async () => {
+        if (uploading) return;
         clearErrors();
+        setStatus('');
 
         const nameOk = await checkNameAvailable();
         if (!nameOk) {
@@ -154,10 +178,16 @@
             return;
         }
 
+        uploading = true;
         submitBtn.disabled = true;
         const previousLabel = submitBtn.textContent;
         submitBtn.textContent = 'Uploading…';
+        setStatus(
+            'Uploading and parsing… PDF make lists can take up to a minute. '
+            + 'You will be taken to the BOQs page when this finishes.'
+        );
 
+        let navigated = false;
         try {
             const response = await fetch(form.getAttribute('action') || '{% url "boq:upload" %}', {
                 method: 'POST',
@@ -167,7 +197,24 @@
                     'Accept': 'application/json',
                 },
                 credentials: 'same-origin',
+                // Stay on this document until we explicitly navigate; do not
+                // silently consume a 302 HTML page while the URL stays on /upload/.
+                redirect: 'manual',
             });
+
+            // Same-origin redirect (e.g. session login) — follow in the real window.
+            if (response.status >= 300 && response.status < 400) {
+                const loc = response.headers.get('Location') || listUrl;
+                navigated = true;
+                goToBoqList(loc);
+                return;
+            }
+            // Opaque redirect (cross-origin) — fall back to the BOQ list.
+            if (response.type === 'opaqueredirect' || response.status === 0) {
+                navigated = true;
+                goToBoqList(listUrl);
+                return;
+            }
 
             const contentType = response.headers.get('content-type') || '';
             let data = {};
@@ -175,12 +222,15 @@
                 data = await response.json();
             }
 
-            if (response.ok && data.ok && data.redirect) {
-                window.location.assign(data.redirect);
+            if (response.ok && data.ok) {
+                navigated = true;
+                setStatus('Upload complete. Opening BOQs…');
+                goToBoqList(data.redirect || listUrl);
                 return;
             }
 
             // Stay on this page — file inputs keep their selected files.
+            setStatus('');
             if (!contentType.includes('application/json')) {
                 showErrors({
                     __all__: [
@@ -196,6 +246,7 @@
         } catch (err) {
             // A dropped connection surfaces as the browser's bare "Failed to fetch".
             console.error('BOQ upload request failed', err);
+            setStatus('');
             showErrors({
                 __all__: [
                     'Could not reach the server, so nothing was uploaded. Your files are '
@@ -203,8 +254,11 @@
                 ],
             });
         } finally {
-            submitBtn.disabled = false;
-            submitBtn.textContent = previousLabel || 'Upload BOQ';
+            if (!navigated) {
+                uploading = false;
+                submitBtn.disabled = false;
+                submitBtn.textContent = previousLabel || 'Upload BOQ';
+            }
         }
     });
 })();

@@ -5,7 +5,7 @@ import logging
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from django.db import transaction
+from common.db import atomic
 
 from apps.boq.models import BOQ
 from apps.boq.services.boq_analysis_store import save_boq_analysis_json
@@ -183,7 +183,7 @@ class BOQPriceCalculationService:
         analysis["row_pricing"] = row_pricing
         analysis["pricing_calculated_at"] = now_local_iso()
 
-        with transaction.atomic():
+        with atomic():
             safe = json_safe(analysis)
             save_boq_analysis_json(boq.boq_name, safe)
             boq.analysis_data = safe

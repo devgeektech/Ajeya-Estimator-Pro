@@ -35,14 +35,18 @@ class XlsUploadConversionService:
         temp_source: str | None = None
         temp_xlsx: str | None = None
         try:
-            if hasattr(uploaded_file, "temporary_file_path"):
-                source_path = uploaded_file.temporary_file_path()
+            temp_path = getattr(uploaded_file, "temporary_file_path", None)
+            if callable(temp_path):
+                source_path = str(temp_path())
             else:
                 with NamedTemporaryFile(suffix=".xls", delete=False) as handle:
                     for chunk in uploaded_file.chunks():
                         handle.write(chunk)
                     temp_source = handle.name
                 source_path = temp_source
+
+            if not source_path:
+                raise XlsConvertError(f"Could not read upload '{name}' for conversion.")
 
             with NamedTemporaryFile(suffix=".xlsx", delete=False) as handle:
                 temp_xlsx = handle.name

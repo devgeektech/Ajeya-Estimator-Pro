@@ -5,7 +5,7 @@ import logging
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from django.db import transaction
+from common.db import atomic
 
 from apps.boq.models import BOQ
 from apps.boq.services.boq_analysis_store import save_boq_analysis_json
@@ -18,6 +18,13 @@ from apps.boq.services.boq_line_output_service import (
     BOQLineOutputService,
     quantity_is_rate_sum_only,
 )
+from apps.boq.services.boq_row_fields import (
+    DESCRIPTION_KEYS as _DESCRIPTION_KEYS,
+    QTY_KEYS as _QTY_KEYS,
+    UNIT_KEYS as _UNIT_KEYS,
+    field_from_map as _field_from_map,
+    ordered_boq_rows as _ordered_boq_rows,
+)
 from apps.boq.services.labour_detail_retrieval_service import LabourDetailRetrievalService
 from apps.boq.services.serial_normalizer import analysis_fields
 from apps.database_manager.services.activation import get_active_database_version
@@ -28,17 +35,23 @@ from utils.timestamps import now_local_iso
 
 logger = logging.getLogger("boq_ai")
 
-_QTY_KEYS = ("qty", "quantity", "qnty", "nos")
-_UNIT_KEYS = ("unit", "uom")
-_DESCRIPTION_KEYS = ("description", "item_description", "particulars", "item")
-
 
 def _product_id_for_labour(product: dict[str, Any] | None) -> str:
     """Resolve Product_ID for Labour_master_Output (Postgres join; not Chroma)."""
     item = product or {}
     selection = item.get("vendor_selection") or {}
     rate_detail = selection.get("rate_detail") or {}
-    for source in (item, selection, rate_detail):
+    # Prefer the captured Analysis / Make & Vendor catalog id on the product
+    # itself so a stale vendor_selection cannot keep an old Product_ID.
+    for key in (
+        "catalog_product_id",
+        "product_id",
+        "suggested_catalog_product_id",
+    ):
+        text = str(item.get(key) or "").strip()
+        if text:
+            return text
+    for source in (selection, rate_detail):
         for key in (
             "catalog_product_id",
             "product_id",
@@ -48,6 +61,22 @@ def _product_id_for_labour(product: dict[str, Any] | None) -> str:
             if text:
                 return text
     return ""
+
+
+def _make_list_payload_for_boq(boq: BOQ) -> dict[str, Any]:
+    if not boq.make_list_file:
+        return {}
+    return dict(boq.make_list_data or {})
+
+
+def _sync_product_ids_from_analysis(boq_id: int, boq: BOQ) -> dict[str, Any]:
+    """Capture latest Analysis Product_IDs before labour load."""
+    from apps.boq.services.make_vendor_selection_service import MakeVendorSelectionService
+
+    return MakeVendorSelectionService(
+        boq_id,
+        _make_list_payload_for_boq(boq),
+    ).sync_analysis_product_ids(refresh_rates_if_changed=True)
 
 
 def _to_decimal(value: Any) -> Decimal | None:
@@ -63,23 +92,6 @@ def _format_decimal(value: Decimal | None) -> str | None:
     if value is None:
         return None
     return format(value, "f")
-
-
-def _field_from_map(fields: dict[str, Any], keys: tuple[str, ...]) -> Any:
-    for key in keys:
-        value = fields.get(key)
-        if value not in (None, ""):
-            return value
-    return None
-
-
-def _ordered_boq_rows(boq_data: dict) -> list[dict[str, Any]]:
-    from apps.boq.services.make_list_constraint_service import walk_rows_tree
-
-    flat_rows = boq_data.get("rows") or []
-    if flat_rows:
-        return flat_rows
-    return walk_rows_tree(boq_data.get("rows_tree") or [])
 
 
 def _product_summary(product: dict[str, Any]) -> str:
@@ -127,13 +139,17 @@ class BOQLabourService:
         ):
             raise ValidationError("Complete Make & Vendor selections first.")
 
+        # Re-capture Analysis Product_IDs (and rates when an id changed) before labour.
+        sync = _sync_product_ids_from_analysis(self.boq_id, boq)
+        boq = self._get_boq()
+
         analysis = dict(boq.analysis_data or {})
         config = dict(analysis.get("labour_config") or {})
         config.setdefault("mode", "auto")
         config.setdefault("category_percentages", {})
         analysis["labour_config"] = config
 
-        with transaction.atomic():
+        with atomic():
             safe = json_safe(analysis)
             save_boq_analysis_json(boq.boq_name, safe)
             boq.analysis_data = safe
@@ -141,18 +157,27 @@ class BOQLabourService:
             boq.save(update_fields=["analysis_data", "status"])
 
         # Load Labour_master_Output amounts from PostgreSQL by Product_ID.
-        applied = self.apply_auto()
-        logger.info("Labour unlocked for BOQ id=%s", boq.pk)
+        applied = self.apply_auto(sync_product_ids=False)
+        logger.info(
+            "Labour unlocked for BOQ id=%s product_ids=%s changed=%s",
+            boq.pk,
+            sync.get("product_id_count"),
+            sync.get("changed_count"),
+        )
         return {
             "status": BOQStatus.LABOUR,
             "mode": "auto",
+            "synced_product_ids": sync.get("product_ids") or [],
             **{k: v for k, v in applied.items() if k != "status"},
         }
 
-    def apply_auto(self) -> dict[str, Any]:
+    def apply_auto(self, *, sync_product_ids: bool = True) -> dict[str, Any]:
         """Fill labour from Labour_master_Output by each selected Product_ID."""
         boq = self._get_boq()
         self._ensure_labour_editable(boq)
+        if sync_product_ids:
+            _sync_product_ids_from_analysis(self.boq_id, boq)
+            boq = self._get_boq()
         database_version_id = self._database_version_id(boq)
         if not database_version_id:
             raise ValidationError("No active master database. Upload a database first.")
@@ -208,7 +233,7 @@ class BOQLabourService:
                 selection["line_output"] = line_output
                 updated_product = dict(product)
                 updated_product["vendor_selection"] = selection
-                if product_id and not updated_product.get("catalog_product_id"):
+                if product_id:
                     updated_product["catalog_product_id"] = product_id
                 updated_product["labour_mode"] = "auto"
                 updated_product["labour_percent"] = None
@@ -230,8 +255,17 @@ class BOQLabourService:
         analysis["rows"] = rows
         analysis["pricing_ready"] = False
         analysis.pop("row_pricing", None)
+        if analysis.get("make_vendor_product_ids") is None:
+            analysis["make_vendor_product_ids"] = sorted(
+                {
+                    str(p.get("catalog_product_id") or "").strip()
+                    for r in rows
+                    for p in (r.get("products") or [])
+                    if str(p.get("catalog_product_id") or "").strip()
+                }
+            )
 
-        with transaction.atomic():
+        with atomic():
             safe = json_safe(analysis)
             save_boq_analysis_json(boq.boq_name, safe)
             boq.analysis_data = safe
@@ -403,7 +437,7 @@ class BOQLabourService:
         analysis["pricing_ready"] = False
         analysis.pop("row_pricing", None)
 
-        with transaction.atomic():
+        with atomic():
             safe = json_safe(analysis)
             save_boq_analysis_json(boq.boq_name, safe)
             boq.analysis_data = safe

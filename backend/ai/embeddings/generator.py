@@ -1,20 +1,29 @@
-"""OpenAI embedding generation and Chroma indexing for active master database."""
+"""OpenAI embedding generation and Chroma indexing for Product_Helper."""
 from __future__ import annotations
 
 import logging
-from typing import cast
+from typing import Any, cast
 
 from django.conf import settings
 
-from ai.embeddings.chroma_store import ChromaEmbeddingStore, rate_document
+from ai.embeddings.chroma_store import ChromaEmbeddingStore, helper_document
 from ai.instruction_log import log_instruction
 from ai.openai_client import get_client, is_configured
-from apps.database_manager.models import DatabaseVersion, Rate_Master_Output
+from apps.database_manager.models import DatabaseVersion, Product_Helper
 from common.exceptions import AIServiceError
 
 logger = logging.getLogger("boq_ai")
 
 _OPENAI_MAX_EMBEDDING_INPUTS = 2048
+_DISCONTINUED_STATUS = frozenset(
+    {
+        "discontinued",
+        "discontinue",
+        "inactive",
+        "obsolete",
+        "withdrawn",
+    }
+)
 
 
 def _embedding_batch_size() -> int:
@@ -85,48 +94,50 @@ def generate_embeddings(texts: list[str]) -> list[list[float]]:
         raise AIServiceError(f"Embedding request failed: {exc}") from exc
 
 
-def _index_rate_batch(
+def _is_discontinued(status: Any) -> bool:
+    return str(status or "").strip().casefold() in _DISCONTINUED_STATUS
+
+
+def _index_helper_batch(
     store: ChromaEmbeddingStore,
-    rates: list[Rate_Master_Output],
+    helpers: list[Product_Helper],
     texts: list[str],
 ) -> tuple[int, int]:
-    """Index one batch of Rate_Master_Output rows; return (generated, errors)."""
-    if not rates:
+    """Index one batch of Product_Helper rows; return (generated, errors)."""
+    if not helpers:
         return 0, 0
 
     try:
         vectors = generate_embeddings(texts)
-        store.upsert_rates(rates, vectors)
-        return len(rates), 0
+        store.upsert_helpers(helpers, vectors)
+        return len(helpers), 0
     except AIServiceError:
         logger.exception(
-            "Embedding batch failed for %s Rate_Master_Output rows; retrying row-by-row",
-            len(rates),
+            "Embedding batch failed for %s Product_Helper rows; retrying row-by-row",
+            len(helpers),
         )
 
     generated = errors = 0
-    for rate, text in zip(rates, texts, strict=True):
+    for helper, text in zip(helpers, texts, strict=True):
         try:
             vector = generate_embedding(text)
-            store.upsert_rate(rate, vector)
+            store.upsert_helper(helper, vector)
             generated += 1
         except AIServiceError:
-            logger.exception("Embedding failed for Rate_Master_Output row %s", rate.pk)
+            logger.exception("Embedding failed for Product_Helper row %s", helper.pk)
             errors += 1
         except Exception:
-            logger.exception(
-                "Chroma indexing failed for Rate_Master_Output row %s", rate.pk
-            )
+            logger.exception("Chroma indexing failed for Product_Helper row %s", helper.pk)
             errors += 1
     return generated, errors
 
 
 def generate_embeddings_for_version(database_version_id: int) -> dict:
-    """Index Rate_Master_Output rows for the active database version into Chroma.
+    """Index Product_Helper rows for the active database version into Chroma.
 
-    Each row is stored separately in Chroma with its own vector, document text,
-    and metadata (including ``product_id``). Batching is used only for OpenAI API
-    calls and Chroma writes; storage remains row-wise.
+    One vector per Product_Helper row (complete catalog fields). Discontinued
+    Status rows are never embedded. Rate_Master / Labour stay in Postgres and
+    are joined by Product_ID after search.
 
     Clears the entire Chroma collection first so only the active database has
     embeddings at any time.
@@ -147,46 +158,59 @@ def generate_embeddings_for_version(database_version_id: int) -> dict:
         )
         return {"total": 0, "generated": 0, "skipped": 0, "errors": 1}
 
-    products = (
-        Rate_Master_Output.objects.filter(database_version=version)
-        .select_related("database_version")
-        .iterator(chunk_size=_embedding_batch_size())
+    helpers_qs = Product_Helper.objects.filter(database_version=version).select_related(
+        "database_version"
     )
-    total = Rate_Master_Output.objects.filter(database_version=version).count()
+    total = helpers_qs.count()
     generated = skipped = errors = 0
     store = ChromaEmbeddingStore()
     store.reset_all()
 
-    pending_rates: list[Rate_Master_Output] = []
+    pending_helpers: list[Product_Helper] = []
     pending_texts: list[str] = []
     batch_size = _embedding_batch_size()
 
-    for product in products:
-        text = rate_document(product)
+    for helper in helpers_qs.iterator(chunk_size=batch_size):
+        if _is_discontinued(helper.Status):
+            skipped += 1
+            continue
+        if not str(helper.Product_ID or "").strip():
+            skipped += 1
+            continue
+        text = helper_document(helper)
         if not text.strip():
             skipped += 1
             continue
 
-        pending_rates.append(product)
+        pending_helpers.append(helper)
         pending_texts.append(text)
-        if len(pending_rates) < batch_size:
+        if len(pending_helpers) < batch_size:
             continue
 
-        batch_generated, batch_errors = _index_rate_batch(
-            store, pending_rates, pending_texts
+        batch_generated, batch_errors = _index_helper_batch(
+            store, pending_helpers, pending_texts
         )
         generated += batch_generated
         errors += batch_errors
-        pending_rates = []
+        pending_helpers = []
         pending_texts = []
 
-    if pending_rates:
-        batch_generated, batch_errors = _index_rate_batch(
-            store, pending_rates, pending_texts
+    if pending_helpers:
+        batch_generated, batch_errors = _index_helper_batch(
+            store, pending_helpers, pending_texts
         )
         generated += batch_generated
         errors += batch_errors
 
-    summary = {"total": total, "generated": generated, "skipped": skipped, "errors": errors}
-    logger.info("Embedding generation summary for version %s: %s", database_version_id, summary)
+    summary = {
+        "total": total,
+        "generated": generated,
+        "skipped": skipped,
+        "errors": errors,
+    }
+    logger.info(
+        "Product_Helper embedding summary for version %s: %s",
+        database_version_id,
+        summary,
+    )
     return summary

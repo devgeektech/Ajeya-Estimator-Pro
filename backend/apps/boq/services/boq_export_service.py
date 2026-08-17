@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from django.core.files.storage import default_storage
-from django.db import transaction
+from common.db import atomic
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter, quote_sheetname
@@ -25,7 +25,11 @@ from apps.boq.services.boq_review_display_service import (
     REVIEW_OUTPUT_HEADERS,
     BOQReviewDisplayService,
     review_output_values,
-    _ordered_boq_rows,
+)
+from apps.boq.services.boq_row_fields import (
+    QTY_KEYS as _QTY_KEYS,
+    UNIT_KEYS as _UNIT_KEYS,
+    ordered_boq_rows as _ordered_boq_rows,
 )
 from apps.boq.services.serial_normalizer import cell_value
 from common.choices import BOQStatus
@@ -45,8 +49,6 @@ _UNSAFE_FILENAME_CHARS = re.compile(r'[\\/:*?"<>|\r\n]+')
 
 _RATE_KEYS = ("rate", "unit_rate", "price")
 _AMOUNT_KEYS = ("amount", "total", "total_amount", "amt")
-_QTY_KEYS = ("qty", "quantity", "qnty", "nos")
-_UNIT_KEYS = ("unit", "uom")
 _UNMATCHED_STATUSES = frozenset({"unmatched", "pending", "not_searched", "no_match"})
 
 _DARK_BORDER = Border(
@@ -248,14 +250,6 @@ def _header_excel_column(headers: list[dict[str, Any]], key: str | None) -> int 
         except (KeyError, TypeError, ValueError):
             return None
     return None
-
-
-def _is_filled(value: Any) -> bool:
-    if value is None:
-        return False
-    if isinstance(value, str) and not value.strip():
-        return False
-    return True
 
 
 def _is_zero_qty(value: Any) -> bool:
@@ -687,7 +681,7 @@ class BOQExportService:
         )
         audit_label = "Exported Review + BOQ workbook"
 
-        with transaction.atomic():
+        with atomic():
             if boq.status != BOQStatus.EXPORTED:
                 boq.status = BOQStatus.EXPORTED
                 boq.save(update_fields=["status"])
@@ -1024,12 +1018,12 @@ class BOQExportService:
             line = lines_by_id.get(row_id)
             slot_products = list(products_by_qty.get(row_id) or [])
             try:
-                depth = int(
+                raw_depth = (
                     (line or {}).get("depth")
                     if line is not None
                     else boq_row.get("depth")
-                    or 0
                 )
+                depth = int(raw_depth if raw_depth is not None else 0)
             except (TypeError, ValueError):
                 depth = 0
             will_write = bool(slot_products or line)

@@ -68,11 +68,17 @@ Aliases: older workbooks titled `Labour_master_Output` are still accepted;
 One catalog product identity (no Make/Vendor). Key fields:
 
 `Product_ID`, `Category`, `Sub_Category`, `Class`, `Size`, `Unit`, `Capacity`,
-`Attribute`, `Status`.
+`Attribute`, `Status` (workbook column **I**).
 
 - **`Product_ID`** — product identity used to load all Make/Vendor rate rows and
   labour. Analysis / Find in DB resolve BOQ extracts onto this sheet first.
-- Active rows (`Status` = Active) are preferred for matching.
+- **`Status` = Discontinued** — row is **not imported**. Matching
+  `Rate_Master_Output` / `Labour_Master_Output` rows for that `Product_ID` are
+  also skipped. Discontinued helpers are never embedded in Chroma (import skip
+  plus embed-time Status filter) and cannot appear during Analysis matching.
+  Blank Status is imported; Active is preferred for matching.
+- **Embeddings:** one Chroma vector per Product_Helper row (complete catalog
+  fields). Search returns `Product_ID`; rates and labour load from Postgres.
 
 ### `Rate_Master_Output`
 
@@ -100,15 +106,16 @@ One priced Make/Vendor row. Key fields:
   are unaffected by the text IDs.
 - UI display key (not stored as Tech_Key):  
   `Category|Sub_Category|Class|Size|Unit|Capacity|Attribute` via `product_display_key()`.
-- Embeddings: **one Chroma vector per rate row**, metadata includes `Product_ID`.
+- Embeddings are **not** built from this sheet. Analysis finds Product_ID via
+  Product_Helper Chroma vectors; rates/Make/Vendor load here by Product_ID.
 
 ### `Labour_Master_Output`
 
 One labour row per `Product_ID`. Taxonomy fields plus labour charges. BOQ Auto
-labour uses **`Total_Labour_Per_Unit`** (falls back to
-`Labour_With_State_Multiplier` / model
-`Total_Labour_per_unit_with_labour_Multipler` when blank). Category-wise labour %
-remains a Labour-page UI feature (not this sheet).
+labour uses **`Labour_With_State_Multiplier`** / model
+`Total_Labour_per_unit_with_labour_Multipler` (falls back to
+`Total_Labour_Per_Unit`, then `Labour_Rate_Per_unit` when blank). Category-wise
+labour % remains a Labour-page UI feature (not this sheet).
 
 | Excel column | Model field |
 | --- | --- |
@@ -161,10 +168,12 @@ remains a Labour-page UI feature (not this sheet).
 ## Embeddings
 
 After each successful import, `generate_embeddings_for_version()` indexes active
-`Rate_Master_Output` rows into Chroma (one vector per rate row).
+`Product_Helper` rows into Chroma (one vector per helper row). Discontinued
+Status and blank Product_ID rows are skipped. Rate_Master / Labour stay in
+PostgreSQL and are joined by Product_ID after search.
 
-**Embedded text fields:** Product_ID, Category, Sub Category, Class, Size, Make,
-Capacity, Unit, Attribute, Vendor.
+**Embedded text fields (Product_Helper):** Product_ID, Category, Sub Category,
+Class, Size, Unit, Capacity, Attribute, Status.
 
 Taxonomy for AI extract/map comes from distinct Category / Sub_Category / Class on
 `Rate_Master_Output` (`classes_by_category_sub_category` plus a deduped `classes`
@@ -182,6 +191,6 @@ For a selected rate row and its labour row (`Product_ID`):
 
 (`Labour_With_State_Multiplier` is stored as
 `Total_Labour_per_unit_with_labour_Multipler`; falls back to
-`Total_Labour_per_Unit` when blank.)
+`Total_Labour_per_Unit`, then `Labour_Rate_Per_unit` when blank.)
 
 Category labour % on the Labour page is applied separately in UI/config.

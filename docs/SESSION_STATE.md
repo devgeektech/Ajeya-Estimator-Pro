@@ -23,7 +23,7 @@ uploads retained.
 
 1. Upload workbook (+ optional make list) → parse to JSON
 2. **Analyse** → AI extract products + map top Rate_Master_Output candidates (Celery)
-3. Expert edit / **Re-analyse** (product rematch with filled attrs; empty section re-extract)
+3. Expert edit / **Re-analyse** / **Confirm** (100% lock) / Select candidate
 4. Analysis **Next** → lowest-price Make & Vendor defaults
 5. Make & Vendor **Next** → unlock Labour → complete → Review → Export
    (one workbook: Review + original BOQ tabs)
@@ -33,24 +33,26 @@ uploads retained.
 | Area | Current behaviour |
 | --- | --- |
 | Sections | Serial-lineage groups with qty **slots**; empty slots show Add + Re-analyse |
-| Analysis | Product tabs show match % + per-product slot Qty/Unit in header |
-| Re-analyse | Product-wise: fresh DB recall with filled fields + BOQ section; synonym-aware (DI=ductile iron); Class snaps to catalog (``0`` for sluice); material stays on Attribute; empty section: workbook re-extract |
+| Analysis | Product tabs in **BOQ slot order**; match %; multi-product review **only** when product count ≠ Unit/Qty slot count |
+| Matching | Chroma = Product_Helper only (AI validates top **5**; UI shows top **3**); Product_ID → Rate_Master / Labour from Postgres |
+| Candidates UI | Summary = **Product ID** / Category / Sub / Class / Size / Unit / Capacity; open on unmatched; weak banner only when effective % below 50 |
+| Re-analyse | Saves expert UI inputs + **AI Description**; empty inputs use full section; edited description leads recall + section; real match % (not forced 100%) |
+| Confirm | Sets match to **100%** when product is correct but % is lower (hidden at 100%) |
 | Select candidate | Prefills Rate_Master core fields + Attribute values into Analysis inputs; keeps that candidate's listed match % |
-
-| Make list map | Heuristic + AI category/sub-category (v5; bare ``panel`` is not ACCESSORIES); remaps on version bump; `unmapped` final per version |
-| Make & Vendor | Product_ID → Rate_Master Make/Vendor/amounts from Postgres; Find in DB yellow; cascade; Chroma not used for rates |
-| Labour | Product_ID → Labour_master_Output from Postgres (auto on Make & Vendor Next); Apply labour reloads |
+| Make list map | **AI-first** multi-target (v11): understands free text; compound lines can map multiple category/sub pairs (e.g. sprinkler + rosette); null sub = category-wide makes; heuristics soft-only; auto remap on stale mapping version |
+| Make & Vendor | Product_ID → Rate_Master Make/Vendor/amounts from Postgres; not found/no match → dropdowns + Apply (green); cascade; Chroma not used for rates |
+| Labour | Product_ID → Labour_master_Output; amount from **Labour_With_State_Multiplier** (fallback Total_Labour_Per_Unit); auto on Make & Vendor Next |
 | Review | Same per-product slot qty + lineage UI; Export is one workbook (Review + BOQ). Review Discount/Base/Labour/Qty are inputs; Net→Amount are Excel formulas. BOQ Rate/Amount follow Review; muted green/orange/red fills |
 | Detail open | Default tab follows `BOQ.status`; renders stored data only — no AI in the GET |
-| Jobs | Stuck analysis heal/fail; progress reset; Celery concurrency 8 |
+| Jobs | Stuck analysis heal/fail; progress reset; Celery concurrency 8; Analyse completion uses `location.replace` auto-reload |
 | Upload | Requires active DB; `.xlsx` / `.xlsm` / legacy `.xls` (converted); **not** `.xlsb`; single sheet |
 
 ## Pending
 
-- Fill Rate_Master_Output with full Make/Vendor price rows; re-import
+- Fill Rate_Master_Output with full Make/Vendor price rows; re-import if needed
 - Restore `backend/tests/`
 - Fresh migrations on EC2 after deploy
-- UAT Analyse / Make & Vendor / Labour against new Product_ID + Final_Material_Amount
+- UAT Analyse / Re-analyse on 2.13 sand buckets → Product_ID 40; confirm rematch % not forced to 100
 - Optional later: qty/slot hard-enforce; retire legacy Match/Confirm URLs
 
 ## Verify
@@ -58,21 +60,23 @@ uploads retained.
 ```powershell
 .venv\Scripts\python.exe backend\manage.py check
 # After Celery code changes: restart the worker
+# After embedding code changes: re-activate/re-import the master DB
 ```
 
 ## Session Log
 
 Keep only the latest entry below. Older work is in `docs/CHANGELOG.md`.
 
-### 2026-08-11 — Panel vs rosette false 100% match
+### 2026-08-14 — AI Description taxonomy + attributes
 
-Completed: Cross-checked BOQ ``rg`` section 4.6 (1 Set slot, 2 identical
-extracts, ACCESSORIES / ROSETTEE PLATE at 100%). Catalog has no electrical
-panel — only ACCESSORIES row is rosette. Scoring no longer confirms or
-shows 100% when the BOQ description names a different product. Duplicate
-same-slot products are collapsed. Make-list hint ``panel`` → ACCESSORIES
-removed (mapping v5).
-Pending: Re-analyse section 4.6 (or re-run Analyse) on BOQ ``rg``.
-Issues: Rate_Master has no control-panel product — 4.6 should stay
-provisional/unmatched until a catalog row exists.
-Next: UAT Re-analyse on 4.6 after worker restart.
+Completed: AI Description now lists Category / Sub-category / Class / Size /
+Unit / Capacity plus key attributes (IS, Type, Material, …). Extract, save, and
+Select candidate refresh it.
+Pending: Re-analyse existing products (or edit+save) to refresh old short hints.
+Issues: None.
+Next: None.
+
+
+
+
+

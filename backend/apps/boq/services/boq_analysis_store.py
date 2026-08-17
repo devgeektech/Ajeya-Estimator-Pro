@@ -1,7 +1,6 @@
 """Persist BOQ analysis JSON alongside extract JSON."""
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -21,13 +20,6 @@ def save_boq_analysis_json(boq_name: str, payload: dict[str, Any]) -> Path:
     _write_json(path, payload)
     logger.info("Saved BOQ analysis JSON for '%s' at %s", boq_name, path)
     return path
-
-
-def read_boq_analysis_json(boq_name: str) -> dict[str, Any] | None:
-    path = boq_extract_dir(boq_name) / ANALYSIS_FILENAME
-    if not path.is_file():
-        return None
-    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def analysis_json_relative_path(boq_name: str) -> str:

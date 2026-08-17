@@ -6,6 +6,10 @@ Only ``Product_Helper``, ``Rate_Master_Output``, and ``Labour_Master_Output``
 are ingested. Other workbook sheets may exist and are counted for the database
 detail UI only. Older workbooks that still use ``Labour_master_Output`` are
 accepted via alias; ``Product_Master`` is accepted as ``Product_Helper``.
+
+Product_Helper rows with Status ``Discontinued`` (sheet column I) are not
+loaded. Matching Rate_Master_Output / Labour rows for those Product_IDs are
+also skipped so they never receive embeddings or appear in Analysis matching.
 """
 
 from __future__ import annotations
@@ -14,7 +18,7 @@ import logging
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
-from django.db import transaction
+from common.db import atomic
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
@@ -107,6 +111,21 @@ def _to_optional_datetime(value) -> datetime | None:
     if timezone.is_naive(parsed):
         return timezone.make_aware(parsed, timezone.get_current_timezone())
     return parsed
+
+
+def _is_discontinued_status(value) -> bool:
+    """True when Product_Helper Status means the product must not be imported."""
+    text = str(value or "").strip().casefold()
+    if not text:
+        return False
+    # Column I on Product_Helper — skip Discontinued (and common synonyms).
+    return text in {
+        "discontinued",
+        "discontinue",
+        "inactive",
+        "obsolete",
+        "withdrawn",
+    }
 
 
 def _product_helper_fields(row: dict) -> dict:
@@ -308,7 +327,7 @@ class DatabaseImportService:
         validate_workbook(self.file_path)
 
         try:
-            with transaction.atomic():
+            with atomic():
                 version = self._create_version()
                 self._import_versioned_sheets(version)
                 self._activate(version)
@@ -346,6 +365,11 @@ class DatabaseImportService:
 
     def _import_versioned_sheets(self, version: DatabaseVersion) -> None:
         available_sheets = list_sheet_names(self.file_path)
+        # Product_IDs marked Discontinued on Product_Helper (Status column).
+        # Rate / Labour rows for these IDs are also skipped so they are never
+        # embedded or returned during Analysis matching.
+        discontinued_product_ids: set[str] = set()
+
         for preferred_name, (model, builder) in VERSIONED_SHEETS.items():
             sheet_name = resolve_master_sheet_name(available_sheets, preferred_name)
             if sheet_name is None:
@@ -355,8 +379,27 @@ class DatabaseImportService:
             rows = read_rows(self.file_path, sheet_name)
             objects = []
             rejected: list[dict] = []
+            discontinued_skipped = 0
             for row in rows:
                 fields = builder(row)
+                product_id = str(fields.get("Product_ID") or "").strip()
+
+                if model is Product_Helper and _is_discontinued_status(
+                    fields.get("Status")
+                ):
+                    if product_id:
+                        discontinued_product_ids.add(product_id)
+                    discontinued_skipped += 1
+                    continue
+
+                if (
+                    model in {Rate_Master_Output, Labour_master_Output}
+                    and product_id
+                    and product_id in discontinued_product_ids
+                ):
+                    discontinued_skipped += 1
+                    continue
+
                 if not _has_required_fields(model, fields):
                     rejected.append(fields)
                     continue
@@ -368,10 +411,17 @@ class DatabaseImportService:
             if objects:
                 model.objects.bulk_create(objects, batch_size=500)
             logger.info(
-                "Imported %s rows from %s (%s skipped)",
+                "Imported %s rows from %s (%s missing required fields, "
+                "%s discontinued skipped)",
                 len(objects),
                 sheet_name,
                 len(rejected),
+                discontinued_skipped,
+            )
+        if discontinued_product_ids:
+            logger.info(
+                "Excluded %s discontinued Product_ID(s) from import/embeddings",
+                len(discontinued_product_ids),
             )
 
     def _generate_embeddings(self, version: DatabaseVersion) -> None:

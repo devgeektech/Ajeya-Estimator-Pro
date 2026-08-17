@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from django.db import transaction
+from common.db import atomic
 
 from apps.boq.models import BOQ
 from apps.boq.services.boq_analysis_enrichment_service import BOQAnalysisEnrichmentService
@@ -17,7 +17,7 @@ from apps.boq.services.boq_analysis_store import (
 )
 from apps.boq.services.boq_extraction_service import (
     BOQExtractionService,
-    _normalize_product_fields,
+    normalize_product_fields,
     rehydrate_analysis_rows_quantity,
 )
 from apps.boq.services.boq_extract_service import load_extract_data
@@ -25,6 +25,7 @@ from apps.boq.services.boq_job_progress import (
     clear_boq_job_progress,
     set_boq_job_progress,
 )
+from apps.boq.services.boq_row_fields import DESCRIPTION_KEYS
 from apps.boq.services.boq_row_grouping_service import full_description_for_row, resolve_anchor_row_id
 from apps.boq.services.make_list_constraint_service import MakeListConstraintService, walk_rows_tree
 from apps.boq.services.product_ai_mapping_service import ProductAIMappingService
@@ -33,12 +34,12 @@ from apps.boq.services.product_matching_service import ProductMatchingService
 from apps.boq.services.serial_normalizer import structure_for_analysis
 from apps.database_manager.services.activation import get_active_database_version
 from common.choices import BOQStatus
+from common.constants import ANALYSIS_INPUT_FILL_CONFIDENCE
 from common.exceptions import AIServiceError, BOQAIError, ValidationError
 from utils.json_safe import json_safe
 
 logger = logging.getLogger("boq_ai")
 
-_DESCRIPTION_KEYS = ("description", "item_description", "particulars", "item")
 PHASE_EXTRACTED = "extracted"
 PHASE_MATCHED = "matched"
 
@@ -74,7 +75,7 @@ def _row_description(boq_data: dict, row_id: str) -> str:
         if node.get("row_id") != row_id:
             continue
         fields = node.get("fields") or {}
-        for key in _DESCRIPTION_KEYS:
+        for key in DESCRIPTION_KEYS:
             value = fields.get(key)
             if value not in (None, ""):
                 return str(value).strip()
@@ -175,7 +176,7 @@ class BOQAnalysisService:
         boq = self._get_boq()
         self._set_status(boq, BOQStatus.PROCESSING)
         # Start at 1% — do not jump ahead until extract/match units complete.
-        set_boq_job_progress(boq.pk, percent=1, label="Starting analysis…", phase="extract")
+        set_boq_job_progress(boq.pk, percent=1, label="Starting analysis...", phase="extract")
 
         # Pin active DB for this job so concurrent analyses stay on one version.
         active_version = get_active_database_version()
@@ -193,7 +194,7 @@ class BOQAnalysisService:
 
         try:
             # Always load this BOQ's own PostgreSQL / upload payloads (never shared).
-            set_boq_job_progress(boq.pk, percent=2, label="Loading BOQ data…", phase="extract")
+            set_boq_job_progress(boq.pk, percent=2, label="Loading BOQ data...", phase="extract")
             boq_payload, make_list_payload = load_extract_data(boq)
             logger.info(
                 "BOQ extraction inputs id=%s boq_rows=%s make_list_rows=%s",
@@ -202,16 +203,23 @@ class BOQAnalysisService:
                 len((make_list_payload or {}).get("rows") or []),
             )
             boq_data = structure_for_analysis(boq_payload)
-            set_boq_job_progress(boq.pk, percent=3, label="Extracting products…", phase="extract")
+            set_boq_job_progress(boq.pk, percent=3, label="Extracting products...", phase="extract")
 
             def _on_extract_progress(done: int, total: int) -> None:
                 total = max(total, 1)
                 # Extraction covers roughly 3% → 55% as batches finish.
                 percent = 3 + int((done / total) * 52)
                 label = (
-                    "Extracting products…"
+                    "Extracting products..."
                     if done <= 0
-                    else f"Extracting products ({done}/{total})…"
+                    else f"Extracting products ({done}/{total})..."
+                )
+                logger.info(
+                    "BOQ extraction progress id=%s sections=%s/%s percent=%s",
+                    boq.pk,
+                    done,
+                    total,
+                    percent,
                 )
                 set_boq_job_progress(
                     boq.pk,
@@ -239,23 +247,57 @@ class BOQAnalysisService:
             set_boq_job_progress(
                 boq.pk,
                 percent=55,
-                label="Matching products to database…",
+                label="Matching products to database...",
                 phase="extract",
             )
 
             def _on_enrich_progress(done: int, total: int) -> None:
-                total = max(total, 1)
-                # Matching covers roughly 55% → 95%.
-                percent = 55 + int((done / total) * 40)
+                total = max(int(total or 0), 1)
+                done = max(0, min(int(done or 0), total))
+                # Matching covers roughly 55% → 95% (leave headroom for save/complete).
+                percent = min(95, 55 + int((done / total) * 40))
+                logger.info(
+                    "BOQ matching progress id=%s products=%s/%s percent=%s",
+                    boq.pk,
+                    done,
+                    total,
+                    percent,
+                )
                 set_boq_job_progress(
                     boq.pk,
                     percent=percent,
-                    label=f"Matching products to database ({done}/{total})…",
+                    label=f"Matching products to database ({done}/{total})...",
                     phase="extract",
                 )
 
-            # One strong pass: rank top Rate_Master neighbors and pick the best.
-            # Experts Re-analyse after editing attributes — no auto multi-pass refine.
+            # Attach full section as AI context; slot line drives product identity.
+            # Do not fold the whole section into Chroma query text (hydrant titles
+            # were drowning pipe/valve slots).
+            for row in extracted_rows:
+                row_id = str(row.get("row_id") or "")
+                section_text = _row_description(boq_data, row_id) if row_id else ""
+                if section_text:
+                    row["description"] = section_text
+                for product in row.get("products") or []:
+                    if not isinstance(product, dict):
+                        continue
+                    slot_id = str(
+                        product.get("qty_row_id") or product.get("source_row_id") or ""
+                    ).strip()
+                    slot_text = ""
+                    if slot_id and slot_id != row_id:
+                        slot_text = _row_description(boq_data, slot_id)
+                    elif slot_id and slot_id == row_id:
+                        # Single-line section: description_hint / product owns identity.
+                        slot_text = str(product.get("description_hint") or "").strip()
+                    if section_text or slot_text:
+                        product["_boq_row"] = {
+                            "row_id": row_id,
+                            "description": section_text,
+                            "slot_description": slot_text,
+                            "serial": str(row.get("serial") or row.get("ser_no") or ""),
+                        }
+
             extracted_rows = self._enrich_extracted_attributes(
                 extracted_rows,
                 database_version_id=db_snap.get("database_version_id"),
@@ -264,7 +306,7 @@ class BOQAnalysisService:
             # Mapping must not leave blank quantities when BOQ slots are known.
             extracted_rows = rehydrate_analysis_rows_quantity(boq_data, extracted_rows)
 
-            set_boq_job_progress(boq.pk, percent=98, label="Saving results…", phase="extract")
+            set_boq_job_progress(boq.pk, percent=98, label="Saving results...", phase="extract")
             analysis_payload = {
                 "schema_version": 2,
                 "phase": PHASE_EXTRACTED,
@@ -298,8 +340,9 @@ class BOQAnalysisService:
             return analysis_payload
         except Exception as exc:
             logger.exception("BOQ extraction failed for id=%s", boq.pk)
-            set_boq_job_progress(boq.pk, percent=100, label="Analysis failed", phase="extract")
+            # Status first so polls never see PROCESSING + terminal 100%.
             self._set_status(boq, BOQStatus.ANALYSIS_FAILED)
+            set_boq_job_progress(boq.pk, percent=100, label="Analysis failed", phase="extract")
             self._audit(boq, "Analysis failed")
             self._notify_user(
                 boq,
@@ -348,7 +391,7 @@ class BOQAnalysisService:
         Empty-section **Re-analyse** (or ``force_reextract=True``) rebuilds products
         from the BOQ workbook via ``extract_products.txt`` (same as initial Analyse).
         """
-        with transaction.atomic():
+        with atomic():
             try:
                 boq = BOQ.objects.select_for_update().get(pk=self.boq_id)
             except BOQ.DoesNotExist:
@@ -394,11 +437,11 @@ class BOQAnalysisService:
                     if selected is None:
                         raise ValidationError(f"Unknown product index: {product_index}")
                     stub_products = [
-                        _normalize_product_fields(selected, preserve_class=True)
+                        normalize_product_fields(selected, preserve_class=True)
                     ]
                 else:
                     stub_products = [
-                        _normalize_product_fields(product, preserve_class=True)
+                        normalize_product_fields(product, preserve_class=True)
                         for product in products
                     ]
                     want = None
@@ -447,16 +490,16 @@ class BOQAnalysisService:
                     or source_product.get("source_row_id")
                     or ""
                 ).strip()
-                description_parts: list[str] = []
-                if section_text:
-                    description_parts.append(section_text)
+                slot_text = ""
                 if slot_id and slot_id != str(row_id):
                     slot_text = _row_description(boq_payload, slot_id)
-                    if slot_text and slot_text not in description_parts:
-                        description_parts.append(slot_text)
+                elif not slot_text:
+                    slot_text = str(source_product.get("description_hint") or "").strip()
+                # Full section for AI meaning; expert UI fields + slot line for recall.
                 boq_context = {
                     "row_id": str(row_id),
-                    "description": "\n".join(description_parts),
+                    "description": section_text,
+                    "slot_description": slot_text,
                     "serial": str(target.get("serial") or target.get("ser_no") or ""),
                 }
                 updated_product = mapper.rematch_product(
@@ -480,7 +523,7 @@ class BOQAnalysisService:
                 )
 
             persist_status = self._status_after_row_work(previous_status)
-            with transaction.atomic():
+            with atomic():
                 boq = BOQ.objects.select_for_update().get(pk=self.boq_id)
                 latest = dict(boq.analysis_data or {})
                 latest_rows = list(latest.get("rows") or rows)
@@ -824,7 +867,12 @@ class BOQAnalysisService:
         database_version_id: int | None = None,
         progress_callback=None,
     ) -> list[dict[str, Any]]:
-        """Map BOQ-extracted products to top Rate_Master neighbors (single strong pass)."""
+        """Map BOQ-extracted products to top Rate_Master neighbors.
+
+        First pass maps every product. A second pass rematches only weak
+        (&lt;50%) products with refine=True so initial Analyse gains the same
+        BOQ-section + wider-recall path as expert Re-analyse.
+        """
         version_id = int(database_version_id or 0)
         if not version_id:
             active_version = get_active_database_version()
@@ -834,7 +882,41 @@ class BOQAnalysisService:
             return rows
         try:
             mapper = ProductAIMappingService(version_id)
-            return mapper.map_rows(rows, progress_callback=progress_callback)
+            product_count = sum(len(row.get("products") or []) for row in rows)
+            product_count = max(int(product_count or 0), 1)
+
+            def _on_first(done: int, total: int) -> None:
+                if not progress_callback:
+                    return
+                # First pass occupies [0, product_count] of overall
+                # [0, product_count + refine_total]. Use 2x until refine starts.
+                first_total = max(int(total or 0), product_count, 1)
+                progress_callback(min(int(done or 0), first_total), first_total * 2)
+
+            mapped = mapper.map_rows(
+                rows,
+                progress_callback=_on_first,
+                blank_weak_inputs=False,
+            )
+
+            def _on_refine(done: int, total: int) -> None:
+                if not progress_callback:
+                    return
+                refine_total = max(int(total or 0), 1)
+                overall_total = product_count + refine_total
+                progress_callback(
+                    min(product_count + int(done or 0), overall_total),
+                    overall_total,
+                )
+
+            refined = mapper.refine_rows(
+                mapped,
+                passes=1,
+                min_confidence=ANALYSIS_INPUT_FILL_CONFIDENCE,
+                progress_callback=_on_refine,
+            )
+            # Blank weak inputs only after refine so rematch still has identity fields.
+            return mapper.apply_weak_match_blanking(refined)
         except Exception:
             logger.exception("AI product mapping failed; keeping AI-extracted attributes")
             return rows
@@ -899,15 +981,35 @@ class BOQAnalysisService:
             safe_payload["match_results_json_path"] = match_results_json_relative_path(
                 boq.boq_name
             )
+        # Use queryset update so a BOQ deleted mid-Celery job does not raise
+        # ``Save with update_fields did not affect any rows``.
+        updated = BOQ.objects.filter(pk=boq.pk).update(
+            analysis_data=safe_payload,
+            status=status,
+        )
+        if not updated:
+            logger.error(
+                "BOQ persist skipped: id=%s was deleted while analysis ran",
+                boq.pk,
+            )
+            raise BOQAIError(
+                f"BOQ id={boq.pk} was deleted while analysis was running."
+            )
         boq.analysis_data = safe_payload
         boq.status = status
-        boq.save(update_fields=["analysis_data", "status"])
 
     @staticmethod
     def _set_status(boq: BOQ, status: str) -> None:
-        with transaction.atomic():
-            boq.status = status
-            boq.save(update_fields=["status"])
+        updated = BOQ.objects.filter(pk=boq.pk).update(status=status)
+        if not updated:
+            logger.error(
+                "BOQ status update skipped: id=%s missing (deleted during job)",
+                boq.pk,
+            )
+            raise BOQAIError(
+                f"BOQ id={boq.pk} was deleted while analysis was running."
+            )
+        boq.status = status
 
     @staticmethod
     def _notify_user(boq: BOQ, title: str, message: str = "") -> None:

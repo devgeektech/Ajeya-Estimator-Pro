@@ -211,14 +211,44 @@ document.addEventListener('alpine:init', () => {
         if (!root || !window.Alpine) {
             return null;
         }
+        let lineData = null;
+        try {
+            lineData = Alpine.$data(root);
+        } catch (e) {
+            lineData = null;
+        }
+        const activeIndex = lineData && lineData.activeProduct != null
+            ? Number(lineData.activeProduct)
+            : null;
         const panels = root.querySelectorAll('.extraction-product-panel');
         let activePanel = null;
         panels.forEach((panel) => {
-            if (window.getComputedStyle(panel).display === 'none') {
+            const card = panel.querySelector('.extraction-product-card');
+            if (!card) {
                 return;
             }
-            activePanel = panel;
+            let cardData = null;
+            try {
+                cardData = Alpine.$data(card);
+            } catch (e) {
+                cardData = null;
+            }
+            if (
+                Number.isFinite(activeIndex)
+                && cardData
+                && Number(cardData.productIndex) === activeIndex
+            ) {
+                activePanel = panel;
+            }
         });
+        if (!activePanel) {
+            panels.forEach((panel) => {
+                if (window.getComputedStyle(panel).display === 'none') {
+                    return;
+                }
+                activePanel = panel;
+            });
+        }
         const card = activePanel && activePanel.querySelector('.extraction-product-card');
         if (!card) {
             return null;
@@ -382,9 +412,39 @@ document.addEventListener('alpine:init', () => {
                 data.row_id || rowId,
                 data.product_index != null ? data.product_index : productIndex,
                 data.line_html,
+                { preserveActiveTab: true },
             );
         } catch (error) {
             alert(error.message || 'Failed to select candidate.');
+            if (btn) {
+                btn.disabled = false;
+            }
+        }
+    };
+
+    window.confirmExtractionMatch = async function confirmExtractionMatch(
+        fromEl,
+        editUrl,
+        rowId,
+        productIndex,
+    ) {
+        const btn = fromEl;
+        if (btn) {
+            btn.disabled = true;
+        }
+        try {
+            const data = await window.extractionAjaxPost(editUrl, {
+                action: 'confirm_match',
+                row_id: rowId,
+                product_index: String(productIndex),
+            });
+            window.replaceExtractionProductPanel(
+                data.row_id || rowId,
+                data.product_index != null ? data.product_index : productIndex,
+                data.line_html,
+            );
+        } catch (error) {
+            alert(error.message || 'Failed to confirm match.');
             if (btn) {
                 btn.disabled = false;
             }

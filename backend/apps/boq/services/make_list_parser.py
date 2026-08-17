@@ -21,6 +21,9 @@ from .serial_normalizer import attach_row_hierarchy, detect_serial_key, structur
 logger = logging.getLogger("boq_ai")
 
 SCHEMA_VERSION = 2
+# Bump when PDF/Excel row extraction rules change so stored make lists re-parse
+# from the uploaded file (repair-only cannot restore rows dropped at parse time).
+MAKE_LIST_PARSE_VERSION = 3
 
 MAKE_LIST_HEADER_HINTS = frozenset(
     {
@@ -224,6 +227,11 @@ def _parse_pdf_make_list(uploaded_file, *, source_filename: str) -> dict:
 
 def parse_make_list_file(uploaded_file, *, source_filename: str = "") -> dict:
     """Return normalized make-list JSON from Excel or PDF."""
+    from utils.make_list_splits import (
+        MAKE_LIST_SPLIT_REPAIR_VERSION,
+        repair_make_list_payload_splits,
+    )
+
     name = source_filename or Path(str(uploaded_file)).name
     lower_name = name.lower()
     if lower_name.endswith(".pdf"):
@@ -237,6 +245,11 @@ def parse_make_list_file(uploaded_file, *, source_filename: str = "") -> dict:
 
     if not payload.get("row_count"):
         raise MakeListParseError(f"Make list '{name}' produced no data rows.")
+
+    # Final peel pass so material nouns never stay in Approved Makes.
+    payload = repair_make_list_payload_splits(payload)
+    payload["split_repair_version"] = MAKE_LIST_SPLIT_REPAIR_VERSION
+    payload["parse_version"] = MAKE_LIST_PARSE_VERSION
 
     try:
         from apps.boq.services.make_list_category_mapping_service import (

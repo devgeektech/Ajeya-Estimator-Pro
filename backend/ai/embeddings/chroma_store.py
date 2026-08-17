@@ -1,4 +1,9 @@
-"""Local Chroma vector index for Rate_Master_Output product embeddings."""
+"""Local Chroma vector index for Product_Helper catalog embeddings.
+
+Chroma stores one vector per Product_Helper row (complete product identity).
+Search returns Product_ID; Rate_Master_Output / Labour_master_Output are loaded
+from Postgres by that Product_ID for Make/Vendor amounts and labour.
+"""
 from __future__ import annotations
 
 import logging
@@ -12,7 +17,7 @@ from chromadb.api.types import PyEmbeddings
 from chromadb.config import Settings
 from django.conf import settings
 
-from apps.database_manager.models import Rate_Master_Output
+from apps.database_manager.models import Product_Helper, Rate_Master_Output
 
 logger = logging.getLogger("boq_ai")
 
@@ -26,10 +31,8 @@ def _to_decimal(value) -> Decimal:
 
 
 def selection_amount(rate: Rate_Master_Output) -> Decimal:
-    """Amount used when comparing Rate_Master_Output rows."""
-    if rate.Final_Material_Amount is not None:
-        return _to_decimal(rate.Final_Material_Amount)
-    return Decimal(0)
+    """Make & Vendor / lowest-price amount — always Final_Material_Amount."""
+    return _to_decimal(rate.Final_Material_Amount)
 
 
 def _scalar(value: Any):
@@ -40,13 +43,47 @@ def _scalar(value: Any):
     return value
 
 
-def rate_document_id(rate: Rate_Master_Output) -> str:
-    """Return the stable Chroma document id for a Rate_Master_Output row."""
-    return f"rate-master-{rate.pk}"
+def helper_document_id(helper: Product_Helper) -> str:
+    """Stable Chroma document id for a Product_Helper row."""
+    return f"product-helper-{helper.pk}"
 
 
+def resolve_product_id(document_id: str, metadata: dict[str, Any] | None = None) -> str | None:
+    """Resolve Product_Helper Product_ID from a Chroma hit id/metadata."""
+    if metadata:
+        raw = str(metadata.get("product_id") or "").strip()
+        if raw:
+            return raw
+    if document_id.startswith("product-helper-"):
+        # Fallback: metadata missing — caller should load by helper pk if needed.
+        return None
+    return None
+
+
+def resolve_helper_id(document_id: str, metadata: dict[str, Any] | None = None) -> int | None:
+    """Resolve PostgreSQL Product_Helper pk from a Chroma hit."""
+    if metadata:
+        raw_id = metadata.get("product_helper_id")
+        if raw_id is not None:
+            try:
+                return int(raw_id)
+            except (TypeError, ValueError):
+                pass
+    if document_id.startswith("product-helper-"):
+        suffix = document_id.removeprefix("product-helper-")
+        try:
+            return int(suffix)
+        except ValueError:
+            return None
+    try:
+        return int(document_id)
+    except ValueError:
+        return None
+
+
+# Kept for callers that still resolve legacy rate-master Chroma ids during transition.
 def resolve_rate_master_id(document_id: str, metadata: dict[str, Any] | None = None) -> int | None:
-    """Resolve PostgreSQL Rate_Master_Output pk from a Chroma hit id/metadata."""
+    """Resolve Rate_Master_Output pk from legacy Chroma metadata (compat)."""
     if metadata:
         raw_id = metadata.get("rate_master_id")
         if raw_id is not None:
@@ -54,33 +91,27 @@ def resolve_rate_master_id(document_id: str, metadata: dict[str, Any] | None = N
                 return int(raw_id)
             except (TypeError, ValueError):
                 pass
-
     if document_id.startswith("rate-master-"):
         suffix = document_id.removeprefix("rate-master-")
         try:
             return int(suffix)
         except ValueError:
             return None
-
-    try:
-        return int(document_id)
-    except ValueError:
-        return None
+    return None
 
 
-def rate_document(rate: Rate_Master_Output) -> str:
-    """Build structured text embedded for vector product search."""
+def helper_document(helper: Product_Helper) -> str:
+    """Build full Product_Helper text for embedding (no Make/Vendor/rates)."""
     fields = [
-        ("Product_ID", rate.Product_ID),
-        ("Category", rate.Category),
-        ("Sub Category", rate.Sub_Category),
-        ("Class", rate.Class),
-        ("Size", rate.Size),
-        ("Make", rate.Make),
-        ("Capacity", rate.Capacity),
-        ("Unit", rate.Unit),
-        ("Attribute", rate.Attribute),
-        ("Vendor", rate.Vendor),
+        ("Product_ID", helper.Product_ID),
+        ("Category", helper.Category),
+        ("Sub Category", helper.Sub_Category),
+        ("Class", helper.Class),
+        ("Size", helper.Size),
+        ("Unit", helper.Unit),
+        ("Capacity", helper.Capacity),
+        ("Attribute", helper.Attribute),
+        ("Status", helper.Status),
     ]
     lines = []
     for label, value in fields:
@@ -90,30 +121,30 @@ def rate_document(rate: Rate_Master_Output) -> str:
     return "\n".join(lines)
 
 
-def rate_metadata(rate: Rate_Master_Output) -> dict:
-    """Return Chroma-safe metadata for resolving vector hits back to PostgreSQL."""
+# Backward-compatible alias used by older call sites / logs.
+rate_document = helper_document
+
+
+def helper_metadata(helper: Product_Helper) -> dict:
+    """Chroma-safe metadata — Product_ID is the join key for rates/labour."""
     return {
-        "database_version_id": rate.database_version.pk,
-        "rate_master_id": rate.pk,
-        "product_id": rate.Product_ID or "",
-        "rate_id": rate.Rate_ID or "",
-        "category": rate.Category or "",
-        "sub_category": rate.Sub_Category or "",
-        "class": rate.Class or "",
-        "size": _scalar(rate.Size),
-        "make": rate.Make or "",
-        "capacity": rate.Capacity or "",
-        "unit": rate.Unit or "",
-        "attribute": rate.Attribute or "",
-        "vendor": rate.Vendor or "",
-        "product_display_key": rate.display_key(),
-        "final_material_amount": _scalar(rate.Final_Material_Amount),
-        "selection_amount": _scalar(selection_amount(rate)),
+        "database_version_id": helper.database_version.pk,
+        "product_helper_id": helper.pk,
+        "product_id": str(helper.Product_ID or "").strip(),
+        "category": helper.Category or "",
+        "sub_category": helper.Sub_Category or "",
+        "class": helper.Class or "",
+        "size": _scalar(helper.Size),
+        "unit": helper.Unit or "",
+        "capacity": helper.Capacity or "",
+        "attribute": helper.Attribute or "",
+        "status": helper.Status or "",
+        "product_display_key": helper.display_key(),
     }
 
 
 class ChromaEmbeddingStore:
-    """Persistent local Chroma index for product embeddings."""
+    """Persistent local Chroma index for Product_Helper embeddings."""
 
     def __init__(self, path: str | None = None, collection_name: str | None = None):
         self.path = Path(path or settings.CHROMA_PATH)
@@ -159,7 +190,7 @@ class ChromaEmbeddingStore:
         limit: int = 20,
         database_version_id: int | None = None,
     ) -> list[dict]:
-        """Return nearest Rate_Master_Output rows by embedding distance."""
+        """Return nearest Product_Helper hits (Product_ID) by embedding distance."""
         where_filter: Any = (
             {"database_version_id": int(database_version_id)}
             if database_version_id is not None
@@ -168,7 +199,6 @@ class ChromaEmbeddingStore:
         try:
             result = self._query(query_embedding, limit, where_filter)
         except Exception:
-            # A re-import can invalidate the segment this process opened; reconnect once.
             logger.warning("Chroma query failed; reopening the index and retrying")
             self._connect(drop_cached_client=True)
             result = self._query(query_embedding, limit, where_filter)
@@ -179,19 +209,21 @@ class ChromaEmbeddingStore:
         documents = (result.get("documents") or [[]])[0]
 
         hits: list[dict] = []
-        for index, rate_id in enumerate(ids):
-            metadata = metadatas[index] if index < len(metadatas) else {}
+        for index, doc_id in enumerate(ids):
+            metadata = dict(metadatas[index] if index < len(metadatas) else {})
             distance = distances[index] if index < len(distances) else 1.0
             document = documents[index] if index < len(documents) else ""
-            rate_master_id = resolve_rate_master_id(str(rate_id), dict(metadata or {}))
-            if rate_master_id is None:
+            product_id = resolve_product_id(str(doc_id), metadata)
+            helper_id = resolve_helper_id(str(doc_id), metadata)
+            if not product_id and helper_id is None:
                 continue
             hits.append(
                 {
-                    "rate_master_id": rate_master_id,
+                    "product_id": product_id or "",
+                    "product_helper_id": helper_id,
                     "distance": float(distance),
                     "similarity": max(0.0, 1.0 - float(distance)),
-                    "metadata": metadata or {},
+                    "metadata": metadata,
                     "document": document or "",
                 }
             )
@@ -205,26 +237,37 @@ class ChromaEmbeddingStore:
             include=["metadatas", "distances", "documents"],
         )
 
-    def upsert_rate(self, rate: Rate_Master_Output, embedding: Sequence[float]) -> str:
-        """Upsert one Rate_Master_Output row into Chroma and return its document id."""
-        return self.upsert_rates([rate], [embedding])[0]
+    def upsert_helper(self, helper: Product_Helper, embedding: Sequence[float]) -> str:
+        """Upsert one Product_Helper row into Chroma."""
+        return self.upsert_helpers([helper], [embedding])[0]
 
-    def upsert_rates(
+    def upsert_helpers(
         self,
-        rates: list[Rate_Master_Output],
+        helpers: list[Product_Helper],
         embeddings: Sequence[Sequence[float]],
     ) -> list[str]:
-        """Upsert many Rate_Master_Output rows into Chroma, one vector per row."""
-        if not rates:
+        """Upsert many Product_Helper rows into Chroma, one vector per row."""
+        if not helpers:
             return []
-        if len(rates) != len(embeddings):
-            raise ValueError("rates and embeddings must be the same length")
+        if len(helpers) != len(embeddings):
+            raise ValueError("helpers and embeddings must be the same length")
 
-        document_ids = [rate_document_id(rate) for rate in rates]
+        document_ids = [helper_document_id(helper) for helper in helpers]
         self.collection.upsert(
             ids=document_ids,
             embeddings=cast(PyEmbeddings, embeddings),
-            documents=[rate_document(rate) for rate in rates],
-            metadatas=[rate_metadata(rate) for rate in rates],
+            documents=[helper_document(helper) for helper in helpers],
+            metadatas=[helper_metadata(helper) for helper in helpers],
         )
         return document_ids
+
+    # Compat aliases — older generator/tests called upsert_rate(s).
+    def upsert_rate(self, helper: Product_Helper, embedding: Sequence[float]) -> str:
+        return self.upsert_helper(helper, embedding)
+
+    def upsert_rates(
+        self,
+        helpers: list[Product_Helper],
+        embeddings: Sequence[Sequence[float]],
+    ) -> list[str]:
+        return self.upsert_helpers(helpers, embeddings)

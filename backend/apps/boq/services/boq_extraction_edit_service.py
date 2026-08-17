@@ -5,18 +5,20 @@ import json
 import re
 from typing import Any
 
-from django.db import transaction
+from common.db import atomic
 
 from ai.context import snap_product_taxonomy
 from apps.boq.models import BOQ
 from apps.boq.services.boq_analysis_store import save_boq_analysis_json
-from apps.boq.services.boq_extraction_service import _normalize_product_fields
+from apps.boq.services.boq_extraction_service import normalize_product_fields
+from apps.boq.services.boq_row_fields import is_blank as _is_blank
 from apps.boq.services.make_list_constraint_service import (
     LOWEST_MAKE_STORED,
     LOWEST_MAKE_VALUE,
     MakeListConstraintService,
     _normalize_make,
 )
+from apps.boq.services.boq_extraction_slots import compose_description_hint
 from apps.boq.services.product_attribute_enrichment_service import (
     compute_attribute_confidence,
     refresh_missing_attribute_keys,
@@ -43,14 +45,6 @@ _PRODUCT_SCALAR_FIELDS = (
 
 _SIZE_FIELDS = {"size", "capacity"}
 _QUANTITY_FIELDS = {"quantity"}
-
-
-def _is_blank(value: Any) -> bool:
-    if value is None:
-        return True
-    if isinstance(value, str):
-        return not value.strip()
-    return False
 
 
 def _coerce_scalar(field: str, raw: str) -> Any:
@@ -128,12 +122,16 @@ class BOQExtractionEditService:
             raise ValidationError(f"Unknown product index: {product_index}")
 
         updated = dict(product)
+        previous_hint = str(product.get("description_hint") or "").strip()
+        submitted_hint = None
+        if "description_hint" in fields:
+            submitted_hint = str(fields.get("description_hint") or "").strip()
         for field in _PRODUCT_SCALAR_FIELDS:
             if field not in fields:
                 continue
             updated[field] = _coerce_scalar(field, fields[field])
         submitted_class = updated.get("class")
-        updated = _normalize_product_fields(updated, preserve_class=True)
+        updated = normalize_product_fields(updated, preserve_class=True)
         updated = snap_product_taxonomy(updated)
         # Expert Class (including ``0``) must survive taxonomy snap / material promote.
         if not _is_blank(submitted_class):
@@ -154,6 +152,16 @@ class BOQExtractionEditService:
             updated["missing_attribute_keys"] = refresh_missing_attribute_keys(updated)
             if not schema_keys and updated["attributes"]:
                 updated["attribute_source"] = updated.get("attribute_source") or "extracted"
+
+        # Keep an expert-edited AI Description; otherwise rebuild from taxonomy + attrs.
+        if submitted_hint is not None and submitted_hint and submitted_hint != previous_hint:
+            updated["description_hint"] = submitted_hint[:500]
+        else:
+            composed = compose_description_hint(updated)
+            if composed:
+                updated["description_hint"] = composed
+            elif submitted_hint is not None:
+                updated["description_hint"] = submitted_hint[:500] or None
 
         position = self._product_position(products, product_index)
         if position is None:
@@ -251,6 +259,96 @@ class BOQExtractionEditService:
             )
         except ValueError as exc:
             raise ValidationError(str(exc)) from exc
+
+        composed = compose_description_hint(updated)
+        if composed:
+            updated["description_hint"] = composed
+
+        position = self._product_position(products, product_index)
+        if position is None:
+            raise ValidationError(f"Unknown product index: {product_index}")
+        products[position] = updated
+        row["products"] = products
+        row["skip_matching"] = not products
+        analysis["rows"] = rows
+        analysis["phase"] = PHASE_EXTRACTED
+        self._persist(boq, analysis)
+        return updated
+
+    def confirm_match(
+        self,
+        *,
+        row_id: str,
+        product_index: int,
+    ) -> dict[str, Any]:
+        """Expert confirms the current product match → lock confidence at 100%."""
+        from apps.boq.services.product_ai_common import DB_MATCH_MATCHED
+
+        boq = self._get_boq()
+        self._ensure_editable(boq)
+
+        analysis = dict(boq.analysis_data or {})
+        rows = list(analysis.get("rows") or [])
+        row = self._find_row(rows, row_id)
+        if row is None:
+            raise ValidationError(f"Unknown BOQ row: {row_id}")
+
+        products = list(row.get("products") or [])
+        product = self._find_product(products, product_index)
+        if product is None:
+            raise ValidationError(f"Unknown product index: {product_index}")
+
+        rate_id = product.get("db_product_id") or product.get("suggested_db_product_id")
+        if rate_id in (None, ""):
+            raise ValidationError(
+                "No database product to confirm. Select a candidate first."
+            )
+        try:
+            rate_pk = int(rate_id)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("Invalid database product id.") from exc
+
+        try:
+            current = float(
+                product.get("db_match_confidence")
+                or product.get("attribute_confidence")
+                or 0.0
+            )
+        except (TypeError, ValueError):
+            current = 0.0
+        if current >= 99.5:
+            raise ValidationError("This product is already a 100% match.")
+
+        updated = dict(product)
+        updated["db_product_id"] = rate_pk
+        updated["suggested_db_product_id"] = rate_pk
+        updated["db_match_status"] = DB_MATCH_MATCHED
+        updated["db_match_confidence"] = 100.0
+        updated["attribute_confidence"] = 100.0
+        updated["needs_extraction_review"] = False
+        updated["slot_fallback"] = False
+        mapping = dict(updated.get("ai_mapping") or {})
+        mapping["selected_id"] = rate_pk
+        mapping["selected_rate_master_id"] = rate_pk
+        mapping["match_status"] = DB_MATCH_MATCHED
+        mapping["selection_source"] = "expert_confirm"
+        mapping["notes"] = "Confirmed by expert (match set to 100%)."
+        updated["ai_mapping"] = mapping
+
+        candidates = list(updated.get("db_candidates") or [])
+        refreshed: list[dict[str, Any]] = []
+        for item in candidates:
+            if not isinstance(item, dict):
+                continue
+            row_item = dict(item)
+            try:
+                if int(row_item.get("id") or 0) == rate_pk:
+                    row_item["confidence"] = 100.0
+            except (TypeError, ValueError):
+                pass
+            refreshed.append(row_item)
+        if refreshed:
+            updated["db_candidates"] = refreshed
 
         position = self._product_position(products, product_index)
         if position is None:
@@ -419,7 +517,7 @@ class BOQExtractionEditService:
         for row in analysis.get("rows") or []:
             row.pop("product_matches", None)
 
-        with transaction.atomic():
+        with atomic():
             safe_analysis = json_safe(analysis)
             save_boq_analysis_json(boq.boq_name, safe_analysis)
             boq.analysis_data = safe_analysis

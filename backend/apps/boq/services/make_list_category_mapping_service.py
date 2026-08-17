@@ -15,6 +15,8 @@ from ai.service import AIService
 from utils.product_synonyms import (
     MAKE_LIST_DESCRIPTION_HINTS,
     MAKE_LIST_SUB_CATEGORY_HINTS,
+    expand_make_list_search_text,
+    format_synonym_map_for_ai,
 )
 
 logger = logging.getLogger("boq_ai")
@@ -22,7 +24,7 @@ logger = logging.getLogger("boq_ai")
 _BATCH_SIZE = 20
 
 # Bump when mapping rules change so ensure_mappings remaps stored make lists.
-_MAPPING_VERSION = 5
+_MAPPING_VERSION = 11
 
 # Tokens too generic to pick a sub-category by overlap alone (e.g. "Alarm Valve"
 # must not become BALL VALVE just because both share "valve").
@@ -41,22 +43,145 @@ _GENERIC_SUB_TOKENS = frozenset(
         "fitting",
         "fittings",
         "type",
+        "types",
+        "all",
+        "any",
         "with",
         "for",
         "and",
         "the",
-        "all",
         "etc",
         "fire",
         "fighting",
         "system",
         "systems",
+        "equipment",
+        "covered",
+        "elsewhere",
+        "else",
+        "where",
+        "not",
+        "miscellaneous",
+        "misc",
+        "general",
     }
 )
+
+_ALL_TYPES_MARKERS = (
+    "all types",
+    "all type",
+    "any type",
+    "any types",
+    "all kinds",
+    "all kind",
+    "of all type",
+    "of all types",
+)
+
 
 def _normalize(text: str) -> str:
     cleaned = re.sub(r"[^0-9a-zA-Z]+", " ", (text or "").lower())
     return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def _is_all_types_line(description: str) -> bool:
+    """True when the make-list line is generic (All Types) — leave sub blank."""
+    text = _normalize(description)
+    if not text:
+        return False
+    if any(marker in text for marker in _ALL_TYPES_MARKERS):
+        return True
+    # Catch-all equipment lines with no specific product noun.
+    if "not covered" in text and "equipment" in text:
+        return True
+    return False
+
+
+def _normalize_targets(
+    raw_targets: Any,
+    *,
+    categories: list[str],
+    by_category: dict[str, list[str]],
+) -> list[dict[str, str | None]]:
+    """Validate AI/heuristic target list against taxonomy (deduped)."""
+    if not isinstance(raw_targets, list):
+        return []
+    cleaned: list[dict[str, str | None]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in raw_targets:
+        if not isinstance(item, dict):
+            continue
+        raw_cat = str(item.get("category") or "").strip()
+        if not raw_cat:
+            continue
+        category = resolve_category_label(raw_cat, categories) or (
+            raw_cat if raw_cat in categories else None
+        )
+        if not category:
+            continue
+        raw_sub = str(item.get("sub_category") or "").strip()
+        sub = None
+        if raw_sub:
+            sub = resolve_sub_category_label(
+                raw_sub,
+                category=category,
+                sub_categories_by_category=by_category,
+            )
+        key = (_normalize(category), _normalize(sub or ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append({"category": category, "sub_category": sub})
+    return cleaned
+
+
+def _targets_from_single(
+    category: str | None,
+    sub_category: str | None,
+) -> list[dict[str, str | None]]:
+    if not category:
+        return []
+    return [{"category": category, "sub_category": sub_category or None}]
+
+
+def _primary_from_targets(
+    targets: list[dict[str, str | None]],
+) -> tuple[str | None, str | None]:
+    if not targets:
+        return None, None
+    first = targets[0]
+    return first.get("category"), first.get("sub_category")
+
+
+def format_mapped_targets_display(
+    targets: list[dict[str, str | None]] | None,
+    *,
+    category: str | None = None,
+    sub_category: str | None = None,
+) -> tuple[str, str]:
+    """UI strings for Category / Subcategory columns (supports multi-target)."""
+    rows = list(targets or [])
+    if not rows and category:
+        rows = _targets_from_single(category, sub_category)
+    if not rows:
+        return "", ""
+
+    cat_parts: list[str] = []
+    sub_parts: list[str] = []
+    for item in rows:
+        cat = str(item.get("category") or "").strip()
+        sub = str(item.get("sub_category") or "").strip()
+        if cat and cat not in cat_parts:
+            cat_parts.append(cat)
+        if sub:
+            label = f"{cat}: {sub}" if cat and len(rows) > 1 else sub
+            if label not in sub_parts:
+                sub_parts.append(label)
+        elif cat and len(rows) > 1:
+            label = f"{cat}: (all)"
+            if label not in sub_parts:
+                sub_parts.append(label)
+    return " | ".join(cat_parts), " | ".join(sub_parts)
 
 
 def _token_set(text: str) -> set[str]:
@@ -75,7 +200,18 @@ def _heuristic_sub_category(
 ) -> str | None:
     if not description or not category:
         return None
-    text = _normalize(description)
+    # "All Types" / catch-all equipment lines — do not invent Pendant vs Upright etc.
+    if _is_all_types_line(description):
+        text = expand_make_list_search_text(description) or _normalize(description)
+        # Pure rosette-plate lines may still map the product sub (not a head type).
+        if _normalize(category) == "accessories" and "rosette" in text and "sprinkler" not in text:
+            return resolve_sub_category_label(
+                "rosette",
+                category=category,
+                sub_categories_by_category=sub_categories_by_category,
+            )
+        return None
+    text = expand_make_list_search_text(description) or _normalize(description)
 
     # Generic "Fire Extinguishers" must not invent ABC / CO2 without a type word.
     if _normalize(category) == "extinguisher":
@@ -116,7 +252,7 @@ def _heuristic_sub_category(
             if resolved:
                 return resolved
 
-    desc_tokens = _token_set(description)
+    desc_tokens = _token_set(text)
     specific_desc = _specific_tokens(desc_tokens)
     if not specific_desc:
         return None
@@ -148,6 +284,7 @@ def _heuristic_sub_category(
         return best
     return None
 
+
 def _heuristic_category(
     description: str,
     categories: list[str],
@@ -159,7 +296,7 @@ def _heuristic_category(
     """
     if not description or not categories:
         return None, None, 0.0, False
-    text = _normalize(description)
+    text = expand_make_list_search_text(description) or _normalize(description)
     for phrase, hint in MAKE_LIST_DESCRIPTION_HINTS:
         phrase_norm = _normalize(phrase)
         if not phrase_norm or phrase_norm not in text:
@@ -179,7 +316,7 @@ def _heuristic_category(
             )
             return resolved, sub, 78.0, True
 
-    desc_tokens = _token_set(description)
+    desc_tokens = _token_set(text)
     best_cat = None
     best_score = 0.0
     for category in categories:
@@ -201,6 +338,74 @@ def _heuristic_category(
         )
         return best_cat, sub, round(best_score, 2), False
     return None, None, 0.0, False
+
+
+def _heuristic_targets(
+    description: str,
+    *,
+    primary_category: str | None,
+    primary_sub: str | None,
+    categories: list[str],
+    sub_categories_by_category: dict[str, list[str]],
+) -> list[dict[str, str | None]]:
+    """Expand primary heuristic into multi-target when text names more families."""
+    targets = _targets_from_single(primary_category, primary_sub)
+    if not description:
+        return targets
+    text = expand_make_list_search_text(description) or _normalize(description)
+    primary_norm = _normalize(primary_category or "")
+
+    # Compound sprinkler + rosette: keep sprinkler family + accessories/rosette.
+    if "sprinkler" in text and "rosette" in text:
+        sprinkler = resolve_category_label("SPRINKLER", categories)
+        accessories = resolve_category_label("ACCESSORIES", categories)
+        if sprinkler and not any(_normalize(str(t.get("category") or "")) == _normalize(sprinkler) for t in targets):
+            targets.insert(0, {"category": sprinkler, "sub_category": None})
+        if accessories:
+            rosette_sub = resolve_sub_category_label(
+                "rosette",
+                category=accessories,
+                sub_categories_by_category=sub_categories_by_category,
+            )
+            if not any(
+                _normalize(str(t.get("category") or "")) == _normalize(accessories)
+                and _normalize(str(t.get("sub_category") or ""))
+                == _normalize(rosette_sub or "")
+                for t in targets
+            ):
+                targets.append({"category": accessories, "sub_category": rosette_sub})
+
+    # Catch-all fire equipment with no specific product → umbrella hydrant.
+    if (
+        not targets
+        and "equipment" in text
+        and "not covered" in text
+        and ("fire" in text or "fighting" in text)
+    ):
+        hydrant = resolve_category_label("HYDRANT", categories)
+        if hydrant:
+            targets = [{"category": hydrant, "sub_category": None}]
+
+    # Dedupe while preserving order.
+    cleaned: list[dict[str, str | None]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in targets:
+        cat = str(item.get("category") or "").strip()
+        if not cat:
+            continue
+        key = (_normalize(cat), _normalize(str(item.get("sub_category") or "")))
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append({"category": cat, "sub_category": item.get("sub_category")})
+    # Prefer sprinkler before accessories when both present.
+    if primary_norm == "accessories" and any(
+        _normalize(str(t.get("category") or "")) == "sprinkler" for t in cleaned
+    ):
+        cleaned.sort(
+            key=lambda t: 0 if _normalize(str(t.get("category") or "")) == "sprinkler" else 1
+        )
+    return cleaned
 
 
 def _materials_from_payload(payload: dict) -> list[dict[str, Any]]:
@@ -363,9 +568,9 @@ class MakeListCategoryMappingService:
         materials: list[dict[str, Any]],
         categories: list[str],
     ) -> list[dict[str, Any]]:
+        """AI-first mapping with multi-target support; heuristic is a soft hint only."""
         by_category = dict(self._taxonomy.get("sub_categories_by_category") or {})
         mapped: list[dict[str, Any]] = []
-        needs_ai: list[tuple[int, dict[str, Any]]] = []
 
         for index, item in enumerate(materials):
             category, sub_category, confidence, phrase_matched = _heuristic_category(
@@ -373,23 +578,32 @@ class MakeListCategoryMappingService:
                 categories,
                 by_category,
             )
-            entry = {
-                "material": item["material"],
-                "material_ref": f"m{index}",
-                "approved_makes_list": list(item.get("approved_makes_list") or []),
-                "mapped_category": category,
-                "mapped_sub_category": sub_category,
-                "confidence": confidence,
-                "source": "heuristic" if category else "pending",
-                "notes": "",
-                "phrase_matched": phrase_matched,
-            }
-            mapped.append(entry)
-            # Ask AI when category unknown, sub missing, or only weak token overlap.
-            if category is None or sub_category is None or (not phrase_matched and confidence < 75):
-                needs_ai.append((index, item))
+            targets = _heuristic_targets(
+                item["material"],
+                primary_category=category,
+                primary_sub=sub_category,
+                categories=categories,
+                sub_categories_by_category=by_category,
+            )
+            primary_cat, primary_sub = _primary_from_targets(targets)
+            mapped.append(
+                {
+                    "material": item["material"],
+                    "material_ref": f"m{index}",
+                    "approved_makes_list": list(item.get("approved_makes_list") or []),
+                    "mapped_category": primary_cat,
+                    "mapped_sub_category": primary_sub,
+                    "mapped_targets": targets,
+                    "confidence": confidence,
+                    "source": "heuristic" if primary_cat else "pending",
+                    "notes": "",
+                    "phrase_matched": phrase_matched,
+                }
+            )
 
-        if needs_ai and categories and self._ai.is_enabled():
+        # AI understands free-text / compound / catch-all lines dynamically.
+        if categories and self._ai.is_enabled() and mapped:
+            needs_ai = list(enumerate(materials))
             try:
                 ai_by_ref = self._run_ai_batches(needs_ai, categories, mapped)
             except Exception:
@@ -408,9 +622,21 @@ class MakeListCategoryMappingService:
 
         for entry in mapped:
             entry.pop("phrase_matched", None)
+            targets = list(entry.get("mapped_targets") or [])
+            if not targets and entry.get("mapped_category"):
+                targets = _targets_from_single(
+                    entry.get("mapped_category"),
+                    entry.get("mapped_sub_category"),
+                )
+                entry["mapped_targets"] = targets
+            primary_cat, primary_sub = _primary_from_targets(targets)
+            if primary_cat:
+                entry["mapped_category"] = primary_cat
+                entry["mapped_sub_category"] = primary_sub
             if entry.get("mapped_category") is None and entry.get("source") == "pending":
                 entry["source"] = "unmapped"
                 entry["notes"] = entry.get("notes") or "No category match."
+                entry["mapped_targets"] = []
         return mapped
 
     def _merge_ai_result(
@@ -422,83 +648,58 @@ class MakeListCategoryMappingService:
         categories: list[str],
         by_category: dict[str, list[str]],
     ) -> None:
-        """Merge AI output without letting a weak AI guess overwrite a solid heuristic."""
-        heuristic_cat = entry.get("mapped_category")
-        heuristic_sub = entry.get("mapped_sub_category")
-        phrase_matched = bool(entry.get("phrase_matched"))
-        try:
-            heuristic_conf = float(entry.get("confidence") or 0)
-        except (TypeError, ValueError):
-            heuristic_conf = 0.0
-
-        raw_cat = str(ai_result.get("category") or "").strip()
-        resolved = resolve_category_label(raw_cat, categories) if raw_cat else None
-        if resolved is None and raw_cat in categories:
-            resolved = raw_cat
-
+        """Prefer validated AI targets; keep heuristic only when AI returns nothing."""
         try:
             ai_conf = float(ai_result.get("confidence") or 0)
         except (TypeError, ValueError):
             ai_conf = 0.0
 
-        keep_heuristic_category = bool(
-            heuristic_cat
-            and (
-                phrase_matched
-                or heuristic_conf >= 70
-            )
-            and (
-                not resolved
-                or _normalize(str(resolved)) == _normalize(str(heuristic_cat))
-                or ai_conf < max(heuristic_conf, 70) + 5
-            )
+        raw_targets = ai_result.get("targets")
+        targets = _normalize_targets(
+            raw_targets,
+            categories=categories,
+            by_category=by_category,
         )
+        # Legacy single-target AI shape.
+        if not targets:
+            raw_cat = str(ai_result.get("category") or "").strip()
+            resolved = resolve_category_label(raw_cat, categories) if raw_cat else None
+            if resolved is None and raw_cat in categories:
+                resolved = raw_cat
+            raw_sub = str(ai_result.get("sub_category") or "").strip()
+            resolved_sub = None
+            if resolved and raw_sub:
+                resolved_sub = resolve_sub_category_label(
+                    raw_sub,
+                    category=resolved,
+                    sub_categories_by_category=by_category,
+                )
+            targets = _targets_from_single(resolved, resolved_sub)
 
-        chosen_category = heuristic_cat if keep_heuristic_category else resolved
-        if not chosen_category and resolved:
-            chosen_category = resolved
-
-        if not chosen_category:
-            if heuristic_cat is None:
-                entry["source"] = "unmapped"
-                entry["notes"] = str(ai_result.get("notes") or "No category match.")
+        if targets:
+            primary_cat, primary_sub = _primary_from_targets(targets)
+            entry["mapped_targets"] = targets
+            entry["mapped_category"] = primary_cat
+            entry["mapped_sub_category"] = primary_sub
+            entry["source"] = "ai"
+            entry["confidence"] = ai_conf or 80.0
+            entry["notes"] = str(ai_result.get("notes") or "")
             return
 
-        entry["mapped_category"] = chosen_category
+        # AI empty — keep heuristic targets if present.
+        if entry.get("mapped_category"):
+            if not entry.get("mapped_targets"):
+                entry["mapped_targets"] = _targets_from_single(
+                    entry.get("mapped_category"),
+                    entry.get("mapped_sub_category"),
+                )
+            return
 
-        raw_sub = str(ai_result.get("sub_category") or "").strip()
-        resolved_sub = resolve_sub_category_label(
-            raw_sub,
-            category=chosen_category,
-            sub_categories_by_category=by_category,
-        )
-        if not resolved_sub:
-            resolved_sub = _heuristic_sub_category(
-                material,
-                category=chosen_category,
-                sub_categories_by_category=by_category,
-            )
-        # Prefer existing correct heuristic sub when AI could not resolve one.
-        if not resolved_sub and heuristic_sub and keep_heuristic_category:
-            resolved_sub = heuristic_sub
-        # Do not keep a heuristic sub that belongs to a different category after override.
-        if resolved_sub:
-            entry["mapped_sub_category"] = resolved_sub
-        elif not keep_heuristic_category:
-            entry["mapped_sub_category"] = None
-
-        if resolved and not keep_heuristic_category:
-            entry["source"] = "ai"
-            entry["confidence"] = ai_conf or 75.0
-            entry["notes"] = str(ai_result.get("notes") or "")
-        elif resolved_sub and entry.get("source") == "heuristic" and not heuristic_sub:
-            entry["notes"] = str(ai_result.get("notes") or entry.get("notes") or "")
-            if ai_conf:
-                entry["confidence"] = max(heuristic_conf, min(ai_conf, 90.0))
-        elif heuristic_cat is None and resolved:
-            entry["source"] = "ai"
-            entry["confidence"] = ai_conf or 75.0
-            entry["notes"] = str(ai_result.get("notes") or "")
+        entry["source"] = "unmapped"
+        entry["notes"] = str(ai_result.get("notes") or "No category match.")
+        entry["mapped_targets"] = []
+        entry["mapped_category"] = None
+        entry["mapped_sub_category"] = None
 
     def _run_ai_batches(
         self,
@@ -524,10 +725,12 @@ class MakeListCategoryMappingService:
                         "approved_makes": item.get("approved_makes_list") or [],
                         "heuristic_category": prior.get("mapped_category"),
                         "heuristic_sub_category": prior.get("mapped_sub_category"),
+                        "heuristic_targets": prior.get("mapped_targets") or [],
                     }
                 )
             prompt = (
-                template.replace("{{TAXONOMY}}", json.dumps(taxonomy_payload, ensure_ascii=False))
+                template.replace("{{SYNONYM_MAP}}", format_synonym_map_for_ai())
+                .replace("{{TAXONOMY}}", json.dumps(taxonomy_payload, ensure_ascii=False))
                 .replace(
                     "{{MATERIALS_PAYLOAD}}",
                     json.dumps(materials_payload, ensure_ascii=False),
@@ -545,7 +748,7 @@ class MakeListCategoryMappingService:
 
     @staticmethod
     def _apply_mappings_to_rows(payload: dict, mappings: list[dict[str, Any]]) -> dict:
-        """Stamp mapped_category / mapped_sub_category onto make-list rows."""
+        """Stamp mapped category/sub/targets onto make-list rows."""
         by_material = {
             _normalize(str(item.get("material") or "")): item
             for item in mappings
@@ -565,18 +768,31 @@ class MakeListCategoryMappingService:
             if not mapping:
                 updated_rows.append(row)
                 continue
+            targets = list(mapping.get("mapped_targets") or [])
+            if not targets and mapping.get("mapped_category"):
+                targets = _targets_from_single(
+                    mapping.get("mapped_category"),
+                    mapping.get("mapped_sub_category"),
+                )
+            cat_display, sub_display = format_mapped_targets_display(
+                targets,
+                category=mapping.get("mapped_category"),
+                sub_category=mapping.get("mapped_sub_category"),
+            )
             updated_rows.append(
                 {
                     **row,
                     "mapped_category": mapping.get("mapped_category"),
                     "mapped_sub_category": mapping.get("mapped_sub_category"),
+                    "mapped_targets": targets,
+                    "mapped_category_display": cat_display or mapping.get("mapped_category"),
+                    "mapped_sub_category_display": sub_display
+                    or mapping.get("mapped_sub_category"),
                     "category_mapping_confidence": mapping.get("confidence"),
                     "category_mapping_source": mapping.get("source"),
                 }
             )
         payload["rows"] = updated_rows
         payload["category_mappings"] = mappings
-        payload["category_mapping_version"] = payload.get(
-            "category_mapping_version", _MAPPING_VERSION
-        )
+        payload["category_mapping_version"] = _MAPPING_VERSION
         return payload

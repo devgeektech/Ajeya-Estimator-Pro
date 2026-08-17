@@ -7,18 +7,31 @@ PostgreSQL after import.
 Ingested sheets (required): ``Product_Helper``, ``Rate_Master_Output``,
 ``Labour_Master_Output`` (older workbooks may still use ``Labour_master_Output``;
 ``Product_Master`` is accepted as an alias for ``Product_Helper``).
+
+Instance attributes are annotated with Python value types so basedpyright treats
+them as data rather than Field descriptors (``# type: ignore[assignment]``).
 """
 from __future__ import annotations
 
+from datetime import datetime
+from decimal import Decimal
+from typing import ClassVar
+
 from django.conf import settings
-from django.db import models, transaction
+from django.db import models
+from django.db.models import Manager
+
+from common.db import atomic
 
 
 class DatabaseVersion(models.Model):
     """Tracks an uploaded master database workbook."""
 
-    version_number = models.PositiveIntegerField(unique=True)
-    name = models.CharField(
+    objects: ClassVar[Manager[DatabaseVersion]] = models.Manager()
+    pk: int
+
+    version_number: int = models.PositiveIntegerField(unique=True)  # type: ignore[assignment]
+    name: str = models.CharField(  # type: ignore[assignment]
         max_length=255,
         blank=True,
         help_text="Custom name provided during upload",
@@ -29,10 +42,10 @@ class DatabaseVersion(models.Model):
         null=True,
         related_name="database_versions",
     )
-    uploaded_at = models.DateTimeField(auto_now_add=True)
-    is_active = models.BooleanField(default=False)
+    uploaded_at: datetime = models.DateTimeField(auto_now_add=True)  # type: ignore[assignment]
+    is_active: bool = models.BooleanField(default=False)  # type: ignore[assignment]
     file = models.FileField(upload_to="database/", null=True, blank=True)
-    source_filename = models.CharField(max_length=255)
+    source_filename: str = models.CharField(max_length=255)  # type: ignore[assignment]
 
     class Meta:
         ordering = ["-version_number"]
@@ -45,7 +58,7 @@ class DatabaseVersion(models.Model):
         ]
 
     def save(self, *args, **kwargs):
-        with transaction.atomic():
+        with atomic():
             if self.is_active:
                 DatabaseVersion.objects.exclude(pk=self.pk).update(is_active=False)
             super().save(*args, **kwargs)
@@ -92,20 +105,36 @@ class Product_Helper(models.Model):
     ``Product_ID``. Labour joins on the same ``Product_ID``.
     """
 
+    objects: ClassVar[Manager[Product_Helper]] = models.Manager()
+
     database_version = models.ForeignKey(
         DatabaseVersion,
         on_delete=models.CASCADE,
         related_name="product_helper_rows",
     )
-    Product_ID = models.CharField(max_length=64, db_index=True)
-    Category = models.CharField(max_length=255, null=True, blank=True)
-    Sub_Category = models.CharField(max_length=255, null=True, blank=True)
-    Class = models.CharField(max_length=255, null=True, blank=True)
-    Size = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
-    Unit = models.CharField(max_length=100, null=True, blank=True)
-    Capacity = models.CharField(max_length=255, null=True, blank=True)
-    Attribute = models.TextField(null=True, blank=True)
-    Status = models.CharField(max_length=64, null=True, blank=True)
+    Product_ID: str = models.CharField(max_length=64, db_index=True)  # type: ignore[assignment]
+    Category: str | None = models.CharField(  # type: ignore[assignment]
+        max_length=255, null=True, blank=True
+    )
+    Sub_Category: str | None = models.CharField(  # type: ignore[assignment]
+        max_length=255, null=True, blank=True
+    )
+    Class: str | None = models.CharField(  # type: ignore[assignment]
+        max_length=255, null=True, blank=True
+    )
+    Size: Decimal | None = models.DecimalField(  # type: ignore[assignment]
+        max_digits=12, decimal_places=2, null=True, blank=True
+    )
+    Unit: str | None = models.CharField(  # type: ignore[assignment]
+        max_length=100, null=True, blank=True
+    )
+    Capacity: str | None = models.CharField(  # type: ignore[assignment]
+        max_length=255, null=True, blank=True
+    )
+    Attribute: str | None = models.TextField(null=True, blank=True)  # type: ignore[assignment]
+    Status: str | None = models.CharField(  # type: ignore[assignment]
+        max_length=64, null=True, blank=True
+    )
 
     class Meta:
         db_table = "Product_Helper"
@@ -132,59 +161,81 @@ class Product_Helper(models.Model):
 class Rate_Master_Output(models.Model):
     """Source: Rate_Master_Output sheet (one priced Make/Vendor row)."""
 
+    objects: ClassVar[Manager[Rate_Master_Output]] = models.Manager()
+
     database_version = models.ForeignKey(
         DatabaseVersion,
         on_delete=models.CASCADE,
         related_name="rate_master_output_rows",
     )
     # Workbook IDs are free-form codes ("P1001" as well as "1001"): store as text.
-    Rate_ID = models.CharField(max_length=64, null=True, blank=True, db_index=True)
-    Product_ID = models.CharField(max_length=64, db_index=True)
-    Category = models.CharField(max_length=255, null=True, blank=True)
-    Sub_Category = models.CharField(max_length=255, null=True, blank=True)
-    Class = models.CharField(max_length=255, null=True, blank=True)
-    Size = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
-    Unit = models.CharField(max_length=100, null=True, blank=True)
-    Capacity = models.CharField(max_length=255, null=True, blank=True)
-    Attribute = models.TextField(null=True, blank=True)
-    Make = models.CharField(max_length=255, null=True, blank=True)
-    Vendor = models.CharField(max_length=255, null=True, blank=True)
-    Base_Purchase_Rate = models.DecimalField(
+    Rate_ID: str | None = models.CharField(  # type: ignore[assignment]
+        max_length=64, null=True, blank=True, db_index=True
+    )
+    Product_ID: str = models.CharField(max_length=64, db_index=True)  # type: ignore[assignment]
+    Category: str | None = models.CharField(  # type: ignore[assignment]
+        max_length=255, null=True, blank=True
+    )
+    Sub_Category: str | None = models.CharField(  # type: ignore[assignment]
+        max_length=255, null=True, blank=True
+    )
+    Class: str | None = models.CharField(  # type: ignore[assignment]
+        max_length=255, null=True, blank=True
+    )
+    Size: Decimal | None = models.DecimalField(  # type: ignore[assignment]
+        max_digits=12, decimal_places=2, null=True, blank=True
+    )
+    Unit: str | None = models.CharField(  # type: ignore[assignment]
+        max_length=100, null=True, blank=True
+    )
+    Capacity: str | None = models.CharField(  # type: ignore[assignment]
+        max_length=255, null=True, blank=True
+    )
+    Attribute: str | None = models.TextField(null=True, blank=True)  # type: ignore[assignment]
+    Make: str | None = models.CharField(  # type: ignore[assignment]
+        max_length=255, null=True, blank=True
+    )
+    Vendor: str | None = models.CharField(  # type: ignore[assignment]
+        max_length=255, null=True, blank=True
+    )
+    Base_Purchase_Rate: Decimal | None = models.DecimalField(  # type: ignore[assignment]
         max_digits=18, decimal_places=2, null=True, blank=True
     )
-    Last_Updated = models.DateTimeField(null=True, blank=True)
-    Discount = models.DecimalField(
+    Last_Updated: datetime | None = models.DateTimeField(  # type: ignore[assignment]
+        null=True, blank=True
+    )
+    Discount: Decimal | None = models.DecimalField(  # type: ignore[assignment]
         max_digits=18, decimal_places=6, null=True, blank=True
     )
-    Net_Material_Rate = models.DecimalField(
+    Net_Material_Rate: Decimal | None = models.DecimalField(  # type: ignore[assignment]
         max_digits=18, decimal_places=2, null=True, blank=True
     )
-    Procurement_Value = models.DecimalField(
+    Procurement_Value: Decimal | None = models.DecimalField(  # type: ignore[assignment]
         max_digits=18, decimal_places=2, null=True, blank=True
     )
-    Commercial_Material_Base = models.DecimalField(
+    Commercial_Material_Base: Decimal | None = models.DecimalField(  # type: ignore[assignment]
         max_digits=18, decimal_places=2, null=True, blank=True
     )
-    Accessories_Value = models.DecimalField(
+    Accessories_Value: Decimal | None = models.DecimalField(  # type: ignore[assignment]
         max_digits=18, decimal_places=2, null=True, blank=True
     )
-    Handling_Value = models.DecimalField(
+    Handling_Value: Decimal | None = models.DecimalField(  # type: ignore[assignment]
         max_digits=18, decimal_places=2, null=True, blank=True
     )
-    Wastage_Value = models.DecimalField(
+    Wastage_Value: Decimal | None = models.DecimalField(  # type: ignore[assignment]
         max_digits=18, decimal_places=2, null=True, blank=True
     )
-    Sub_Total = models.DecimalField(
+    Sub_Total: Decimal | None = models.DecimalField(  # type: ignore[assignment]
         max_digits=18, decimal_places=2, null=True, blank=True
     )
-    Profit_Value = models.DecimalField(
+    Profit_Value: Decimal | None = models.DecimalField(  # type: ignore[assignment]
         max_digits=18, decimal_places=2, null=True, blank=True
     )
-    Final_Material_Amount = models.DecimalField(
+    Final_Material_Amount: Decimal | None = models.DecimalField(  # type: ignore[assignment]
         max_digits=18, decimal_places=2, null=True, blank=True
     )
     # Excel header: Margin_%_on_Selling
-    Margin_pct_on_Selling = models.DecimalField(
+    Margin_pct_on_Selling: Decimal | None = models.DecimalField(  # type: ignore[assignment]
         max_digits=18,
         decimal_places=8,
         null=True,
@@ -224,49 +275,65 @@ class Labour_master_Output(models.Model):
     ``Total_Labour_per_unit_with_labour_Multipler``.
     """
 
+    objects: ClassVar[Manager[Labour_master_Output]] = models.Manager()
+
     database_version = models.ForeignKey(
         DatabaseVersion,
         on_delete=models.CASCADE,
         related_name="labour_master_output_rows",
     )
-    Product_ID = models.CharField(max_length=64, db_index=True)
-    Category = models.CharField(max_length=255, null=True, blank=True)
-    Sub_Category = models.CharField(max_length=255, null=True, blank=True)
-    Class = models.CharField(max_length=255, null=True, blank=True)
-    Size = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
-    Unit = models.CharField(max_length=100, null=True, blank=True)
-    Capacity = models.CharField(max_length=255, null=True, blank=True)
-    Attribute = models.TextField(null=True, blank=True)
-    Labour_Type = models.CharField(max_length=255, null=True, blank=True)
-    Base_Rate = models.DecimalField(
+    Product_ID: str = models.CharField(max_length=64, db_index=True)  # type: ignore[assignment]
+    Category: str | None = models.CharField(  # type: ignore[assignment]
+        max_length=255, null=True, blank=True
+    )
+    Sub_Category: str | None = models.CharField(  # type: ignore[assignment]
+        max_length=255, null=True, blank=True
+    )
+    Class: str | None = models.CharField(  # type: ignore[assignment]
+        max_length=255, null=True, blank=True
+    )
+    Size: Decimal | None = models.DecimalField(  # type: ignore[assignment]
+        max_digits=12, decimal_places=2, null=True, blank=True
+    )
+    Unit: str | None = models.CharField(  # type: ignore[assignment]
+        max_length=100, null=True, blank=True
+    )
+    Capacity: str | None = models.CharField(  # type: ignore[assignment]
+        max_length=255, null=True, blank=True
+    )
+    Attribute: str | None = models.TextField(null=True, blank=True)  # type: ignore[assignment]
+    Labour_Type: str | None = models.CharField(  # type: ignore[assignment]
+        max_length=255, null=True, blank=True
+    )
+    Base_Rate: Decimal | None = models.DecimalField(  # type: ignore[assignment]
         max_digits=18, decimal_places=2, null=True, blank=True
     )
-    Size_Factor = models.DecimalField(
+    Size_Factor: Decimal | None = models.DecimalField(  # type: ignore[assignment]
         max_digits=12, decimal_places=4, null=True, blank=True
     )
-    Labour_Rate_Per_unit = models.DecimalField(
+    Labour_Rate_Per_unit: Decimal | None = models.DecimalField(  # type: ignore[assignment]
         max_digits=18, decimal_places=2, null=True, blank=True
     )
-    Testing_Labour_Value = models.DecimalField(
+    Testing_Labour_Value: Decimal | None = models.DecimalField(  # type: ignore[assignment]
         max_digits=18, decimal_places=2, null=True, blank=True
     )
-    Scaffolding_Labour_Value = models.DecimalField(
+    Scaffolding_Labour_Value: Decimal | None = models.DecimalField(  # type: ignore[assignment]
         max_digits=18, decimal_places=2, null=True, blank=True
     )
-    Consumables_Labour_Value = models.DecimalField(
+    Consumables_Labour_Value: Decimal | None = models.DecimalField(  # type: ignore[assignment]
         max_digits=18, decimal_places=2, null=True, blank=True
     )
-    Painting_Labour_Value = models.DecimalField(
+    Painting_Labour_Value: Decimal | None = models.DecimalField(  # type: ignore[assignment]
         max_digits=18, decimal_places=2, null=True, blank=True
     )
-    Labour_Buffer_Value = models.DecimalField(
+    Labour_Buffer_Value: Decimal | None = models.DecimalField(  # type: ignore[assignment]
         max_digits=18, decimal_places=2, null=True, blank=True
     )
-    Total_Labour_per_Unit = models.DecimalField(
+    Total_Labour_per_Unit: Decimal | None = models.DecimalField(  # type: ignore[assignment]
         max_digits=18, decimal_places=2, null=True, blank=True
     )
     # Excel header keeps spaces: Total_Labour_per_unit_with _labour _Multipler
-    Total_Labour_per_unit_with_labour_Multipler = models.DecimalField(
+    Total_Labour_per_unit_with_labour_Multipler: Decimal | None = models.DecimalField(  # type: ignore[assignment]
         max_digits=18,
         decimal_places=2,
         null=True,

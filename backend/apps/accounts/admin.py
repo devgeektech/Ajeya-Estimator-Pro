@@ -6,13 +6,13 @@ from .models import User
 
 
 class UserCreationFormEmail(UserCreationForm):
-    class Meta(UserCreationForm.Meta):
+    class Meta:
         model = User
         fields = ("email", "first_name", "last_name", "role")
 
 
 class UserChangeFormEmail(UserChangeForm):
-    class Meta(UserChangeForm.Meta):
+    class Meta:
         model = User
         fields = "__all__"
 

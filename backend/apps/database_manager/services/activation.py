@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from django.db import transaction
+from common.db import atomic
 
 from common.constants import DATABASE_UPLOADS_TO_RETAIN
 
@@ -70,7 +70,7 @@ def enforce_version_retention() -> int:
 
 def activate_database_version(version: DatabaseVersion) -> DatabaseVersion:
     """Mark one database version active and deactivate all others."""
-    with transaction.atomic():
+    with atomic():
         DatabaseVersion.objects.exclude(pk=version.pk).update(is_active=False)
         if not version.is_active:
             version.is_active = True

@@ -133,6 +133,63 @@ _MAKE_STOPWORDS = frozenset(
         "pipe",
         "ul",
         "fm",
+        # Hose-reel / drum lines (Title Case in PDFs, not brands).
+        "drum",
+        "drums",
+        "reel",
+        "reels",
+        "module",
+        "modules",
+        "thermoplastic",
+        "plastic",
+        "rubber",
+        "first",
+        "aid",
+        "cabinet",
+        "cabinets",
+        "hydrant",
+        "hydrants",
+        "brigade",
+        "strainer",
+        "strainers",
+        "connector",
+        "connectors",
+        "fastener",
+        "fasteners",
+        "electrode",
+        "electrodes",
+        "tray",
+        "trays",
+        "clamp",
+        "clamps",
+        "support",
+        "supports",
+        "pad",
+        "pads",
+        "primer",
+        "primers",
+        "nut",
+        "nuts",
+        "relay",
+        "relays",
+        "isolator",
+        "isolators",
+        "transformer",
+        "transformers",
+        "battery",
+        "batteries",
+        "cable",
+        "cables",
+        "motor",
+        "motors",
+        "engine",
+        "engines",
+        "panel",
+        "panels",
+        "gear",
+        "switchgear",
+        "monitor",
+        "monitors",
     }
 )
 
@@ -213,6 +270,9 @@ def peel_fused_case_brand(token: str) -> tuple[str, str | None]:
     if not looks_like_make_word(brand):
         return token, None
     if len(prefix) < 2:
+        return token, None
+    # Keep abbreviated names intact: ``H.GURU``, ``A.E``, ``L.T``.
+    if re.fullmatch(r"[A-Za-z]{1,3}\.", prefix):
         return token, None
     return prefix, brand
 
@@ -341,22 +401,26 @@ def repair_description_and_makes(
         if not text:
             continue
         words = text.split()
-        # Material noun stuck ahead of a real brand: ``Bolts Hilti``, ``Rods Advani``.
-        # Keep intact trade names that are valid make tokens (``System Sensor``).
-        if (
+        # Material noun(s) stuck ahead of a real brand: ``Drums SAFEGUARD``,
+        # ``Drum SAFEGUARD``, ``Bolts Hilti``. Always peel leading stopwords —
+        # even when Title-Case+ALLCAPS falsely looked like a two-word brand.
+        while (
             len(words) >= 2
             and words[0].casefold().strip(".,;:") in _MAKE_STOPWORDS
-            and not looks_like_make_token(text)
+            and not (
+                words[0].casefold().strip(".,;:") == "system"
+                and words[1].casefold().strip(".,;:") == "sensor"
+            )
         ):
             material = words[0].strip(".,;:")
-            brand = normalize_make_segment(" ".join(words[1:]))
             if material:
                 desc_parts.append(material)
-            text = brand
+            words = words[1:]
+            text = normalize_make_segment(" ".join(words))
         if not text or not is_valid_approved_make(text):
             # Keep rejected multi-word material text in the description.
             if text and text.casefold() not in {_normalize_make_key(part) for part in desc_parts}:
-                if any(word.casefold() in _MAKE_STOPWORDS for word in text.split()):
+                if any(word.casefold().strip(".,;:") in _MAKE_STOPWORDS for word in text.split()):
                     desc_parts.append(text)
             continue
         key = _normalize_make_key(text)
@@ -524,12 +588,18 @@ def looks_like_make_token(segment: str) -> bool:
     if len(words) == 2:
         first = words[0].strip(".,;:")
         second = words[1].strip(".,;:")
-        # ``ESS ESS``, ``H Guru``, ``Mather Platt``, ``Unik Brand``
-        if looks_like_make_word(first) and looks_like_make_word(second):
-            return True
         # Trade-name pair used in fire make lists.
         if first.casefold() == "system" and second.casefold() == "sensor":
             return True
+        # Material noun + brand is not one make (``Drum SAFEGUARD``). Only the
+        # *leading* word is checked — trailing qualifiers like ``HD FIRE`` /
+        # ``CEASE FIRE`` / ``GE POWER`` are valid brands.
+        if first.casefold() in _MAKE_STOPWORDS:
+            return False
+        # ``ESS ESS``, ``H Guru``, ``Mather Platt``, ``Unik Brand``
+        if looks_like_make_word(first) and looks_like_make_word(second):
+            return True
+        # Brand + common trade qualifier (second may be a stopword like fire/power).
         if looks_like_make_word(first) and second.casefold() in {
             "brand",
             "ltd",
@@ -540,6 +610,12 @@ def looks_like_make_token(segment: str) -> bool:
             "italy",
             "spain",
             "germany",
+            "fire",
+            "power",
+            "electric",
+            "electrical",
+            "india",
+            "hissar",
         }:
             return True
         if max(len(first), len(second)) <= 8 and looks_like_make_word(first):

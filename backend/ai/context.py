@@ -482,7 +482,7 @@ def build_database_context() -> str:
     payload_json = json.dumps(payload, ensure_ascii=False)
     logger.info(
         "AI database context built version_id=%s chars=%s categories=%s",
-        version.id,
+        version.pk,
         len(payload_json),
         len(payload["categories"]),
     )

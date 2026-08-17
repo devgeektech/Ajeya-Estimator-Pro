@@ -71,17 +71,3 @@ def save_extract_json_for_boq(
         path = save_make_list_extract_json(boq_name, make_list_data)
         written["make_list_data"] = str(path.relative_to(media_root)).replace("\\", "/")
     return written
-
-
-def read_boq_extract_json(boq_name: str) -> dict[str, Any] | None:
-    path = boq_extract_dir(boq_name) / BOQ_FILENAME
-    if not path.is_file():
-        return None
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def read_make_list_extract_json(boq_name: str) -> dict[str, Any] | None:
-    path = boq_extract_dir(boq_name) / MAKE_LIST_FILENAME
-    if not path.is_file():
-        return None
-    return json.loads(path.read_text(encoding="utf-8"))

@@ -162,6 +162,28 @@ def _job_is_running(boq: BOQ) -> bool:
     return boq.status in {BOQStatus.PROCESSING, BOQStatus.MATCHING}
 
 
+_last_status_progress_log: dict[int, tuple[int, str]] = {}
+
+
+def _echo_analyse_progress_to_server(boq: BOQ, *, percent: int, label: str) -> None:
+    """Log Analyse progress on the Django runserver console while the UI polls."""
+    if boq.status not in {BOQStatus.PROCESSING, BOQStatus.MATCHING}:
+        _last_status_progress_log.pop(int(boq.pk), None)
+        return
+    key = int(boq.pk)
+    marker = (int(percent), str(label or "").strip())
+    if _last_status_progress_log.get(key) == marker:
+        return
+    _last_status_progress_log[key] = marker
+    logger.info(
+        "BOQ Analyse id=%s name=%s percent=%s label=%s",
+        boq.pk,
+        boq.boq_name,
+        percent,
+        label or boq.status,
+    )
+
+
 def _status_payload(boq: BOQ, session, *, expect: str = "extract") -> dict:
     """JSON fields for polling Analyse / Match completion."""
     from apps.boq.services.boq_job_progress import (
@@ -185,6 +207,8 @@ def _status_payload(boq: BOQ, session, *, expect: str = "extract") -> dict:
         percent = 100
     elif boq.status in {BOQStatus.PROCESSING, BOQStatus.MATCHING} and percent <= 0:
         percent = 1
+    progress_label = progress.get("label") or display["label"]
+    _echo_analyse_progress_to_server(boq, percent=percent, label=progress_label)
     return {
         "status": boq.status,
         "ready": ready,
@@ -194,7 +218,7 @@ def _status_payload(boq: BOQ, session, *, expect: str = "extract") -> dict:
         "badge": display["badge"],
         "polling": boq.status in {BOQStatus.PROCESSING, BOQStatus.MATCHING},
         "progress_percent": percent,
-        "progress_label": progress.get("label") or display["label"],
+        "progress_label": progress_label,
     }
 
 
@@ -318,12 +342,17 @@ class BOQDetailView(LoginRequiredMixin, DetailView):
         active_tab = context["default_tab"]
 
         # Load extract JSON only for tabs that render it (keeps switches light).
+        # Analysis must stay read-only: no make-list AI remap and no embedding calls.
         boq_payload: dict = {}
         make_list_payload: dict = {}
         if active_tab == "boq":
             # Sheet display uses stored BOQ JSON — skip make-list normalize path.
             boq_payload = boq.boq_data or {}
-        elif active_tab in {"make_list", "analysis", "make_vendor"}:
+        elif active_tab == "analysis":
+            # Use stored make-list JSON as-is (options for Makes). Never call OpenAI
+            # on tab switch — ensure_mappings / embedding recall belong elsewhere.
+            make_list_payload = (boq.make_list_data or {}) if boq.make_list_file else {}
+        elif active_tab in {"make_list", "make_vendor"}:
             try:
                 _loaded_boq, loaded_make_list = load_extract_data(boq)
             except Exception:
@@ -638,7 +667,7 @@ class BOQRowExtractView(LoginRequiredMixin, View):
             message = (
                 "Section re-extracted from the BOQ workbook."
                 if force_reextract
-                else "Product re-analysed using BOQ row, filled attributes, and prior match details."
+                else "Product re-analysed using your inputs, product description, full BOQ section context, and refreshed database candidates."
             )
             if ajax:
                 line_html = _render_extraction_line_html(request, boq, row_id)
@@ -787,6 +816,26 @@ class BOQExtractionEditView(LoginRequiredMixin, View):
                         line_html=line_html,
                     )
                 messages.success(request, message)
+            elif action == "confirm_match":
+                try:
+                    product_index = int(request.POST.get("product_index") or "0")
+                except ValueError:
+                    message = "Invalid product selection."
+                    if ajax:
+                        return _extraction_edit_json_error(message)
+                    messages.error(request, message)
+                    return HttpResponseRedirect(redirect_url)
+                editor.confirm_match(row_id=row_id, product_index=product_index)
+                message = "Product match confirmed at 100%."
+                if ajax:
+                    line_html = _render_extraction_line_html(request, boq, row_id)
+                    return _extraction_edit_json_ok(
+                        message,
+                        row_id=row_id,
+                        product_index=product_index,
+                        line_html=line_html,
+                    )
+                messages.success(request, message)
             elif action == "update_make":
                 selected_make = (request.POST.get("selected_make") or "").strip()
                 custom_make = (request.POST.get("custom_make") or "").strip()
@@ -901,6 +950,17 @@ class BOQMakeVendorSelectView(LoginRequiredMixin, View):
                 messages.success(request, message)
                 return HttpResponseRedirect(redirect_url)
 
+            if action == "sync_analysis_product_ids":
+                result = service.sync_analysis_product_ids(refresh_rates_if_changed=True)
+                message = (
+                    f"Synced {result['product_id_count']} Product_ID(s) from Analysis "
+                    f"({result['changed_count']} changed, {result['refreshed_count']} rates refreshed)."
+                )
+                if ajax:
+                    return _extraction_edit_json_ok(message, selection=result, reload=True)
+                messages.success(request, message)
+                return HttpResponseRedirect(redirect_url)
+
             if action == "apply_subcategory":
                 category = (request.POST.get("category") or "").strip()
                 sub_category = (request.POST.get("sub_category") or "").strip()
@@ -985,8 +1045,10 @@ class BOQMakeVendorSelectView(LoginRequiredMixin, View):
                 messages.success(request, message)
                 return HttpResponseRedirect(redirect_url)
 
-            if action == "find_in_db":
+            if action == "apply_manual":
                 row_id = (request.POST.get("row_id") or "").strip()
+                make = (request.POST.get("make") or "").strip()
+                vendor = (request.POST.get("vendor") or "").strip()
                 try:
                     product_index = int(request.POST.get("product_index") or "0")
                 except ValueError:
@@ -1001,10 +1063,15 @@ class BOQMakeVendorSelectView(LoginRequiredMixin, View):
                         return _extraction_edit_json_error(message)
                     messages.error(request, message)
                     return HttpResponseRedirect(redirect_url)
-                result = service.find_in_db(row_id=row_id, product_index=product_index)
+                result = service.apply_manual_selection(
+                    row_id=row_id,
+                    product_index=product_index,
+                    make=make,
+                    vendor=vendor,
+                )
                 message = (
-                    f"Found Product_ID {result.get('product_id') or '—'} in database; "
-                    f"loaded make/vendor rates."
+                    f"Applied make/vendor ({result.get('make') or '—'} / "
+                    f"{result.get('vendor') or '—'})."
                 )
                 if ajax:
                     return _extraction_edit_json_ok(
@@ -1057,17 +1124,26 @@ class BOQMakeVendorSelectView(LoginRequiredMixin, View):
                 messages.error(request, message)
                 return HttpResponseRedirect(redirect_url)
 
+            preview_only = (request.POST.get("preview_only") or "").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+            }
             result = service.select_and_match(
                 row_id=row_id,
                 product_index=product_index,
                 make=make,
                 vendor=vendor,
+                preview_only=preview_only,
             )
-            message = (
-                "Exact product matched and rates loaded."
-                if result.get("status") == "matched"
-                else "Selection saved — review the closest database match."
-            )
+            if preview_only:
+                message = "Rate preview loaded."
+            else:
+                message = (
+                    "Exact product matched and rates loaded."
+                    if result.get("status") == "matched"
+                    else "Selection saved — review the closest database match."
+                )
             if ajax:
                 return _extraction_edit_json_ok(
                     message,
@@ -1396,7 +1472,14 @@ class BOQAnalysisStatusView(LoginRequiredMixin, View):
             qs = qs.filter(user=user)
         boq = get_object_or_404(qs, pk=pk)
         expect = (request.GET.get("expect") or "extract").strip().lower()
-        return JsonResponse(_status_payload(boq, request.session, expect=expect))
+        payload = _status_payload(boq, request.session, expect=expect)
+        response = JsonResponse(payload)
+        # Polls must never be served from browser/proxy cache — that pins the
+        # Analysis spinner at an old percent until a hard refresh.
+        response["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response["Pragma"] = "no-cache"
+        response["Expires"] = "0"
+        return response
 
 
 class BOQConfirmView(LoginRequiredMixin, View):
@@ -1515,8 +1598,15 @@ class BOQUploadView(LoginRequiredMixin, FormView):
             "BOQ uploaded",
             f"BOQ '{form.cleaned_data['boq_name']}' is ready. Open it and run Analyse.",
         )
+        # AJAX upload must get JSON (not HttpResponseRedirect). fetch() would
+        # follow a 302 and leave the browser URL on /boqs/upload/ forever.
         if self._wants_json():
-            return JsonResponse({"ok": True, "redirect": self.get_success_url()})
+            return JsonResponse(
+                {
+                    "ok": True,
+                    "redirect": self.request.build_absolute_uri(self.get_success_url()),
+                }
+            )
         return super().form_valid(form)
 
     def form_invalid(self, form):

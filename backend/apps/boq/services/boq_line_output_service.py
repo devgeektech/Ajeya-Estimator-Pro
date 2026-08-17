@@ -65,11 +65,10 @@ class BOQLineOutputService:
             }
 
         qty = _to_decimal(quantity)
-        material_rate = _to_decimal(
-            rate_detail.get("final_material_amount")
-            or rate_detail.get("selection_amount")
-            or rate_detail.get("net_material_rate")
-        )
+        # Product rate is always Rate_Master Final_Material_Amount.
+        material_rate = _to_decimal(rate_detail.get("final_material_amount"))
+        if material_rate is None:
+            material_rate = _to_decimal(rate_detail.get("selection_amount"))
         labour_rate = _to_decimal(
             labour_detail.get("effective_labour_rate") if labour_detail else None
         )

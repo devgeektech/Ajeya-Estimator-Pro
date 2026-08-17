@@ -15,7 +15,9 @@ _SOFT_TIME_LIMIT_SECONDS = 60 * 25
 def run_boq_extraction(boq_id: int) -> dict:
     """Extract products from BOQ rows (sync entry point)."""
     from apps.boq.services.boq_analysis_service import BOQAnalysisService
+    from apps.boq.services.celery_worker_heartbeat import touch_celery_worker_heartbeat
 
+    touch_celery_worker_heartbeat()
     logger.info("Starting BOQ extraction for id=%s", boq_id)
     return BOQAnalysisService(boq_id).run_extraction()
 
@@ -23,7 +25,9 @@ def run_boq_extraction(boq_id: int) -> dict:
 def run_boq_matching(boq_id: int) -> dict:
     """Match extracted products against the master database (sync entry point)."""
     from apps.boq.services.boq_analysis_service import BOQAnalysisService
+    from apps.boq.services.celery_worker_heartbeat import touch_celery_worker_heartbeat
 
+    touch_celery_worker_heartbeat()
     logger.info("Starting BOQ matching for id=%s", boq_id)
     return BOQAnalysisService(boq_id).run_matching()
 

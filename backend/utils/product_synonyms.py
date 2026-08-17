@@ -93,7 +93,17 @@ _CANONICAL_QUERY_EXPANSIONS: dict[str, tuple[str, ...]] = {
 # Product / taxonomy phrase groups (different words, same meaning).
 # First entry is the canonical key used for equivalence.
 _PHRASE_GROUPS: tuple[tuple[str, ...], ...] = (
-    ("non return valve", "non-return valve", "non return", "non-return", "nrv", "check valve", "n r v"),
+    (
+        "non return valve",
+        "non-return valve",
+        "non return",
+        "non-return",
+        "nrv",
+        "check valve",
+        "n r v",
+        "reflex valve",
+        "reflex",
+    ),
     ("sluice valve", "sluice", "gate valve", "gate"),
     ("butterfly valve", "butterfly"),
     ("ball valve", "ball"),
@@ -103,7 +113,21 @@ _PHRASE_GROUPS: tuple[tuple[str, ...], ...] = (
     ("foot valve", "foot"),
     ("landing valve", "landing"),
     ("hose reel", "hose reel drum", "first aid hose reel", "first-aid hose reel"),
-    ("hose box", "hose cabinet", "hydrant box"),
+    (
+        "hose box",
+        "hose cabinet",
+        "hydrant box",
+        "fire hose box",
+        "fire hose cabinet",
+    ),
+    (
+        "sand bucket set",
+        "sand bucket",
+        "sand buckets",
+        "bucket set",
+        "sandbucket",
+        "sand bucket with stand",
+    ),
     ("branch pipe", "branchpipe", "branch"),
     ("fire brigade inlet", "fire brigade", "breeching inlet", "collective inlet"),
     ("flow switch", "flow indicator", "flow indicator switch", "water flow switch"),
@@ -147,8 +171,8 @@ MAKE_LIST_DESCRIPTION_HINTS: tuple[tuple[str, str], ...] = (
     ("alarm valve", "SPRINKLER"),
     ("installation control", "SPRINKLER"),
     ("icv", "SPRINKLER"),
-    ("rosette", "ACCESSORIES"),
     ("sprinkler", "SPRINKLER"),
+    ("rosette", "ACCESSORIES"),
     ("landing valve", "HYDRANT"),
     ("breeching inlet", "HYDRANT"),
     ("collective inlet", "HYDRANT"),
@@ -156,6 +180,9 @@ MAKE_LIST_DESCRIPTION_HINTS: tuple[tuple[str, str], ...] = (
     ("hose reel", "HYDRANT"),
     ("hose box", "HYDRANT"),
     ("hose cabinet", "HYDRANT"),
+    ("sand bucket set", "HYDRANT"),
+    ("sand buckets", "HYDRANT"),
+    ("sand bucket", "HYDRANT"),
     ("branch pipe", "HYDRANT"),
     ("fire brigade", "HYDRANT"),
     ("hose", "HYDRANT"),
@@ -167,6 +194,8 @@ MAKE_LIST_DESCRIPTION_HINTS: tuple[tuple[str, str], ...] = (
     ("non return", "VALVE"),
     ("nrv", "VALVE"),
     ("check valve", "VALVE"),
+    ("reflex valve", "VALVE"),
+    ("reflex", "VALVE"),
     ("air release", "VALVE"),
     ("air relief", "VALVE"),
     ("y strainer", "VALVE"),
@@ -189,6 +218,16 @@ MAKE_LIST_DESCRIPTION_HINTS: tuple[tuple[str, str], ...] = (
     ("air vessel", "PUMP ACCESSORIES"),
     ("pressure gauge", "INSTRUMENT"),
     ("pressure switch", "INSTRUMENT"),
+    ("m.s pipe", "PIPE"),
+    ("ms pipe", "PIPE"),
+    ("m s pipe", "PIPE"),
+    ("d.i", "PIPE"),
+    ("d i", "PIPE"),
+    ("di pipe", "PIPE"),
+    ("c.i", "PIPE"),
+    ("c i", "PIPE"),
+    ("g.i", "PIPE"),
+    ("g i", "PIPE"),
     ("ductile iron", "PIPE"),
     ("cast iron", "PIPE"),
     ("mild steel", "PIPE"),
@@ -213,6 +252,8 @@ MAKE_LIST_SUB_CATEGORY_HINTS: tuple[tuple[str, str], ...] = (
     ("non-return", "non return"),
     ("nrv", "non return"),
     ("check valve", "non return"),
+    ("reflex valve", "non return"),
+    ("reflex", "non return"),
     ("air release", "air release"),
     ("air relief", "air release"),
     ("y strainer", "y strainer"),
@@ -232,8 +273,13 @@ MAKE_LIST_SUB_CATEGORY_HINTS: tuple[tuple[str, str], ...] = (
     ("installation control", "installation control"),
     ("icv", "installation control"),
     ("hose reel", "hose reel"),
+    ("fire hose box", "hose box"),
+    ("fire hose cabinet", "hose box"),
     ("hose box", "hose box"),
     ("hose cabinet", "hose box"),
+    ("sand bucket set", "sand bucket set"),
+    ("sand buckets", "sand bucket set"),
+    ("sand bucket", "sand bucket set"),
     ("fire hose", "fire hose"),
     ("branch pipe", "branch"),
     ("landing valve", "landing"),
@@ -375,3 +421,79 @@ def expand_query_terms(value: Any) -> list[str]:
                 if item not in terms:
                     terms.append(item)
     return terms
+
+
+def expand_make_list_search_text(description: str) -> str:
+    """Build a synonym-expanded search blob for make-list category heuristics.
+
+    Fold material abbreviations (``M.S`` / ``D.I.`` / ``C.I``) and product
+    phrases (NRV / hose reel / …) so free-text make-list lines map to taxonomy.
+    """
+    raw = str(description or "").strip()
+    if not raw:
+        return ""
+    parts: list[str] = []
+
+    def _add(value: str) -> None:
+        text = _normalize_label(value)
+        if text and text not in parts:
+            parts.append(text)
+
+    _add(raw)
+    for term in expand_query_terms(raw):
+        _add(term)
+
+    # Strip punctuation so ``M.S`` / ``D.I.`` become ``m s`` / ``d i``.
+    folded = re.sub(r"[^0-9a-zA-Z]+", " ", raw.lower())
+    folded = re.sub(r"\s+", " ", folded).strip()
+    _add(folded)
+
+    for pattern, expansion in (
+        (r"\bm\s*s\b", "ms mild steel"),
+        (r"\bd\s*i\b", "di ductile iron"),
+        (r"\bc\s*i\b", "ci cast iron"),
+        (r"\bg\s*i\b", "gi galvanized"),
+        (r"\bs\s*s\b", "ss stainless steel"),
+    ):
+        if re.search(pattern, folded):
+            _add(expansion)
+
+    return " ".join(parts)
+
+
+def format_synonym_map_for_ai() -> str:
+    """Render the shared material + product synonym map for AI prompt injection.
+
+    Single source of truth with code matching/recall — keep prompts in sync by
+    substituting ``{{SYNONYM_MAP}}`` rather than hardcoding synonym lists.
+    """
+    lines: list[str] = [
+        "Approved synonym map (treat every term on a line as the SAME meaning).",
+        "Do not lower match confidence only because BOQ text uses a synonym or",
+        "short form from this map instead of the catalog wording.",
+        "",
+        "Materials / Class abbreviations:",
+    ]
+    for canon in sorted(_CANONICAL_QUERY_EXPANSIONS.keys()):
+        expansions = list(_CANONICAL_QUERY_EXPANSIONS[canon])
+        display = _CANONICAL_DISPLAY.get(canon)
+        terms: list[str] = []
+        if display and display not in terms:
+            terms.append(display)
+        for item in expansions:
+            if item not in terms:
+                terms.append(item)
+        if not terms:
+            continue
+        lines.append(f"- {' = '.join(terms)}")
+
+    lines.append("")
+    lines.append("Product phrases / short forms:")
+    for group in _PHRASE_GROUPS:
+        # Preserve group order; drop empties.
+        terms = [str(item).strip() for item in group if str(item).strip()]
+        if len(terms) < 2:
+            continue
+        lines.append(f"- {' = '.join(terms)}")
+
+    return "\n".join(lines)

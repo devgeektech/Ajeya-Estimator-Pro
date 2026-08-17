@@ -9,6 +9,8 @@ from apps.database_manager.models import Product_Helper
 from common.constants import MATCH_CONFIDENCE_THRESHOLD
 from utils.attribute_parser import attribute_overlap_score, parse_attributes
 
+from .boq_row_fields import is_filled as _is_filled, normalize_text as _normalize_text
+
 logger = logging.getLogger("boq_ai")
 
 _TEXT_WEIGHTS = {
@@ -20,18 +22,6 @@ _TEXT_WEIGHTS = {
     "capacity": 5.0,
     "attributes": 20.0,
 }
-
-
-def _normalize_text(value: Any) -> str:
-    return re.sub(r"\s+", " ", str(value or "").strip().lower())
-
-
-def _is_filled(value: Any) -> bool:
-    if value is None:
-        return False
-    if isinstance(value, str):
-        return bool(value.strip())
-    return True
 
 
 def _size_value(value: Any) -> float | None:
@@ -104,9 +94,40 @@ def structured_helper_match_score(
     weighted = 0.0
     weight_total = 0.0
     breakdown: dict[str, Any] = {}
+    hint = extracted.get("description_hint")
     for name, left, right, scorer in field_checks:
         weight = _TEXT_WEIGHTS[name]
         if not _is_filled(left):
+            # Sparse Analyse / Make & Vendor cards: let description vouch for cat/sub
+            # (e.g. "fire door …" → FIRE DOOR) so Find in DB can resolve Product_ID.
+            if name in {"category", "sub_category"} and _is_filled(hint) and _is_filled(right):
+                weight_total += weight
+                hint_score = _text_match_score(hint, right)
+                if hint_score < 0.85:
+                    # Token overlap for "fire door fabricated…" vs "FIRE DOOR".
+                    hint_tokens = {
+                        tok
+                        for tok in re.findall(r"[a-z0-9]+", _normalize_text(hint))
+                        if len(tok) >= 4
+                    }
+                    right_tokens = {
+                        tok
+                        for tok in re.findall(r"[a-z0-9]+", _normalize_text(right))
+                        if len(tok) >= 4
+                    }
+                    overlap = hint_tokens & right_tokens
+                    if overlap:
+                        # More overlapping tokens beat a lone shared word like "fire".
+                        hint_score = max(
+                            hint_score,
+                            min(1.0, 0.55 + 0.25 * len(overlap)),
+                        )
+                weighted += weight * hint_score
+                breakdown[name] = {
+                    "score": round(hint_score, 3),
+                    "weight": weight,
+                    "from_hint": True,
+                }
             continue
         weight_total += weight
         score = float(scorer(left, right))
@@ -182,8 +203,16 @@ class ProductHelperMatchingService:
 
         scored: list[dict[str, Any]] = []
         for helper in helpers:
-            # Skip inactive catalog rows when Status is present.
+            # Import already drops Discontinued; keep a runtime gate for older DBs.
             status = str(helper.Status or "").strip().lower()
+            if status in {
+                "discontinued",
+                "discontinue",
+                "inactive",
+                "obsolete",
+                "withdrawn",
+            }:
+                continue
             if status and status not in {"active", "a", "1", "yes", "y"}:
                 continue
             confidence, breakdown = structured_helper_match_score(extracted, helper)

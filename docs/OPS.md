@@ -122,7 +122,11 @@ cd backend
 ### 5. Redis / Celery (BOQ analysis)
 
 BOQ analysis uses Celery. In production (`DEBUG=False`), Redis and the Celery worker
-are required. Check readiness:
+are required. **Analyse will refuse to start** if the worker heartbeat is missing —
+it will not queue a job into Redis with nobody consuming it (that used to freeze
+the loading UI).
+
+Check readiness:
 
 **Windows:** `..\.venv\Scripts\python.exe manage.py check_celery`  
 **Linux / macOS:** `../.venv/bin/python manage.py check_celery`
@@ -158,10 +162,10 @@ redis-server
 
 On Windows without native Redis, use WSL: `wsl redis-server` or `scripts/run_redis.ps1`.
 
-Terminal 3 — Celery worker:
+Terminal 3 — Celery worker (**keep this window open**):
 
 ```powershell
-# Windows
+# Windows (auto-restarts if the worker crashes)
 .\scripts\run_celery_worker.ps1
 ```
 
@@ -170,16 +174,24 @@ Terminal 3 — Celery worker:
 ./scripts/run_celery_worker.sh
 ```
 
+The worker writes `media/job_progress/celery_worker_heartbeat.json`. Analyse
+checks that heartbeat before queueing. Worker scripts auto-restart after a crash
+so analysis does not stay stuck.
 
-Default worker concurrency is **8** (up to 8 BOQs analysing at once). Override:
+While Analyse runs you should see live ``BOQ Analyse id=… percent=…`` log lines
+on:
+- the **Django runserver** terminal (``boq_ai`` console logger mirror), and
+- the **Celery** terminal (actual AI/matching work).
 
-```powershell
-$env:CELERY_WORKER_CONCURRENCY = "12"
-.\scripts\run_celery_worker.ps1
-```
+Same logging as the rest of the app (console handler) — not ``print``.
+Keep **one** Celery window; restart it with `.\scripts\run_celery_worker.ps1`
+after code changes (worker does not auto-reload).
 
-If progress stops updating for 5+ minutes while status is `PROCESSING`, the status
-endpoint marks the BOQ failed so Analyse can be started again.
+Default Windows concurrency is **4** (override with `CELERY_WORKER_CONCURRENCY`).
+Linux default remains **8**.
+
+If progress stops updating for **2+ minutes** while status is `PROCESSING`, the
+status endpoint marks the BOQ failed so Analyse can be started again.
 
 The BOQ detail page polls `GET /boqs/<id>/status/` while status is `PROCESSING` and
 reloads when analysis completes or fails.

@@ -256,6 +256,7 @@
                     notes: '{{ product.notes|default:''|escapejs }}',
                     materialRate: '{{ product.line_output.material_rate|default:''|escapejs }}',
                     notFound: {{ product.highlight_no_make|yesno:'true,false' }},
+                    showManualApply: {{ product.show_manual_apply|yesno:'true,false' }},
                     allowTypedEntry: {{ product.allow_typed_make_vendor|yesno:'true,false' }},
                     vendorRateReview: {{ product.vendor_rate_review|yesno:'true,false' }},
                     samePriceTie: {{ product.same_price_tie|yesno:'true,false' }},
@@ -281,9 +282,9 @@
                         </p>
                         {% endif %}
                         {% if product.highlight_no_make %}
-                        <p class="make-vendor-card__no-make-note">No Approved Make Found in Make List — enter make and vendor below, then Find rates, or use <strong>Find in DB</strong> to resolve Product_ID from Product_Helper.</p>
+                        <p class="make-vendor-card__no-make-note">No Approved Make Found in Make List — pick make/vendor from the dropdowns (rate loads automatically), then click <strong>Apply</strong>.</p>
                         {% elif product.is_no_match %}
-                        <p class="make-vendor-card__no-make-note">No Rate_Master_Output match — edit make/vendor and Find rates again, or use <strong>Find in DB</strong>.</p>
+                        <p class="make-vendor-card__no-make-note">No Rate_Master_Output match — pick make/vendor from the dropdowns (rate loads automatically), then click <strong>Apply</strong>.</p>
                         {% endif %}
                     </div>
                     <span
@@ -366,19 +367,29 @@
                     {% else %}
                     <label class="extraction-field">
                         <span class="extraction-field__label">Make</span>
-                        <select class="extraction-input" x-model="make" @change="onMakeChange()">
+                        <select
+                            class="extraction-input"
+                            :key="'make-sel-' + makeOptionsKey"
+                            x-model="make"
+                            @change="onMakeChange()"
+                        >
                             <option value="">Select make…</option>
                             <template x-for="option in makeOptions" :key="'make-' + option">
-                                <option :value="option" x-text="option" :selected="option === make"></option>
+                                <option :value="option" x-text="option"></option>
                             </template>
                         </select>
                     </label>
                     <label class="extraction-field">
                         <span class="extraction-field__label">Vendor</span>
-                        <select class="extraction-input" x-model="vendor" @change="onVendorChange()">
+                        <select
+                            class="extraction-input"
+                            :key="'vendor-sel-' + vendorOptionsKey"
+                            x-model="vendor"
+                            @change="onVendorChange()"
+                        >
                             <option value="">Select vendor…</option>
                             <template x-for="option in vendorOptions" :key="'vendor-' + option">
-                                <option :value="option" x-text="option" :selected="option === vendor"></option>
+                                <option :value="option" x-text="option"></option>
                             </template>
                         </select>
                     </label>
@@ -398,23 +409,29 @@
                         <button
                             type="button"
                             class="btn btn--small btn--boq-analyse"
-                            :disabled="saving || (!make && !vendor)"
+                            x-show="allowTypedEntry"
+                            x-cloak
+                            :disabled="isBusy || (!make && !vendor)"
                             @click="findRates()"
                         >
-                            <span x-show="!saving">Find rates</span>
-                            <span x-show="saving" x-cloak>Searching…</span>
+                            <span x-text="busyAction === 'find' ? 'Searching…' : 'Find rates'"></span>
                         </button>
-                        {% if product.show_find_in_db %}
+                        {% if product.show_manual_apply %}
                         <button
                             type="button"
-                            class="btn btn--small btn--boq-analyse"
-                            :disabled="saving"
-                            @click="findInDb()"
+                            class="btn btn--small btn--primary"
+                            :disabled="isBusy || !String(make || '').trim()"
+                            @click="applyManual()"
+                            title="Accept this make/vendor (turns green when applied)"
                         >
-                            <span x-show="!saving">Find in DB</span>
-                            <span x-show="saving" x-cloak>Searching…</span>
+                            <span x-text="busyAction === 'apply' ? 'Applying…' : 'Apply'"></span>
                         </button>
                         {% endif %}
+                        <span
+                            class="extraction-save-hint"
+                            x-show="busyAction === 'auto'"
+                            x-cloak
+                        >Loading rate…</span>
                         <span class="extraction-save-hint extraction-save-hint--error" x-show="error" x-text="error" x-cloak></span>
                     </div>
                 </div>
@@ -474,15 +491,18 @@ document.addEventListener('alpine:init', () => {
     const persistMakeVendorScroll = (rowId) => {
         try {
             const el = rowId ? document.getElementById('make-vendor-' + rowId) : null;
-            sessionStorage.setItem(MAKE_VENDOR_SCROLL_KEY, JSON.stringify({
+            const payload = {
                 y: window.scrollY,
                 rowId: rowId || '',
                 offset: el ? el.getBoundingClientRect().top : null,
-            }));
+            };
+            sessionStorage.setItem(MAKE_VENDOR_SCROLL_KEY, JSON.stringify(payload));
         } catch (e) { /* ignore */ }
     };
 
     const reloadMakeVendor = (rowId) => {
+        // Stored y + card offset reproduces the exact position at click time.
+        // A URL hash would instead pull the card to the top of the viewport.
         persistMakeVendorScroll(rowId);
         window.location.assign(MAKE_VENDOR_URL + Date.now());
     };
@@ -588,8 +608,22 @@ document.addEventListener('alpine:init', () => {
                 this.vendor = '';
                 return;
             }
-            this.make = (row && row.selected_make) ? row.selected_make : (row && (row.make_options || []).length ? LOWEST_LABEL : '');
-            this.vendor = (row && row.selected_vendor) ? row.selected_vendor : '';
+            const options = (row && row.make_options) ? row.make_options : [];
+            const preferred = (row && row.selected_make) ? row.selected_make : '';
+            if (preferred && options.some((item) => String(item) === String(preferred))) {
+                this.make = preferred;
+            } else if (options.length) {
+                this.make = LOWEST_LABEL;
+            } else {
+                this.make = '';
+            }
+            const vendors = this.vendorOptions;
+            const preferredVendor = (row && row.selected_vendor) ? row.selected_vendor : '';
+            if (preferredVendor && vendors.some((item) => String(item) === String(preferredVendor))) {
+                this.vendor = preferredVendor;
+            } else {
+                this.vendor = '';
+            }
         },
         onMakeChange() {
             if (isLowestMake(this.make)) {
@@ -653,6 +687,7 @@ document.addEventListener('alpine:init', () => {
         notes: config.notes || '',
         materialRate: config.materialRate || '',
         notFound: Boolean(config.notFound),
+        showManualApply: Boolean(config.showManualApply),
         allowTypedEntry: Boolean(config.allowTypedEntry),
         vendorRateReview: Boolean(config.vendorRateReview),
         samePriceTie: Boolean(config.samePriceTie),
@@ -666,58 +701,128 @@ document.addEventListener('alpine:init', () => {
             ? config.makesByVendor
             : {},
         chosenRateMasterId: config.rateMasterId || null,
-        saving: false,
+        busyAction: '',
+        _rateTimer: null,
         error: '',
+        get isBusy() {
+            return Boolean(this.busyAction);
+        },
         isLowestMake(value) {
             const text = String(value || '').trim().toLowerCase();
             return !text || text === 'lowest price' || text === 'lowest make' || text === 'lowest';
         },
         _lookupList(map, key) {
             if (!key) return [];
-            if (map[key]) return map[key];
-            const wanted = String(key || '').trim().toLowerCase();
+            if (Object.prototype.hasOwnProperty.call(map || {}, key)) {
+                const exact = map[key];
+                if (Array.isArray(exact) && exact.length) {
+                    return exact;
+                }
+                // Empty exact key (e.g. NEWAGE → []) must not hide NEW AGE vendors.
+            } else if (map[key]) {
+                return Array.isArray(map[key]) ? map[key] : [];
+            }
+            const wanted = String(key || '').trim().toLowerCase().replace(/\s+/g, '');
             for (const [entry, values] of Object.entries(map || {})) {
-                if (String(entry).trim().toLowerCase() === wanted) return values || [];
+                const entryKey = String(entry).trim().toLowerCase().replace(/\s+/g, '');
+                if (entryKey === wanted && Array.isArray(values) && values.length) {
+                    return values;
+                }
             }
             return [];
         },
-        get makeOptions() {
-            if (this.vendor && !this.isLowestMake(this.vendor)) {
-                const filtered = this._lookupList(this.makesByVendor, this.vendor);
-                if (filtered.length) return filtered;
+        _alignOption(value, options) {
+            const text = String(value || '').trim();
+            const list = Array.isArray(options) ? options : [];
+            if (!text) return '';
+            if (list.some((item) => String(item) === text)) return text;
+            const wanted = text.toLowerCase().replace(/\s+/g, '');
+            for (const option of list) {
+                const opt = String(option || '').trim();
+                if (opt.toLowerCase().replace(/\s+/g, '') === wanted) {
+                    return opt;
+                }
             }
-            return this.allMakeOptions;
+            return text;
+        },
+        init() {
+            // Align stored make-list spellings onto dropdown Rate_Master labels.
+            this.make = this._alignOption(this.make, this.allMakeOptions);
+            this.vendor = this._alignOption(this.vendor, this.allVendorOptions);
+            if (this.make && !this.isLowestMake(this.make)) {
+                const vendors = this.vendorOptions;
+                this.vendor = this._alignOption(this.vendor, vendors.length ? vendors : this.allVendorOptions);
+            }
+        },
+        get makeOptions() {
+            // Always list every Rate_Master make for this product (do not shrink to
+            // the prefilled lowest make/vendor pair).
+            return [...this.allMakeOptions];
         },
         get vendorOptions() {
+            // When a concrete make is selected, list that make's vendors.
+            // Otherwise list every vendor from the Product_ID pair map.
             if (this.make && !this.isLowestMake(this.make)) {
-                const filtered = this._lookupList(this.vendorsByMake, this.make);
-                if (filtered.length) return filtered;
+                const scoped = this._lookupList(this.vendorsByMake, this.make);
+                if (scoped.length) {
+                    return [...scoped];
+                }
             }
-            return this.allVendorOptions;
+            const seen = new Set();
+            const all = [];
+            for (const values of Object.values(this.vendorsByMake || {})) {
+                if (!Array.isArray(values)) continue;
+                for (const vendor of values) {
+                    const key = String(vendor || '').trim();
+                    if (!key || seen.has(key)) continue;
+                    seen.add(key);
+                    all.push(vendor);
+                }
+            }
+            if (all.length) {
+                return all;
+            }
+            return [...this.allVendorOptions];
+        },
+        get makeOptionsKey() {
+            return this.makeOptions.join('\u001f') + '|' + String(this.vendor || '');
+        },
+        get vendorOptionsKey() {
+            return this.vendorOptions.join('\u001f') + '|' + String(this.make || '');
         },
         onMakeChange() {
+            this.error = '';
             if (this.isLowestMake(this.make)) {
-                if (this.vendor && !this.vendorOptions.some((item) => String(item) === String(this.vendor))) {
-                    this.vendor = '';
-                }
+                this.scheduleAutoLoadRates();
                 return;
             }
-            const options = this.vendorOptions;
-            if (this.vendor && !options.some((item) => String(item) === String(this.vendor))) {
+            const vendors = this.vendorOptions;
+            if (this.vendor && !vendors.some((item) => String(item) === String(this.vendor))) {
                 this.vendor = '';
             }
+            this.scheduleAutoLoadRates();
         },
         onVendorChange() {
-            if (!this.vendor) {
-                if (this.make && !this.makeOptions.some((item) => String(item) === String(this.make))) {
-                    this.make = '';
-                }
+            // Keep the full make list; do not clear make when vendor changes.
+            this.error = '';
+            this.scheduleAutoLoadRates();
+        },
+        scheduleAutoLoadRates() {
+            if (this._rateTimer) {
+                clearTimeout(this._rateTimer);
+                this._rateTimer = null;
+            }
+            if (!String(this.make || '').trim()) {
+                this.materialRate = '';
                 return;
             }
-            const options = this.makeOptions;
-            if (this.make && !options.some((item) => String(item) === String(this.make))) {
-                this.make = '';
+            // Dropdown mode: auto-load Final_Material_Amount for the pair.
+            if (this.allowTypedEntry) {
+                return;
             }
+            this._rateTimer = setTimeout(() => {
+                this.autoLoadRates();
+            }, 300);
         },
         get statusLabel() {
             if (this.samePriceTie) return 'Same price';
@@ -727,8 +832,8 @@ document.addEventListener('alpine:init', () => {
             return 'Select make';
         },
         async resolveSamePrice() {
-            if (this.saving || !this.chosenRateMasterId) return;
-            this.saving = true;
+            if (this.isBusy || !this.chosenRateMasterId) return;
+            this.busyAction = 'apply';
             this.error = '';
             try {
                 const body = new FormData();
@@ -754,11 +859,106 @@ document.addEventListener('alpine:init', () => {
                 reloadMakeVendor(this.rowId);
             } catch (error) {
                 this.error = error.message || 'Failed to save choice.';
-                this.saving = false;
+                this.busyAction = '';
+            }
+        },
+        async _postSelectProduct({ actionLabel, reloadOnMatch, commitMatch }) {
+            const body = new FormData();
+            body.append('ajax', '1');
+            body.append('action', 'select_product');
+            body.append('row_id', this.rowId);
+            body.append('product_index', String(this.productIndex));
+            body.append(
+                'make',
+                this.allowTypedEntry
+                    ? String(this.make || '').trim()
+                    : (this.make || 'Lowest price')
+            );
+            body.append('vendor', this.vendor || '');
+            // Not found / No match: preview rate only; Apply commits the match.
+            if (this.showManualApply && commitMatch === false) {
+                body.append('preview_only', '1');
+            }
+            const response = await fetch(this.url, {
+                method: 'POST',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRFToken': csrfToken(),
+                    'Accept': 'application/json',
+                },
+                credentials: 'same-origin',
+                body,
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || !data.ok) {
+                throw new Error(data.message || actionLabel || 'Search failed.');
+            }
+            const selection = data.selection || {};
+            const line = selection.line_output || {};
+            // Not found / No match: preview rate only until Apply turns the card green.
+            if (this.showManualApply && commitMatch === false) {
+                if (selection.make) this.make = selection.make;
+                if (selection.vendor != null) this.vendor = selection.vendor || '';
+                this.materialRate = line.material_rate || '';
+                this.notes = selection.notes || this.notes;
+                this.samePriceTie = Boolean(selection.same_price_tie);
+                this.samePriceChoices = Array.isArray(selection.same_price_choices)
+                    ? selection.same_price_choices
+                    : [];
+                this.chosenRateMasterId = selection.rate_master_id || null;
+                return selection;
+            }
+            if (
+                reloadOnMatch
+                && (this.notFound || selection.status === 'matched' || selection.same_price_tie)
+            ) {
+                reloadMakeVendor(this.rowId);
+                return selection;
+            }
+            this.status = selection.status || 'unmatched';
+            this.confidence = selection.confidence;
+            this.techKey = selection.tech_key || '';
+            this.matchedSummary = selection.summary || '';
+            this.notes = selection.notes || '';
+            this.samePriceTie = Boolean(selection.same_price_tie);
+            this.samePriceChoices = Array.isArray(selection.same_price_choices)
+                ? selection.same_price_choices
+                : [];
+            this.chosenRateMasterId = selection.rate_master_id || null;
+            if (selection.make) this.make = selection.make;
+            if (selection.vendor != null) this.vendor = selection.vendor || '';
+            this.materialRate = line.material_rate || '';
+            if (selection.status === 'matched') {
+                this.notFound = false;
+            }
+            this.$dispatch('make-vendor-status', {
+                productIndex: this.productIndex,
+                status: this.status,
+            });
+            return selection;
+        },
+        async autoLoadRates() {
+            if (this.isBusy) return;
+            if (!String(this.make || '').trim()) return;
+            this.busyAction = 'auto';
+            this.error = '';
+            try {
+                await this._postSelectProduct({
+                    actionLabel: 'Failed to load rate.',
+                    reloadOnMatch: false,
+                    // Keep warning/red until Apply on not-found / no-match cards.
+                    commitMatch: !this.showManualApply,
+                });
+            } catch (error) {
+                this.error = error.message || 'Failed to load rate.';
+            } finally {
+                if (this.busyAction === 'auto') {
+                    this.busyAction = '';
+                }
             }
         },
         async findRates() {
-            if (this.saving) return;
+            if (this.isBusy) return;
             if (this.allowTypedEntry && !String(this.make || '').trim()) {
                 this.error = 'Enter a make to continue.';
                 return;
@@ -769,81 +969,39 @@ document.addEventListener('alpine:init', () => {
                     : 'Select a make or vendor.';
                 return;
             }
-            this.saving = true;
+            this.busyAction = 'find';
             this.error = '';
-            const wasNotFound = this.notFound;
             try {
-                const body = new FormData();
-                body.append('ajax', '1');
-                body.append('action', 'select_product');
-                body.append('row_id', this.rowId);
-                body.append('product_index', String(this.productIndex));
-                body.append(
-                    'make',
-                    this.allowTypedEntry
-                        ? String(this.make || '').trim()
-                        : (this.make || 'Lowest price')
-                );
-                body.append('vendor', this.vendor || '');
-                const response = await fetch(this.url, {
-                    method: 'POST',
-                    headers: {
-                        'X-Requested-With': 'XMLHttpRequest',
-                        'X-CSRFToken': csrfToken(),
-                        'Accept': 'application/json',
-                    },
-                    credentials: 'same-origin',
-                    body,
-                });
-                const data = await response.json().catch(() => ({}));
-                if (!response.ok || !data.ok) {
-                    throw new Error(data.message || 'Search failed.');
-                }
-                const selection = data.selection || {};
-                // Refresh when not-found clears or rates match — vendor-review
-                // highlights compare material rates across all products.
-                if (wasNotFound || selection.status === 'matched' || selection.same_price_tie) {
-                    reloadMakeVendor(this.rowId);
-                    return;
-                }
-                this.status = selection.status || 'unmatched';
-                this.confidence = selection.confidence;
-                this.techKey = selection.tech_key || '';
-                this.matchedSummary = selection.summary || '';
-                this.notes = selection.notes || '';
-                this.samePriceTie = Boolean(selection.same_price_tie);
-                this.samePriceChoices = Array.isArray(selection.same_price_choices)
-                    ? selection.same_price_choices
-                    : [];
-                this.chosenRateMasterId = selection.rate_master_id || null;
-                if (selection.make) this.make = selection.make;
-                if (selection.vendor != null) this.vendor = selection.vendor || '';
-                const line = selection.line_output || {};
-                this.materialRate = line.material_rate || '';
-                // Keep free-text editable after not-found retries only.
-                if (this.notFound || this.allowTypedEntry) {
-                    this.allowTypedEntry = true;
-                }
-                this.$dispatch('make-vendor-status', {
-                    productIndex: this.productIndex,
-                    status: this.status,
+                await this._postSelectProduct({
+                    actionLabel: 'Search failed.',
+                    reloadOnMatch: !this.showManualApply,
+                    commitMatch: !this.showManualApply,
                 });
             } catch (error) {
                 this.error = error.message || 'Search failed.';
             } finally {
-                this.saving = false;
+                if (this.busyAction === 'find') {
+                    this.busyAction = '';
+                }
             }
         },
-        async findInDb() {
-            if (this.saving) return;
-            this.saving = true;
+        async applyManual() {
+            if (this.isBusy) return;
+            const makeText = String(this.make || '').trim();
+            if (!makeText) {
+                this.error = 'Enter or select a make before applying.';
+                return;
+            }
+            this.busyAction = 'apply';
             this.error = '';
             try {
                 const body = new FormData();
                 body.append('ajax', '1');
-                body.append('action', 'find_in_db');
+                body.append('action', 'apply_manual');
                 body.append('row_id', this.rowId);
                 body.append('product_index', String(this.productIndex));
+                body.append('make', makeText);
+                body.append('vendor', String(this.vendor || '').trim());
                 const response = await fetch(this.url, {
                     method: 'POST',
                     headers: {
@@ -856,12 +1014,12 @@ document.addEventListener('alpine:init', () => {
                 });
                 const data = await response.json().catch(() => ({}));
                 if (!response.ok || !data.ok) {
-                    throw new Error(data.message || 'Find in DB failed.');
+                    throw new Error(data.message || 'Failed to apply make/vendor.');
                 }
                 reloadMakeVendor(this.rowId);
             } catch (error) {
-                this.error = error.message || 'Find in DB failed.';
-                this.saving = false;
+                this.error = error.message || 'Failed to apply make/vendor.';
+                this.busyAction = '';
             }
         },
     }));

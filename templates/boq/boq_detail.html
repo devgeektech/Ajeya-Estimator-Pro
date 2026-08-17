@@ -311,6 +311,9 @@
 </style>
 <div
     class="boq-view"
+    data-extract-status-url="{% url 'boq:status' boq.pk %}?expect=extract"
+    data-detail-analysis-url="{% url 'boq:detail' boq.pk %}?tab=analysis"
+    data-is-extracting="{% if is_extracting %}1{% else %}0{% endif %}"
     x-data="{
         tab: '{{ default_tab }}',
         analysisEnabled: {{ tab_access.analysis|yesno:'true,false' }},
@@ -351,6 +354,9 @@
         analysisStartedAt: {{ is_extracting|yesno:'Date.now(),null' }},
         prefillingMakeVendor: false,
         scrollPositions: {},
+        _pollInFlight: false,
+        _lastPollAt: 0,
+        _pollWatchdog: null,
         readStoredProgress() {
             try {
                 const raw = sessionStorage.getItem(this.progressStorageKey);
@@ -401,26 +407,15 @@
                     this.writeStoredProgress();
                     return;
                 }
+                // Only catch up to the server target — never creep ahead (that
+                // caused 10→12→10 flicker when a later poll arrived).
                 if (target > current) {
                     const gap = target - current;
-                    const step = gap >= 8 ? 3 : (gap >= 3 ? 2 : 1);
-                    this.analysisProgress = Math.min(99, current + step);
-                    this.writeStoredProgress();
-                    return;
-                }
-                // Soft creep only a little ahead of the last server target so the
-                // bar does not jump to a mid-band % before real extract ticks.
-                const started = Number(this.analysisStartedAt) || Date.now();
-                const elapsedSec = Math.max(0, (Date.now() - started) / 1000);
-                const softCap = Math.min(
-                    90,
-                    Math.max(1, target) + 1 + Math.floor(elapsedSec / 5)
-                );
-                if (softCap > current) {
-                    this.analysisProgress = Math.min(90, current + 1);
+                    const step = gap >= 8 ? 4 : (gap >= 3 ? 2 : 1);
+                    this.analysisProgress = Math.min(target, current + step);
                     this.writeStoredProgress();
                 }
-            }, 700);
+            }, 500);
         },
         stopProgressTicker() {
             if (this.progressTicker) {
@@ -434,6 +429,7 @@
             this.stopProgressTicker();
             this.analysisStartedAt = null;
             this.clearStoredProgress();
+            if (window.BOQAnalysisProgress) window.BOQAnalysisProgress.stop();
         },
         scrollStorageKey(tabName) {
             return 'boq-detail-scroll-{{ boq.pk }}-' + (tabName || this.activeTabPage || this.tab || 'analysis');
@@ -451,7 +447,7 @@
             if (document.body) document.body.scrollTop = top;
         },
         captureVisibleAnalysisLine() {
-            const lines = document.querySelectorAll('.extraction-line[id^="line-"]');
+            const lines = document.querySelectorAll('.extraction-line[id^=line-]');
             if (!lines.length) {
                 return { rowId: '', offset: null };
             }
@@ -501,6 +497,27 @@
         restoreScroll(tabName) {
             try {
                 const tab = tabName || this.activeTabPage || this.tab;
+                // Prefer URL hash to the product card (Apply reload).
+                const hash = String(window.location.hash || '');
+                if (hash.indexOf('#make-vendor-') === 0 || hash.indexOf('#line-') === 0) {
+                    this._restoringScroll = true;
+                    const applyHash = () => {
+                        const el = document.querySelector(hash);
+                        if (el) {
+                            const header = document.querySelector('.boq-detail-header');
+                            const pad = header ? header.getBoundingClientRect().height + 8 : 80;
+                            const top = el.getBoundingClientRect().top + this.readPageScroll() - pad;
+                            this.writePageScroll(Math.max(0, top));
+                        }
+                        this._restoringScroll = false;
+                    };
+                    this.$nextTick(() => {
+                        applyHash();
+                        setTimeout(applyHash, 80);
+                        setTimeout(applyHash, 200);
+                    });
+                    return;
+                }
                 const payload = this.parseScrollPayload(
                     sessionStorage.getItem(this.scrollStorageKey(tab))
                 );
@@ -509,7 +526,9 @@
                 const rowId = payload.rowId ? String(payload.rowId) : '';
                 const offset = Number(payload.offset);
                 if ((!Number.isFinite(y) || y < 0) && !rowId) return;
+                this._restoringScroll = true;
                 let tries = 0;
+                let lastY = null;
                 const apply = () => {
                     tries += 1;
                     if (rowId) {
@@ -518,28 +537,42 @@
                         if (el && Number.isFinite(offset)) {
                             const top = el.getBoundingClientRect().top + this.readPageScroll();
                             this.writePageScroll(Math.max(0, top - offset));
-                        } else if (Number.isFinite(y) && y > 0) {
+                        } else if (Number.isFinite(y) && y >= 0) {
                             this.writePageScroll(y);
                         }
-                    } else if (Number.isFinite(y) && y > 0) {
+                    } else if (Number.isFinite(y) && y >= 0) {
                         this.writePageScroll(y);
                     }
-                    if (tries < 16) {
-                        setTimeout(apply, 100);
+                    const nowY = this.readPageScroll();
+                    // Stop early once position settles — endless retries fought
+                    // user scroll and caused jumps on button reload.
+                    if (lastY !== null && Math.abs(nowY - lastY) < 2) {
+                        this._restoringScroll = false;
+                        return;
+                    }
+                    lastY = nowY;
+                    if (tries < 8) {
+                        setTimeout(apply, 50);
+                    } else {
+                        this._restoringScroll = false;
                     }
                 };
                 this.$nextTick(apply);
-            } catch (e) { /* ignore */ }
+            } catch (e) {
+                this._restoringScroll = false;
+            }
         },
         bindScrollPersist() {
             if (this._scrollPersistBound) return;
             this._scrollPersistBound = true;
             let timer = null;
             window.addEventListener('scroll', () => {
+                if (this._restoringScroll) return;
                 if (timer) clearTimeout(timer);
                 timer = setTimeout(() => {
+                    if (this._restoringScroll) return;
                     this.persistScroll(this.activeTabPage || this.tab);
-                }, 120);
+                }, 150);
             }, { passive: true });
         },
         persistScrollForRow(rowId, tabName) {
@@ -587,6 +620,35 @@
                 alert(error.message || 'Failed to open Make & Vendor.');
             }
         },
+        async openMakeVendorTab() {
+            // Re-capture Analysis Product_IDs when returning to Make & Vendor
+            // (preserves unchanged make/vendor; refreshes rates when Product_ID changed).
+            if (!this.makeVendorEnabled || this.analysing || this.matching || this.prefillingMakeVendor) return;
+            this.prefillingMakeVendor = true;
+            try {
+                const body = new FormData();
+                body.append('ajax', '1');
+                body.append('action', 'sync_analysis_product_ids');
+                const response = await fetch('{% url "boq:make_vendor_select" boq.pk %}', {
+                    method: 'POST',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-CSRFToken': this.csrfToken(),
+                        'Accept': 'application/json',
+                    },
+                    credentials: 'same-origin',
+                    body,
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || data.ok === false) {
+                    throw new Error(data.message || 'Failed to sync Product_IDs.');
+                }
+                this.reloadWithCacheBust(this.detailMakeVendorUrl);
+            } catch (error) {
+                this.prefillingMakeVendor = false;
+                alert(error.message || 'Failed to open Make & Vendor.');
+            }
+        },
         csrfToken() {
             return document.querySelector('meta[name=csrf-token]')?.getAttribute('content') || '';
         },
@@ -596,6 +658,14 @@
             if (name === 'labour' && !this.labourEnabled) return;
             if ((name === 'review' || name === 'match_results') && !this.reviewEnabled) return;
             if (name === 'match_results') name = 'review';
+            if (name === 'make_vendor') {
+                this.openMakeVendorTab();
+                return;
+            }
+            if (name === 'labour') {
+                this.goToLabour();
+                return;
+            }
             // Each tab is server-rendered alone — navigate unless this page
             // already rendered that tab. Do not use Alpine `tab` here: during
             // analysis polling it can diverge from the rendered panel.
@@ -620,6 +690,11 @@
         applyStatus(data) {
             if (data.label) this.statusLabel = data.label;
             if (data.badge) this.statusBadge = data.badge;
+            if (data.polling && data.expect === 'extract') {
+                this.analysing = true;
+                if (!this.progressTicker) this.startProgressTicker();
+                this.ensurePollWatchdog();
+            }
             if (data.progress_percent != null && data.progress_percent !== '') {
                 const pct = Number(data.progress_percent);
                 if (Number.isFinite(pct)) {
@@ -629,9 +704,8 @@
                         const serverPct = Math.max(0, Math.min(data.ready ? 100 : 99, pct));
                         const prev = Number(this.analysisProgress) || 0;
                         const prevTarget = Number(this.analysisTargetPercent) || 0;
-                        // Allow snap-down on re-queue (server resets to 1–8%).
-                        // Never keep a prior 99% while a new run is at the start.
-                        if (serverPct + 5 < prev || serverPct + 5 < prevTarget) {
+                        // Snap down only on a clear re-queue (server back at start).
+                        if (serverPct <= 5 && (prev >= 15 || prevTarget >= 15)) {
                             this.analysisProgress = serverPct;
                             this.analysisTargetPercent = serverPct;
                             this.analysisStartedAt = Date.now();
@@ -660,6 +734,10 @@
                 this.matchProgress = 100;
             }
         },
+        statusPollUrl(baseUrl) {
+            const sep = baseUrl.includes('?') ? '&' : '?';
+            return baseUrl + sep + '_=' + Date.now();
+        },
         reloadWithCacheBust(url) {
             const sep = url.includes('?') ? '&' : '?';
             window.location.href = url + sep + '_t=' + Date.now();
@@ -684,38 +762,97 @@
             return data;
         },
         pollExtract() {
-            fetch(this.extractStatusUrl, { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
-                .then((response) => response.json())
+            if (this._pollInFlight) return;
+            this._pollInFlight = true;
+            const url = this.statusPollUrl(this.extractStatusUrl);
+            const controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+            const abortTimer = controller
+                ? setTimeout(() => { try { controller.abort(); } catch (e) { /* ignore */ } }, 10000)
+                : null;
+            const fetchOpts = {
+                headers: {
+                    'Accept': 'application/json',
+                    'Cache-Control': 'no-cache',
+                    'Pragma': 'no-cache',
+                },
+                credentials: 'same-origin',
+                cache: 'no-store',
+            };
+            if (controller) fetchOpts.signal = controller.signal;
+            fetch(url, fetchOpts)
+                .then((response) => {
+                    if (!response.ok) throw new Error('status ' + response.status);
+                    return response.json();
+                })
                 .then((data) => {
+                    if (abortTimer) clearTimeout(abortTimer);
+                    this._pollInFlight = false;
+                    this._lastPollAt = Date.now();
                     this.applyStatus(data);
                     if (data.ready) {
-                        // Stay on Analysis so the expert can review before Make & Vendor.
-                        this.reloadWithCacheBust(this.detailAnalysisUrl);
+                        this.stopPollWatchdog();
+                        this.finishAnalysisProgress();
+                        this.persistScroll(this.activeTabPage || this.tab || 'analysis');
+                        // Full navigation so Analysis HTML reloads with results.
+                        // replace() avoids bfcache restore of the loading spinner.
+                        const target = this.detailAnalysisUrl;
+                        const sep = target.includes('?') ? '&' : '?';
+                        const nextUrl = target + sep + '_t=' + Date.now();
+                        window.location.replace(nextUrl);
+                        // If navigation is blocked, clear the spinner and force assign.
+                        setTimeout(() => {
+                            if (!this.analysing) return;
+                            this.analysing = false;
+                            window.location.assign(nextUrl);
+                        }, 2000);
                         return;
                     }
-                    this.pollTimer = setTimeout(() => this.pollExtract(), 800);
+                    if (!this.analysing && data.polling) {
+                        this.analysing = true;
+                    }
+                    if (!this.analysing) return;
+                    this.pollTimer = setTimeout(() => this.pollExtract(), 700);
                 })
-                .catch(() => { this.pollTimer = setTimeout(() => this.pollExtract(), 5000); });
+                .catch(() => {
+                    if (abortTimer) clearTimeout(abortTimer);
+                    this._pollInFlight = false;
+                    this._lastPollAt = Date.now();
+                    if (!this.analysing) return;
+                    this.pollTimer = setTimeout(() => this.pollExtract(), 1500);
+                });
         },
         pollMatch() {
-            fetch(this.matchStatusUrl, { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
+            fetch(this.statusPollUrl(this.matchStatusUrl), {
+                headers: {
+                    'Accept': 'application/json',
+                    'Cache-Control': 'no-cache',
+                    'Pragma': 'no-cache',
+                },
+                credentials: 'same-origin',
+                cache: 'no-store',
+            })
                 .then((response) => response.json())
                 .then((data) => {
                     this.applyStatus(data);
                     if (data.ready) {
+                        this.matchProgress = 100;
+                        this.persistScroll(this.activeTabPage || this.tab || 'review');
                         this.reloadWithCacheBust(this.detailMatchUrl);
                         return;
                     }
-                    this.pollTimer = setTimeout(() => this.pollMatch(), 2500);
+                    this.pollTimer = setTimeout(() => this.pollMatch(), 2000);
                 })
-                .catch(() => { this.pollTimer = setTimeout(() => this.pollMatch(), 5000); });
+                .catch(() => { this.pollTimer = setTimeout(() => this.pollMatch(), 4000); });
         },
         startPolling() {
             if (this.pollTimer) {
                 clearTimeout(this.pollTimer);
                 this.pollTimer = null;
             }
+            this._pollInFlight = false;
             if (this.analysing) {
+                // Vanilla poller keeps % moving even if Alpine timers stall.
+                if (window.BOQAnalysisProgress) window.BOQAnalysisProgress.start();
                 // Keep the opened tab (BOQ / Make List / Analysis). Forcing
                 // tab=analysis here rewrote the URL while leaving BOQ/Make List
                 // HTML on screen, so clicking Analysis looked like a no-op.
@@ -751,14 +888,46 @@
                 }
                 this.writeStoredProgress();
                 this.startProgressTicker();
+                this._lastPollAt = 0;
                 this.pollExtract();
+                this.ensurePollWatchdog();
             } else if (this.matching) {
                 this.tab = 'review';
                 this.syncTabUrl('review');
                 this.pollMatch();
             } else {
                 this.clearStoredProgress();
+                this.stopPollWatchdog();
                 this.syncTabUrl(this.tab);
+            }
+        },
+        ensurePollWatchdog() {
+            this.stopPollWatchdog();
+            // If a poll chain dies (tab freeze, aborted fetch, bfcache), kick it.
+            this._pollWatchdog = setInterval(() => {
+                if (!this.analysing) {
+                    this.stopPollWatchdog();
+                    return;
+                }
+                const last = Number(this._lastPollAt) || 0;
+                const idleMs = Date.now() - last;
+                // Stuck in-flight fetch (browser hang) — force a new poll.
+                if (this._pollInFlight && idleMs > 8000) {
+                    this._pollInFlight = false;
+                }
+                if (!this._pollInFlight && idleMs > 2500) {
+                    if (this.pollTimer) {
+                        clearTimeout(this.pollTimer);
+                        this.pollTimer = null;
+                    }
+                    this.pollExtract();
+                }
+            }, 1500);
+        },
+        stopPollWatchdog() {
+            if (this._pollWatchdog) {
+                clearInterval(this._pollWatchdog);
+                this._pollWatchdog = null;
             }
         },
         async startAnalyse() {
@@ -770,24 +939,43 @@
             this.statusBadge = 'badge--yellow';
             this.analysisProgress = 1;
             this.analysisTargetPercent = 1;
-            this.analysisProgressLabel = 'Starting analysis…';
+            this.analysisProgressLabel = 'Starting analysis...';
             this.analysisStartedAt = Date.now();
             this.writeStoredProgress();
             this.startProgressTicker();
+            // Poll while the queue POST runs so % keeps moving even before reload.
+            this._lastPollAt = 0;
+            if (window.BOQAnalysisProgress) window.BOQAnalysisProgress.start();
+            this.pollExtract();
+            this.ensurePollWatchdog();
             try {
                 const data = await this.postJob(this.extractUrl);
                 this.applyStatus(data);
                 if (data.ready || data.mode === 'sync') {
+                    this.stopPollWatchdog();
                     this.finishAnalysisProgress();
-                    this.reloadWithCacheBust(this.detailAnalysisUrl);
+                    this.persistScroll(this.activeTabPage || this.tab);
+                    const target = this.detailAnalysisUrl;
+                    const sep = target.includes('?') ? '&' : '?';
+                    window.location.replace(target + sep + '_t=' + Date.now());
                     return;
                 }
-                // Analysis spinner lives on the Analysis tab panel — open it.
+                // Already on Analysis: keep this page and the live poll chain.
+                // Reloading here used to abort polls so the % froze until refresh.
+                if ((this.activeTabPage || this.tab) === 'analysis') {
+                    this.tab = 'analysis';
+                    this.syncTabUrl('analysis');
+                    if (!this._pollInFlight) this.pollExtract();
+                    this.ensurePollWatchdog();
+                    return;
+                }
+                // Open Analysis tab (loading panel lives there).
                 this.persistScroll(this.activeTabPage || this.tab);
                 this.reloadWithCacheBust(this.detailAnalysisUrl);
             } catch (error) {
                 this.analysing = false;
                 this.stopProgressTicker();
+                this.stopPollWatchdog();
                 this.analysisStartedAt = null;
                 this.clearStoredProgress();
                 alert(error.message || 'Failed to start analysis.');
@@ -871,13 +1059,25 @@
         }
     }"
     x-init="
+        if (analysing && window.BOQAnalysisProgress) BOQAnalysisProgress.start();
         try { history.scrollRestoration = 'manual'; } catch (e) { /* ignore */ }
         bindScrollPersist();
         startPolling();
         restoreScroll();
-        window.addEventListener('pageshow', () => restoreScroll());
+        window.addEventListener('pageshow', () => {
+            restoreScroll();
+            // bfcache restore kills timers — resume Analyse polling.
+            if (analysing || matching) startPolling();
+        });
         window.addEventListener('load', () => restoreScroll());
         window.addEventListener('beforeunload', () => persistScroll());
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible' && analysing) {
+                ensurePollWatchdog();
+                if (!_pollInFlight) pollExtract();
+                if (window.BOQAnalysisProgress) BOQAnalysisProgress.start();
+            }
+        });
     "
 >
     <div class="boq-detail-header">
@@ -1009,6 +1209,18 @@
                         <span x-show="!analysing">Analyse BOQ</span>
                         <span x-show="analysing" x-cloak>Analysing...</span>
                     </button>
+                {% elif can_analyse and boq.status == 'analysis_failed' %}
+                    <button
+                        type="button"
+                        class="btn btn--small btn--boq-analyse"
+                        :class="{ 'btn--analysis-loading': analysing }"
+                        :disabled="analysing"
+                        x-show="tab === 'boq' || tab === 'make_list' || tab === 'analysis'"
+                        @click="startAnalyse()"
+                    >
+                        <span x-show="!analysing">Retry Analyse</span>
+                        <span x-show="analysing" x-cloak>Analysing...</span>
+                    </button>
                 {% elif is_extracting %}
                     <button
                         type="button"
@@ -1033,8 +1245,12 @@
                     <button
                         type="button"
                         class="btn btn--small btn--primary"
-                        @click="selectTab('make_vendor')"
-                    >Next</button>
+                        :disabled="prefillingMakeVendor"
+                        @click="goToMakeVendor()"
+                    >
+                        <span x-show="!prefillingMakeVendor">Next</span>
+                        <span x-show="prefillingMakeVendor" x-cloak>Loading…</span>
+                    </button>
                 </span>
 
                 <span x-show="tab === 'review'" x-cloak class="boq-export-actions">
@@ -1093,8 +1309,12 @@
                 <button
                     type="button"
                     class="btn btn--small btn--primary"
-                    @click="selectTab('labour')"
-                >Next</button>
+                    :disabled="unlockingLabour"
+                    @click="goToLabour()"
+                >
+                    <span x-show="!unlockingLabour">Next</span>
+                    <span x-show="unlockingLabour" x-cloak>Loading…</span>
+                </button>
                 {% endif %}
             </div>
         </div>
@@ -1123,10 +1343,14 @@
         {% elif default_tab == 'analysis' %}
         <div role="tabpanel" class="analysis-tab-canvas">
             <div
+                id="analysis-loading-center"
                 class="analysis-loading-center{% if is_extracting %} analysis-loading-center--active{% endif %}"
                 :class="{ 'analysis-loading-center--active': analysing }"
                 x-show="analysing"
                 {% if not is_extracting %}x-cloak{% endif %}
+                data-status-url="{% url 'boq:status' boq.pk %}?expect=extract"
+                data-reload-url="{% url 'boq:detail' boq.pk %}?tab=analysis"
+                data-analysing="{% if is_extracting %}1{% else %}0{% endif %}"
             >
                 <div
                     class="analysis-loading-center__spinner"
@@ -1134,10 +1358,15 @@
                     style="width:56px;height:56px;border-radius:50%;border:5px solid #bfdbfe;border-top-color:#2563eb;box-sizing:border-box;display:block;margin:0 auto;animation:boqAnalysisSpin 0.7s linear infinite;"
                 ></div>
                 <p
+                    id="analysis-progress-percent"
                     class="analysis-loading-center__percent"
                     x-text="Math.round(analysisProgress) + '%'"
-                >{% if is_extracting %}1%{% else %}0%{% endif %}</p>
-                <p class="analysis-loading-center__title">Analysing BOQ And Extracting Products</p>
+                >{% if is_extracting %}{{ analysis_progress_percent|default:1 }}%{% else %}0%{% endif %}</p>
+                <p
+                    id="analysis-progress-label"
+                    class="analysis-loading-center__title"
+                    x-text="analysisProgressLabel || 'Analysing BOQ And Extracting Products'"
+                >{% if analysis_progress_label %}{{ analysis_progress_label }}{% else %}Analysing BOQ And Extracting Products{% endif %}</p>
             </div>
             <div x-show="!analysing" {% if is_extracting %}style="display:none"{% endif %}>
                 {% include "boq/_extraction_table.html" with extraction_display=extraction_display can_edit_extraction=can_edit_extraction boq=boq %}
@@ -1158,4 +1387,189 @@
         {% endif %}
     </div>
 </div>
+<script>
+/**
+ * Analysis progress poller (vanilla).
+ * Keeps the Analysis % moving even when the large Alpine x-data block fails to
+ * init or its timer chain stalls — runserver showed job progress while the UI
+ * stayed on the server-rendered 1% with zero /status/ requests.
+ */
+(function () {
+    var view = document.querySelector('.boq-view');
+    if (!view) return;
+
+    var statusUrl = view.getAttribute('data-extract-status-url') || '';
+    var reloadUrl = view.getAttribute('data-detail-analysis-url') || '';
+    var timer = null;
+    var inFlight = false;
+    var active = false;
+    var highWater = 0;
+
+    function rootEl() {
+        return document.getElementById('analysis-loading-center');
+    }
+    function percentEl() {
+        return document.getElementById('analysis-progress-percent');
+    }
+    function labelEl() {
+        return document.getElementById('analysis-progress-label');
+    }
+
+    function syncAlpine(pct, label, opts) {
+        opts = opts || {};
+        try {
+            if (!window.Alpine || typeof Alpine.$data !== 'function') return;
+            var data = Alpine.$data(view);
+            if (!data) return;
+            if (opts.analysing) data.analysing = true;
+            if (pct != null && isFinite(pct)) {
+                var n = Math.max(0, Math.min(opts.ready ? 100 : 99, Number(pct)));
+                var prev = Number(data.analysisProgress) || 0;
+                var prevTarget = Number(data.analysisTargetPercent) || 0;
+                if (n <= 5 && (prev >= 15 || prevTarget >= 15)) {
+                    data.analysisProgress = n;
+                    data.analysisTargetPercent = n;
+                } else {
+                    data.analysisTargetPercent = Math.max(prevTarget, n);
+                    data.analysisProgress = Math.max(prev, n);
+                }
+            }
+            if (label) data.analysisProgressLabel = label;
+        } catch (e) { /* ignore */ }
+    }
+
+    function applyProgress(pct, label, opts) {
+        opts = opts || {};
+        if (pct != null && isFinite(pct)) {
+            var n = opts.ready ? 100 : Math.max(0, Math.min(99, Number(pct)));
+            if (n <= 5 && highWater >= 15) {
+                highWater = n;
+            } else {
+                n = Math.max(highWater, n);
+                highWater = n;
+            }
+            var el = percentEl();
+            if (el) el.textContent = Math.round(n) + '%';
+            syncAlpine(n, label, opts);
+        } else if (label) {
+            syncAlpine(null, label, opts);
+        }
+        if (label) {
+            var title = labelEl();
+            if (title) title.textContent = label;
+        }
+    }
+
+    function stop() {
+        active = false;
+        inFlight = false;
+        if (timer) {
+            clearTimeout(timer);
+            timer = null;
+        }
+    }
+
+    function schedule(ms) {
+        if (!active) return;
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(poll, ms);
+    }
+
+    function poll() {
+        if (!active || inFlight || !statusUrl) return;
+        inFlight = true;
+        var url = statusUrl + (statusUrl.indexOf('?') >= 0 ? '&' : '?') + '_=' + Date.now();
+        fetch(url, {
+            headers: {
+                'Accept': 'application/json',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache',
+            },
+            credentials: 'same-origin',
+            cache: 'no-store',
+        })
+            .then(function (response) {
+                if (!response.ok) throw new Error('status ' + response.status);
+                return response.json();
+            })
+            .then(function (data) {
+                inFlight = false;
+                if (data.progress_percent != null && data.progress_percent !== '') {
+                    var pct = Number(data.progress_percent);
+                    if (isFinite(pct)) {
+                        applyProgress(pct, data.progress_label || '', {
+                            ready: !!data.ready,
+                            analysing: !!data.polling,
+                        });
+                    }
+                } else if (data.progress_label) {
+                    applyProgress(null, data.progress_label, { analysing: !!data.polling });
+                }
+                if (data.ready) {
+                    stop();
+                    applyProgress(100, data.progress_label || 'Analysis complete', { ready: true });
+                    var sep = reloadUrl.indexOf('?') >= 0 ? '&' : '?';
+                    window.location.replace(reloadUrl + sep + '_t=' + Date.now());
+                    return;
+                }
+                if (data.polling) {
+                    schedule(700);
+                    return;
+                }
+                stop();
+            })
+            .catch(function () {
+                inFlight = false;
+                schedule(1500);
+            });
+    }
+
+    function start() {
+        if (active) {
+            if (!inFlight) schedule(0);
+            return;
+        }
+        active = true;
+        highWater = 0;
+        var root = rootEl();
+        if (root) {
+            root.classList.add('analysis-loading-center--active');
+            root.style.display = 'flex';
+        }
+        poll();
+    }
+
+    window.BOQAnalysisProgress = {
+        start: start,
+        stop: stop,
+        applyProgress: applyProgress,
+    };
+
+    function shouldAutostart() {
+        if (view.getAttribute('data-is-extracting') === '1') return true;
+        var root = rootEl();
+        return !!(root && root.getAttribute('data-analysing') === '1');
+    }
+
+    if (shouldAutostart()) {
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', start);
+        } else {
+            start();
+        }
+    }
+
+    window.addEventListener('pageshow', function () {
+        if (!shouldAutostart()) {
+            try {
+                if (window.Alpine && Alpine.$data(view) && Alpine.$data(view).analysing) {
+                    start();
+                }
+            } catch (e) { /* ignore */ }
+            return;
+        }
+        start();
+    });
+})();
+</script>
 {% endblock %}

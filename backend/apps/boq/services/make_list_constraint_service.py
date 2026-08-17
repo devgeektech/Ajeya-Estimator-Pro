@@ -5,19 +5,14 @@ import re
 from difflib import SequenceMatcher
 from typing import Any, Iterable
 
+from apps.boq.services.boq_row_fields import DESCRIPTION_KEYS
+
 LOWEST_MAKE_VALUE = "__lowest__"
 LOWEST_MAKE_LABEL = "Lowest price"
 LOWEST_MAKE_STORED = "LOWEST PRICE"
 NO_APPROVED_MAKE_LABEL = "No Approved Make Found in Make List"
 
-_DESCRIPTION_KEYS = (
-    "description",
-    "item_description",
-    "particulars",
-    "item",
-    "material",
-    "materials",
-)
+_DESCRIPTION_KEYS = DESCRIPTION_KEYS + ("material", "materials")
 
 # Optimal make-name threshold (make-list vs Rate_Master_Output spelling variants).
 _MAKE_MATCH_THRESHOLD = 0.82
@@ -125,6 +120,61 @@ def walk_rows_tree(nodes: Iterable[dict]) -> list[dict]:
     return flat
 
 
+def _targets_from_mapping(item: dict[str, Any]) -> list[dict[str, str | None]]:
+    """Normalize mapped_targets or legacy single category/sub onto a target list."""
+    raw = item.get("mapped_targets")
+    targets: list[dict[str, str | None]] = []
+    if isinstance(raw, list):
+        for node in raw:
+            if not isinstance(node, dict):
+                continue
+            category = str(node.get("category") or "").strip()
+            if not category:
+                continue
+            sub = str(node.get("sub_category") or "").strip() or None
+            targets.append({"category": category, "sub_category": sub})
+    if targets:
+        return targets
+    category = str(item.get("mapped_category") or "").strip()
+    if not category:
+        return []
+    sub = str(item.get("mapped_sub_category") or "").strip() or None
+    return [{"category": category, "sub_category": sub}]
+
+
+def _entry_covers_sub(
+    entry: dict[str, Any],
+    *,
+    category: str,
+    sub_norm: str,
+    allow_category_wide: bool = True,
+) -> bool:
+    """True when make-list entry covers category+sub.
+
+    Category-wide rows (null sub) match every sub only when ``allow_category_wide``.
+    Cascade UI passes ``False`` so a selected sub-category shows that sub's makes.
+    """
+    if sub_norm in _normalize_text(entry.get("description") or ""):
+        return True
+    targets = list(entry.get("mapped_targets") or [])
+    if not targets:
+        mapped_sub = _normalize_text(str(entry.get("mapped_sub_category") or ""))
+        if not mapped_sub:
+            return bool(allow_category_wide)
+        return mapped_sub == sub_norm
+    for target in targets:
+        if not _categories_equivalent(str(target.get("category") or ""), category):
+            continue
+        mapped_sub = _normalize_text(str(target.get("sub_category") or ""))
+        if not mapped_sub:
+            if allow_category_wide:
+                return True
+            continue
+        if mapped_sub == sub_norm:
+            return True
+    return False
+
+
 class MakeListConstraintService:
     """Map BOQ products to approved makes via category mapping + description match."""
 
@@ -144,21 +194,30 @@ class MakeListConstraintService:
             for item in mappings:
                 description = str(item.get("material") or "").strip()
                 approved = item.get("approved_makes_list") or []
-                category = str(item.get("mapped_category") or "").strip()
                 if not description or not approved:
                     continue
+                targets = _targets_from_mapping(item)
+                category = str(
+                    (targets[0].get("category") if targets else None)
+                    or item.get("mapped_category")
+                    or ""
+                ).strip()
+                sub = (
+                    targets[0].get("sub_category")
+                    if targets
+                    else str(item.get("mapped_sub_category") or "").strip() or None
+                )
                 entry = {
                     "description": description,
                     "tokens": _token_set(description),
                     "approved_makes_list": [_normalize_make(m) for m in approved],
                     "mapped_category": category or None,
-                    "mapped_sub_category": str(item.get("mapped_sub_category") or "").strip() or None,
+                    "mapped_sub_category": sub,
+                    "mapped_targets": targets,
                     "confidence": item.get("confidence"),
                 }
                 self._entries.append(entry)
-                if category:
-                    key = _normalize_text(category)
-                    self._by_category.setdefault(key, []).append(entry)
+                self._index_entry_by_targets(entry)
             return
 
         tree = make_list_data.get("rows_tree") or []
@@ -171,6 +230,7 @@ class MakeListConstraintService:
                     "approved_makes_list": row.get("approved_makes_list") or [],
                     "mapped_category": row.get("mapped_category"),
                     "mapped_sub_category": row.get("mapped_sub_category"),
+                    "mapped_targets": row.get("mapped_targets") or [],
                 }
                 for row in (make_list_data.get("rows") or [])
                 if not row.get("is_section_heading")
@@ -184,23 +244,56 @@ class MakeListConstraintService:
                 make_keys=make_keys,
             )
             approved = node.get("approved_makes_list") or []
-            category = str(node.get("mapped_category") or fields.get("mapped_category") or "").strip()
-            if description and approved:
-                entry = {
-                    "description": description,
-                    "tokens": _token_set(description),
-                    "approved_makes_list": [_normalize_make(m) for m in approved],
-                    "mapped_category": category or None,
-                    "mapped_sub_category": str(
-                        node.get("mapped_sub_category") or fields.get("mapped_sub_category") or ""
-                    ).strip()
-                    or None,
-                    "confidence": node.get("category_mapping_confidence"),
+            if not (description and approved):
+                continue
+            targets = _targets_from_mapping(
+                {
+                    "mapped_targets": node.get("mapped_targets") or fields.get("mapped_targets"),
+                    "mapped_category": node.get("mapped_category") or fields.get("mapped_category"),
+                    "mapped_sub_category": node.get("mapped_sub_category")
+                    or fields.get("mapped_sub_category"),
                 }
-                self._entries.append(entry)
-                if category:
-                    key = _normalize_text(category)
-                    self._by_category.setdefault(key, []).append(entry)
+            )
+            category = str(
+                (targets[0].get("category") if targets else None)
+                or node.get("mapped_category")
+                or fields.get("mapped_category")
+                or ""
+            ).strip()
+            sub = (
+                targets[0].get("sub_category")
+                if targets
+                else str(
+                    node.get("mapped_sub_category") or fields.get("mapped_sub_category") or ""
+                ).strip()
+                or None
+            )
+            entry = {
+                "description": description,
+                "tokens": _token_set(description),
+                "approved_makes_list": [_normalize_make(m) for m in approved],
+                "mapped_category": category or None,
+                "mapped_sub_category": sub,
+                "mapped_targets": targets,
+                "confidence": node.get("category_mapping_confidence"),
+            }
+            self._entries.append(entry)
+            self._index_entry_by_targets(entry)
+
+    def _index_entry_by_targets(self, entry: dict[str, Any]) -> None:
+        """Index one make-list entry under every mapped category target."""
+        categories: list[str] = []
+        for target in entry.get("mapped_targets") or []:
+            category = str(target.get("category") or "").strip()
+            if category and category not in categories:
+                categories.append(category)
+        if not categories and entry.get("mapped_category"):
+            categories.append(str(entry["mapped_category"]))
+        for category in categories:
+            key = _normalize_text(category)
+            bucket = self._by_category.setdefault(key, [])
+            if entry not in bucket:
+                bucket.append(entry)
 
     @property
     def has_constraints(self) -> bool:
@@ -219,12 +312,15 @@ class MakeListConstraintService:
         self,
         category: str,
         sub_category: str = "",
+        *,
+        allow_category_wide: bool = True,
     ) -> list[str] | None:
         """Return approved makes mapped to this Rate_Master_Output product category.
 
         When ``sub_category`` is set and no make-list row maps to that
         sub-category (or description), returns ``None`` — do **not** fall back
-        to every make under the parent category.
+        to every make under the parent category unless ``allow_category_wide``
+        and a null-sub mapping covers the category.
         """
         if not category or not self._entries:
             return None
@@ -238,11 +334,19 @@ class MakeListConstraintService:
                 matched_entries.extend(entries)
 
         if not matched_entries:
-            # Soft fallback: category tokens vs make-list description.
+            # Soft fallback: category tokens vs make-list description / targets.
             for entry in self._entries:
                 mapped = entry.get("mapped_category") or ""
                 if mapped and _categories_equivalent(mapped, category):
                     matched_entries.append(entry)
+                    continue
+                target_hit = False
+                for target in entry.get("mapped_targets") or []:
+                    if _categories_equivalent(str(target.get("category") or ""), category):
+                        matched_entries.append(entry)
+                        target_hit = True
+                        break
+                if target_hit:
                     continue
                 if category_norm and (category_norm in _normalize_text(entry["description"])):
                     matched_entries.append(entry)
@@ -254,8 +358,12 @@ class MakeListConstraintService:
             sub_hits = [
                 entry
                 for entry in matched_entries
-                if _normalize_text(str(entry.get("mapped_sub_category") or "")) == sub_norm
-                or sub_norm in _normalize_text(entry["description"])
+                if _entry_covers_sub(
+                    entry,
+                    category=category,
+                    sub_norm=sub_norm,
+                    allow_category_wide=allow_category_wide,
+                )
             ]
             if not sub_hits:
                 # Explicit sub-category with no make-list coverage.
@@ -305,6 +413,7 @@ class MakeListConstraintService:
             "match_score": round(best_score, 2),
             "mapped_category": best_entry.get("mapped_category"),
             "mapped_sub_category": best_entry.get("mapped_sub_category"),
+            "mapped_targets": list(best_entry.get("mapped_targets") or []),
         }
 
     def make_options_for_product(

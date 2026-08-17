@@ -78,5 +78,8 @@ wcwidth==0.8.2
 
 # --- Dev / tooling (not needed in production, kept for reproducibility) ---
 nodeenv==1.10.0
+django-stubs==5.2.9
+django-stubs-ext==5.2.9
 pyright==1.1.411
+basedpyright==1.39.10
 ruff==0.15.20

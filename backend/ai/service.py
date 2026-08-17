@@ -57,8 +57,11 @@ class AIService:
             "model": str(self.model),
             "messages": [{"role": "user", "content": prompt}],
         }
+        # Deterministic Analyse: same BOQ → same extract/match when the model
+        # honors temperature/seed (gpt-4o-mini does).
         if self._supports_custom_temperature(str(self.model)):
             kwargs["temperature"] = 0
+        kwargs["seed"] = 42
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
 

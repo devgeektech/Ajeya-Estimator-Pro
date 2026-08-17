@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 
-from django.db import transaction
+from common.db import atomic
 
 from apps.boq.models import BOQ
 from common.choices import BOQStatus
@@ -132,7 +132,7 @@ def heal_make_vendor_unlock(boq: BOQ) -> bool:
     if not changed_fields:
         return False
 
-    with transaction.atomic():
+    with atomic():
         boq.save(update_fields=list(dict.fromkeys(changed_fields)))
     logger.debug(
         "Healed Make & Vendor unlock for BOQ id=%s status=%s fields=%s",
@@ -157,18 +157,18 @@ def build_boq_status_display(boq: BOQ, session) -> dict[str, str]:
         return {"label": "Make/Vendor selection", "badge": "badge--blue"}
 
     mapping = {
-        BOQStatus.UPLOADED: ("Uploaded", "badge--dark"),
-        BOQStatus.PROCESSING: ("Analysing...", "badge--yellow"),
-        BOQStatus.EXTRACTED: ("Analysed", "badge--blue"),
-        BOQStatus.MAKE_VENDOR: ("Make/Vendor selection", "badge--blue"),
-        BOQStatus.LABOUR: ("Labour", "badge--blue"),
-        BOQStatus.MATCHING: ("Matching", "badge--red"),
-        BOQStatus.PROCESSED: ("Matched", "badge--green"),
-        BOQStatus.READY_EXPORT: ("Ready to Export", "badge--green"),
-        BOQStatus.EXPORTED: ("Exported", "badge--green"),
-        BOQStatus.ANALYSIS_FAILED: ("Failed", "badge--red"),
+        BOQStatus.UPLOADED.value: ("Uploaded", "badge--dark"),
+        BOQStatus.PROCESSING.value: ("Analysing...", "badge--yellow"),
+        BOQStatus.EXTRACTED.value: ("Analysed", "badge--blue"),
+        BOQStatus.MAKE_VENDOR.value: ("Make/Vendor selection", "badge--blue"),
+        BOQStatus.LABOUR.value: ("Labour", "badge--blue"),
+        BOQStatus.MATCHING.value: ("Matching", "badge--red"),
+        BOQStatus.PROCESSED.value: ("Matched", "badge--green"),
+        BOQStatus.READY_EXPORT.value: ("Ready to Export", "badge--green"),
+        BOQStatus.EXPORTED.value: ("Exported", "badge--green"),
+        BOQStatus.ANALYSIS_FAILED.value: ("Failed", "badge--red"),
     }
-    label, badge = mapping.get(status, ("Unknown", "badge--gray"))
+    label, badge = mapping.get(str(status), ("Unknown", "badge--gray"))
     return {"label": label, "badge": badge}
 
 

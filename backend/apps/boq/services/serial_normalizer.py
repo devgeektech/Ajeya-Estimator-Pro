@@ -15,7 +15,21 @@ _PAREN_ALPHA = re.compile(r"^\(([a-zA-Z])\)$")
 # Common BOQ forms: a)  b)  A)
 _SUFFIX_ALPHA = re.compile(r"^([a-zA-Z])\)$")
 _PAREN_NUM = re.compile(r"^\((\d+)\)$")
-_DESC_ALPHA = re.compile(r"^\(?([a-zA-Z])\)?[\).:\-]\s*")
+# Letter markers in description: (a) / a) / a: / a- / a.<space>
+# Do NOT treat ``M.S.`` / ``C.I.`` / ``D.I.`` as serial ``m)`` / ``c)`` / ``d)``.
+_DESC_ALPHA = re.compile(
+    r"^(?:"
+    r"\(([a-zA-Z])\)\s*"  # (a)
+    r"|([a-zA-Z])\)\s*"  # a)
+    r"|([a-zA-Z])[:\-]\s+"  # a: or a-
+    r"|([a-zA-Z])\.\s+"  # a. with required space (not M.S.)
+    r")"
+)
+# Material abbreviations that look like letter serials if ``.`` is allowed bare.
+_MATERIAL_DESC_PREFIX = re.compile(
+    r"^(?:m\.?\s*s\.?|c\.?\s*i\.?|d\.?\s*i\.?|g\.?\s*i\.?|s\.?\s*s\.?)\b",
+    re.IGNORECASE,
+)
 # Standalone section romans (I, II, III…) — not product-line continuations.
 _SECTION_ROMAN = re.compile(r"^(?:i{1,3}|iv|vi{0,3}|ix|x|v)$", re.IGNORECASE)
 # Roman-numeral continuations under lettered products (i / ii / iii / iv…).
@@ -270,7 +284,8 @@ def structure_for_display(structure: dict) -> dict:
                     continue
                 if cells[index] in (None, ""):
                     inferred = _format_display_serial(row.get("serial"))
-                    if inferred:
+                    desc = _description_text(row)
+                    if inferred and not _is_bogus_material_serial(inferred, desc):
                         cells[index] = inferred
                 break
         rows.append(
@@ -430,8 +445,22 @@ def structure_for_make_list_display(structure: dict) -> dict:
         # Keep description-only rows (empty Approved Makes) and section banners.
         if not str(material_text or "").strip() and not makes_text and not is_section:
             continue
-        mapped_category = "" if is_section else str(row.get("mapped_category") or "").strip()
-        mapped_sub = "" if is_section else str(row.get("mapped_sub_category") or "").strip()
+        mapped_category = "" if is_section else str(
+            row.get("mapped_category_display") or row.get("mapped_category") or ""
+        ).strip()
+        mapped_sub = "" if is_section else str(
+            row.get("mapped_sub_category_display") or row.get("mapped_sub_category") or ""
+        ).strip()
+        if not is_section and not mapped_category and row.get("mapped_targets"):
+            from apps.boq.services.make_list_category_mapping_service import (
+                format_mapped_targets_display,
+            )
+
+            mapped_category, mapped_sub = format_mapped_targets_display(
+                row.get("mapped_targets"),
+                category=row.get("mapped_category"),
+                sub_category=row.get("mapped_sub_category"),
+            )
         cells = []
         if serial_key:
             cells.append("" if is_section else serial_text)
@@ -447,8 +476,13 @@ def structure_for_make_list_display(structure: dict) -> dict:
                 "cells": cells,
                 "display_cells": _with_display_cells(display_headers, cells),
                 "approved_makes_list": [] if is_section else list(makes or []),
-                "mapped_category": None if is_section else (mapped_category or None),
-                "mapped_sub_category": None if is_section else (mapped_sub or None),
+                "mapped_category": None if is_section else (row.get("mapped_category") or None),
+                "mapped_sub_category": None
+                if is_section
+                else (row.get("mapped_sub_category") or None),
+                "mapped_targets": [] if is_section else list(row.get("mapped_targets") or []),
+                "mapped_category_display": None if is_section else (mapped_category or None),
+                "mapped_sub_category_display": None if is_section else (mapped_sub or None),
                 "is_section_heading": is_section,
                 "row_class": "make-list-sheet__row--section" if is_section else "",
             }
@@ -550,14 +584,35 @@ def _infer_serial_from_description(record: dict) -> str:
     text = _description_text(record)
     if not text:
         return ""
+    # M.S. / C.I. / D.I. / G.I. / S.S. are materials, not letter serials.
+    if _MATERIAL_DESC_PREFIX.match(text):
+        return ""
     # Prefer roman continuations so ``i)`` / ``ii)`` are not treated as product letters.
     if _ROMAN_CONT.match(text):
         return ""
     match = _DESC_ALPHA.match(text)
     if match:
+        letter = next((group for group in match.groups() if group), "")
+        if not letter:
+            return ""
         # Keep the common BOQ form ``a)`` so S.No / hierarchy match the sheet.
-        return f"{match.group(1).lower()})"
+        return f"{letter.lower()})"
     return ""
+
+
+def _is_bogus_material_serial(serial: str, description: str) -> bool:
+    """True when stored ``m)`` / ``c)`` came from ``M.S.`` / ``C.I.`` description lead."""
+    letter = letter_from_serial(serial)
+    if not letter:
+        return False
+    if not _MATERIAL_DESC_PREFIX.match(description or ""):
+        return False
+    # Only clear when the letter matches the material lead (m←MS, c←CI, …).
+    material = _MATERIAL_DESC_PREFIX.match(description or "")
+    if not material:
+        return False
+    lead = re.sub(r"[^a-z]", "", material.group(0).lower())
+    return lead[:1] == letter.lower()
 
 
 def _leading_indent_depth(record: dict) -> int | None:

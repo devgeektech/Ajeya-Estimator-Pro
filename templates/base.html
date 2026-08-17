@@ -1004,8 +1004,11 @@
         }
 
         .analysis-tab-canvas .extraction-field--full .extraction-input--wrap {
-            min-height: 1.7rem;
-            max-height: 2.4rem;
+            min-height: 2rem;
+            max-height: 4.5rem;
+            font-size: .78rem;
+            font-family: inherit;
+            line-height: 1.4;
         }
 
         .analysis-tab-canvas .extraction-field__label {
@@ -2040,10 +2043,37 @@
         }
 
         .make-vendor-fields {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            display: flex;
+            flex-wrap: nowrap;
             gap: 10px;
             align-items: end;
+        }
+
+        .make-vendor-fields > .extraction-field {
+            flex: 1 1 0;
+            min-width: 120px;
+        }
+
+        /* Same row as Make / Vendor / Product rate — flush right. */
+        .make-vendor-fields__actions {
+            flex: 0 0 auto;
+            margin-left: auto;
+            display: flex;
+            flex-wrap: nowrap;
+            gap: 8px;
+            align-items: center;
+            min-height: 2.25rem;
+        }
+
+        .make-vendor-fields__actions .btn {
+            white-space: nowrap;
+            flex: 0 0 auto;
+        }
+
+        .make-vendor-fields__actions .extraction-save-hint {
+            flex: 0 1 auto;
+            min-width: 0;
+            max-width: 12rem;
         }
 
         .make-vendor-fields .extraction-input--readonly {
@@ -2116,13 +2146,6 @@
         .labour-mode-badge {
             margin-left: 4px;
             align-self: center;
-        }
-
-        .make-vendor-fields__actions {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            align-items: center;
         }
 
         .make-vendor-result {
@@ -2407,9 +2430,23 @@
             font-size: .8rem;
             color: #9a3412;
         }
+        .extraction-db-match__warning {
+            margin: 8px 0 0;
+            padding: 8px 10px;
+            border-radius: 6px;
+            border: 1px solid #f0c36d;
+            background: #fff8e8;
+            color: #7a4e00;
+            font-size: .84rem;
+            line-height: 1.4;
+        }
         .extraction-db-match--provisional {
             border-color: #fdba74;
             background: #fff7ed;
+        }
+        .extraction-db-match--weak {
+            border-color: #f0c36d;
+            background: #fffbeb;
         }
         .extraction-db-match--unmatched {
             border-style: dashed;
@@ -2437,41 +2474,50 @@
             gap: 6px;
             line-height: 1.25;
         }
+        .extraction-db-candidates__summary {
+            white-space: pre-wrap;
+            tab-size: 4;
+        }
         .extraction-db-candidates__link {
             display: inline-flex;
             flex-wrap: wrap;
             align-items: center;
             gap: 6px;
-            margin: 0;
-            padding: 0;
+            width: 100%;
+            text-align: left;
             border: 0;
             background: transparent;
+            padding: 4px 0;
+            cursor: pointer;
             color: inherit;
             font: inherit;
-            text-align: left;
-            cursor: pointer;
         }
         .extraction-db-candidates__link:hover {
-            color: #b91c1c;
+            color: var(--primary, #1d4ed8);
         }
         .extraction-db-candidates__link:hover .muted {
-            color: #dc2626;
+            color: inherit;
         }
         .extraction-db-candidates__list li.is-selected {
-            color: var(--text);
+            font-weight: 600;
         }
         .extraction-db-candidates .muted {
             color: var(--text-muted);
         }
         .extraction-db-candidates__pct {
-            flex: 0 0 auto;
-            font-variant-numeric: tabular-nums;
-            white-space: nowrap;
             color: var(--text-muted);
+            font-variant-numeric: tabular-nums;
         }
         .extraction-db-candidates__selected {
             color: #15803d;
-            white-space: nowrap;
+            font-size: .75rem;
+            font-weight: 600;
+        }
+        .extraction-db-candidates__action {
+            margin-left: auto;
+            color: #1d4ed8;
+            font-size: .75rem;
+            font-weight: 600;
         }
 
         .extraction-input {
@@ -2509,7 +2555,8 @@
         }
 
         .extraction-input--textarea {
-            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font: inherit;
+            font-size: inherit;
             resize: vertical;
         }
 
@@ -3206,6 +3253,17 @@
         .dark-mode .extraction-db-match--provisional {
             background: rgba(251, 146, 60, 0.14);
             border-color: rgba(251, 146, 60, 0.45);
+        }
+
+        .dark-mode .extraction-db-match--weak {
+            background: rgba(122, 78, 0, 0.22);
+            border-color: rgba(240, 195, 109, 0.45);
+        }
+
+        .dark-mode .extraction-db-match__warning {
+            border-color: rgba(240, 195, 109, 0.45);
+            background: rgba(122, 78, 0, 0.28);
+            color: #fde68a;
         }
 
         .dark-mode .extraction-db-match__summary {

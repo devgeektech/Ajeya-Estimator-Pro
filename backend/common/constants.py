@@ -33,6 +33,11 @@ EMBEDDING_DIMENSION = 1536
 # Below this score (0-100), no product is auto-selected (pending item).
 MATCH_CONFIDENCE_THRESHOLD = 30
 
+# Analysis UI: leave Category/Sub/Class/Size/Unit/Capacity/Attributes empty when
+# match confidence is below this (expert fills or Selects a candidate). Confirm /
+# provisional rules still use MATCH_CONFIDENCE_THRESHOLD.
+ANALYSIS_INPUT_FILL_CONFIDENCE = 50
+
 # After first DB mapping, rematch weak products until this confidence (or unmatched).
 # Mirrors expert Re-analyse gains from taxonomy/schema alignment.
 REFINE_MATCH_CONFIDENCE_TARGET = 70

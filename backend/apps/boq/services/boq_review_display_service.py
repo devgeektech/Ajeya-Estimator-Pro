@@ -9,8 +9,14 @@ from apps.boq.services.boq_extraction_service import (
     quantity_display_fields,
     rehydrate_products_quantity_from_group,
 )
+from apps.boq.services.boq_row_fields import (
+    DESCRIPTION_KEYS as _DESCRIPTION_KEYS,
+    QTY_KEYS as _QTY_KEYS,
+    UNIT_KEYS as _UNIT_KEYS,
+    field_from_map as _field_from_map,
+    ordered_boq_rows as _ordered_boq_rows,
+)
 from apps.boq.services.boq_row_grouping_service import grouped_anchor_rows
-from apps.boq.services.make_list_constraint_service import walk_rows_tree
 from apps.boq.services.serial_normalizer import (
     analysis_fields,
     detect_serial_key,
@@ -19,10 +25,6 @@ from apps.boq.services.serial_normalizer import (
     nearest_structural_serial,
     workbook_serial,
 )
-
-_DESCRIPTION_KEYS = ("description", "item_description", "particulars", "item")
-_QTY_KEYS = ("qty", "quantity", "qnty", "nos")
-_UNIT_KEYS = ("unit", "uom")
 
 
 def _qty_slot_row_ids(group_by_row: dict[str, dict[str, Any]]) -> set[str]:
@@ -83,21 +85,6 @@ REVIEW_UI_HEADERS = [
     "TOTAL LABOUR",
     "Total Amount",
 ]
-
-
-def _field_from_map(fields: dict[str, Any], keys: tuple[str, ...]) -> Any:
-    for key in keys:
-        value = fields.get(key)
-        if value not in (None, ""):
-            return value
-    return None
-
-
-def _ordered_boq_rows(boq_data: dict) -> list[dict[str, Any]]:
-    flat_rows = boq_data.get("rows") or []
-    if flat_rows:
-        return flat_rows
-    return walk_rows_tree(boq_data.get("rows_tree") or [])
 
 
 def _product_base_serial(

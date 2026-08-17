@@ -163,7 +163,7 @@
                         type="button"
                         class="btn btn--xsmall btn--boq-analyse"
                         :disabled="activeIsReanalysing"
-                        title="Re-analyse this product using BOQ row text, filled fields, and prior DB match"
+                        title="Re-analyse using your AI Description, filled inputs, and the full BOQ section"
                         @click="window.reanalyseActiveExtractionProduct($el, '{% url "boq:row_extract" boq.pk line.row_id %}')"
                     >
                         <span x-text="activeIsReanalysing ? 'Re-analysing…' : 'Re-analyse'"></span>
@@ -213,9 +213,11 @@
                 </div>
                 {% endif %}
                 {% if product.db_match %}
-                <div class="extraction-db-match extraction-db-match--{{ product.db_match.status|default:product.db_match_status }}">
+                <div class="extraction-db-match extraction-db-match--{{ product.db_match.status|default:product.db_match_status }}{% if product.show_weak_match_warning %} extraction-db-match--weak{% endif %}">
                     <div class="extraction-db-match__head">
-                        {% if product.db_match.status == 'matched' %}
+                        {% if product.show_weak_match_warning %}
+                        <span class="extraction-db-match__heading">Low-confidence match</span>
+                        {% elif product.db_match.status == 'matched' %}
                         <span class="extraction-db-match__heading">Matched database product</span>
                         {% elif product.db_match.status == 'provisional' %}
                         <span class="extraction-db-match__heading">Suggested database product</span>
@@ -228,35 +230,77 @@
                         <span class="badge badge--{{ product.match_percentage_band|default:product.attribute_confidence_band }} extraction-confidence-badge">
                             {{ product.match_percentage|default:product.attribute_confidence|floatformat:0 }}% match
                         </span>
+                        {% if can_edit_extraction and product.show_confirm_match %}
+                        <button
+                            type="button"
+                            class="btn btn--xsmall btn--primary extraction-confirm-match"
+                            title="Confirm this product is correct and set match to 100%"
+                            @click="window.confirmExtractionMatch($el, '{% url 'boq:extraction_edit' boq.pk %}', '{{ product.source_row_id }}', {{ product.product_index }})"
+                        >Confirm</button>
+                        {% endif %}
                     </div>
-                    {% if product.missing_attribute_count %}
+                    {% if product.show_weak_match_warning and product.weak_match_message %}
+                    <p class="extraction-db-match__warning" role="status">{{ product.weak_match_message }}</p>
+                    {% endif %}
+                    {% if product.missing_attribute_count and not product.show_weak_match_warning %}
                     <p class="extraction-db-match__missing">
                         {{ product.missing_attribute_count }} missing attribute(s) —
                         fill them below, then click <strong>Re-analyse</strong> on
-                        this product to rematch using your filled values, the BOQ row,
-                        and prior DB match details.
+                        this product. Rematch uses your AI Description (editable),
+                        filled values, the full BOQ section, and refreshes
+                        database candidates.
                     </p>
                     {% endif %}
-                    {% if product.db_match.notes %}
+                    {% if product.db_match.notes and not product.show_weak_match_warning %}
                     <p class="extraction-db-match__notes">{{ product.db_match.notes }}</p>
                     {% endif %}
                 </div>
-                {% elif product.db_match_status == 'unmatched' %}
-                <div class="extraction-db-match extraction-db-match--unmatched">
+                {% elif product.show_weak_match_warning or product.db_match_status == 'unmatched' %}
+                <div class="extraction-db-match extraction-db-match--{% if product.db_match_status == 'unmatched' %}unmatched{% else %}weak{% endif %}">
                     <div class="extraction-db-match__head">
-                        <span class="extraction-section-label">No database match yet</span>
+                        {% if product.db_match_status == 'unmatched' and product.db_candidates and not product.show_weak_match_warning %}
+                        <span class="extraction-db-match__heading">Suggested database candidates</span>
+                        {% elif product.db_match_status == 'unmatched' %}
+                        <span class="extraction-db-match__heading">No database match yet</span>
+                        {% else %}
+                        <span class="extraction-db-match__heading">Low-confidence match</span>
+                        {% endif %}
+                        <span class="badge badge--{{ product.match_percentage_band|default:'red' }} extraction-confidence-badge">
+                            {{ product.match_percentage|floatformat:0 }}% match
+                        </span>
+                        {% if can_edit_extraction and product.show_confirm_match %}
+                        <button
+                            type="button"
+                            class="btn btn--xsmall btn--primary extraction-confirm-match"
+                            title="Confirm this product is correct and set match to 100%"
+                            @click="window.confirmExtractionMatch($el, '{% url 'boq:extraction_edit' boq.pk %}', '{{ product.source_row_id }}', {{ product.product_index }})"
+                        >Confirm</button>
+                        {% endif %}
                     </div>
+                    {% if product.weak_match_message %}
+                    <p class="extraction-db-match__warning" role="status">{{ product.weak_match_message }}</p>
+                    {% else %}
                     <p class="extraction-db-match__notes">
-                        Fill known attributes and product fields, then click
-                        <strong>Re-analyse</strong> on this product to rematch
-                        (keeps your edits; does not re-extract the whole section).
+                        {% if product.db_candidates %}
+                        Similar products are listed under <strong>Top database candidates</strong>
+                        below — select any of them, or edit the inputs and click
+                        <strong>Re-analyse</strong>.
+                        {% else %}
+                        Edit the <strong>AI Description</strong> (e.g. correct the
+                        product in plain language) and input columns, then click
+                        <strong>Re-analyse</strong> on this product.
+                        {% endif %}
                     </p>
+                    {% endif %}
                 </div>
                 {% endif %}
 
                 {% if product.db_candidates %}
-                <details class="extraction-db-candidates">
-                    <summary>Top database candidates ({{ product.db_candidates|length }})</summary>
+                <details class="extraction-db-candidates"{% if product.show_candidates_open or product.show_weak_match_warning or product.db_match_status == 'unmatched' %} open{% endif %}>
+                    <summary>
+                        Top database candidates ({{ product.db_candidates|length }})
+                        {% if can_edit_extraction %} — click any to select{% endif %}
+                    </summary>
                     <ul class="extraction-db-candidates__list">
                         {% for candidate in product.db_candidates %}
                         <li class="{% if candidate.is_selected %}is-selected{% endif %}">
@@ -267,16 +311,18 @@
                                 title="{% if candidate.is_selected %}Reload this database product into the form{% else %}Select this database product{% endif %}"
                                 @click="window.selectExtractionCandidate($el, '{% url 'boq:extraction_edit' boq.pk %}', '{{ line.row_id }}', {{ product.product_index }}, {{ candidate.id }})"
                             >
-                                <span>{{ candidate.summary }}</span>
+                                <span class="extraction-db-candidates__summary">{{ candidate.summary }}</span>
                                 {% if candidate.confidence is not None %}
                                 <span class="extraction-db-candidates__pct">{{ candidate.confidence|floatformat:0 }}%</span>
                                 {% endif %}
                                 {% if candidate.is_selected %}
                                 <span class="extraction-db-candidates__selected">Selected</span>
+                                {% else %}
+                                <span class="extraction-db-candidates__action">Select</span>
                                 {% endif %}
                             </button>
                             {% else %}
-                            <span>{{ candidate.summary }}</span>
+                            <span class="extraction-db-candidates__summary">{{ candidate.summary }}</span>
                             {% if candidate.confidence is not None %}
                             <span class="extraction-db-candidates__pct">{{ candidate.confidence|floatformat:0 }}%</span>
                             {% endif %}
@@ -305,8 +351,8 @@
                             <textarea
                                 name="{{ field.key }}"
                                 class="extraction-input extraction-input--textarea extraction-input--wrap"
-                                rows="1"
-                                placeholder="Optional — fill when known"
+                                rows="2"
+                                placeholder="Plain-language product description — edit if wrong, then Re-analyse"
                             >{{ field.value }}</textarea>
                             {% else %}
                             <input

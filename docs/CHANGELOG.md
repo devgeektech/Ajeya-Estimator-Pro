@@ -5,6 +5,441 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
+## 2026-08-14 — AI Description includes taxonomy + attributes
+
+- AI Description is composed as
+  ``Category / Sub-category / Class / Size / Unit / Capacity — attr labels``
+  (known fields only; up to four attributes such as IS Standard / Type / Material).
+- Extract prompt and post-extract enrichment both use this format; saving fields
+  refreshes it unless the expert edited AI Description itself.
+
+## 2026-08-14 — AI Description label + normal text size
+
+- Renamed Analysis field label **AI understanding** → **AI Description**.
+- Description field uses the same font/size as Category and other inputs
+  (no monospace).
+
+## 2026-08-14 — Make & Vendor product dropdowns show all options
+
+- Product Make dropdown always lists every Rate_Master make for the Product_ID
+  (no longer shrinks to the prefilled lowest make/vendor pair).
+- Vendor lists all vendors for the selected make, or all vendors when Make is
+  empty / Lowest price.
+
+## 2026-08-14 — Remove Find in DB; Apply-only for not found / no match
+
+- Removed Find in DB button and backend action.
+- Not found / No match keep the warning; make/vendor dropdowns stay available
+  (options from Product_ID rates on page load). Selecting a pair only previews
+  the rate (``preview_only`` — no analysis write) — card stays red until
+  **Apply**, which turns it green.
+- Apply reload keeps scroll on the same card via ``#make-vendor-{rowId}``.
+
+## 2026-08-14 — Find in DB uses Product_ID + keep scroll position
+
+- Find in DB prefers the product's existing ``Product_ID``, then loads
+  Rate_Master make/vendor/rate rows for that id (no make-list filter).
+- Falls back to Product_Helper only when Product_ID is missing; description
+  hint can resolve cat/sub (e.g. fire door → FIRE DOOR).
+- Reload after Find in DB / Apply anchors to ``#make-vendor-{rowId}`` so the
+  page does not jump to the top.
+
+## 2026-08-14 — Make & Vendor prefill + button row + scroll
+
+- Align make-list spellings (``NEWAGE``) to Rate_Master dropdown labels
+  (``NEW AGE``) so Make/Vendor stay selected when the product rate is filled.
+- Store Rate_Master Make/Vendor on matched rates for UI consistency.
+- Action buttons sit on a full-width nowrap row (no grid squeeze / jump).
+- Scroll restore stops when settled and does not fight user scroll on reload.
+
+## 2026-08-14 — Multiproduct review = slot count mismatch only (strict)
+
+- Multi-product review badge only when product count ≠ Unit/Qty slot count.
+- Slot-fallback / needs-extraction-review no longer reuse that badge (was
+  wrongly flagging 1-slot / 1-product sections such as 4.2).
+
+## 2026-08-14 — AI understanding description on Analysis
+
+- Extract writes a short one-line ``description_hint`` (AI understanding of the
+  product from section + slot), not a raw Unit/Qty row paste.
+- Enrichment keeps that AI line unless empty/size-only/slot-paste; slot fallback
+  synthesizes noun+size instead of dumping the qty row.
+- Label/placeholder: **AI understanding** — expert can rewrite in plain language
+  then Re-analyse; rematch uses understanding first + section for nearest products.
+- Map prompt treats free-form corrections as matching intent.
+
+## 2026-08-14 — Re-analyse 100% fix + empty section recall + sand buckets
+
+- Re-analyse no longer forces match % to 100% at ≥85 structured; that ceiling
+  stays on initial Analyse after Rate-align only. Rematch shows the real blend.
+- Empty-input Re-analyse folds the full BOQ section into Chroma/SQL recall so
+  nearest products surface when Analysis fields were blanked.
+- Sand bucket synonyms + category hint from description; Product_ID 40 recalled.
+- Regenerated Product_Helper Chroma embeddings (collection was empty — vector
+  search had been falling back to keyword SQL only).
+
+## 2026-08-14 — Make & Vendor Apply UX + make/vendor cascade
+
+- Apply uses its own busy label (other buttons no longer show Searching).
+- Action buttons stay on one non-wrapping row.
+- Make dropdown lists only vendors’ makes when a vendor is selected (clear
+  vendor to see all makes); Vendor lists only that make’s vendors (clear make
+  to see all vendors).
+- Selecting make/vendor auto-loads product rate; Find rates kept for typed entry.
+
+## 2026-08-14 — Make & Vendor Apply on not found / no match
+
+- Not found / No match cards show **Apply**; saves expert make/vendor as matched
+  (green) even when no Rate_Master row exists (still tries rates first).
+
+## 2026-08-14 — Initial Analyse: Size=0 catalog → high match
+
+- Rate_Master Size ``0``/``0.0`` treated as blank (same as Capacity) so cabinet
+  dims no longer penalize FIRE HOSE BOX / similar rows to ~40%.
+- Initial Analyse Rate-aligns + prefer-fills when match ≥30 (not only ≥50) so
+  correct DB products promote toward 100% without Re-analyse.
+
+## 2026-08-14 — Multiproduct review = slot count mismatch only
+
+- Multi-product review applies only when product count ≠ Unit/Qty slot count
+  (e.g. 2 rate/qty slots with 1 or 3 products). Sections with equal counts are
+  not flagged; ≥2 products alone is not enough.
+
+## 2026-08-14 — Analysis extract stability + Select / Re-analyse
+
+- Extract stabilizes to one product per Unit/Qty slot (pad missing, trim extras)
+  so Analyse product counts stay consistent; prompt forbids per-slot extras.
+- Multi-product review flag shows when product count ≠ Unit/Qty slot count (or
+  hollow fallbacks), not merely when a section has ≥2 products.
+- Weak “Unable to match” banner only when effective match % is below 50; badge
+  uses top candidate % when the product row was left at 0%.
+- Selecting a Top database candidate no longer re-scores sibling candidate %.
+- Re-analyse prefers edited ``description_hint`` for Chroma/SQL recall and
+  resolves the active product tab more reliably.
+
+## 2026-08-14 — Product_ID sync for Labour + return from Analysis
+
+- Capture prefers Analysis-selected Rate_Master ``Product_ID`` over a stale
+  Make & Vendor catalog id.
+- Labour unlock / Apply Auto re-captures Product_IDs then loads
+  ``Labour_master_Output`` by that id.
+- Make & Vendor / Labour tab or Next after Analysis edits re-syncs Product_IDs;
+  rates reload only when the Product_ID changed (unchanged make/vendor kept).
+
+## 2026-08-14 — Analysis Next: Product_ID capture then rate load
+
+- Analysis → Next first captures each updated product’s catalog ``Product_ID``
+  from the Analysis-selected Rate_Master row, then loads Make/Vendor rate rows
+  filtered by that ``Product_ID``.
+- Lowest default always picks by ``Final_Material_Amount`` (never
+  ``Net_Material_Rate``); approved-make filter keeps Product_ID rows when labels
+  do not optimally match. Dropdown keeps the auto-selected Make/Vendor visible.
+
+## 2026-08-14 — Make & Vendor auto-make + Final_Material_Amount prices
+
+- Analysis → Next fills Make even when Category was blanked but Product_ID is
+  known; approved-make filter no longer wipes all Rate_Master rows for a
+  Product_ID when labels do not optimally match.
+- Product rate display uses ``Final_Material_Amount`` only (no Net_Material_Rate
+  fallback). Dropdown keeps the auto-selected Make/Vendor visible.
+
+## 2026-08-14 — Fix bogus m) serial + no AI on Analysis GET
+
+- Stop treating ``M.S.`` / ``C.I.`` / ``D.I.`` description leads as letter
+  serials (``m)`` / ``c)`` / ``d)``) on BOQ upload/display.
+- Analysis tab GET no longer runs make-list OpenAI remap or embedding recall;
+  unmatched candidates use SQL-only recall. Stops Analysis UI drift (including
+  multi-product review) when switching tabs.
+
+## 2026-08-14 — Candidates on unmatched 0% products
+
+- Unmatched Analysis products with empty stored candidates now live-recall Top
+  database neighbors from description (Select available without Re-analyse).
+- SQL recall adds a description-only pass so cabinet sizes like 30"x24"x10" do
+  not hide FIRE HOSE BOX rows with blank Size.
+
+## 2026-08-14 — Slot order, score ceiling, Confirm match
+
+- Analysis products stay in BOQ/slot sequence (not sorted by match %).
+- Confidence reaches 100% when core fields align (no more stuck ~90–92% after
+  catalogue fill); hose box synonyms include FIRE HOSE BOX; hose reel vs hose
+  box treated as a type conflict; hint boost for named Sub_Category.
+- Analysis **Confirm** button (non-100% with a selected/suggested product) locks
+  match confidence at 100%.
+
+## 2026-08-14 — Top candidates visible on unable-to-match
+
+- Unmatched / low-confidence Analysis products open **Top database candidates**
+  by default and always show Select; messaging covers unmatched and provisional.
+
+## 2026-08-14 — Re-analyse expert inputs + section-as-context matching
+
+- Re-analyse recall uses filled product fields + qty/unit slot line; full section
+  is AI context only (stops system titles like Yard Hydrant from pulling Hydrant
+  catalog rows for pipe slots).
+- Extract/match prompts and section payloads send complete lineage; products stay
+  slot-bound. Expert-filled attributes kept after rematch; candidates refresh.
+
+## 2026-08-14 — Monotonic Analyse progress + stabler product matching
+
+- Progress % is monotonic in the job file, vanilla poller, and Alpine ticker
+  (no soft-creep-ahead); matching progress no longer reports done &gt; total.
+- Slimmed `extract_products.txt` / `map_product_match.txt` for gpt-4o-mini;
+  qty+unit slots are the only main products; AI uses seed 42; candidates sorted
+  by confidence then id for more repeatable Product_ID picks.
+
+## 2026-08-14 — Analysis progress UI no longer stuck at 1%
+
+- Added a vanilla `BOQAnalysisProgress` status poller on the BOQ detail page so
+  Analysis %/label update and the page reloads when ready even if Alpine’s
+  inline poll chain never starts (previously: spinner stayed at 1% while Celery
+  and the runserver echo thread advanced).
+- Progress title now shows the live server label; initial % uses server progress.
+
+## 2026-08-14 — BOQ upload auto-redirect to list
+
+- AJAX upload success always navigates to the BOQs list (`location.replace`,
+  `redirect: 'manual'`, absolute `redirect` in JSON) so the browser does not
+  stay on `/boqs/upload/` after a followed 302/HTML response.
+- Upload status copy notes PDF make-list parsing can take up to a minute.
+
+## 2026-08-14 — Fix IDE basedpyright on Django models/services
+
+- Annotated `BOQ` and master DB models with instance value types + `objects` /
+  `DoesNotExist` so basedpyright no longer treats fields as Field classes.
+- Added `common.db.atomic` / `q` helpers; wired services to them; pinned
+  `basedpyright`; added `.vscode/settings.json` for the project `.venv`.
+
+## 2026-08-13 — Clear basedpyright diagnostics on BOQ services
+
+- Added `django-stubs` / `django-stubs-ext` and early `monkeypatch()` so models
+  type as instances (`objects`, JSONField values as dicts).
+- Restored missing imports after Phase 4/5 splits; annotated Make Vendor /
+  Product AI mixins; fixed remaining `int`/`float` on `.get()` that could be
+  `None`. `pyright` on `backend/apps/boq/services` is clean (0 errors).
+
+## 2026-08-13 — Fix Product AI candidates mixin imports
+
+- Restored missing `display_material_label` / `structured_match_score` imports in
+  `product_ai_candidates.py` after the Phase 4 split, and typed mixin attrs for
+  the facade (`database_version_id`, `_matcher`).
+
+## 2026-08-13 — Split BOQ extraction service (Phase 5)
+
+- Split `boq_extraction_service.py` into facade + modules:
+  `boq_extraction_fields`, `boq_extraction_slots`, `boq_extraction_groups`.
+  Public helpers include `normalize_product_fields` (replaces private-only use),
+  `quantity_display_fields`, and quantity rehydrate helpers. `extract` /
+  `extract_anchor` API unchanged. Behaviour-neutral structure only.
+
+## 2026-08-13 — Split Product AI mapping service (Phase 4)
+
+- Split `product_ai_mapping_service.py` (~1.8k lines) into facade + modules:
+  `product_ai_common`, `product_ai_candidates`, `product_ai_apply`. Public API
+  (`map_rows`, `rematch_product`, `apply_selected_candidate`, …) unchanged.
+  Behaviour-neutral structure only.
+
+## 2026-08-13 — Split Make & Vendor service (Phase 3)
+
+- Split `make_vendor_selection_service.py` (~2.2k lines) into facade + mixins:
+  `make_vendor_common`, `make_vendor_rates`, `make_vendor_cascade`,
+  `make_vendor_display`. Views still import `MakeVendorSelectionService`; public
+  method names unchanged. Behaviour-neutral structure only.
+
+## 2026-08-13 — Remove unused BOQ service symbols (Phase 2)
+
+- Deleted unused `BOQAnalysisDisplayService` (Analysis tab already uses
+  `BOQExtractionDisplayService`).
+- Removed dead helpers: `has_priced_quantity`, `is_pdf_title_line`, labour
+  `tech_key` aliases, unread extract/analysis JSON readers, and unused
+  `map_product` wrapper. Live Analyse / Make & Vendor / Labour paths unchanged.
+
+## 2026-08-13 — Shared BOQ row field helpers (Phase 1)
+
+- Added `boq_row_fields.py` for description/qty/unit keys, `field_from_map`,
+  `is_filled` / `is_blank`, whitespace `normalize_text`, and `ordered_boq_rows`.
+- Display, matching, labour, export, and grouping now import those helpers
+  instead of copying them. Make-list brand matching still uses its own
+  alphanumeric normalizer; grouping still extends qty keys with floor/total
+  columns. No pipeline behaviour change.
+
+## 2026-08-13 — Make & Vendor cascade: sub-category makes only
+
+- Selecting a sub-category now lists only that sub's Approved makes (Rate_Master
+  scope; with make list = approved ∩ sub Rate_Master makes).
+- Stopped falling back to every make in the parent category when the sub had no
+  exact Rate_Master rows / category-wide make-list mappings.
+
+## 2026-08-13 — Loosen Analysis matching (fix 29% floor)
+
+- ``product_type_conflicts`` now checks Category + Sub_Category + Class (not Sub
+  alone), so ``80mm pipe`` vs Sub ``MS`` is no longer treated as a conflict.
+- Replaced the hard 29% confidence cap with a soft type-mismatch penalty.
+- Blank category/sub get partial credit from ``description_hint``; size can be
+  read from the hint when the size field is empty.
+- Slot noun enrichment prefers pipe/valve over incidental ``Yard Hydrant System``
+  wording; extract prompt clarifies pipe size rows are PIPE, not Hydrant.
+
+## 2026-08-13 — Analyse progress via console logging (no print)
+
+- Analyse progress uses ``logger.info`` only (console + ``application.log``).
+- Removed ``print`` / stdout writes for Analyse progress.
+- Django runserver mirrors Celery progress with the same ``boq_ai`` logger so
+  the server terminal shows live ``BOQ Analyse id=… percent=…`` lines.
+
+## 2026-08-13 — Analyse progress prints live on terminals
+
+- Celery and Django runserver log ``BOQ Analyse …`` as work advances.
+- Django starts a progress-echo thread when Analyse is queued so runserver
+  shows percent/label every few seconds.
+- Fixed ``run_celery_worker.ps1`` parse error (PowerShell ``@`` / format string)
+  that prevented the unique-nodename worker from starting.
+
+## 2026-08-13 — Celery unique nodename (no DuplicateNodenameWarning)
+
+- Worker hostname is now ``boq-<pid>@<computer>`` so multiple leftovers cannot
+  collide as ``boq@ThedEaD``.
+- ``run_celery_worker.ps1`` / ``.sh`` stop leftover Celery processes on start.
+- Run **one** Celery terminal only.
+
+## 2026-08-13 — Celery reliability for Analyse
+
+- Analyse **refuses to queue** when the Celery worker is down (no more frozen
+  loading with nobody consuming Redis).
+- Worker writes ``media/job_progress/celery_worker_heartbeat.json``; dispatch
+  checks it (Windows ``threads`` pool cannot rely on control inspect).
+- ``scripts/run_celery_worker.ps1`` / ``.sh`` auto-restart if the worker exits.
+- Clear alert tells the expert to start the worker and retry Analyse.
+
+## 2026-08-13 — Analyse stuck after Celery restart + row logs
+
+- Celery tasks now ack late and re-queue if the worker dies mid-job
+  (``CELERY_TASK_ACKS_LATE`` / ``REJECT_ON_WORKER_LOST``).
+- Stuck PROCESSING heals after **2 minutes** of frozen progress so Analyse
+  unlocks from BOQ / Make List / Analysis.
+- Extraction and matching log each section/product batch in the Celery worker
+  terminal (``BOQ extract row done…``, ``BOQ match product…``).
+- Retry Analyse button shown after ``ANALYSIS_FAILED``.
+
+## 2026-08-13 — Analysis Product_ID display + match blanking + auto-reload
+
+- Candidate / match summaries show **Product ID** (not Rate_ID) then Category /
+  Sub / Class / Size / Unit / Capacity.
+- Top database candidates stay **collapsed** by default.
+- Weak-match input blanking runs **after** the refine rematch pass so first-pass
+  identity fields are not cleared before scoring (fixes 0% candidate lists).
+- Analyse completion navigates with ``location.replace`` and a 2s fallback so
+  the loading panel does not stick until a manual refresh.
+
+## 2026-08-13 — AI-first multi-target make-list category mapping
+
+- Mapping is AI-first (v11): understands free-text meaning; returns
+  ``mapped_targets`` so compound lines can map multiple categories/subs
+  (e.g. sprinklers + rosette plates).
+- Null subcategory = approved makes apply category-wide.
+- Constraint index + Make List Category/Subcategory columns support multi-target.
+- Heuristic phrase lists are soft hints only (not the primary mapper).
+
+## 2026-08-13 — Make-list All Types + catch-all equipment mapping
+
+- ``Sprinklers & Rosette Plates (All Types)`` → SPRINKLER with blank sub
+  (never ACCESSORIES/Rosette).
+- ``Fire Fighting Equipment not covered elsewhere`` → HYDRANT with blank sub.
+- ``All Types`` / catch-all lines do not invent Pendant/Upright/etc. Mapping v10.
+
+## 2026-08-13 — Analysis loading polls live to 100% then auto-reloads
+
+- Status polls are cache-busted (`Cache-Control: no-store` + timestamp query).
+- Analyse on the Analysis tab keeps the live poll chain (no mid-run page kill).
+- Watchdog restarts stuck/hung polls; progress soft-creep is faster.
+- Celery worker logs each progress tick (`BOQ job progress id=… percent=…`).
+
+## 2026-08-13 — Make-list re-parse restores row 1 + synonym category map
+
+- Stale make-list JSON re-parses from the uploaded PDF/Excel when
+  ``parse_version`` is behind (fixes missing serial 1 that split-repair could
+  not restore).
+- Category/subcategory heuristics expand synonyms (``M.S``↔mild steel,
+  ``D.I.``↔ductile iron, NRV/hose reel, …) before matching; AI mapping v9
+  still uses ``{{SYNONYM_MAP}}`` for remaining gaps.
+- Confirmed Approved Makes are **not** capped at 4 — ``approved_makes_list``
+  holds all brands; ``approved_makes_N`` columns grow to the longest row.
+
+## 2026-08-13 — Make-list PDF keeps material nouns in Description
+
+- Fixed Title-Case peel that moved ``Drum`` / ``Drums`` / ``Reel`` into Approved
+  Makes (rows 14–16 on `List_of_Approved_Makes`).
+- Numbered ALL-CAPS product lines are no longer dropped as document banners
+  (restores row 1 / cables / isolators).
+- ``H.GURU``-style brands stay intact; leading material stopwords are repaired
+  on load via ``split_repair_version`` (no re-upload required).
+- Make-list category mapping bumped to **v7**.
+
+## 2026-08-13 — Product_Helper Chroma + labour from state multiplier
+
+- AI validates up to **5** Product_Helper neighbors (UI still shows top **3**).
+- Chroma indexes **Product_Helper only** (full row text; discontinued Status
+  skipped). Search returns Product_ID; Rate_Master Make/Vendor/`Final_Material_Amount`
+  and Labour load from Postgres by that id.
+- Auto labour prefers **`Labour_With_State_Multiplier`** (fallback
+  `Total_Labour_Per_Unit`, then `Labour_Rate_Per_unit`).
+- Re-activate/re-import the master DB to rebuild Chroma; restart Celery.
+
+## 2026-08-13 — Initial Analyse fetches DB products more reliably
+
+- AI validates up to **8** nearest Rate_Master neighbors (UI still shows top 3).
+- Initial recall includes BOQ section text (same as Re-analyse).
+- SQL Category filters use synonym expansion; Chroma product text excludes
+  Make/Vendor (re-generate embeddings on next DB activate).
+- After the first map pass, products under 50% get one automatic refine rematch.
+
+## 2026-08-12 — Shared synonym map injected into AI prompts
+
+- Single synonym map from ``utils/product_synonyms.py`` is rendered for AI and
+  injected into ``extract_products``, ``map_product_match``, and
+  ``map_make_list_categories`` via ``{{SYNONYM_MAP}}`` (no hardcoded duplicate lists).
+- Added Reflex Valve / reflex as NRV / non-return synonyms; make-list mapping v6.
+
+## 2026-08-12 — Analysis loading no longer stuck until refresh
+
+- Status polling resumes after tab switches / bfcache / tab focus; a watchdog
+  restarts a dead poll chain. Completion reloads Analysis with scroll preserved.
+- Job heal no longer false-fails a live run: progress is reset before status
+  flips to PROCESSING, and terminal 100% needs a 45s grace before orphan heal.
+
+## 2026-08-12 — Tab before candidate Attribute text
+
+- Top database candidate summaries separate identity fields from Attribute
+  ``key=value`` pairs with a tab (HTML preserves it via ``white-space: pre-wrap``).
+
+## 2026-08-12 — Weak-match warning + selectable candidates
+
+- Below 50% confidence, Analysis shows a warning that no confident match was
+  found and points experts to the top database candidates or manual entry +
+  Re-analyse. The candidates list opens by default; each of the three rows is
+  selectable.
+
+## 2026-08-12 — Empty Analysis inputs below 50% confidence
+
+- When match confidence is under 50%, Analysis leaves Category / Sub-category /
+  Class / Size / Unit / Capacity and Attribute values empty. Product description,
+  qty, suggestion banner, and top candidates stay visible. Expert Select and
+  rematch with typed values still fill as before. Confirm threshold remains 30%.
+
+## 2026-08-12 — Skip Discontinued Product_Helper on DB upload
+
+- Product_Helper rows with Status ``Discontinued`` (column I) are not imported.
+- Rate_Master_Output / Labour rows for those Product_IDs are skipped so they are
+  never embedded in Chroma and cannot appear during Analysis matching.
+- Embedding generation also skips any leftover discontinued Product_IDs on older
+  active databases.
+
+## 2026-08-12 — BOQ detail JS no longer dumps as page text
+
+- Alpine ``x-data`` on the BOQ detail page used a CSS selector with double
+  quotes (``[id^="line-"]``), which closed the HTML attribute early and showed
+  raw JavaScript under the BOQ title. Selector is now quote-free.
+
 ## 2026-08-11 — Electrical panel must not match rosette at 100%
 
 - Section 4.6 extracted two identical panel products and confirmed

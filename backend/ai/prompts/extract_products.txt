@@ -1,58 +1,45 @@
-You extract purchasable products from BOQ sections for a fire-protection / MEP estimator.
+You extract purchasable products from BOQ sections (fire protection / MEP).
 
-Source of truth: BOQ text only. Prefer null over guessing. Downstream matching finds
-Rate_Master_Output rows — do not invent catalog facts, prices, or vendors.
+Return valid JSON only. Prefer null over guessing. No prices, vendors, or invented catalog rows.
 
-Return valid JSON only.
+READ THE WHOLE SECTION FIRST:
+- ``description`` / ``lineage_lines`` give the full meaning of the package (system title,
+  specs, notes). Use them as CONTEXT only.
+- Products come ONLY from ``slots`` (rows with Quantity AND Unit).
+- A system title is not a product. Example: under ``Yard Hydrant System``, a size row
+  with qty/unit that describes pipe/piping is a PIPE product — not a Hydrant —
+  even though the word hydrant appears in the section title.
+- Spec-only lines (Speed, Head, Pressure, notes) become attributes on the slot products.
 
-Section / slots:
-- Each input item is one section (serial package + children). Shared parent text in
-  ``description`` / ``lineage_lines`` applies to every product.
-- ``slots`` lists every filled Unit+Qty row. Return **≥ ``slot_count`` products**.
-  Never omit a slot. Extras are allowed only when the BOQ clearly shows more than one
-  purchasable item on the same slot; bind extras to that slot's ``qty_row_id``.
-- Spec-only lines (Speed, Head, Capacity, Pressure, notes, Incomings) are attributes,
-  not products — unless the name is a real device (e.g. "Pressure switch") with a slot.
-- Lettered sizes (``a)``/``b)``) with qty are separate products. One Set / 1 panel /
-  electrical control panel = one product. Do not emit two copies of the same product
-  on one slot.
-- Never map electrical / control / MCC / starter panels onto ACCESSORIES /
-  ROSETTEE PLATE. If no listed category/sub fits, keep the BOQ wording and leave
-  matching unmatched/provisional.
-- Products only — no labour/installation activities.
-- ``skip_matching``=true only for empty/header sections with no purchasable product.
+Binding:
+- Exactly one product per slot. Never invent extra products for the same slot.
+- Always set ``qty_row_id``, ``source_row_id``, ``slot_index`` from that slot.
+- ``quantity`` / ``quantity_unit`` from the slot (keep 0; Rate Only / RO → ``"Rate Only"``).
+- Size/unit from that slot only. Shared parent specs (PN, flanged, IS, material) on every product.
+- Product count for a section MUST equal the number of slots in the payload.
 
-Per product (required when a product exists):
-- Always set ``qty_row_id``, ``source_row_id``, ``slot_index`` from the bound slot.
-- ``description_hint``: product type + size/rating from BOQ (e.g. "sluice valve 200mm PN16"),
-  never size alone ("200mm dia").
-- **Size from that slot only** — use ``slots[i].description`` / ``size_hint`` /
-  ``evidence_text``. Never copy the first letter size onto later products.
-- Shared parent specs (PN rating, flanged, seat, IS, body/spindle) go on **every**
-  product in the section, not only product 0.
-- ``quantity`` / ``quantity_unit``: copy from the bound slot (keep ``0``; for Rate Only /
-  RO use ``"Rate Only"`` and copy ``boq_rate`` when present).
+``description_hint`` — REQUIRED AI Description (one natural-language line, max ~200 chars):
+- Write plain English, NOT a slash-separated field dump.
+- Mention what is known: Class/material, Sub-category, Category, Size + Unit,
+  Capacity, and key attributes (IS, Type, Material, connection, …).
+  Example: ``SS branch pipe for hydrant, 20 mm dia, with is standard 903, type short branch pipe``
+  Example: ``ductile iron sluice valve, 200 mm dia, PN16, flanged ends``
+- Skip only fields that are truly unknown/null (do not invent).
+- This text is shown to the expert as **AI Description** so they can correct it.
+- NEVER paste the raw Unit/Qty row text alone (size-only lines, "as above", blanks).
+- NEVER paste the system/section title alone (e.g. not "Yard Hydrant System").
+- NEVER dump the full multi-line section. One clear product line only.
+- Prefer catalog-style naming (what would be bought) over BOQ boilerplate
+  ("providing and fixing…", "of approved make").
 
-Taxonomy (from DATABASE_CONTEXT lists — exact listed labels when they fit):
+Taxonomy (DATABASE_CONTEXT exact labels when they fit):
 - ``category`` + ``sub_category`` required when a product exists.
-- ``class`` MUST be an exact label from
-  ``classes_by_category_sub_category[category][sub_category]`` (also listed
-  deduped in ``classes``). ``0`` is a real Rate_Master Class for valves — use it
-  when listed. Never invent ``-`` / ``N/A``. Never put body material (DI, CI,
-  ductile iron, MS) in ``class`` unless that token is listed for that pair.
-- For PIPE, MS/GI stay in sub_category; Class is usually C.
-- Body material goes in ``attributes.material`` when the listed Class is ``0``
-  or another non-material token.
+- ``class`` = exact listed label (``0`` valid for valves). Body material → ``attributes.material`` when Class is ``0``.
+- Electrical / MCC / control panels are never ACCESSORIES / ROSETTEE PLATE.
 
-Fields:
-- ``size``: nominal size from the bound slot (``200`` from ``200mm dia``); else null.
-- ``unit``: measurement unit (mm, NB, inch…) — never BOQ qty UOM (Each, Nos, Mtr).
-- ``capacity``: flow/power or pressure rating from BOQ (``PN 16`` → ``PN16``); else null.
-  Do not invent a different PN from catalog memory.
-- ``make_hint``: only if brand is stated; else null.
-- ``attributes``: only keys in ``attribute_keys``. Omit empty keys. Put IS standards in
-  ``attributes.is`` when present. Do not put material/body_material in attributes when
-  that value belongs in ``class`` for the family; otherwise leave material null.
+Fields: ``size``, ``unit`` (mm/NB — not qty UOM), ``capacity``, ``make_hint`` only if brand stated, ``attributes`` only from ``attribute_keys``.
+
+{{SYNONYM_MAP}}
 
 Database context:
 {{DATABASE_CONTEXT}}
@@ -66,7 +53,7 @@ Respond with:
       "products": [
         {
           "product_index": 0,
-          "description_hint": "200mm dia double flanged sluice valve PN16",
+          "description_hint": "ductile iron sluice valve, 200 mm dia, PN16, flanged connection",
           "category": "VALVE",
           "sub_category": "SLUICE VALVE",
           "class": "0",
@@ -74,31 +61,13 @@ Respond with:
           "capacity": "PN16",
           "unit": "mm",
           "make_hint": null,
-          "attributes": {"connection_type": "flanged", "material": "ductile iron", "seat_type": "bronze/gun metal", "is": "14846"},
-          "quantity": 0,
+          "attributes": {"connection_type": "flanged", "material": "ductile iron"},
+          "quantity": 9,
           "quantity_unit": "Each",
           "qty_row_id": "r17",
           "source_row_id": "r17",
           "slot_index": 0,
-          "extraction_confidence": 0.0
-        },
-        {
-          "product_index": 1,
-          "description_hint": "150mm dia double flanged sluice valve PN16",
-          "category": "VALVE",
-          "sub_category": "SLUICE VALVE",
-          "class": "0",
-          "size": "150",
-          "capacity": "PN16",
-          "unit": "mm",
-          "make_hint": null,
-          "attributes": {"connection_type": "flanged", "material": "ductile iron", "seat_type": "bronze/gun metal", "is": "14846"},
-          "quantity": 9,
-          "quantity_unit": "Each",
-          "qty_row_id": "r18",
-          "source_row_id": "r18",
-          "slot_index": 1,
-          "extraction_confidence": 0.0
+          "extraction_confidence": 0.9
         }
       ]
     }

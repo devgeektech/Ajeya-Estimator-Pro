@@ -38,11 +38,14 @@ def gather_labour_charges(row: Labour_master_Output) -> dict[str, Any]:
     for snapshot_key, model_field in LABOUR_CHARGE_COLUMN_MAP:
         components[snapshot_key] = _model_value(row, model_field)
 
-    # Preferred BOQ labour unit amount: Total_Labour_Per_Unit (Product_ID join).
-    # Fall back to Labour_With_State_Multiplier when Total_Labour_Per_Unit is blank.
-    effective = components.get("total_labour_per_unit")
+    # Preferred BOQ labour unit amount: Labour_With_State_Multiplier
+    # (model Total_Labour_per_unit_with_labour_Multipler). Fall back to
+    # Total_Labour_Per_Unit, then Labour_Rate_Per_unit when blank.
+    effective = components.get("total_labour_per_unit_with_multiplier")
     if effective in (None, ""):
-        effective = components.get("total_labour_per_unit_with_multiplier")
+        effective = components.get("total_labour_per_unit")
+    if effective in (None, ""):
+        effective = components.get("labour_rate_per_unit")
 
     return {
         "components": components,
@@ -93,20 +96,3 @@ class LabourDetailRetrievalService:
         if row is None:
             return None
         return labour_to_snapshot(row)
-
-    def get_by_tech_key(
-        self,
-        tech_key: str | None,
-        *,
-        size: Decimal | float | str | None = None,
-    ) -> dict[str, Any] | None:
-        """Backward-compatible alias: ``tech_key`` may be a Product_ID string."""
-        _ = size
-        return self.get_by_product_id(tech_key)
-
-    def get_all_by_product_id(self, product_id: int | str | None) -> list[dict[str, Any]]:
-        snap = self.get_by_product_id(product_id)
-        return [snap] if snap else []
-
-    def get_all_by_tech_key(self, tech_key: str | None) -> list[dict[str, Any]]:
-        return self.get_all_by_product_id(tech_key)

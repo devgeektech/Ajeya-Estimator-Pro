@@ -11,6 +11,14 @@ import sys
 import environ
 from django.core.exceptions import ImproperlyConfigured
 
+# Make Django model fields resolve to Python types under pyright/django-stubs.
+try:
+    import django_stubs_ext
+
+    django_stubs_ext.monkeypatch()
+except ImportError:
+    pass
+
 # backend/ directory (contains manage.py, config/, apps/, ...)
 BASE_DIR = Path(__file__).resolve().parents[1]
 # Project root (contains backend/, docs/, templates/, static/, media/, ...)
@@ -177,7 +185,15 @@ CELERY_TIMEZONE = TIME_ZONE
 CELERY_RESULT_EXPIRES = 3600
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 60 * 30
+# If the worker dies mid-task (Windows restart / Ctrl-C), re-queue so Analyse
+# does not stay stuck in PROCESSING with a dead job.
+CELERY_TASK_ACKS_LATE = True
+CELERY_TASK_REJECT_ON_WORKER_LOST = True
 CELERY_TASK_ALWAYS_EAGER = env.bool("CELERY_TASK_ALWAYS_EAGER", default=DEBUG)
+# Shared heartbeat file max age — Analyse refuses to queue when stale/missing.
+CELERY_WORKER_HEARTBEAT_MAX_AGE = env.float("CELERY_WORKER_HEARTBEAT_MAX_AGE", default=45.0)
+# Skip liveness checks only for controlled tests.
+CELERY_SKIP_WORKER_CHECK = env.bool("CELERY_SKIP_WORKER_CHECK", default=False)
 
 # --- OpenAI -----------------------------------------------------------------
 
@@ -315,6 +331,16 @@ LOGGING = {
             "level": "INFO",
             "propagate": False,
             "filters": ["skip_broken_pipe"],
+        },
+        "celery": {
+            "handlers": ["console", "app_file", "error_file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "celery.task": {
+            "handlers": ["console", "app_file", "error_file"],
+            "level": "INFO",
+            "propagate": False,
         },
     },
 }

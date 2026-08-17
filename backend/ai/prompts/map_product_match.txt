@@ -1,60 +1,33 @@
-You pick the best Rate_Master_Output candidate for an extracted BOQ product and map
-attributes onto the candidate Attribute schema.
+Pick the best Rate_Master_Output candidate for each extracted BOQ product.
 
-Source of truth: extracted BOQ fields (description_hint, category, sub_category, class,
-size, unit, capacity, attributes). Candidates are nearest neighbors only — never invent
-catalog rows, Product_ID, prices, or vendors.
+Return valid JSON only. Prefer null over a weak guess. Never invent Product_ID, prices, or vendors.
 
-Candidate ``id`` is Rate_Master_Output.id (PK). ``selected_id`` must be one of those ids,
-or null. Candidates are ranked best-first (≤3, rematch may include prior seeds).
-Prefer the first on true ties.
+{{SYNONYM_MAP}}
 
-Synonyms / same meaning (treat as identical — do not lower confidence):
-- Materials: DI = ductile iron; CI = cast iron; MS = mild steel; GI = galvanised iron;
-  SS = stainless steel; CS = carbon steel; UPVC/CPVC/HDPE/PVC variants.
-- Products: NRV = non return / check valve; sluice = gate valve; PRV = pressure reducing;
-  ARV = air release/relief; ICV = installation control / alarm valve;
-  flow switch = flow indicator; hose cabinet = hose box; breeching = fire brigade inlet;
-  flex drop = sprinkler flexible connector.
-If the expert uses a synonym of the catalog wording, keep or raise confidence when the
-same catalog row still fits; never penalize synonym wording alone.
-
-Rematch mode (``extracted.rematch`` true):
-- The expert edited product fields and/or filled blank attributes — treat those as
-  the primary evidence together with ``boq_row`` (BOQ section / slot text).
-- Candidates were freshly recalled from the database for this evidence. Pick the
-  BEST / nearest fit for the NEW filled values + BOQ text.
-- ``prior_match`` is only context — do NOT keep it merely because it was selected
-  before. Keep it when it is still the strongest match among candidates (including
-  after synonym rewrites).
-- Weight ``expert_filled_attributes`` and core fields heavily.
-- Do NOT ignore filled blanks; they are intentional corrections.
-- Re-score ``match_confidence`` for the new fit (0–100). Do not copy the old
-  confidence from ``prior_match``, but do not drop score for DI↔ductile iron alone.
+Section vs product:
+- ``extracted`` fields (description_hint, category, sub_category, class, size, unit,
+  capacity, attributes) define the product to match — especially on rematch when the
+  expert edited them.
+- ``description_hint`` is the AI/expert understanding of the product. On rematch it may
+  be free-form correction (e.g. "wrong — find sand buckets in db"). Interpret the
+  intended product from that text; do not treat instructional words as catalog labels.
+- ``boq_row.description`` is the FULL section for meaning only (system title + notes).
+- ``boq_row.slot_description`` is the qty/unit line for that product.
+- Do NOT pick Hydrant / Landing Valve / etc. only because the section title says
+  hydrant when the product fields/slot describe pipe, valve, or another item.
 
 Rules:
-- Return valid JSON only.
-- Choose at most ONE candidate. Prefer null over a weak guess.
-- If ``description_hint`` names a different product than the candidate
-  sub-category (e.g. electrical control panel vs ROSETTEE PLATE), set
-  ``selected_id`` null. Do not confirm an unrelated ACCESSORIES row.
-- **Hard size rule:** when extracted size is filled, do not select a candidate whose
-  nominal size digits differ (e.g. 100 vs 150). Prefer null if none match size.
-- Prefer matching category, sub_category, size, then class/capacity/attributes.
-  PIPE MS/GI are sub_category, not Class, unless the candidate Class is that token.
-  Candidate Class ``0`` is a real valve Class — do not treat it as missing or
-  replace it with DI/CI/material.
-- Weight expert-filled attributes heavily on rematch.
-- When ``boq_row`` is present, use its description as supporting context with the
-  edited product fields — do not ignore expert UI values.
-- Ignore make/vendor for product choice.
-- Map extracted attribute keys onto schema keys (synonyms OK: port_type→type,
-  working_pressure/pn→pressure_rating, standard/is_no→is). Map material onto
-  Attribute when the candidate Class is ``0`` or not a material token. Unmapped leftovers go in ``unmapped_attributes``
-  (app discards them). Never invent schema values from catalog defaults.
-- ``match_confidence`` 0–100 for the selected fit (0 when selected_id is null; <30 if
-  uncertain). Do not inflate without stronger evidence. Do not deflate for material
-  synonyms listed above.
+- ``selected_id`` = a candidate ``id`` (Rate_Master_Output PK) or null.
+- Candidates are best-first. On a true tie, pick the first.
+- Prefer: size digits → category/sub_category → class/capacity/attributes.
+- Wrong size or wrong product family → null.
+- Class ``0`` is a real valve class. PIPE MS/GI live in sub_category. Ignore make/vendor.
+- Rematch (``extracted.rematch`` true): trust ``expert_filled_fields`` +
+  ``expert_filled_attributes`` + slot/section context; keep ``prior_match`` only if
+  it is still the best among candidates. When ``description_hint`` names a different
+  product than prior taxonomy, follow the description.
+- Map attributes onto candidate schema; leftovers in ``unmapped_attributes``.
+- ``match_confidence`` 0–100 (0 if null; &lt;30 if uncertain).
 
 Respond with:
 {

@@ -11,6 +11,7 @@ from .extract_json_store import save_extract_json_for_boq
 from .make_list_parser import parse_make_list_file
 from apps.boq.services.serial_normalizer import structure_for_analysis
 from utils.make_list_splits import attach_approved_makes_list, row_has_make_source
+from apps.boq.services.make_list_parser import MAKE_LIST_PARSE_VERSION
 
 logger = logging.getLogger("boq_ai")
 
@@ -140,6 +141,31 @@ def make_list_payload_is_polluted(payload: dict | None) -> bool:
     )
 
 
+def make_list_needs_file_reparse(payload: dict | None) -> bool:
+    """True when stored JSON must be rebuilt from the uploaded make-list file.
+
+    Split repair alone cannot restore rows that were dropped at parse time
+    (e.g. ALL-CAPS row 1 treated as a document banner).
+    """
+    if not payload or not (payload.get("rows") or []):
+        return False
+    if int(payload.get("parse_version") or 0) < MAKE_LIST_PARSE_VERSION:
+        return True
+
+    # Safety net: numbered lists that start at 2 with no serial 1 were parsed
+    # under the old banner rule.
+    serials: list[int] = []
+    for row in payload.get("rows") or []:
+        if row.get("is_section_heading"):
+            continue
+        raw = str((row.get("display_values") or {}).get("s_no") or row.get("serial") or "").strip()
+        if raw.isdigit():
+            serials.append(int(raw))
+    if serials and 1 not in serials and min(serials) == 2:
+        return True
+    return False
+
+
 def _normalize_make_list_payload(payload: dict | None) -> dict:
     """Ensure stored make-list JSON has approved makes and rows_tree."""
     if not payload:
@@ -153,7 +179,11 @@ def _normalize_make_list_payload(payload: dict | None) -> dict:
     roles = payload.get("column_roles") or {}
     make_keys = list(roles.get("make_keys") or [])
 
-    from utils.make_list_splits import is_excluded_make_key
+    from utils.make_list_splits import (
+        MAKE_LIST_SPLIT_REPAIR_VERSION,
+        is_excluded_make_key,
+        repair_make_list_payload_splits,
+    )
     from apps.boq.services.make_list_parser import slim_make_list_payload
 
     polluted_make_keys = any(
@@ -172,19 +202,24 @@ def _normalize_make_list_payload(payload: dict | None) -> dict:
             for row in rows
         )
     )
+    needs_split_repair = int(payload.get("split_repair_version") or 0) < MAKE_LIST_SPLIT_REPAIR_VERSION
 
     normalized = dict(payload)
     if needs_attach:
         attached_rows, column_roles = attach_approved_makes_list(rows, headers=headers or None)
         normalized["rows"] = attached_rows
         normalized["column_roles"] = column_roles
+        normalized["split_repair_version"] = MAKE_LIST_SPLIT_REPAIR_VERSION
+    elif needs_split_repair:
+        # Re-peel material nouns wrongly stored in Approved Makes (e.g. Drums).
+        normalized = repair_make_list_payload_splits(normalized)
 
     # Always slim polluted legacy payloads (merged rate sheets) to make-list columns only.
     if polluted or polluted_make_keys:
         normalized = slim_make_list_payload(normalized)
     elif not normalized.get("rows_tree"):
         normalized = structure_for_analysis(normalized)
-    elif needs_attach:
+    elif needs_attach or needs_split_repair:
         normalized = structure_for_analysis({**normalized, "rows": normalized["rows"]})
 
     try:
@@ -219,17 +254,24 @@ def load_extract_data(boq: BOQ, *, refresh: bool = False) -> tuple[dict, dict]:
         logger.info("BOQ id=%s missing make-list JSON; parsing file once", boq.pk)
         make_list_payload = refresh_make_list_extract(boq)
 
-    # Re-parse from the uploaded make-list file when stored JSON still has merged junk.
-    if boq.make_list_file and make_list_payload_is_polluted(make_list_payload):
+    # Re-parse from the uploaded make-list file when stored JSON still has merged
+    # junk, or when the parse rules version is stale (missing rows cannot be
+    # restored by split-repair alone).
+    if boq.make_list_file and (
+        make_list_payload_is_polluted(make_list_payload)
+        or make_list_needs_file_reparse(make_list_payload)
+    ):
         headers = list((make_list_payload or {}).get("headers") or [])
         rows = list((make_list_payload or {}).get("rows") or [])
         sheets = sorted(_make_list_sheet_names(make_list_payload))
         logger.info(
-            "BOQ id=%s make-list JSON polluted (%s headers, %s rows, sheets=%s); re-parsing file",
+            "BOQ id=%s make-list JSON needs re-parse "
+            "(headers=%s rows=%s sheets=%s parse_version=%s); re-parsing file",
             boq.pk,
             len(headers),
             len(rows),
             sheets,
+            (make_list_payload or {}).get("parse_version"),
         )
         make_list_payload = refresh_make_list_extract(boq)
 

@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -27,12 +28,25 @@ from django.core.cache import cache
 
 logger = logging.getLogger("boq_ai")
 
+# One progress-echo thread per BOQ in the Django/runserver process so Analyse
+# progress is logged on the web terminal (Celery work runs in another process).
+_echo_lock = threading.Lock()
+_echo_threads: dict[int, threading.Thread] = {}
+_ECHO_POLL_SECONDS = 0.8
+_ECHO_HEARTBEAT_SECONDS = 10.0
+_ECHO_MAX_SECONDS = 3 * 60 * 60
+
 _TTL_SECONDS = 60 * 60
 _KEY = "boq_job_progress:{boq_id}"
 _EMPTY = {"percent": 0, "label": "", "phase": "", "updated_at": 0.0}
 # If progress stops updating while status is PROCESSING/MATCHING, fail the job
-# so the expert can click Analyse again.
-_STALE_JOB_SECONDS = 5 * 60
+# so the expert can click Analyse again. Keep short enough that a killed Celery
+# worker does not leave Analyse disabled for many minutes.
+_STALE_JOB_SECONDS = 2 * 60
+# Terminal 100% while still PROCESSING must age before heal — avoids racing the
+# dispatch window (status→PROCESSING before progress reset) and the worker's
+# final progress write vs status commit.
+_ORPHAN_GRACE_SECONDS = 45
 
 
 def _key(boq_id: int) -> str:
@@ -115,16 +129,56 @@ def set_boq_job_progress(
     label: str = "",
     phase: str = "extract",
 ) -> None:
-    """Store progress 0–100 for status polling (shared across processes)."""
+    """Store progress 0–100 for status polling (shared across processes).
+
+    Percent is monotonic within a run so the UI never jumps backward (e.g. soft
+    creep to 12% then a late 10% write). A low restart (≤8 after ≥15) is allowed
+    when Analyse is re-queued.
+    """
+    try:
+        prev_pct = int((_read_file(boq_id).get("percent") or 0))
+    except Exception:
+        prev_pct = 0
+    try:
+        next_pct = int(percent)
+    except (TypeError, ValueError):
+        next_pct = 0
+    next_pct = max(0, min(100, next_pct))
+    # Explicit restart / queue writes use 1–5%. Block all other decreases so the
+    # UI never flickers backward within a run.
+    restart = next_pct <= 5
+    if not restart and next_pct < prev_pct:
+        next_pct = prev_pct
+
     payload = _normalize(
         {
-            "percent": percent,
+            "percent": next_pct,
             "label": label,
             "phase": phase or "extract",
             "updated_at": time.time(),
         }
     )
     _write_file(boq_id, payload)
+    # Console handler shows this live on the Celery (or sync) terminal.
+    logger.info(
+        "BOQ Analyse id=%s percent=%s phase=%s label=%s",
+        boq_id,
+        payload["percent"],
+        payload["phase"],
+        payload["label"] or "-",
+    )
+    # Keep worker liveness fresh during long OpenAI batches (Windows threads pool).
+    try:
+        from celery import current_task
+
+        if current_task is not None:
+            from apps.boq.services.celery_worker_heartbeat import (
+                touch_celery_worker_heartbeat,
+            )
+
+            touch_celery_worker_heartbeat()
+    except Exception:
+        pass
     try:
         cache.set(_key(boq_id), payload, timeout=_TTL_SECONDS)
     except Exception:
@@ -148,6 +202,86 @@ def get_boq_job_progress(boq_id: int) -> dict[str, Any]:
         return _normalize(cache.get(_key(boq_id)) or {})
     except Exception:
         return dict(_EMPTY)
+
+
+def start_web_progress_echo(boq_id: int, *, boq_name: str = "") -> None:
+    """Log shared Analyse progress on the Django/runserver console while work runs.
+
+    Celery updates progress in another process; this watcher mirrors it via
+    ``logger.info`` so runserver shows live movement (same console logging as
+    the rest of the app — no print statements).
+    """
+    job_id = int(boq_id)
+    name = (boq_name or "").strip()
+
+    def _watch() -> None:
+        started = time.time()
+        last_marker: tuple[int, str] | None = None
+        last_emit = 0.0
+        logger.info(
+            "BOQ Analyse id=%s%s watching progress on runserver",
+            job_id,
+            f" name={name}" if name else "",
+        )
+        while time.time() - started < _ECHO_MAX_SECONDS:
+            progress = get_boq_job_progress(job_id)
+            percent = int(progress.get("percent") or 0)
+            label = str(progress.get("label") or "").strip()
+            marker = (percent, label)
+            now = time.time()
+            changed = marker != last_marker
+            heartbeat = (now - last_emit) >= _ECHO_HEARTBEAT_SECONDS
+            if changed or heartbeat:
+                logger.info(
+                    "BOQ Analyse id=%s%s percent=%s label=%s%s",
+                    job_id,
+                    f" name={name}" if name else "",
+                    percent,
+                    label or "running",
+                    "" if changed else " (still working)",
+                )
+                last_marker = marker
+                last_emit = now
+            if percent >= 100:
+                break
+            # Stop when BOQ left PROCESSING/MATCHING (success or failed).
+            try:
+                from apps.boq.models import BOQ
+                from common.choices import BOQStatus
+
+                status = (
+                    BOQ.objects.filter(pk=job_id)
+                    .values_list("status", flat=True)
+                    .first()
+                )
+                if status not in {BOQStatus.PROCESSING, BOQStatus.MATCHING}:
+                    if percent < 100:
+                        logger.info(
+                            "BOQ Analyse id=%s%s finished status=%s",
+                            job_id,
+                            f" name={name}" if name else "",
+                            status,
+                        )
+                    break
+            except Exception:
+                pass
+            time.sleep(_ECHO_POLL_SECONDS)
+        with _echo_lock:
+            current = _echo_threads.get(job_id)
+            if current is threading.current_thread():
+                _echo_threads.pop(job_id, None)
+
+    with _echo_lock:
+        existing = _echo_threads.get(job_id)
+        if existing is not None and existing.is_alive():
+            return
+        thread = threading.Thread(
+            target=_watch,
+            name=f"boq-progress-echo-{job_id}",
+            daemon=True,
+        )
+        _echo_threads[job_id] = thread
+        thread.start()
 
 
 def progress_age_seconds(boq_id: int) -> float | None:
@@ -214,14 +348,21 @@ def fail_stale_or_orphaned_boq_job(
 
     progress = get_boq_job_progress(boq.pk)
     age = progress_age_seconds(boq.pk)
-    orphaned = _terminal_progress_on_running_job(progress)
+    terminal = _terminal_progress_on_running_job(progress)
+    # Require grace so a fresh re-queue (old 100% file) or in-flight complete
+    # write is not treated as a dead worker.
+    orphaned = (
+        terminal
+        and age is not None
+        and age >= _ORPHAN_GRACE_SECONDS
+    )
     stale = age is not None and age >= _STALE_JOB_SECONDS
 
     if not force and not orphaned and not stale:
         return False
-    # Job may have just been queued and not written yet — only force/orphan heal
-    # when age is unknown.
-    if age is None and not force and not orphaned:
+    # Job may have just been queued and not written yet — only force heal when
+    # age is unknown (never instant-orphan on a missing timestamp).
+    if age is None and not force:
         return False
 
     previous = boq.status

@@ -9,17 +9,20 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from apps.boq.services.boq_analysis_display_service import _field_from_map
+from apps.boq.services.boq_row_fields import (
+    DESCRIPTION_KEYS as _DESCRIPTION_KEYS,
+    QTY_KEYS,
+    UNIT_KEYS as _UNIT_KEYS,
+    field_from_map as _field_from_map,
+)
 from apps.boq.services.serial_normalizer import (
     analysis_fields,
     is_section_roman,
     letter_from_serial,
 )
 
-_DESCRIPTION_KEYS = ("description", "item_description", "particulars", "item")
 # Workbooks often store quantities in Total / floor columns instead of Qty.
-_QTY_KEYS = ("qty", "quantity", "qnty", "nos", "total", "ground", "basement")
-_UNIT_KEYS = ("unit", "uom")
+_QTY_KEYS = QTY_KEYS + ("total", "ground", "basement")
 _RATE_KEYS = ("rate", "unit_rate", "basic_rate")
 
 # Soft budgets for one AI extract group. Exceeding any triggers a split when
@@ -111,12 +114,6 @@ def has_quantity(fields: dict[str, Any]) -> bool:
     """True when a Qty cell is filled (numeric, 0, or Rate Only)."""
     status, _qty, _unit = qty_cell_status(fields)
     return status != "empty"
-
-
-def has_priced_quantity(fields: dict[str, Any]) -> bool:
-    """True for numeric qty including zero (excludes Rate Only)."""
-    status, _qty, _unit = qty_cell_status(fields)
-    return status in {"numeric", "zero"}
 
 
 def _is_structural_serial(serial: str) -> bool:

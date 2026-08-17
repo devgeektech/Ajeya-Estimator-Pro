@@ -171,26 +171,16 @@ def is_pdf_document_banner(line: str) -> bool:
     text = line.strip()
     if not text:
         return True
+    # Numbered product rows are never banners (even when brands are ALL CAPS).
+    if _SERIAL_LINE.match(_strip_fused_title_suffix(text)) or _SOFT_SERIAL_START.match(text):
+        return False
+    if _SOLO_SERIAL.match(text):
+        return False
     if _TITLE_MARKERS.search(text) or _HEADER_LINE.search(text):
         return True
     letters = [char for char in text if char.isalpha()]
     if letters and sum(char.isupper() for char in letters) / len(letters) > 0.85:
         return len(text) > 20
-    return False
-
-
-def is_pdf_title_line(line: str) -> bool:
-    text = line.strip()
-    if not text:
-        return True
-    if _SERIAL_LINE.match(_strip_fused_title_suffix(text)):
-        return False
-    if is_pdf_document_banner(text):
-        return True
-    if is_pdf_section_heading(text):
-        return True
-    if _SERIAL_LINE.match(text):
-        return False
     return False
 
 

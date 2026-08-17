@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 from django.conf import settings
 
 from apps.boq.models import BOQ
+from apps.boq.services.celery_worker_heartbeat import celery_worker_heartbeat_is_fresh
 from apps.boq.tasks import (
     process_boq_extraction_task,
     process_boq_matching_task,
@@ -20,6 +21,13 @@ from common.choices import BOQStatus
 from config.celery import app as celery_app
 
 logger = logging.getLogger("boq_ai")
+
+_WORKER_REQUIRED_MESSAGE = (
+    "Celery worker is not running. Analysis cannot start. "
+    "Keep Redis running, then start the worker with "
+    ".\\scripts\\run_celery_worker.ps1 (Windows) or ./scripts/run_celery_worker.sh "
+    "(Linux) and click Analyse again."
+)
 
 
 @dataclass(frozen=True)
@@ -75,18 +83,23 @@ def _dispatch_boq_job(
             ),
         )
 
+    # Heartbeat is authoritative on Windows (threads pool breaks control inspect).
+    # Never queue into Redis when no worker will consume — that freezes Analyse UI.
     if not worker_is_available():
-        # The 'threads' pool on Windows does not support control commands, 
-        # so worker_is_available() will incorrectly return False.
-        # We will log a warning but still attempt to queue the task.
-        logger.warning(
-            "No Celery worker detected (or thread pool in use). Queueing anyway."
+        logger.error(
+            "Refusing to queue BOQ %s for id=%s — Celery worker heartbeat missing/stale",
+            job_label,
+            boq_id,
         )
+        return AnalysisDispatchResult(mode="failed", message=_WORKER_REQUIRED_MESSAGE)
 
-    BOQ.objects.filter(pk=boq_id).update(status=pending_status)
-    # Clear prior 100%/stalled progress so the UI does not look finished while waiting.
+    # Reset progress BEFORE flipping status so a concurrent status poll cannot
+    # see PROCESSING + leftover 100% "Analysis complete" and heal the job dead.
     try:
-        from apps.boq.services.boq_job_progress import set_boq_job_progress
+        from apps.boq.services.boq_job_progress import (
+            set_boq_job_progress,
+            start_web_progress_echo,
+        )
 
         phase = "match" if pending_status == BOQStatus.MATCHING else "extract"
         set_boq_job_progress(
@@ -95,14 +108,26 @@ def _dispatch_boq_job(
             label=f"Queued {job_label}…",
             phase=phase,
         )
+        boq_name = (
+            BOQ.objects.filter(pk=boq_id).values_list("boq_name", flat=True).first()
+            or ""
+        )
+        start_web_progress_echo(boq_id, boq_name=str(boq_name))
     except Exception:
         logger.exception("Failed resetting job progress for boq_id=%s", boq_id)
+    BOQ.objects.filter(pk=boq_id).update(status=pending_status)
     try:
         getattr(task, "delay")(boq_id)
         logger.info("Queued BOQ %s for id=%s", job_label, boq_id)
         return AnalysisDispatchResult(mode="async")
     except Exception as exc:
         logger.exception("Failed to queue BOQ %s for id=%s", job_label, boq_id)
+        # Roll status back so the UI is not left PROCESSING with no task.
+        BOQ.objects.filter(pk=boq_id, status=pending_status).update(
+            status=BOQStatus.ANALYSIS_FAILED
+            if pending_status == BOQStatus.PROCESSING
+            else BOQStatus.EXTRACTED
+        )
         if settings.DEBUG:
             runner(boq_id)
             return AnalysisDispatchResult(mode="sync")
@@ -115,12 +140,13 @@ def _dispatch_boq_job(
 def broker_is_available() -> bool:
     """Return True when the configured Redis broker accepts connections."""
     broker_url = str(settings.CELERY_BROKER_URL or "")
-    parsed = urlparse(broker_url)
+    # Cast keeps pyright on the str overload of urlparse (typeshed dual overload).
+    parsed = urlparse(broker_url)  # type: ignore[arg-type]
     if parsed.scheme not in {"redis", "rediss"}:
         return True
 
-    host = parsed.hostname or "localhost"
-    port = parsed.port or 6379
+    host = str(parsed.hostname or "localhost")
+    port = int(parsed.port or 6379)
     try:
         with socket.create_connection((host, port), timeout=1):
             return True
@@ -129,14 +155,31 @@ def broker_is_available() -> bool:
 
 
 def worker_is_available() -> bool:
-    """Return True when at least one Celery worker responds to ping."""
+    """Return True when a Celery worker is alive and can consume Analyse jobs.
+
+    Preference order:
+    1. Shared heartbeat file (works with Windows ``threads`` pool)
+    2. Celery control ping / stats (works with prefork on Linux)
+    """
     if getattr(settings, "CELERY_SKIP_WORKER_CHECK", False):
         return True
-        
+
+    if celery_worker_heartbeat_is_fresh():
+        return True
+
+    try:
+        replies = celery_app.control.ping(timeout=1.0)
+        if replies:
+            return True
+    except Exception:
+        logger.debug("Celery control.ping failed", exc_info=True)
+
     try:
         inspector = celery_app.control.inspect(timeout=1.0)
         stats = inspector.stats() if inspector else None
-        return bool(stats)
+        if stats:
+            return True
     except Exception:
-        logger.exception("Celery worker inspection failed")
-        return False
+        logger.debug("Celery worker inspection failed", exc_info=True)
+
+    return False
