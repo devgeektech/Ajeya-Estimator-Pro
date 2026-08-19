@@ -20,9 +20,9 @@ from apps.boq.services.boq_row_grouping_service import grouped_anchor_rows
 from apps.boq.services.serial_normalizer import (
     analysis_fields,
     detect_serial_key,
+    display_serial_for_row,
     export_serial_with_suffix,
-    letter_from_serial,
-    nearest_structural_serial,
+    format_boq_serial_text,
     workbook_serial,
 )
 
@@ -64,10 +64,11 @@ REVIEW_OUTPUT_HEADER_SPECS: list[tuple[str, bool]] = [
     ("Final_Material_Amount", False),
     # Red in template; keep the short label (instructional suffix dropped).
     ("Labour", True),
+    ("Final Rate", False),
     ("Qty", False),
-    ("TOTAL MATERIAL (Q*S)", True),
-    ("TOTAL LABOUR (R*S)", True),
-    ("Amount (T+U)", False),
+    ("TOTAL MATERIAL", True),
+    ("TOTAL LABOUR", True),
+    ("Amount", False),
 ]
 REVIEW_OUTPUT_HEADERS = [label for label, _is_red in REVIEW_OUTPUT_HEADER_SPECS]
 
@@ -95,11 +96,9 @@ def _product_base_serial(
     serial_key: str | None,
 ) -> str:
     """
-    Resolve BOQ serial for one product from its Unit/Qty row.
+    Ser no for Review/export — mirror the uploaded BOQ Unit/Qty row S.No.
 
-    Letter slots (``a)``, ``b)``) are qualified with the qty row's nearest
-    structural parent (``5.1 a)``), not the broader group serial (``5 a)``).
-    Structural slot serials (``1.7``, ``2.10``) are kept as-is.
+    Letter slots stay ``a)`` / ``b)``; structural item rows keep ``1.7``, ``2.10``, etc.
     """
     fallback_parent = str(parent_serial or "").strip()
     qty_row_id = ""
@@ -109,45 +108,17 @@ def _product_base_serial(
             qty_row_id = candidate
             break
 
-    child = str(product.get("boq_serial") or "").strip()
     source_row = rows_by_id.get(qty_row_id) if qty_row_id else None
-    if not child and source_row is not None:
-        child = workbook_serial(source_row, serial_key=serial_key)
-    if not child:
-        return fallback_parent
+    if source_row is not None:
+        serial = display_serial_for_row(source_row, serial_key=serial_key)
+        if serial:
+            return serial
 
-    if letter_from_serial(child):
-        structural = nearest_structural_serial(
-            qty_row_id,
-            rows_by_id,
-            serial_key=serial_key,
-            start_at_parent=True,
-        )
-        return _qualify_serial_with_parent(structural or fallback_parent, child)
+    child = str(product.get("boq_serial") or "").strip()
+    if child:
+        return format_boq_serial_text(child) or child
 
-    # Already a section/item serial on the qty row itself.
-    return child
-
-
-def _qualify_serial_with_parent(parent: str, child: str) -> str:
-    """
-    Combine section serial with letter/qty-row serial.
-
-    Examples: parent ``1.1`` + child ``a)`` → ``1.1 a)``;
-    parent ``1.2`` + child ``1.2`` → ``1.2``.
-    """
-    parent_text = str(parent or "").strip()
-    child_text = str(child or "").strip()
-    if not child_text:
-        return parent_text
-    if not parent_text:
-        return child_text
-    if child_text == parent_text or child_text.startswith(f"{parent_text}."):
-        return child_text
-    # Child already includes parent (e.g. "1.1 a)" or "1.1a)").
-    if child_text.startswith(parent_text) and len(child_text) > len(parent_text):
-        return child_text
-    return f"{parent_text} {child_text}"
+    return fallback_parent
 
 
 def _assign_export_serials(products: list[dict[str, Any]]) -> None:
@@ -272,6 +243,8 @@ def build_review_output_row(
         "profit_value": rd.get("profit_value"),
         "final_material_amount": material_unit,
         "labour": labour_unit,
+        # Final Rate is calculated in Excel (not here) to keep rollups as formulas.
+        "final_rate": None,
         "qty": qty if qty not in (None, "") else line_output.get("quantity"),
         "total_material": line_output.get("material_amount"),
         "total_labour": line_output.get("labour_amount"),
@@ -300,6 +273,7 @@ def review_output_values(row: dict[str, Any]) -> list[Any]:
         row.get("profit_value"),
         row.get("final_material_amount"),
         row.get("labour"),
+        row.get("final_rate"),
         row.get("qty"),
         row.get("total_material"),
         row.get("total_labour"),
@@ -362,7 +336,7 @@ class BOQReviewDisplayService:
                 }
 
             fields = analysis_fields(boq_row)
-            serial = workbook_serial(boq_row, serial_key=serial_key)
+            serial = display_serial_for_row(boq_row, serial_key=serial_key)
             depth = boq_row.get("depth", 0)
             description = _field_from_map(fields, _DESCRIPTION_KEYS) or ""
             qty = _field_from_map(fields, _QTY_KEYS)

@@ -91,10 +91,11 @@ _REVIEW_SUBTOTAL_COL = 15
 _REVIEW_PROFIT_COL = 16
 _REVIEW_FINAL_MATERIAL_COL = 17
 _REVIEW_LABOUR_COL = 18
-_REVIEW_QTY_COL = 19
-_REVIEW_TOTAL_MATERIAL_COL = 20
-_REVIEW_TOTAL_LABOUR_COL = 21
-_REVIEW_AMOUNT_COL = 22
+_REVIEW_FINAL_RATE_COL = 19
+_REVIEW_QTY_COL = 20
+_REVIEW_TOTAL_MATERIAL_COL = 21
+_REVIEW_TOTAL_LABOUR_COL = 22
+_REVIEW_AMOUNT_COL = 23
 
 _RATE_BLOB_RE = re.compile(
     r"\b(unit[_\s-]?rate|rate|price|rs\.?\s*/\s*(unit|qty|no))\b",
@@ -226,16 +227,12 @@ def _review_amount_formula(sheet_title: str, rows: list[int]) -> str | None:
 
 
 def _review_rate_formula(sheet_title: str, rows: list[int]) -> str | None:
-    """Result Rate = Final_Material_Amount + Labour (summed across mapped products)."""
+    """BOQ Rate = Review Final Rate column (summed when several products share a slot)."""
     if not rows:
         return None
-    parts = [
-        (
-            f"({_review_cell_ref(sheet_title, _REVIEW_FINAL_MATERIAL_COL, row)}"
-            f"+{_review_cell_ref(sheet_title, _REVIEW_LABOUR_COL, row)})"
-        )
-        for row in rows
-    ]
+    if len(rows) == 1:
+        return f"={_review_cell_ref(sheet_title, _REVIEW_FINAL_RATE_COL, rows[0])}"
+    parts = [_review_cell_ref(sheet_title, _REVIEW_FINAL_RATE_COL, row) for row in rows]
     return "=" + "+".join(parts)
 
 
@@ -308,15 +305,16 @@ def _excel_number_value(value: Any) -> Any:
     return number
 
 
-def _as_ratio(numerator: Any, denominator: Any) -> float | None:
-    """Literal % baked into Review formulas so Discount edits rescale add-ons."""
-    top = _excel_number_value(numerator)
-    bottom = _excel_number_value(denominator)
-    if not isinstance(top, (int, float)) or not isinstance(bottom, (int, float)):
+def _boq_excel_row_number(row: dict[str, Any]) -> int | None:
+    """Workbook row index from parsed BOQ JSON, or None when missing/invalid."""
+    raw = row.get("excel_row_number")
+    if raw in (None, ""):
         return None
-    if bottom == 0:
+    try:
+        number = int(raw)
+    except (TypeError, ValueError):
         return None
-    return float(top) / float(bottom)
+    return number if number >= 1 else None
 
 
 def _review_a1(column: int, row_number: int) -> str:
@@ -331,89 +329,57 @@ def _apply_review_calc_formulas(
     rate_sum: bool,
 ) -> None:
     """
-    Make Review derived cells live Excel formulas.
+    Excel formulas on selected Review rollups only.
 
-    Inputs stay as values: Base, Discount, Labour, Qty.
-    Discount may be 0.44 or 44 — both mean 44%.
+    Formula columns (build-up J–N and P stay as Rate_Master values):
+    - Net_Material_Rate (= Base × (1 − Discount))
+    - Sub_Total (= Commercial + Accessories + Handling + Wastage)
+    - Final_Material_Amount, Final Rate
+    - Total Material, Total Labour, Amount
     """
-    base = _excel_number_value(review_row.get("base_purchase_rate"))
-    if not isinstance(base, (int, float)):
-        _apply_review_amount_formulas(sheet, row_number, rate_sum=rate_sum)
-        return
+    base_a1 = _review_a1(_REVIEW_BASE_COL, row_number)
+    discount_a1 = _review_a1(_REVIEW_DISCOUNT_COL, row_number)
+    commercial_a1 = _review_a1(_REVIEW_COMMERCIAL_COL, row_number)
+    accessories_a1 = _review_a1(_REVIEW_ACCESSORIES_COL, row_number)
+    handling_a1 = _review_a1(_REVIEW_HANDLING_COL, row_number)
+    wastage_a1 = _review_a1(_REVIEW_WASTAGE_COL, row_number)
+    subtotal_a1 = _review_a1(_REVIEW_SUBTOTAL_COL, row_number)
+    profit_a1 = _review_a1(_REVIEW_PROFIT_COL, row_number)
+    final_material_a1 = _review_a1(_REVIEW_FINAL_MATERIAL_COL, row_number)
+    labour_a1 = _review_a1(_REVIEW_LABOUR_COL, row_number)
 
-    g = _review_a1(_REVIEW_BASE_COL, row_number)
-    h = _review_a1(_REVIEW_DISCOUNT_COL, row_number)
-    i = _review_a1(_REVIEW_NET_COL, row_number)
-    j = _review_a1(_REVIEW_PROCUREMENT_COL, row_number)
-    k = _review_a1(_REVIEW_COMMERCIAL_COL, row_number)
-    l = _review_a1(_REVIEW_ACCESSORIES_COL, row_number)
-    m = _review_a1(_REVIEW_HANDLING_COL, row_number)
-    n = _review_a1(_REVIEW_WASTAGE_COL, row_number)
-    o = _review_a1(_REVIEW_SUBTOTAL_COL, row_number)
-    p = _review_a1(_REVIEW_PROFIT_COL, row_number)
-    q = _review_a1(_REVIEW_FINAL_MATERIAL_COL, row_number)
-
-    proc_pct = _as_ratio(review_row.get("procurement_value"), review_row.get("base_purchase_rate"))
-    acc_pct = _as_ratio(review_row.get("accessories_value"), review_row.get("net_material_rate"))
-    hand_pct = _as_ratio(
-        review_row.get("handling_value"),
-        review_row.get("commercial_material_base"),
-    )
-    wast_pct = _as_ratio(
-        review_row.get("wastage_value"),
-        review_row.get("commercial_material_base"),
-    )
-    profit_pct = _as_ratio(review_row.get("profit_value"), review_row.get("sub_total"))
-
+    # Net_Material_Rate = Base_Purchase_Rate × (1 − Discount)
     sheet.cell(
         row=row_number,
         column=_REVIEW_NET_COL,
-        value=f"=IF({g}=\"\",\"\",{g}*(1-IF({h}>1,{h}/100,{h})))",
+        value=(
+            f"=IF({base_a1}=\"\",\"\","
+            f"{base_a1}*(1-IF({discount_a1}>1,{discount_a1}/100,{discount_a1})))"
+        ),
     )
-    if proc_pct is not None:
-        sheet.cell(
-            row=row_number,
-            column=_REVIEW_PROCUREMENT_COL,
-            value=f"=IF({g}=\"\",\"\",{g}*{proc_pct:.8f})",
-        )
-    sheet.cell(
-        row=row_number,
-        column=_REVIEW_COMMERCIAL_COL,
-        value=f"=IF({i}=\"\",\"\",{i}+N({j}))",
-    )
-    if acc_pct is not None:
-        sheet.cell(
-            row=row_number,
-            column=_REVIEW_ACCESSORIES_COL,
-            value=f"=IF({i}=\"\",\"\",{i}*{acc_pct:.8f})",
-        )
-    if hand_pct is not None:
-        sheet.cell(
-            row=row_number,
-            column=_REVIEW_HANDLING_COL,
-            value=f"=IF({k}=\"\",\"\",{k}*{hand_pct:.8f})",
-        )
-    if wast_pct is not None:
-        sheet.cell(
-            row=row_number,
-            column=_REVIEW_WASTAGE_COL,
-            value=f"=IF({k}=\"\",\"\",{k}*{wast_pct:.8f})",
-        )
+
+    # Sub_Total = Commercial_Material_Base + Accessories + Handling + Wastage
     sheet.cell(
         row=row_number,
         column=_REVIEW_SUBTOTAL_COL,
-        value=f"=N({k})+N({l})+N({m})+N({n})",
+        value=(
+            f"=N({commercial_a1})+N({accessories_a1})"
+            f"+N({handling_a1})+N({wastage_a1})"
+        ),
     )
-    if profit_pct is not None:
-        sheet.cell(
-            row=row_number,
-            column=_REVIEW_PROFIT_COL,
-            value=f"=IF({o}=\"\",\"\",{o}*{profit_pct:.8f})",
-        )
+
+    # Final_Material_Amount = Sub_Total + Profit_Value
     sheet.cell(
         row=row_number,
         column=_REVIEW_FINAL_MATERIAL_COL,
-        value=f"=N({o})+N({p})",
+        value=f"=N({subtotal_a1})+N({profit_a1})",
+    )
+
+    # Final Rate = Final_Material_Amount + Labour
+    sheet.cell(
+        row=row_number,
+        column=_REVIEW_FINAL_RATE_COL,
+        value=f"=N({final_material_a1})+N({labour_a1})",
     )
     _apply_review_amount_formulas(sheet, row_number, rate_sum=rate_sum)
 
@@ -777,12 +743,8 @@ class BOQExportService:
             row_id = str(row.get("row_id") or "").strip()
             if not row_id or row_id not in slot_ids:
                 continue
-            excel_row = row.get("excel_row_number")
-            try:
-                excel_row_number = int(excel_row)
-            except (TypeError, ValueError):
-                continue
-            if excel_row_number < 1:
+            excel_row_number = _boq_excel_row_number(row)
+            if excel_row_number is None:
                 continue
 
             sheet_name = str(row.get("sheet_name") or "").strip()
@@ -967,6 +929,12 @@ class BOQExportService:
                 for col, key in (
                     (_REVIEW_BASE_COL, "base_purchase_rate"),
                     (_REVIEW_DISCOUNT_COL, "discount"),
+                    (_REVIEW_PROCUREMENT_COL, "procurement_value"),
+                    (_REVIEW_COMMERCIAL_COL, "commercial_material_base"),
+                    (_REVIEW_ACCESSORIES_COL, "accessories_value"),
+                    (_REVIEW_HANDLING_COL, "handling_value"),
+                    (_REVIEW_WASTAGE_COL, "wastage_value"),
+                    (_REVIEW_PROFIT_COL, "profit_value"),
                     (_REVIEW_LABOUR_COL, "labour"),
                     (_REVIEW_QTY_COL, "qty"),
                 ):
@@ -1012,32 +980,22 @@ class BOQExportService:
                 if line.get("row_id")
             ]
 
-        prev_depth = None
+        prev_excel_row: int | None = None
         for boq_row in walk_rows:
             row_id = str(boq_row.get("row_id") or "")
+            excel_row_num = _boq_excel_row_number(boq_row)
+            if (
+                prev_excel_row is not None
+                and excel_row_num is not None
+                and excel_row_num > prev_excel_row + 1
+            ):
+                for _ in range(excel_row_num - prev_excel_row - 1):
+                    sheet.append([None] * col_count)
+            if excel_row_num is not None:
+                prev_excel_row = excel_row_num
+
             line = lines_by_id.get(row_id)
             slot_products = list(products_by_qty.get(row_id) or [])
-            try:
-                raw_depth = (
-                    (line or {}).get("depth")
-                    if line is not None
-                    else boq_row.get("depth")
-                )
-                depth = int(raw_depth if raw_depth is not None else 0)
-            except (TypeError, ValueError):
-                depth = 0
-            will_write = bool(slot_products or line)
-            # Blank spacer only before real top-level chapter headers.
-            if (
-                prev_depth is not None
-                and depth == 0
-                and line is not None
-                and not slot_products
-                and will_write
-            ):
-                sheet.append([None] * col_count)
-            if will_write:
-                prev_depth = depth
 
             # Qty letter row (a)/b)): write its priced product(s) here.
             if slot_products:

@@ -92,6 +92,14 @@ class MakeVendorCascadeMixin:
             sub_category: str,
             make: str,
         ) -> list[str]: ...
+        def _lowest_amount_maps(
+            self,
+            *,
+            database_version_id: int,
+            category: str,
+            sub_category: str,
+            approved_makes: list[str] | None,
+        ) -> dict[str, Any]: ...
 
     def apply_subcategory_make(
         self,
@@ -176,6 +184,7 @@ class MakeVendorCascadeMixin:
         matched_count = 0
         applied_make = make_text
         applied_vendor = vendor_text
+        applied_amount: float | None = None
         for row in rows:
             products = list(row.get("products") or [])
             if not products:
@@ -208,6 +217,18 @@ class MakeVendorCascadeMixin:
                     applied_vendor = match_payload.get("vendor") or applied_vendor
                     if match_payload.get("status") == "matched":
                         matched_count += 1
+                    rate_text = str(
+                        (match_payload.get("line_output") or {}).get("material_rate")
+                        or ""
+                    ).strip()
+                    try:
+                        rate_number = float(rate_text.replace(",", ""))
+                    except (TypeError, ValueError):
+                        rate_number = None
+                    if rate_number is not None and (
+                        applied_amount is None or rate_number < applied_amount
+                    ):
+                        applied_amount = rate_number
                 else:
                     selection = dict(updated.get("vendor_selection") or {})
                     selection["make"] = make_text
@@ -241,6 +262,9 @@ class MakeVendorCascadeMixin:
             "sub_category": sub_category_text,
             "make": applied_make,
             "vendor": applied_vendor,
+            "amount": (
+                f"{applied_amount:.2f}" if applied_amount is not None else ""
+            ),
             "prefer_lowest_price": use_lowest,
             "applied_at": now_local_iso(),
             "product_count": updated_count,
@@ -272,11 +296,155 @@ class MakeVendorCascadeMixin:
             "sub_category": sub_category_text,
             "make": applied_make,
             "vendor": applied_vendor,
+            "amount": (
+                f"{applied_amount:.2f}" if applied_amount is not None else ""
+            ),
             "prefer_lowest_price": use_lowest,
             "updated_count": updated_count,
             "matched_count": matched_count,
         }
 
+
+    def _restore_product_to_lowest(
+        self,
+        product: dict[str, Any],
+        *,
+        qty: Any,
+        database_version_id: int,
+        open_lowest: bool,
+    ) -> dict[str, Any]:
+        """Reload the lowest-price Rate_Master make/vendor for one product."""
+        updated = dict(product)
+        category_for_product = str(updated.get("category") or "").strip()
+        sub_for_product = str(updated.get("sub_category") or "").strip()
+        approved_makes = self._approved_makes_for_subcategory(
+            category_for_product,
+            sub_for_product,
+        )
+        # Prefer approved-make lowest when the make list has them; otherwise use
+        # Product_ID Rate_Master rows so the product rate still comes back.
+        constrain = bool(approved_makes) and not open_lowest
+        match_payload = self._exact_match_and_rates(
+            updated,
+            make="",
+            vendor="",
+            quantity=qty,
+            database_version_id=database_version_id,
+            prefer_lowest_price=True,
+            approved_makes=approved_makes if constrain else None,
+        )
+        matched = match_payload.get("status") == "matched"
+        if matched:
+            source_out = "lowest_defaults"
+            approved_found = True
+        elif self.has_make_list and not approved_makes:
+            source_out = "not_found"
+            approved_found = False
+            if not match_payload.get("notes"):
+                match_payload["notes"] = NO_APPROVED_MAKE_LABEL
+        else:
+            source_out = "lowest_defaults"
+            approved_found = True if open_lowest else bool(approved_makes)
+
+        updated["vendor_selection"] = match_payload
+        applied_make = str(match_payload.get("make") or "").strip()
+        applied_vendor = str(match_payload.get("vendor") or "").strip()
+        updated["selected_make"] = applied_make or None
+        updated["selected_vendor"] = applied_vendor or None
+        if applied_make:
+            updated["make_hint"] = applied_make
+        updated["approved_make_found"] = approved_found
+        updated["vendor_selection_source"] = source_out
+        return updated
+
+    def _has_remaining_specific_filter(
+        self,
+        *,
+        category: str,
+        sub_category: str,
+        remaining: dict[str, Any],
+    ) -> bool:
+        """True when a more specific manual filter still covers this sub-category."""
+        if not sub_category:
+            return False
+        specific = remaining.get(_subcategory_storage_key(category, sub_category)) or {}
+        if str(specific.get("source") or "").strip() == "manual":
+            return True
+        return any(
+            isinstance(value, dict)
+            and str(value.get("source") or "").strip() == "manual"
+            and _normalize_text(value.get("category")) == _normalize_text(category)
+            and _normalize_text(value.get("sub_category")) == _normalize_text(sub_category)
+            for value in remaining.values()
+        )
+
+    def _restore_scope_to_lowest(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        category: str,
+        sub_category: str,
+        remaining: dict[str, Any],
+        database_version_id: int,
+        boq_by_id: dict[str, Any],
+        open_lowest: bool,
+    ) -> int:
+        """Restore cascade-applied products in one category/sub to lowest price."""
+        cleared = 0
+        for row in rows:
+            products = list(row.get("products") or [])
+            if not products:
+                continue
+            row_id = str(row.get("row_id") or "")
+            qty = _field_from_map(analysis_fields(boq_by_id.get(row_id) or {}), _QTY_KEYS)
+            changed = False
+            for index, product in enumerate(products):
+                if not _product_matches_subcategory(
+                    product,
+                    category=category,
+                    sub_category=sub_category,
+                ):
+                    continue
+                product_sub = str(product.get("sub_category") or "").strip()
+                if not sub_category and self._has_remaining_specific_filter(
+                    category=category,
+                    sub_category=product_sub,
+                    remaining=remaining,
+                ):
+                    continue
+                if str(product.get("vendor_selection_source") or "").strip() != "manual":
+                    continue
+                products[index] = self._restore_product_to_lowest(
+                    product,
+                    qty=qty,
+                    database_version_id=database_version_id,
+                    open_lowest=open_lowest,
+                )
+                cleared += 1
+                changed = True
+            if changed:
+                row["products"] = products
+        return cleared
+
+    def _persist_filter_restore(
+        self,
+        boq: Any,
+        analysis: dict[str, Any],
+        *,
+        rows: list[dict[str, Any]],
+        selections: dict[str, Any],
+        database_version_id: int,
+    ) -> dict[str, Any]:
+        analysis["subcategory_make_selections"] = selections
+        analysis["rows"] = rows
+        if database_version_id:
+            analysis["database_version_id"] = database_version_id
+        with atomic():
+            safe = json_safe(analysis)
+            save_boq_analysis_json(boq.boq_name, safe)
+            boq.analysis_data = safe
+            boq.save(update_fields=["analysis_data"])
+        return self.build_display().get("stats") or {}
 
     def remove_subcategory_filter(
         self,
@@ -284,7 +452,7 @@ class MakeVendorCascadeMixin:
         category: str,
         sub_category: str = "",
     ) -> dict[str, Any]:
-        """Remove a manual cascade filter and restore those products to defaults."""
+        """Remove a manual cascade filter and restore those products to lowest price."""
         boq = self._get_boq()
         self._ensure_editable(boq)
 
@@ -299,7 +467,6 @@ class MakeVendorCascadeMixin:
         selections = dict(analysis.get("subcategory_make_selections") or {})
         storage_key = _subcategory_storage_key(category_text, sub_category_text)
         if storage_key not in selections:
-            # Tolerate case/whitespace differences in stored keys.
             matched_key = next(
                 (
                     key
@@ -329,120 +496,23 @@ class MakeVendorCascadeMixin:
             for row in _ordered_boq_rows(boq.boq_data or {})
             if row.get("row_id")
         }
-        open_lowest = not self.has_make_list
-        cleared = 0
-
-        for row in rows:
-            products = list(row.get("products") or [])
-            if not products:
-                continue
-            row_id = str(row.get("row_id") or "")
-            qty = _field_from_map(analysis_fields(boq_by_id.get(row_id) or {}), _QTY_KEYS)
-            changed = False
-            for index, product in enumerate(products):
-                if not _product_matches_subcategory(
-                    product,
-                    category=category_text,
-                    sub_category=sub_category_text,
-                ):
-                    continue
-                # Category-wide remove: leave products that still have a more specific
-                # manual sub-category filter applied.
-                product_sub = str(product.get("sub_category") or "").strip()
-                if not sub_category_text and product_sub:
-                    specific_key = _subcategory_storage_key(category_text, product_sub)
-                    specific = remaining.get(specific_key) or {}
-                    if str(specific.get("source") or "").strip() == "manual":
-                        continue
-                    # Also match remaining keys by normalized category/sub-category.
-                    if any(
-                        isinstance(value, dict)
-                        and str(value.get("source") or "").strip() == "manual"
-                        and _normalize_text(value.get("category"))
-                        == _normalize_text(category_text)
-                        and _normalize_text(value.get("sub_category"))
-                        == _normalize_text(product_sub)
-                        for value in remaining.values()
-                    ):
-                        continue
-
-                source = str(product.get("vendor_selection_source") or "").strip()
-                if source != "manual":
-                    continue
-
-                updated = dict(product)
-                category_for_product = str(updated.get("category") or "").strip()
-                sub_for_product = str(updated.get("sub_category") or "").strip() or "—"
-                approved_makes = self._approved_makes_for_subcategory(
-                    category_for_product,
-                    sub_for_product if sub_for_product != "—" else "",
-                )
-                if self.has_make_list and not approved_makes:
-                    match_payload = {
-                        "status": "unmatched",
-                        "confidence": 0.0,
-                        "notes": NO_APPROVED_MAKE_LABEL,
-                        "make": "",
-                        "vendor": "",
-                        "rate_master_id": None,
-                        "tech_key": "",
-                        "summary": "",
-                        "rate_detail": None,
-                        "labour_detail": None,
-                        "line_output": BOQLineOutputService.build(
-                            quantity=qty,
-                            rate_detail=None,
-                            labour_detail=None,
-                            is_pending=True,
-                        ),
-                        "prefer_lowest_price": True,
-                        "matched_at": now_local_iso(),
-                    }
-                    source_out = "not_found"
-                    approved_found = False
-                else:
-                    match_payload = self._exact_match_and_rates(
-                        updated,
-                        make="",
-                        vendor="",
-                        quantity=qty,
-                        database_version_id=database_version_id,
-                        prefer_lowest_price=True,
-                        approved_makes=None if open_lowest else (approved_makes or None),
-                    )
-                    source_out = "lowest_defaults"
-                    approved_found = True if open_lowest else bool(approved_makes)
-
-                updated["vendor_selection"] = match_payload
-                applied_make = match_payload.get("make") or ""
-                applied_vendor = match_payload.get("vendor") or ""
-                updated["selected_make"] = applied_make or None
-                updated["selected_vendor"] = applied_vendor or None
-                if applied_make:
-                    updated["make_hint"] = applied_make
-                updated["approved_make_found"] = approved_found
-                updated["vendor_selection_source"] = source_out
-                products[index] = updated
-                cleared += 1
-                changed = True
-            if changed:
-                row["products"] = products
-
+        cleared = self._restore_scope_to_lowest(
+            rows,
+            category=category_text,
+            sub_category=sub_category_text,
+            remaining=remaining,
+            database_version_id=database_version_id,
+            boq_by_id=boq_by_id,
+            open_lowest=not self.has_make_list,
+        )
         selections.pop(storage_key, None)
-        analysis["subcategory_make_selections"] = selections
-        analysis["rows"] = rows
-        if database_version_id:
-            analysis["database_version_id"] = database_version_id
-
-        with atomic():
-            safe = json_safe(analysis)
-            save_boq_analysis_json(boq.boq_name, safe)
-            boq.analysis_data = safe
-            boq.save(update_fields=["analysis_data"])
-
-        # Fresh stats for summary bar after filter removal.
-        stats = self.build_display().get("stats") or {}
-
+        stats = self._persist_filter_restore(
+            boq,
+            analysis,
+            rows=rows,
+            selections=selections,
+            database_version_id=database_version_id,
+        )
         logger.debug(
             "Sub-category filter removed boq=%s category=%s sub_category=%s cleared=%s",
             boq.pk,
@@ -453,6 +523,66 @@ class MakeVendorCascadeMixin:
         return {
             "category": category_text,
             "sub_category": sub_category_text,
+            "cleared_count": cleared,
+            "stats": stats,
+        }
+
+    def clear_all_subcategory_filters(self) -> dict[str, Any]:
+        """Remove every manual cascade filter and restore lowest-price rates."""
+        boq = self._get_boq()
+        self._ensure_editable(boq)
+
+        analysis = dict(boq.analysis_data or {})
+        selections = dict(analysis.get("subcategory_make_selections") or {})
+        manuals = [
+            value
+            for value in selections.values()
+            if isinstance(value, dict)
+            and str(value.get("source") or "").strip() == "manual"
+        ]
+        if not manuals:
+            raise ValidationError("No applied filters to clear.")
+
+        database_version_id = self._database_version_id(boq)
+        rows = list(analysis.get("rows") or [])
+        remaining = {
+            key: value
+            for key, value in selections.items()
+            if isinstance(value, dict)
+            and str(value.get("source") or "").strip() != "manual"
+        }
+        boq_by_id = {
+            str(row.get("row_id")): row
+            for row in _ordered_boq_rows(boq.boq_data or {})
+            if row.get("row_id")
+        }
+        open_lowest = not self.has_make_list
+        cleared = 0
+        for value in manuals:
+            cleared += self._restore_scope_to_lowest(
+                rows,
+                category=str(value.get("category") or "").strip(),
+                sub_category=str(value.get("sub_category") or "").strip(),
+                remaining=remaining,
+                database_version_id=database_version_id,
+                boq_by_id=boq_by_id,
+                open_lowest=open_lowest,
+            )
+        stats = self._persist_filter_restore(
+            boq,
+            analysis,
+            rows=rows,
+            selections=remaining,
+            database_version_id=database_version_id,
+        )
+        logger.debug(
+            "All sub-category filters cleared boq=%s filters=%s products=%s",
+            boq.pk,
+            len(manuals),
+            cleared,
+        )
+        return {
+            "filter_count": len(manuals),
             "cleared_count": cleared,
             "stats": stats,
         }
@@ -960,6 +1090,12 @@ class MakeVendorCascadeMixin:
                     sub_category="",
                     make=make_option,
                 )
+            category_preview = self._lowest_amount_maps(
+                database_version_id=database_version_id,
+                category=category,
+                sub_category="",
+                approved_makes=self._approved_makes_for_subcategory(category, "") or None,
+            )
 
             sub_rows: list[dict[str, Any]] = []
             for sub_row in catalog["sub_categories_by_category"].get(cat_key, []):
@@ -1007,6 +1143,15 @@ class MakeVendorCascadeMixin:
                         "selected_make": selected_make if selectable else "",
                         "selected_vendor": selected_vendor if selectable else "",
                         "prefer_lowest_price": bool(selection.get("prefer_lowest_price")),
+                        **self._lowest_amount_maps(
+                            database_version_id=database_version_id,
+                            category=category,
+                            sub_category=sub_category,
+                            approved_makes=self._approved_makes_for_subcategory(
+                                category, sub_category
+                            )
+                            or None,
+                        ),
                     }
                 )
             categories_out.append(
@@ -1018,6 +1163,7 @@ class MakeVendorCascadeMixin:
                     "make_options": category_make_options,
                     "vendors_by_make": category_vendors_by_make,
                     "sub_categories": sub_rows,
+                    **category_preview,
                 }
             )
 
@@ -1041,6 +1187,7 @@ class MakeVendorCascadeMixin:
                     "make": str(value.get("make") or "").strip() or "Lowest price",
                     "vendor": str(value.get("vendor") or "").strip()
                     or "Auto (lowest price)",
+                    "amount": str(value.get("amount") or "").strip(),
                     "prefer_lowest_price": bool(value.get("prefer_lowest_price")),
                     "product_count": int(value.get("product_count") or 0),
                     "source": "manual",

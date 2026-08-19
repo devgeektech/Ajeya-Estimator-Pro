@@ -83,6 +83,17 @@
                     autocomplete="off"
                 >
             </label>
+            <label class="extraction-field">
+                <span class="extraction-field__label">Price</span>
+                <input
+                    type="text"
+                    class="extraction-input extraction-input--readonly"
+                    :value="previewRate || '—'"
+                    readonly
+                    tabindex="-1"
+                    aria-readonly="true"
+                >
+            </label>
         </div>
         <div class="make-vendor-subcategory-panel__actions">
             <button
@@ -107,13 +118,21 @@
 
 {% if make_vendor_display.selection_catalog.applied_filters %}
 <section class="make-vendor-applied-filters make-vendor-applied-filters--card">
-    <h4 class="make-vendor-filter-preview__title">Applied filters</h4>
+    <div class="make-vendor-applied-filters__head">
+        <h4 class="make-vendor-filter-preview__title">Applied filters</h4>
+        <button
+            type="button"
+            class="btn btn--xsmall btn--boq-analyse"
+            title="Clear all applied filters and restore lowest-price rates"
+            @click="window.clearAllMakeVendorAppliedFilters('{% url 'boq:make_vendor_select' boq.pk %}')"
+        >Clear all</button>
+    </div>
     <ul class="make-vendor-applied-filters__list">
         {% for item in make_vendor_display.selection_catalog.applied_filters %}
         <li class="make-vendor-applied-filters__item">
             <div class="make-vendor-applied-filters__body">
                 <strong>{{ item.category }} / {{ item.sub_category }}</strong>
-                <span>{{ item.make }} · {{ item.vendor }}</span>
+                <span>{{ item.make }} · {{ item.vendor }}{% if item.amount %} · {{ item.amount }}{% endif %}</span>
                 {% if item.product_count %}
                 <span class="badge badge--gray">{{ item.product_count }} product{{ item.product_count|pluralize }}</span>
                 {% endif %}
@@ -546,6 +565,43 @@ document.addEventListener('alpine:init', () => {
         }
     };
 
+    window.clearAllMakeVendorAppliedFilters = async function clearAllMakeVendorAppliedFilters(url) {
+        if (!url) {
+            return;
+        }
+        const confirmed = window.BOQConfirm
+            ? await window.BOQConfirm.ask('Clear all applied filters and restore lowest-price rates?', {
+                title: 'Clear all filters',
+                confirmLabel: 'Clear all',
+            })
+            : window.confirm('Clear all applied filters and restore lowest-price rates?');
+        if (!confirmed) {
+            return;
+        }
+        try {
+            const body = new FormData();
+            body.append('ajax', '1');
+            body.append('action', 'clear_all_subcategory_filters');
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRFToken': csrfToken(),
+                    'Accept': 'application/json',
+                },
+                credentials: 'same-origin',
+                body,
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || !data.ok) {
+                throw new Error(data.message || 'Failed to clear filters.');
+            }
+            reloadMakeVendor('');
+        } catch (error) {
+            alert(error.message || 'Failed to clear filters.');
+        }
+    };
+
     Alpine.data('makeVendorSubcategoryPanel', (config) => ({
         url: config.url,
         catalog: { categories: [] },
@@ -594,6 +650,37 @@ document.addEventListener('alpine:init', () => {
             if (!row || isLowestMake(this.make)) return [];
             const byMake = row.vendors_by_make || {};
             return byMake[this.make] || [];
+        },
+        _amountLookup(map, key) {
+            if (!map || !key) return '';
+            if (Object.prototype.hasOwnProperty.call(map, key) && map[key]) {
+                return map[key];
+            }
+            const wanted = String(key).trim().toLowerCase().replace(/\s+/g, '');
+            for (const [entry, value] of Object.entries(map)) {
+                const entryKey = String(entry).trim().toLowerCase().replace(/\s+/g, '');
+                if (entryKey === wanted && value) {
+                    return value;
+                }
+            }
+            return '';
+        },
+        get previewRate() {
+            if (!this.subCategory) return '';
+            const row = this.activeScope;
+            if (!row) return '';
+            const make = String(this.make || '').trim();
+            const vendor = String(this.vendor || '').trim();
+            if (make && !this.isLowestMake(make)) {
+                if (vendor) {
+                    const byVendor = this._amountLookup(row.lowest_by_make_vendor || {}, make) || {};
+                    const pair = this._amountLookup(byVendor, vendor);
+                    if (pair) return pair;
+                }
+                const byMake = this._amountLookup(row.lowest_by_make || {}, make);
+                if (byMake) return byMake;
+            }
+            return row.lowest_amount || '';
         },
         onCategoryChange() {
             this.subCategory = '';

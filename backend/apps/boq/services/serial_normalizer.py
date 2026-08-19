@@ -134,6 +134,16 @@ def workbook_serial(row: dict[str, Any], *, serial_key: str | None = None) -> st
     return str(row.get("serial") or "").strip()
 
 
+def display_serial_for_row(row: dict[str, Any], *, serial_key: str | None = None) -> str:
+    """BOQ S.No cell text for one row (``a)``, ``1.1``, …)."""
+    return format_boq_serial_text(workbook_serial(row, serial_key=serial_key))
+
+
+def format_boq_serial_text(serial: Any) -> str:
+    """Normalize one serial token for BOQ / Review display (``a`` → ``a)``)."""
+    return _format_display_serial(serial)
+
+
 def nearest_structural_serial(
     row_id: str,
     rows_by_id: dict[str, dict[str, Any]],

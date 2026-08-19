@@ -381,14 +381,17 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
   **sub-category is selected**, Approved make lists only makes for that sub
   (make-list mapping for the sub, else approved ∩ Rate_Master makes for the sub) —
   not the full category / whole make-list dump. Default make is
-  **Lowest price** (approved-make constrained when a make list exists). Empty vendor also
+  **Lowest price** (approved-make constrained when a make list exists). The cascade
+  panel shows **Price** for the selected category / sub-category / make /
+  vendor before Apply. Empty vendor also
   picks the lowest-priced Rate_Master_Output row for the chosen make. Changing Make on a
   product or the cascade panel reloads **all** Rate_Master_Output vendors for that make
   (scoped to Product_ID when known). When two or more
   Rate_Master_Output rows for that make share the same lowest price (typically different
   vendors), the product is flagged **Multiple product detected in same price** and
-  the expert must choose one. Applied filters list
-  shows manual cascade applies.
+  the expert must choose one. Applied filters list shows manual cascade applies.
+  Removing one filter (×) or **Clear all** restores those sub-category products
+  to the **lowest-price** Rate_Master make/vendor combination.
 - Selection persisted per product as `selected_make`, `selected_vendor`, `vendor_selection`;
   sub-category choices stored in `analysis_data.subcategory_make_selections`.
 - AI does not choose make/vendor or calculate prices — rates are read from the master DB.
@@ -444,18 +447,21 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
 - **One export** (`GET /boqs/<id>/export/?kind=review|boq` — both return the same
   file): ``{uploaded_boq}_result.xlsx`` with two tabs:
   - **Review** — client Output format columns (one row per product). Red template
-    headers stay red. **Ser no of BOQ** uses each product's Unit/Qty row serial.
-    Letter slots (`a)`, `b)`) are qualified with that row's nearest structural
-    parent (`5.1 a)`). Shared serials use `1.7(A)`, `1.7(B)`. Structural section
-    rows do **not** copy the first child's quantity.
+    headers stay red. **Ser no of BOQ** uses each row's S.No exactly as the
+    uploaded BOQ sheet (``1.1`` on section rows, ``a)`` / ``b)`` on Unit/Qty
+    rows). Shared serials use ``1.7(A)``, ``1.7(B)``. Blank spacer rows follow
+    gaps in the original workbook row numbers. Structural section rows do **not**
+    copy the first child's quantity.
   - **Original BOQ** — uploaded layout. Qty is written only on Unit/Qty slot
-    rows. **Rate** is an Excel formula: Review `Final_Material_Amount + Labour`
-    (summed when several products share one slot). **Amount** is an Excel formula
-    to Review `Amount`. Rate/Amount columns are detected across client header
-    formats (`RATE (Rs.)`, `Amount`, etc.).
-  - Review derived columns are Excel formulas: Discount (or Base) updates Net →
-    add-ons → Final material → TOTAL MATERIAL / Amount. Labour × Qty updates
-    TOTAL LABOUR. The BOQ tab Rate/Amount formulas follow those Review cells.
+    rows. **Rate** is an Excel formula to Review **Final Rate** (summed when
+    several products share one slot). **Amount** is an Excel formula to Review
+    **Amount**. Rate/Amount columns are detected across client header formats
+    (`RATE (Rs.)`, `Amount`, etc.).
+  - Review Excel formulas: **Net_Material_Rate** (Base × (1 − Discount)),
+    **Sub_Total** (Commercial + Accessories + Handling + Wastage),
+    **Final_Material_Amount**, **Final Rate**, TOTAL MATERIAL / TOTAL LABOUR /
+    **Amount**. Procurement through Wastage and Profit stay as Rate_Master values.
+    The BOQ tab Rate/Amount formulas follow those Review cells.
   - Row fills (muted): **green** = amount found, **orange** = zero qty / Rate
     Only, **red** = missing product.
 - Download sets status `EXPORTED`.

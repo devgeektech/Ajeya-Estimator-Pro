@@ -1008,6 +1008,17 @@ class BOQMakeVendorSelectView(LoginRequiredMixin, View):
                 messages.success(request, message)
                 return HttpResponseRedirect(redirect_url)
 
+            if action == "clear_all_subcategory_filters":
+                result = service.clear_all_subcategory_filters()
+                message = (
+                    f"Cleared {result.get('filter_count') or 0} applied filter(s); "
+                    f"restored lowest price on {result.get('cleared_count') or 0} product(s)."
+                )
+                if ajax:
+                    return _extraction_edit_json_ok(message, selection=result, reload=True)
+                messages.success(request, message)
+                return HttpResponseRedirect(redirect_url)
+
             if action == "resolve_same_price":
                 row_id = (request.POST.get("row_id") or "").strip()
                 try:

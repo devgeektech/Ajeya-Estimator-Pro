@@ -1458,7 +1458,7 @@
 
         .make-vendor-subcategory-panel__grid {
             display: grid;
-            grid-template-columns: repeat(4, minmax(140px, 1fr));
+            grid-template-columns: repeat(5, minmax(120px, 1fr));
             gap: 10px;
             align-items: end;
             margin-top: 0;
@@ -1551,9 +1551,17 @@
         }
 
         .make-vendor-filter-preview__title {
-            margin: 0 0 8px;
+            margin: 0;
             font-size: .85rem;
             font-weight: 700;
+        }
+
+        .make-vendor-applied-filters__head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin: 0 0 8px;
         }
 
         .make-vendor-filter-preview__grid {

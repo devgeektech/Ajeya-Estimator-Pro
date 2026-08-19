@@ -32,8 +32,10 @@ Binding:
 - Prefer catalog-style naming (what would be bought) over BOQ boilerplate
   ("providing and fixing…", "of approved make").
 
-Taxonomy (DATABASE_CONTEXT exact labels when they fit):
+Taxonomy (use DATABASE_CONTEXT exact labels):
 - ``category`` + ``sub_category`` required when a product exists.
+- Use the SYNONYM_MAP below to identify products: if BOQ text matches ANY synonym
+  for a Category > Sub-category, use that exact Category and Sub-category.
 - ``class`` = exact listed label (``0`` valid for valves). Body material → ``attributes.material`` when Class is ``0``.
 - Electrical / MCC / control panels are never ACCESSORIES / ROSETTEE PLATE.
 

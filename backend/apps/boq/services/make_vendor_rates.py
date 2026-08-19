@@ -56,7 +56,7 @@ class MakeVendorRatesMixin:
             Rate_Master_Output.objects.filter(database_version_id=database_version_id)
             .exclude(Make__isnull=True)
             .exclude(Make="")
-            .values("Category", "Sub_Category", "Make", "Vendor")
+            .values("Category", "Sub_Category", "Make", "Vendor", "Final_Material_Amount")
         )
         by_category: dict[str, list[dict[str, str]]] = {}
         for row in rows:
@@ -64,12 +64,14 @@ class MakeVendorRatesMixin:
             key = _normalize_text(category)
             if not key:
                 continue
+            amount = row.get("Final_Material_Amount")
             by_category.setdefault(key, []).append(
                 {
                     "category": category,
                     "sub_category": str(row.get("Sub_Category") or "").strip(),
                     "make": str(row.get("Make") or "").strip(),
                     "vendor": str(row.get("Vendor") or "").strip(),
+                    "amount": "" if amount is None else str(amount),
                 }
             )
         self._rate_index_version_id = database_version_id
@@ -152,6 +154,70 @@ class MakeVendorRatesMixin:
                 seen.add(key)
                 makes.append(text)
         return sorted(makes, key=lambda item: item.lower())
+
+
+    def _format_preview_amount(self, value: Any) -> str:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return ""
+        if number < 0:
+            return ""
+        return f"{number:.2f}"
+
+    def _lowest_amount_maps(
+        self,
+        *,
+        database_version_id: int,
+        category: str,
+        sub_category: str,
+        approved_makes: list[str] | None,
+    ) -> dict[str, Any]:
+        """Lowest Final_Material_Amount for cascade preview (scope / make / vendor)."""
+        overall: float | None = None
+        by_make: dict[str, float] = {}
+        by_make_vendor: dict[str, dict[str, float]] = {}
+        for rate in self._rate_rows_for_scope(
+            database_version_id=database_version_id,
+            category=category,
+            sub_category=sub_category,
+        ):
+            make = str(rate.get("make") or "").strip()
+            vendor = str(rate.get("vendor") or "").strip()
+            if not make:
+                continue
+            if approved_makes and not MakeListConstraintService.make_is_allowed(
+                make, approved_makes
+            ):
+                continue
+            try:
+                amount = float(rate.get("amount") or "")
+            except (TypeError, ValueError):
+                continue
+            if overall is None or amount < overall:
+                overall = amount
+            current_make = by_make.get(make)
+            if current_make is None or amount < current_make:
+                by_make[make] = amount
+            if vendor:
+                vendor_map = by_make_vendor.setdefault(make, {})
+                current_vendor = vendor_map.get(vendor)
+                if current_vendor is None or amount < current_vendor:
+                    vendor_map[vendor] = amount
+        return {
+            "lowest_amount": self._format_preview_amount(overall) if overall is not None else "",
+            "lowest_by_make": {
+                make: self._format_preview_amount(amount)
+                for make, amount in by_make.items()
+            },
+            "lowest_by_make_vendor": {
+                make: {
+                    vendor: self._format_preview_amount(amount)
+                    for vendor, amount in vendors.items()
+                }
+                for make, vendors in by_make_vendor.items()
+            },
+        }
 
 
     def _make_options_for_scope(

@@ -1,4 +1,4 @@
-﻿# BOQ_AI Session State
+# BOQ_AI Session State
 
 Compact active memory. Full spec: `docs/PRODUCT.md`. Schema: `docs/DATABASE.md`.
 History: `docs/CHANGELOG.md` (do not duplicate session diaries here).
@@ -42,7 +42,7 @@ uploads retained.
 | Make list map | **AI-first** multi-target (v11): understands free text; compound lines can map multiple category/sub pairs (e.g. sprinkler + rosette); null sub = category-wide makes; heuristics soft-only; auto remap on stale mapping version |
 | Make & Vendor | Product_ID → Rate_Master Make/Vendor/amounts from Postgres; not found/no match → dropdowns + Apply (green); cascade; Chroma not used for rates |
 | Labour | Product_ID → Labour_master_Output; amount from **Labour_With_State_Multiplier** (fallback Total_Labour_Per_Unit); auto on Make & Vendor Next |
-| Review | Same per-product slot qty + lineage UI; Export is one workbook (Review + BOQ). Review Discount/Base/Labour/Qty are inputs; Net→Amount are Excel formulas. BOQ Rate/Amount follow Review; muted green/orange/red fills |
+| Review | Same per-product slot qty + lineage UI; Export is one workbook (Review + BOQ). Review Base/Discount/Labour/Qty are inputs; Net, Sub_Total, Final material, Final Rate, totals are Excel formulas. BOQ Rate → Review Final Rate; Amount → Review Amount |
 | Detail open | Default tab follows `BOQ.status`; renders stored data only — no AI in the GET |
 | Jobs | Stuck analysis heal/fail; progress reset; Celery concurrency 8; Analyse completion uses `location.replace` auto-reload |
 | Upload | Requires active DB; `.xlsx` / `.xlsm` / legacy `.xls` (converted); **not** `.xlsb`; single sheet |
@@ -67,12 +67,11 @@ uploads retained.
 
 Keep only the latest entry below. Older work is in `docs/CHANGELOG.md`.
 
-### 2026-08-14 — AI Description taxonomy + attributes
+### 2026-08-19 — Review export spacing + BOQ-native serials
 
-Completed: AI Description now lists Category / Sub-category / Class / Size /
-Unit / Capacity plus key attributes (IS, Type, Material, …). Extract, save, and
-Select candidate refresh it.
-Pending: Re-analyse existing products (or edit+save) to refresh old short hints.
+Completed: Review sheet blank rows follow original BOQ workbook gaps; Ser no uses
+BOQ S.No (`a)`, `b)`, `1.1`, …) not parent-qualified numbering.
+Pending: Re-export and compare Review vs BOQ tab layout.
 Issues: None.
 Next: None.
 

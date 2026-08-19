@@ -5,6 +5,41 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
+## 2026-08-19 — Review export spacing + BOQ-native serials
+
+- Review sheet inserts blank rows where the uploaded BOQ workbook has empty rows
+  (matches section spacing on the BOQ tab).
+- Review **Ser no of BOQ** now mirrors the original BOQ S.No (`1.1`, `a)`, `b)`,
+  …) instead of parent-qualified forms like `1.1 a)`.
+
+## 2026-08-19 — Review export: Net/Sub_Total formulas + BOQ Rate → Final Rate
+
+- Review sheet Excel formulas now include **Net_Material_Rate** and **Sub_Total**
+  (plus existing **Final_Material_Amount**, **Final Rate**, totals, and **Amount**).
+  Procurement through Wastage and **Profit_Value** stay as Rate_Master values.
+- BOQ tab **Rate** references Review column **Final Rate** (S), not Q+R inline.
+
+## 2026-08-19 — Cascade Apply field label is Price
+
+- Renamed the apply-filter preview field from **Lowest price** to **Price**.
+
+## 2026-08-19 — Review export: Final Rate + fewer formulas
+
+- Added **Final Rate** column before **Qty** in the Review sheet export.
+- Excel formulas are now limited to **Final_Material_Amount**, **Final Rate**,
+  **Total Material**, **Total Labour**, and **Amount** rollups.
+
+## 2026-08-18 — Cascade Apply shows lowest price
+
+- Make & Vendor apply-filter panel shows the lowest Rate_Master price for the
+  selected category / sub-category / make / vendor.
+- Applied filter chips also include that amount.
+
+## 2026-08-18 — Make & Vendor Clear all filters restores lowest price
+
+- Applied filters has **Clear all**. Removing one filter or all filters reloads
+  the lowest-price make/vendor/rate for those sub-category products.
+
 ## 2026-08-14 — AI Description includes taxonomy + attributes
 
 - AI Description is composed as

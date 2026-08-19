@@ -109,16 +109,67 @@ def resolve_category_label(hint: str, categories: list[str]) -> str | None:
 
 
 _SUB_CATEGORY_SYNONYMS: dict[str, tuple[str, ...]] = {
-    "ms": ("mild steel", "m s", "m.s", "ms pipe"),
-    "gi": ("galvanised", "galvanized", "g i", "g.i"),
+    # PIPE materials
+    "ms": ("mild steel", "m s", "m.s", "ms pipe", "m.s. pipe", "mild steel pipe"),
+    "gi": ("galvanised", "galvanized", "g i", "g.i", "gi pipe", "g.i. pipe", "galvanized iron pipe", "galvanised iron pipe"),
     "ss": ("stainless", "stainless steel", "s s"),
     "ci": ("cast iron", "c i"),
     "di": ("ductile iron", "d i"),
-    "nrv": ("non return", "non-return", "check valve"),
-    "non return valve": ("nrv", "check valve", "non-return"),
-    "sluice valve": ("sluice", "gate valve", "gate"),
-    "ball valve": ("ball",),
-    "butterfly valve": ("butterfly",),
+    "sprinkler flexible pipe": ("sprinkler flexible", "flexible sprinkler pipe", "sprinkler flex hose", "flex drop", "flexible drop"),
+    # VALVE
+    "sluice valve": ("sluice", "gate valve", "gate", "gv", "gate isolation valve"),
+    "butterfly": ("butterfly valve", "bfv", "bf valve", "gear butterfly valve"),
+    "ball valve": ("ball", "bv", "ball isolation valve"),
+    "non return valve": ("nrv", "nr valve", "check valve", "non-return", "non return", "non return check valve", "reflex valve", "reflex"),
+    "air release valve": ("air release", "air relief", "arv", "air valve"),
+    "y strainer": ("y-type strainer", "y type strainer", "y filter", "y-type filter"),
+    # HYDRANT
+    "external hydrant": ("pillar hydrant", "yard hydrant", "fire hydrant pillar", "external fire hydrant"),
+    "landing valve": ("fire landing valve", "hydrant landing valve", "hydrant valve"),
+    "branch pipe": ("fire branch pipe", "hydrant branch pipe", "fire nozzle", "branch pipe nozzle"),
+    "short branch pipe": ("short branch nozzle", "short branch pipe nozzle", "is 903 branch pipe"),
+    "fire hose reel": ("hose reel", "fire hose reel drum", "hose reel drum", "swinging hose reel"),
+    "fire hose": ("fire fighting hose", "delivery hose", "hydrant hose", "rrl hose"),
+    "fire man axe": ("fire axe", "fireman's axe", "fire fighting axe"),
+    "fire brigade inlet connection": ("fire brigade inlet", "breeching inlet", "fbc inlet", "fire brigade breeching inlet"),
+    "fire brigade delivery head": ("fire brigade outlet", "delivery head", "fire brigade outlet head"),
+    "fire brigade suction hose coupling": ("suction hose coupling", "fire suction coupling"),
+    "sand bucket set": ("sand bucket", "sand buckets", "fire sand bucket set", "fire buckets"),
+    "fire hose box": ("hose box", "fire hose cabinet", "hose cabinet", "hydrant hose box"),
+    "fire door": ("fire rated door", "fire resistant door", "fire check door"),
+    # SPRINKLER
+    "upright": ("upright sprinkler", "upright sprinkler head"),
+    "side wall": ("sidewall sprinkler", "side wall sprinkler", "horizontal sidewall sprinkler"),
+    "pendant": ("pendant sprinkler", "pendent sprinkler", "hanging sprinkler"),
+    "flow indicator switch": ("flow switch", "water flow switch", "flow indicator", "vane type flow switch"),
+    "inspecting and testing assembly": ("inspector test", "inspection and testing assembly", "ita", "test and drain assembly"),
+    "installation control valve": ("icv", "alarm valve", "sprinkler control valve assembly", "zone control valve assembly"),
+    # PUMP
+    "jockey pump": ("jockey", "jockey fire pump", "pressure maintenance pump"),
+    "diesel pump": ("diesel fire pump", "diesel driven fire pump", "diesel engine driven pump"),
+    "hydrant pump": ("hydrant fire pump", "fire hydrant pump", "hydrant duty pump"),
+    "sprinkler pump": ("sprinkler fire pump", "fire sprinkler pump", "automatic sprinkler pump"),
+    # PUMP ACCESSORIES
+    "exhaust piping system": ("engine exhaust system", "diesel engine exhaust system", "pump exhaust system"),
+    "diesel tank": ("diesel fuel tank", "fuel tank", "diesel storage tank"),
+    "rubber expansion joints": ("rubber expansion joint", "vibration eliminator", "rubber bellows"),
+    # TANK
+    "air cushion tank": ("air cushion", "air vessel", "air pressure vessel", "plain air vessel"),
+    "pressure vessel": ("pressure tank", "pressure maintenance vessel"),
+    "grp water tank": ("grp tank", "frp water tank", "frp tank", "fiberglass water tank"),
+    # ACCESSORIES
+    "rosettee plate": ("rosette", "rosette plate", "escutcheon plate", "sprinkler rosette", "sprinkler escutcheon"),
+    "fire pump pannel": ("fire pump panel", "fire pump control panel", "fire pump controller", "pump controller"),
+    # INSTRUMENT
+    "pressure gauge": ("pressure indicator", "pressure meter", "pressure dial", "pg"),
+    # EXTINGUISHER
+    "abc": ("abc extinguisher", "abc fire extinguisher", "dry chemical powder extinguisher", "abc dcp extinguisher"),
+    "co2": ("co2 extinguisher", "carbon dioxide extinguisher", "carbon dioxide", "co2 fire extinguisher"),
+    "foam": ("foam extinguisher", "afff", "mechanical foam extinguisher"),
+    "dcp": ("dcp extinguisher", "dry powder extinguisher", "dry chemical fire extinguisher"),
+    "water based": ("water based extinguisher", "water fire extinguisher", "water extinguisher"),
+    "wet chemical": ("wet chemical extinguisher", "wet chemical fire extinguisher"),
+    "fe36": ("fe36 extinguisher", "fe-36 extinguisher", "clean agent fe36 extinguisher"),
 }
 
 
