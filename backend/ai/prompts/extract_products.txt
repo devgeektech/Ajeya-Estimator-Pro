@@ -12,16 +12,17 @@ READ THE WHOLE SECTION FIRST:
 - Spec-only lines (Speed, Head, Pressure, notes) become attributes on the slot products.
 
 Binding:
-- Exactly one product per slot. Never invent extra products for the same slot.
+- Usually one product per slot. Extract multiple only when the slot clearly describes
+  distinct purchasable items (e.g. "Sluice valve with Y strainer" → two products).
 - Always set ``qty_row_id``, ``source_row_id``, ``slot_index`` from that slot.
 - ``quantity`` / ``quantity_unit`` from the slot (keep 0; Rate Only / RO → ``"Rate Only"``).
 - Size/unit from that slot only. Shared parent specs (PN, flanged, IS, material) on every product.
-- Product count for a section MUST equal the number of slots in the payload.
+- Product count for a section MUST be at least the number of slots (≥1 product per slot).
 
 ``description_hint`` — REQUIRED AI Description (one natural-language line, max ~200 chars):
 - Write plain English, NOT a slash-separated field dump.
 - Mention what is known: Class/material, Sub-category, Category, Size + Unit,
-  Capacity, and key attributes (IS, Type, Material, connection, …).
+  Capacity, and key attributes (IS, Type, Material, connection, etc.).
   Example: ``SS branch pipe for hydrant, 20 mm dia, with is standard 903, type short branch pipe``
   Example: ``ductile iron sluice valve, 200 mm dia, PN16, flanged ends``
 - Skip only fields that are truly unknown/null (do not invent).

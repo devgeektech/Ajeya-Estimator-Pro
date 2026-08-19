@@ -90,208 +90,10 @@ _CANONICAL_QUERY_EXPANSIONS: dict[str, tuple[str, ...]] = {
     "pvc": ("PVC",),
 }
 
-# Product / taxonomy phrase groups (different words, same meaning).
-# First entry is the canonical key used for equivalence.
-# Sourced from Synonyms.xlsx — add new rows here for future categories.
-_PHRASE_GROUPS: tuple[tuple[str, ...], ...] = (
-    # ── VALVE ──
-    (
-        "sluice valve", "sluice", "gate valve", "gate",
-        "gate isolation valve", "fire gate valve", "fire sluice valve",
-        "isolation gate valve", "gv",
-    ),
-    (
-        "butterfly valve", "butterfly", "butterfly isolation valve",
-        "fire butterfly valve", "bf valve", "bfv",
-        "gear operated butterfly valve", "gear butterfly valve",
-    ),
-    ("ball valve", "ball", "ball isolation valve", "bv", "full port ball valve"),
-    (
-        "non return valve", "non-return valve", "non return", "non-return",
-        "nrv", "nr valve", "check valve", "n r v",
-        "check valve nrv", "non return check valve",
-        "reflex valve", "reflex",
-    ),
-    (
-        "air release valve", "air release", "air relief", "arv",
-        "air valve", "air release air valve",
-    ),
-    (
-        "y strainer", "y-type strainer", "y type strainer", "y-strainer",
-        "strainer y", "y filter", "y-type filter",
-    ),
-    ("pressure reducing valve", "pressure reducing", "prv", "pressure reducer"),
-    ("foot valve", "foot"),
-    # ── HYDRANT ──
-    (
-        "external hydrant", "external fire hydrant", "pillar hydrant",
-        "hydrant pillar", "yard hydrant", "fire hydrant pillar",
-    ),
-    (
-        "landing valve", "landing", "fire landing valve",
-        "hydrant landing valve", "fire hydrant valve", "hydrant valve",
-    ),
-    (
-        "branch pipe", "branchpipe", "branch",
-        "fire branch pipe", "hydrant branch pipe",
-        "branch pipe nozzle", "fire nozzle",
-    ),
-    (
-        "short branch pipe", "short branch nozzle",
-        "short branch pipe nozzle", "fire short branch pipe",
-        "is 903 branch pipe",
-    ),
-    (
-        "hose reel", "fire hose reel", "hose reel drum",
-        "fire hose reel drum", "hose reel assembly",
-        "swinging hose reel", "first aid hose reel", "first-aid hose reel",
-    ),
-    (
-        "fire hose", "fire fighting hose", "delivery hose",
-        "hydrant hose", "rrl hose", "synthetic fire hose",
-        "fire delivery hose",
-    ),
-    (
-        "fire man axe", "fire axe", "fireman's axe",
-        "fire fighting axe", "fireman's fire axe",
-    ),
-    (
-        "fire brigade inlet", "fire brigade inlet connection",
-        "fire brigade inlet breeching", "breeching inlet",
-        "fire brigade breeching inlet", "fbc inlet",
-        "fire brigade", "collective inlet",
-    ),
-    (
-        "fire brigade delivery head", "fire brigade outlet",
-        "delivery head", "fire brigade outlet head",
-        "fire brigade connection head",
-    ),
-    (
-        "fire brigade suction hose coupling", "suction hose coupling",
-        "fire suction coupling", "pump suction hose coupling",
-        "fire hose suction coupling",
-    ),
-    (
-        "sand bucket set", "sand bucket", "sand buckets",
-        "fire sand bucket set", "fire buckets",
-        "sand buckets with stand", "fire bucket stand set",
-        "bucket set", "sandbucket", "sand bucket with stand",
-    ),
-    (
-        "hose box", "fire hose box", "hose cabinet",
-        "fire hose cabinet", "hydrant hose box",
-        "fire fighting hose cabinet", "hydrant box",
-    ),
-    ("fire door", "fire rated door", "fire resistant door", "fire check door", "fire door assembly"),
-    # ── PIPE ──
-    (
-        "ms pipe", "mild steel pipe", "m.s. pipe",
-        "mild steel fire pipe", "ms fire fighting pipe",
-        "ms black steel pipe",
-    ),
-    (
-        "gi pipe", "g.i. pipe", "galvanized iron pipe",
-        "galvanised iron pipe", "gi fire pipe",
-        "gi fire fighting pipe",
-    ),
-    (
-        "sprinkler flexible pipe", "flexible sprinkler pipe",
-        "sprinkler flexible hose", "flexible sprinkler hose",
-        "sprinkler drop hose", "flexible sprinkler connection",
-        "sprinkler flex hose",
-        "flexible drop", "sprinkler flexible",
-        "flexible connector", "flexible pipe", "flex drop",
-    ),
-    # ── SPRINKLER ──
-    ("upright sprinkler", "upright sprinkler head", "upright fire sprinkler", "upright type sprinkler", "upright automatic sprinkler"),
-    ("sidewall sprinkler", "side wall sprinkler", "sidewall sprinkler head", "side wall sprinkler head", "horizontal sidewall sprinkler"),
-    ("pendant sprinkler", "pendent sprinkler", "pendant sprinkler head", "pendent sprinkler head", "hanging sprinkler"),
-    (
-        "inspecting and testing assembly", "inspection and testing assembly",
-        "inspection & testing assembly", "ita",
-        "test and drain assembly", "inspection test assembly",
-        "inspector test", "inspecting test", "test and drain", "inspector's test",
-    ),
-    (
-        "flow indicator switch", "flow switch", "water flow switch",
-        "flow indicator", "sprinkler flow switch",
-        "water flow indicator", "vane type flow switch", "vane flow switch",
-    ),
-    (
-        "installation control valve", "icv",
-        "sprinkler installation control valve",
-        "sprinkler control valve assembly",
-        "zone control valve assembly",
-        "sprinkler zone control valve",
-        "alarm valve", "installation control",
-    ),
-    # ── PUMP ──
-    ("jockey pump", "jockey", "jockey fire pump", "pressure maintenance pump", "pressure maintenance jockey pump", "jockey duty pump"),
-    ("diesel pump", "diesel fire pump", "diesel driven fire pump", "diesel engine driven pump", "diesel fire fighting pump", "diesel engine pump"),
-    ("hydrant pump", "hydrant fire pump", "fire hydrant pump", "hydrant system pump", "hydrant duty pump", "main hydrant pump"),
-    ("sprinkler pump", "sprinkler fire pump", "sprinkler system pump", "automatic sprinkler pump", "fire sprinkler pump", "main sprinkler pump"),
-    # ── PUMP ACCESSORIES ──
-    (
-        "exhaust piping system", "engine exhaust system",
-        "diesel engine exhaust system", "pump exhaust system",
-        "exhaust pipe system", "diesel pump exhaust", "engine exhaust piping",
-    ),
-    (
-        "diesel tank", "diesel fuel tank", "fuel tank",
-        "fuel storage tank", "diesel storage tank",
-        "fire pump diesel tank", "engine fuel tank",
-    ),
-    (
-        "rubber expansion joint", "rubber vibration eliminator",
-        "vibration eliminator", "rubber bellows",
-        "flexible rubber connector", "rubber flexible joint",
-    ),
-    # ── TANK ──
-    (
-        "air cushion tank", "air cushion", "air vessel",
-        "air pressure vessel", "air chamber",
-        "plain air vessel", "fire pump air vessel",
-    ),
-    (
-        "pressure vessel", "pressure tank", "pressure maintenance vessel",
-        "pressure tank vessel",
-    ),
-    (
-        "grp water tank", "grp tank", "frp water tank", "frp tank",
-        "grp water storage tank", "fiberglass water tank", "grp panel tank",
-    ),
-    # ── ACCESSORIES ──
-    (
-        "rosette", "rosette plate", "rosetee plate", "rosette ring",
-        "sprinkler rosette", "sprinkler escutcheon",
-        "escutcheon plate", "ceiling plate", "cover plate",
-    ),
-    (
-        "fire pump panel", "fire pump pannel",
-        "fire pump control panel", "fire pump controller",
-        "fire pump control panel assembly", "pump controller",
-    ),
-    # ── INSTRUMENT ──
-    ("pressure gauge", "pressure indicator", "pressure meter", "pressure dial", "pg", "pressure gauges"),
-    ("pressure switch", "pressure switches"),
-    # ── EXTINGUISHER ──
-    ("abc extinguisher", "abc fire extinguisher", "abc dry chemical extinguisher", "abc dcp extinguisher", "dry chemical powder extinguisher", "abc", "abc powder"),
-    ("co2 extinguisher", "co2 fire extinguisher", "carbon dioxide extinguisher", "carbon dioxide fire extinguisher", "co2 type extinguisher", "co2", "carbon dioxide", "co 2"),
-    ("water based extinguisher", "water fire extinguisher", "water extinguisher", "water type fire extinguisher", "stored pressure water extinguisher"),
-    ("wet chemical extinguisher", "wet chemical fire extinguisher", "wet chemical type extinguisher", "kitchen wet chemical extinguisher"),
-    ("fe36 extinguisher", "fe-36 extinguisher", "fe36 fire extinguisher", "clean agent fe36 extinguisher"),
-    ("dcp extinguisher", "dry powder extinguisher", "dcp fire extinguisher", "dry chemical fire extinguisher", "dcp"),
-    ("foam extinguisher", "foam fire extinguisher", "mechanical foam extinguisher", "mechanical foam fire extinguisher", "foam type extinguisher", "foam", "afff", "foam type"),
-    ("extinguisher", "fire extinguisher", "fire extinguishers"),
-)
-
+# Phrase groups are auto-derived from _AI_SYNONYM_CATALOG (defined below).
+# Forward declaration — populated after _AI_SYNONYM_CATALOG is defined.
 _PHRASE_TO_CANONICAL: dict[str, str] = {}
 _PHRASE_EXPANSIONS: dict[str, tuple[str, ...]] = {}
-for _group in _PHRASE_GROUPS:
-    _canon = _group[0]
-    _PHRASE_EXPANSIONS[_canon] = _group
-    for _phrase in _group:
-        _PHRASE_TO_CANONICAL[_phrase] = _canon
 
 # Make-list heuristic hints (phrase → category / sub-category). Order: specific first.
 MAKE_LIST_DESCRIPTION_HINTS: tuple[tuple[str, str], ...] = (
@@ -848,6 +650,17 @@ _AI_SYNONYM_CATALOG: dict[tuple[str, str], tuple[str, ...]] = {
     ("EXTINGUISHER", "DCP"): ("DCP Extinguisher", "Dry Powder Extinguisher", "DCP Fire Extinguisher"),
     ("EXTINGUISHER", "FOAM"): ("Foam Extinguisher", "Mechanical Foam Extinguisher", "AFFF Extinguisher"),
 }
+
+# ── Build _PHRASE_TO_CANONICAL / _PHRASE_EXPANSIONS from _AI_SYNONYM_CATALOG ──
+# Each catalog entry becomes a phrase group: (sub_category_lower, *synonyms_lower).
+for (_cat, _sub), _synonyms in _AI_SYNONYM_CATALOG.items():
+    _canon = _sub.lower()
+    _group = tuple(dict.fromkeys(
+        [_canon] + [s.lower() for s in _synonyms]
+    ))
+    _PHRASE_EXPANSIONS[_canon] = _group
+    for _phrase in _group:
+        _PHRASE_TO_CANONICAL.setdefault(_phrase, _canon)
 
 
 def format_synonym_map_for_ai() -> str:

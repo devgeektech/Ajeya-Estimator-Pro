@@ -76,7 +76,8 @@ def convert_xls_path_to_xlsx(source_path: str | Path, dest_path: str | Path) -> 
 
     workbook = Workbook()
     default_sheet = workbook.active
-    workbook.remove(default_sheet)
+    if default_sheet is not None:
+        workbook.remove(default_sheet)
 
     try:
         for sheet_index in range(book.nsheets):
