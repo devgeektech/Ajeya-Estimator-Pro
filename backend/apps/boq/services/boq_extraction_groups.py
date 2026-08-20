@@ -232,8 +232,9 @@ def _compact_anchor_payload(group: dict[str, Any]) -> dict[str, Any]:
         "slots": slots,
         "section_note": (
             "description/lineage_lines are CONTEXT only. "
-            "Create products only from slots (qty+unit rows). "
-            "System titles (e.g. Yard Hydrant System) are not products."
+            "Products only from slots. "
+            "Slots with unit Job/LS describing services (testing, commissioning, "
+            "dismantling, painting, shop drawings) → skip_matching: true, products: []."
         ),
         "heuristic_skip": should_skip_anchor_group(
             group,

@@ -2,22 +2,44 @@ You extract purchasable products from BOQ sections (fire protection / MEP).
 
 Return valid JSON only. Prefer null over guessing. No prices, vendors, or invented catalog rows.
 
-READ THE WHOLE SECTION FIRST:
-- ``description`` / ``lineage_lines`` give the full meaning of the package (system title,
-  specs, notes). Use them as CONTEXT only.
-- Products come ONLY from ``slots`` (rows with Quantity AND Unit).
-- A system title is not a product. Example: under ``Yard Hydrant System``, a size row
-  with qty/unit that describes pipe/piping is a PIPE product — not a Hydrant —
-  even though the word hydrant appears in the section title.
-- Spec-only lines (Speed, Head, Pressure, notes) become attributes on the slot products.
+STEP 1 — UNDERSTAND THE SECTION (read everything before extracting):
+- ``description`` / ``lineage_lines`` tell you WHAT SYSTEM this section covers
+  (e.g. "Yard Hydrant System", "Sprinkler System for Basement").
+  These are CONTEXT — never a product by themselves.
+- ``slots`` are the individual rows with Quantity + Unit — these are the ONLY
+  source of products. Read every slot's description AND unit together.
+- Spec-only lines (Speed, Head, Pressure, IS standard, notes) are shared
+  attributes — apply them to the relevant slot products.
+
+STEP 2 — CLASSIFY EACH SLOT (product vs. non-product):
+For each slot, ask: "Is this a PHYSICAL ITEM that can be purchased/procured?"
+
+Extract as PRODUCT when the slot describes:
+- Equipment: pumps, valves, sprinklers, extinguishers, tanks, gauges, panels
+- Materials: pipes, fittings, hose reels, hose boxes, branch pipes, cables
+- Hardware: hydrants, nozzles, expansion joints, rosette plates
+
+Mark as NON-PRODUCT (``skip_matching: true``, ``products: []``) when:
+- Unit is "Job" / "LS" / "Lump Sum" AND description is a service activity
+- Description talks about: testing, commissioning, dismantling, removing,
+  refixing, painting, site preparation, shop drawings, hydraulic calculations,
+  approvals, documentation, as-built drawings, insurance, transportation
+- The row describes WORK/LABOUR, not a thing to buy
+- Even if qty > 0, if the text is about an activity — skip it
+
+When unsure: if you cannot identify a specific purchasable product category
+from the DATABASE_CONTEXT, set ``skip_matching: true``.
+
+STEP 3 — EXTRACT PRODUCTS from product slots:
 
 Binding:
-- Usually one product per slot. Extract multiple only when the slot clearly describes
-  distinct purchasable items (e.g. "Sluice valve with Y strainer" → two products).
+- Usually one product per slot. Extract multiple only when the slot clearly
+  describes distinct purchasable items (e.g. "Sluice valve with Y strainer").
 - Always set ``qty_row_id``, ``source_row_id``, ``slot_index`` from that slot.
 - ``quantity`` / ``quantity_unit`` from the slot (keep 0; Rate Only / RO → ``"Rate Only"``).
-- Size/unit from that slot only. Shared parent specs (PN, flanged, IS, material) on every product.
-- Product count for a section MUST be at least the number of slots (≥1 product per slot).
+- Size/unit from that slot only. Shared parent specs (PN, flanged, IS, material)
+  on every product in the section.
+- Product count for a section MUST be at least the number of product slots.
 
 ``description_hint`` — REQUIRED AI Description (one natural-language line, max ~200 chars):
 - Write plain English, NOT a slash-separated field dump.
@@ -73,6 +95,11 @@ Respond with:
           "extraction_confidence": 0.9
         }
       ]
+    },
+    {
+      "row_id": "r30",
+      "skip_matching": true,
+      "products": []
     }
   ]
 }
