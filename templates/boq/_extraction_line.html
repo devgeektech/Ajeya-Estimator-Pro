@@ -1,11 +1,13 @@
-    <article class="extraction-line extraction-line--{{ line.status }}{% if line.multiproduct_review %} extraction-line--multiproduct-review{% elif line.confidence_border %} extraction-line--confidence-{{ line.confidence_border }}{% endif %}" id="line-{{ line.row_id }}">
+    <article class="extraction-line extraction-line--{{ line.status }}{% if line.is_activity_only %} extraction-line--activity-only{% elif line.multiproduct_review %} extraction-line--multiproduct-review{% elif line.confidence_border %} extraction-line--confidence-{{ line.confidence_border }}{% endif %}" id="line-{{ line.row_id }}">
         <header class="extraction-line__header">
             <div class="extraction-line__title">
                 <span class="extraction-line__serial">{{ line.serial|default:"—" }}</span>
                 {% if line.lineage_count > 1 %}
                     <span class="badge badge--soft">{{ line.lineage_count }} lines grouped</span>
                 {% endif %}
-                {% if line.multiproduct_review %}
+                {% if line.is_activity_only %}
+                    <span class="badge badge--orange" title="Unit is job — Job Only">Job Only</span>
+                {% elif line.multiproduct_review %}
                     <span class="badge badge--review" title="Product count does not match Unit/Qty rows in this section — confirm the split">Multi-product review</span>
                 {% endif %}
             </div>

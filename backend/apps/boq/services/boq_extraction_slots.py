@@ -8,12 +8,10 @@ from typing import Any
 from ai.context import snap_product_taxonomy
 from apps.boq.services.boq_extraction_fields import (
     _apply_one_qty,
-    _is_placeholder_class,
     _is_qty_uom,
     normalize_product_fields,
 )
 from apps.boq.services.boq_row_fields import is_blank as _is_blank_value
-from apps.boq.services.serial_normalizer import letter_from_serial
 from utils.attribute_parser import coerce_attributes_dict
 from apps.boq.services.extraction_attribute_fields import COMMON_ATTRIBUTE_LABELS
 from apps.boq.services.product_attribute_enrichment_service import (

@@ -153,12 +153,15 @@
 <div class="make-vendor-lines" id="make-vendor-lines">
     <h3 class="make-vendor-lines__title">Products</h3>
     {% for line in make_vendor_display.lines %}
-    <article class="make-vendor-line{% cycle '' ' make-vendor-line--alt' %} make-vendor-line--{{ line.line_status|default:'default' }}" id="make-vendor-{{ line.row_id }}">
+    <article class="make-vendor-line{% cycle '' ' make-vendor-line--alt' %}{% if line.is_activity_only %} make-vendor-line--activity-only{% endif %} make-vendor-line--{{ line.line_status|default:'default' }}" id="make-vendor-{{ line.row_id }}">
         <header class="make-vendor-line__header">
             <div class="make-vendor-line__title">
                 <span class="make-vendor-line__serial">{{ line.serial|default:"—" }}</span>
                 {% if line.lineage_count > 1 %}
                     <span class="badge badge--soft">{{ line.lineage_count }} lines grouped</span>
+                {% endif %}
+                {% if line.is_activity_only %}
+                    <span class="badge badge--orange" title="Unit is job — Job Only">Job Only</span>
                 {% endif %}
                 {% if line.selection_mode %}
                     <span class="badge badge--soft">{{ line.selection_mode }}</span>
@@ -477,11 +480,10 @@
                     <button
                         type="button"
                         class="btn btn--small btn--primary"
-                        :disabled="saving || !chosenRateMasterId"
+                        :disabled="isBusy || !chosenRateMasterId"
                         @click="resolveSamePrice()"
                     >
-                        <span x-show="!saving">Use selected vendor</span>
-                        <span x-show="saving" x-cloak>Saving…</span>
+                        <span x-text="busyAction === 'resolve' ? 'Applying…' : 'Use selected vendor'"></span>
                     </button>
                 </div>
             </section>
@@ -1106,6 +1108,38 @@ document.addEventListener('alpine:init', () => {
                 reloadMakeVendor(this.rowId);
             } catch (error) {
                 this.error = error.message || 'Failed to apply make/vendor.';
+                this.busyAction = '';
+            }
+        },
+        async resolveSamePrice() {
+            if (this.isBusy || !this.chosenRateMasterId) return;
+            this.busyAction = 'resolve';
+            this.error = '';
+            try {
+                const body = new FormData();
+                body.append('ajax', '1');
+                body.append('action', 'resolve_same_price');
+                body.append('row_id', this.rowId);
+                body.append('product_index', String(this.productIndex));
+                body.append('rate_master_id', String(this.chosenRateMasterId));
+                const response = await fetch(this.url, {
+                    method: 'POST',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-CSRFToken': csrfToken(),
+                        'Accept': 'application/json',
+                    },
+                    credentials: 'same-origin',
+                    body,
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || !data.ok) {
+                    throw new Error(data.message || 'Failed to apply vendor selection.');
+                }
+                reloadMakeVendor(this.rowId);
+            } catch (error) {
+                this.error = error.message || 'Failed to apply vendor selection.';
+            } finally {
                 this.busyAction = '';
             }
         },

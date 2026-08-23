@@ -1,6 +1,7 @@
 """Labour charges after Make & Vendor using Labour_master_Output or manual rates."""
 from __future__ import annotations
 
+import json
 import logging
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -23,6 +24,7 @@ from apps.boq.services.boq_row_fields import (
     QTY_KEYS as _QTY_KEYS,
     UNIT_KEYS as _UNIT_KEYS,
     field_from_map as _field_from_map,
+    is_job_unit,
     ordered_boq_rows as _ordered_boq_rows,
 )
 from apps.boq.services.labour_detail_retrieval_service import LabourDetailRetrievalService
@@ -302,7 +304,7 @@ class BOQLabourService:
 
         percents: dict[str, Decimal] = {}
         for raw_key, raw_value in (category_percentages or {}).items():
-            category = str(raw_key or "").strip()
+            category = (raw_key or "").strip()
             if not category:
                 continue
             value = _to_decimal(raw_value)
@@ -517,6 +519,13 @@ class BOQLabourService:
                 list(analysis_row.get("products") or []),
                 group,
             )
+            is_act_only = (
+                is_job_unit(group.get("unit"))
+                or any(is_job_unit(p.get("unit")) or is_job_unit(p.get("quantity_unit")) for p in products)
+                or any(is_job_unit(r.get("unit")) for r in group.get("qty_rows") or [])
+            )
+            line_status = "default" if is_act_only else ""
+
             products_out: list[dict[str, Any]] = []
             for display_number, product in enumerate(products, start=1):
                 product_count += 1
@@ -611,7 +620,10 @@ class BOQLabourService:
                         "highlight_no_labour": not has_labour,
                     }
                 )
-            if products_out:
+                if is_act_only:
+                    products_out = []
+
+            if products_out or is_act_only:
                 qty = group.get("qty")
                 unit = group.get("unit")
                 qty_status = str(group.get("qty_status") or "empty")
@@ -647,13 +659,6 @@ class BOQLabourService:
                             )
                         )
 
-                if any(item.get("highlight_no_labour") for item in products_out):
-                    line_status = "no_labour"
-                elif products_out:
-                    line_status = "matched"
-                else:
-                    line_status = "default"
-
                 lines.append(
                     {
                         "row_id": row_id,
@@ -669,6 +674,7 @@ class BOQLabourService:
                         "unit_display": unit_display,
                         "show_qty_unit": show_qty_unit,
                         "product_count": len(products_out),
+                        "is_activity_only": is_act_only,
                         "line_status": line_status,
                         "products": products_out,
                     }
@@ -682,13 +688,18 @@ class BOQLabourService:
             }
             for name, count in sorted(categories.items(), key=lambda item: item[0].lower())
         ]
+        category_percents = {
+            name: str(percentages.get(name, "") or "")
+            for name in categories
+        }
 
         return {
-            "has_products": product_count > 0,
+            "has_products": len(lines) > 0 or bool(analysis.get("rows")),
             "mode": mode,
             "labour_ready": bool(config.get("labour_ready")),
             "applied_at": config.get("applied_at") or "",
             "category_rows": category_rows,
+            "category_percents_json": json.dumps(category_percents),
             "lines": lines,
             "stats": {
                 "product_count": product_count,
@@ -703,7 +714,7 @@ class BOQLabourService:
         if stored:
             return stored
         active = get_active_database_version()
-        return int(active.pk) if active else 0
+        return active.pk if active else 0
 
     def _get_boq(self) -> BOQ:
         try:

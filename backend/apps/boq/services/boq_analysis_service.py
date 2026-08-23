@@ -22,7 +22,6 @@ from apps.boq.services.boq_extraction_service import (
 )
 from apps.boq.services.boq_extract_service import load_extract_data
 from apps.boq.services.boq_job_progress import (
-    clear_boq_job_progress,
     set_boq_job_progress,
 )
 from apps.boq.services.boq_row_fields import DESCRIPTION_KEYS

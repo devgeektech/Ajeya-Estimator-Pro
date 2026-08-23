@@ -5,16 +5,9 @@ Return valid JSON only. Prefer null over a weak guess. Never invent Product_ID, 
 {{SYNONYM_MAP}}
 
 Section vs product:
-- ``extracted`` fields (description_hint, category, sub_category, class, size, unit,
-  capacity, attributes) define the product to match — especially on rematch when the
-  expert edited them.
-- ``description_hint`` is the AI/expert understanding of the product. On rematch it may
-  be free-form correction (e.g. "wrong — find sand buckets in db"). Interpret the
-  intended product from that text; do not treat instructional words as catalog labels.
-- ``boq_row.description`` is the FULL section for meaning only (system title + notes).
-- ``boq_row.slot_description`` is the qty/unit line for that product.
-- Do NOT pick Hydrant / Landing Valve / etc. only because the section title says
-  hydrant when the product fields/slot describe pipe, valve, or another item.
+- ``boq_row.description`` (FULL section) and ``boq_row.slot_description`` are the ULTIMATE SOURCE OF TRUTH. You must analyze the description carefully to find the correct product.
+- ``extracted`` fields (description_hint, category, sub_category, class, size, etc.) and ``expert_filled_fields`` are provided as a HELPING HAND (hints). 
+- If the expert inputs or description_hint contradict the actual BOQ row text, IGNORE the expert inputs and find the product that truly matches the BOQ row.
 
 Rules:
 - ``selected_id`` = a candidate ``id`` (Rate_Master_Output PK) or null.
@@ -22,10 +15,7 @@ Rules:
 - Prefer: size digits → category/sub_category → class/capacity/attributes.
 - Wrong size or wrong product family → null.
 - Class ``0`` is a real valve class. PIPE MS/GI live in sub_category. Ignore make/vendor.
-- Rematch (``extracted.rematch`` true): trust ``expert_filled_fields`` +
-  ``expert_filled_attributes`` + slot/section context; keep ``prior_match`` only if
-  it is still the best among candidates. When ``description_hint`` names a different
-  product than prior taxonomy, follow the description.
+- Rematch (``extracted.rematch`` true): Use the expert inputs as hints to find the product more accurately, BUT always validate them against the BOQ section text. If the expert provided random text or a wrong product, disregard it and find the correct product for the section. The confidence score should reflect how well the selected DB product matches the BOQ section (not just the expert inputs).
 - Map attributes onto candidate schema; leftovers in ``unmapped_attributes``.
 - ``match_confidence`` 0–100 (0 if null; &lt;30 if uncertain).
 

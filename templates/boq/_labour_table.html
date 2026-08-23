@@ -87,12 +87,15 @@
     <div class="make-vendor-lines labour-lines" id="labour-lines">
         <h3 class="make-vendor-lines__title">Products</h3>
         {% for line in labour_display.lines %}
-        <article class="make-vendor-line{% cycle '' ' make-vendor-line--alt' %} make-vendor-line--{{ line.line_status|default:'default' }}" id="labour-{{ line.row_id }}">
+        <article class="make-vendor-line{% cycle '' ' make-vendor-line--alt' %}{% if line.is_activity_only %} make-vendor-line--activity-only{% endif %} make-vendor-line--{{ line.line_status|default:'default' }}" id="labour-{{ line.row_id }}">
             <header class="make-vendor-line__header">
                 <div class="make-vendor-line__title">
                     <span class="make-vendor-line__serial">{{ line.serial|default:"—" }}</span>
                     {% if line.lineage_count > 1 %}
                         <span class="badge badge--soft">{{ line.lineage_count }} lines grouped</span>
+                    {% endif %}
+                    {% if line.is_activity_only %}
+                        <span class="badge badge--orange" title="Unit is job — Job Only">Job Only</span>
                     {% endif %}
                 </div>
                 <div class="make-vendor-line__meta">
@@ -254,11 +257,7 @@ document.addEventListener('alpine:init', () => {
         labourReady: Boolean(config.labourReady),
         canApply: Boolean(config.canApply),
         canComplete: Boolean(config.canComplete),
-        percents: {
-            {% for row in labour_display.category_rows %}
-            '{{ row.category|escapejs }}': '{{ row.percent|default:""|escapejs }}'{% if not forloop.last %},{% endif %}
-            {% endfor %}
-        },
+        percents: JSON.parse('{{ labour_display.category_percents_json|default:"{}"|escapejs }}'),
         saving: false,
         completing: false,
         error: '',

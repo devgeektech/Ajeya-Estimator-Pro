@@ -10,7 +10,10 @@ from apps.boq.services.boq_extraction_service import (
     quantity_display_fields,
     rehydrate_products_quantity_from_group,
 )
-from apps.boq.services.boq_row_fields import is_blank as _is_blank
+from apps.boq.services.boq_row_fields import (
+    is_blank as _is_blank,
+    is_job_unit,
+)
 from apps.boq.services.boq_row_grouping_service import grouped_anchor_rows
 from apps.boq.services.extraction_attribute_fields import COMMON_ATTRIBUTE_LABELS
 from apps.boq.services.make_list_constraint_service import MakeListConstraintService
@@ -150,7 +153,7 @@ def _backfill_candidate_confidences(
         if rate is None:
             continue
         score, _breakdown = structured_match_score(product_only, rate)
-        item["confidence"] = round(float(score), 2)
+        item["confidence"] = round(score, 2)
 
 
 def _recall_candidates_for_unmatched(
@@ -189,7 +192,7 @@ def _recall_candidates_for_unmatched(
         "make_hint": None,
     }
     try:
-        matcher = ProductMatchingService(int(database_version_id))
+        matcher = ProductMatchingService(database_version_id)
         raw_candidates = matcher.recall_sql_candidates(recall, limit=max(limit, 3))
     except Exception:
         return []
@@ -294,7 +297,7 @@ def _shape_product(
         selected_confidence = _candidate_confidence_value(
             product.get("attribute_confidence")
         )
-    stored_match_percentage = float(selected_confidence or 0.0)
+    stored_match_percentage = selected_confidence or 0.0
     selection_source = str(
         (product.get("ai_mapping") or {}).get("selection_source") or ""
     )
@@ -480,6 +483,7 @@ def _shape_product(
         **qty_fields,
         "display_label": f"Product {display_number}" + (f" of {total}" if total > 1 else ""),
         "is_user_added": (product.get("source") or "").lower() == "user",
+        "is_activity_only": is_job_unit(product.get("unit")) or is_job_unit(product.get("quantity_unit")),
         "fields": fields,
         "attributes": attribute_fields,
         "extra_attrs_json": json.dumps([]),
@@ -610,13 +614,13 @@ def _merge_lineage_analysis(
     lineage_ids: list[str],
     analysis_by_row: dict[str, dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[str], dict[str, Any]]:
-    anchor_id = str(lineage_ids[0]) if lineage_ids else ""
+    anchor_id = lineage_ids[0] if lineage_ids else ""
     anchor_analysis = analysis_by_row.get(anchor_id, {})
 
     products: list[dict[str, Any]] = []
     seen: set[str] = set()
     for row_id in lineage_ids:
-        analysis_row = analysis_by_row.get(str(row_id), {})
+        analysis_row = analysis_by_row.get(row_id, {})
         for product in analysis_row.get("products") or []:
             dedupe_key = "|".join(
                 [
@@ -630,7 +634,7 @@ def _merge_lineage_analysis(
             if dedupe_key in seen:
                 continue
             seen.add(dedupe_key)
-            products.append({**product, "source_row_id": str(row_id)})
+            products.append({**product, "source_row_id": row_id})
 
     # Keep BOQ / slot sequence — do not arrange tabs by match percentage.
     products.sort(key=_product_boq_order_key)
@@ -703,53 +707,66 @@ class BOQExtractionDisplayService:
             qty_row_count = int(group.get("slot_count") or 0) or len(
                 group.get("slots") or qty_rows
             )
-            # Multi-product review ONLY when product count ≠ Unit/Qty slot count
-            # (e.g. 2 slots → 1 or 3 products). Equal counts are fine — including
-            # 1 product for 1 rate/qty row. Hollow slot-fallback / weak extract
-            # review must not reuse this badge (it mislabels single-product sections).
-            multiproduct_review = (
-                qty_row_count > 0
-                and product_total > 0
-                and product_total != qty_row_count
+            qty = group.get("qty")
+            unit = group.get("unit")
+            if qty in (None, "") and qty_rows:
+                qty = qty_rows[0].get("qty")
+                unit = unit or qty_rows[0].get("unit")
+
+            is_activity_only = (
+                is_job_unit(unit)
+                or is_job_unit(group.get("unit"))
+                or any(is_job_unit(p.get("unit")) or is_job_unit(p.get("quantity_unit")) for p in products)
+                or any(is_job_unit(r.get("unit")) for r in qty_rows)
             )
 
-            shaped_products = [
-                _shape_product(
-                    product,
-                    display_number=index + 1,
-                    total=product_total,
-                    source_row_id=str(product.get("source_row_id") or row_id),
-                    database_version_id=db_version_id,
-                    taxonomy=taxonomy,
-                )
-                for index, product in enumerate(products)
-            ]
-            product_count += len(products)
-            missing_field_count += sum(product["missing_count"] for product in shaped_products)
-            if multiproduct_review:
-                multiproduct_review_count += 1
-
-            category, sub_category = _primary_category(products)
-            if analysis_row.get("skip_matching") and not products:
-                status = "skipped"
-            elif products:
-                status = "extracted"
-            elif analysis_row:
-                status = "empty"
-            else:
-                status = "not_analyzed"
-
-            # Analysis UI: left confidence line on the outer extraction card.
-            # Green only when every product match is ≥ 95% (match_percentage_band green).
-            confidence_border: str | None
-            if multiproduct_review or not shaped_products:
+            if is_activity_only:
+                shaped_products = []
+                product_total = 0
+                multiproduct_review = False
                 confidence_border = None
+                status = "extracted"
             else:
-                is_all_green = all(
-                    str(p.get("match_percentage_band") or "").strip() == "green"
-                    for p in shaped_products
+                multiproduct_review = (
+                    qty_row_count > 0
+                    and product_total > 0
+                    and product_total != qty_row_count
                 )
-                confidence_border = "green" if is_all_green else "red"
+
+                shaped_products = [
+                    _shape_product(
+                        product,
+                        display_number=index + 1,
+                        total=product_total,
+                        source_row_id=str(product.get("source_row_id") or row_id),
+                        database_version_id=db_version_id,
+                        taxonomy=taxonomy,
+                    )
+                    for index, product in enumerate(products)
+                ]
+                product_count += len(products)
+                missing_field_count += sum(product["missing_count"] for product in shaped_products)
+                if multiproduct_review:
+                    multiproduct_review_count += 1
+
+                if analysis_row.get("skip_matching") and not products:
+                    status = "skipped"
+                elif products:
+                    status = "extracted"
+                elif analysis_row:
+                    status = "empty"
+                else:
+                    status = "not_analyzed"
+
+                if multiproduct_review or not shaped_products:
+                    confidence_border = None
+                else:
+                    is_all_green = all(
+                        str(p.get("match_percentage_band") or "").strip() == "green"
+                        for p in shaped_products
+                    )
+                    confidence_border = "green" if is_all_green else "red"
+            category, sub_category = _primary_category(products)
 
             # Hide pure chapter headers with no Unit/Qty slots and no products.
             # Keep empty sections that have qty slots so experts can Add / Re-analyse.
@@ -811,6 +828,13 @@ class BOQExtractionDisplayService:
                     "skip_reason": analysis_row.get("skip_reason") or "",
                     "product_count": product_total,
                     "multiproduct_review": multiproduct_review,
+                    "is_activity_only": (
+                        is_job_unit(unit)
+                        or is_job_unit(group.get("unit"))
+                        or any(bool(p.get("is_activity_only")) for p in shaped_products)
+                        or any(is_job_unit(product.get("unit")) or is_job_unit(product.get("quantity_unit")) for product in products)
+                        or any(is_job_unit(r.get("unit")) for r in qty_rows)
+                    ),
                     "needs_product": product_total == 0 and qty_row_count > 0,
                     "products": shaped_products,
                     "activities": [],

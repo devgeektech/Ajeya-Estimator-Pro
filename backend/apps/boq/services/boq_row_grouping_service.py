@@ -10,9 +10,9 @@ import re
 from typing import Any
 
 from apps.boq.services.boq_row_fields import (
-    DESCRIPTION_KEYS as _DESCRIPTION_KEYS,
+    DESCRIPTION_KEYS,
     QTY_KEYS,
-    UNIT_KEYS as _UNIT_KEYS,
+    UNIT_KEYS,
     field_from_map as _field_from_map,
 )
 from apps.boq.services.serial_normalizer import (
@@ -21,8 +21,6 @@ from apps.boq.services.serial_normalizer import (
     letter_from_serial,
 )
 
-# Workbooks often store quantities in Total / floor columns instead of Qty.
-_QTY_KEYS = QTY_KEYS + ("total", "ground", "basement")
 _RATE_KEYS = ("rate", "unit_rate", "basic_rate")
 
 # Soft budgets for one AI extract group. Exceeding any triggers a split when
@@ -82,8 +80,8 @@ def qty_cell_status(fields: dict[str, Any]) -> tuple[str, Any, Any]:
     - ``zero`` — explicit 0 / 0.0
     - ``rate_only`` — Rate Only (priced later / rate column)
     """
-    unit = _field_from_map(fields, _UNIT_KEYS)
-    qty = _field_from_map(fields, _QTY_KEYS)
+    unit = _field_from_map(fields, UNIT_KEYS)
+    qty = _field_from_map(fields, QTY_KEYS)
     if qty in (None, ""):
         return "empty", None, unit
 
@@ -117,12 +115,12 @@ def has_quantity(fields: dict[str, Any]) -> bool:
 
 
 def _is_structural_serial(serial: str) -> bool:
-    return bool(_STRUCTURAL_SERIAL.match(str(serial).strip()))
+    return bool(_STRUCTURAL_SERIAL.match(serial.strip()))
 
 
 def _is_dotted_structural_serial(serial: str) -> bool:
     """True for ``1.1``, ``2.15`` — not bare chapter ``1`` / ``2``."""
-    return bool(_DOTTED_STRUCTURAL.match(str(serial).strip()))
+    return bool(_DOTTED_STRUCTURAL.match(serial.strip()))
 
 
 def _is_letter_serial(serial: str) -> bool:
@@ -136,7 +134,7 @@ def _is_spec_description(description: str) -> bool:
 
 def _is_section_title_row(row: dict[str, Any], fields: dict[str, Any]) -> bool:
     serial = str(row.get("serial") or "").strip()
-    description = str(_field_from_map(fields, _DESCRIPTION_KEYS) or "").strip()
+    description = str(_field_from_map(fields, DESCRIPTION_KEYS) or "").strip()
     if is_section_roman(serial):
         return True
     if _TOTAL_LABEL.match(description):
@@ -161,7 +159,7 @@ def _children_map(rows: list[dict[str, Any]]) -> dict[str, list[str]]:
     return mapping
 
 
-def is_anchor_row(row: dict[str, Any], children_map: dict[str, list[str]] | None = None) -> bool:
+def is_anchor_row(row: dict[str, Any]) -> bool:
     """
     Hierarchy helper for nested specs vs product/item nodes.
 
@@ -175,7 +173,7 @@ def is_anchor_row(row: dict[str, Any], children_map: dict[str, list[str]] | None
     serial = str(row.get("serial") or "").strip()
     if _is_structural_serial(serial) or is_section_roman(serial):
         return True
-    description = str(_field_from_map(fields, _DESCRIPTION_KEYS) or "")
+    description = str(_field_from_map(fields, DESCRIPTION_KEYS) or "")
     if _is_spec_description(description):
         return False
     return _is_letter_serial(serial)
@@ -192,7 +190,7 @@ def _collect_descendant_ids(
     while stack:
         child_id = stack.pop(0)
         child_row = index.get(child_id)
-        if child_row and is_anchor_row(child_row, children):
+        if child_row and is_anchor_row(child_row):
             continue
         ordered.append(child_id)
         stack[0:0] = children.get(child_id, [])
@@ -263,7 +261,7 @@ def _is_lineage_section_root(
 
 def resolve_group_row_id(boq_data: dict[str, Any], row_id: str) -> str | None:
     """If ``row_id`` belongs to a lineage section, return that section's anchor id."""
-    target = str(row_id)
+    target = row_id
     for group in grouped_anchor_rows(boq_data):
         anchor_id = str(group.get("row_id") or "")
         group_ids = [str(item) for item in (group.get("group_ids") or [])]
@@ -286,11 +284,11 @@ def resolve_anchor_row_id(boq_data: dict[str, Any], row_id: str) -> str:
     rows = boq_data.get("rows") or []
     index = _row_index(rows)
     children = _children_map(rows)
-    current_id = str(row_id)
+    current_id = row_id
     row = index.get(current_id)
     if not row:
         return current_id
-    if is_anchor_row(row, children):
+    if is_anchor_row(row):
         return current_id
     while row.get("parent_row_id"):
         parent_id = str(row.get("parent_row_id"))
@@ -299,7 +297,7 @@ def resolve_anchor_row_id(boq_data: dict[str, Any], row_id: str) -> str:
             break
         current_id = parent_id
         row = parent
-        if is_anchor_row(row, children):
+        if is_anchor_row(row):
             return current_id
     return current_id
 
@@ -337,7 +335,7 @@ def group_ids_for_anchor(anchor_row_id: str, rows: list[dict[str, Any]]) -> list
 
 def row_description(row: dict[str, Any]) -> str:
     fields = analysis_fields(row)
-    return str(_field_from_map(fields, _DESCRIPTION_KEYS) or "").strip()
+    return str(_field_from_map(fields, DESCRIPTION_KEYS) or "").strip()
 
 
 def combine_row_descriptions(index: dict[str, dict[str, Any]], row_ids: list[str]) -> str:
@@ -432,7 +430,7 @@ def build_slots_for_section(
         return []
 
     qty_id_set = {str(item.get("row_id") or "") for item in qty_rows}
-    owned = [str(item) for item in owned_ids]
+    owned = list(owned_ids)
     slots: list[dict[str, Any]] = []
     cursor = 0
 
@@ -452,6 +450,14 @@ def build_slots_for_section(
             local_ids.append(row_id)
 
         evidence_ids = [*local_ids, qty_row_id] if qty_row_id else list(local_ids)
+        serial = qty_row.get("serial") or ""
+        if not serial and local_ids:
+            for cid in local_ids:
+                er = index.get(cid)
+                if er and er.get("serial"):
+                    serial = str(er.get("serial")).strip()
+                    break
+
         description = qty_row.get("description") or ""
         size_hint, _size_unit = _parse_size_hint_from_description(description)
         slots.append(
@@ -459,7 +465,7 @@ def build_slots_for_section(
                 "slot_index": slot_index,
                 "slot_id": f"{qty_row_id or 'slot'}:{slot_index}",
                 "qty_row_id": qty_row_id,
-                "serial": qty_row.get("serial") or "",
+                "serial": serial,
                 "description": description,
                 "size_hint": size_hint,
                 "qty": qty_row.get("qty"),

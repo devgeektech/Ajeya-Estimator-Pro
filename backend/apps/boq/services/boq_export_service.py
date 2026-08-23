@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import re
+from copy import copy
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,7 @@ from apps.boq.services.boq_review_display_service import (
 from apps.boq.services.boq_row_fields import (
     QTY_KEYS as _QTY_KEYS,
     UNIT_KEYS as _UNIT_KEYS,
+    is_job_unit,
     ordered_boq_rows as _ordered_boq_rows,
 )
 from apps.boq.services.serial_normalizer import cell_value
@@ -60,20 +62,29 @@ _DARK_BORDER = Border(
 _CELL_ALIGNMENT = Alignment(horizontal="left", vertical="top", wrap_text=True)
 _HEADER_FONT = Font(bold=True)
 _RED_HEADER_FONT = Font(bold=True, color="FFFF0000")
-# Muted fills — not bright Excel reds/greens/oranges.
+_YELLOW_HEADER_FILL = PatternFill(
+    start_color="FFFF00",
+    end_color="FFFF00",
+    fill_type="solid",
+)
 _MISSING_PRODUCT_FILL = PatternFill(
-    start_color="F2D7D5",
-    end_color="F2D7D5",
+    start_color="FADBD8",
+    end_color="FADBD8",
     fill_type="solid",
 )
 _ZERO_OR_RATE_ONLY_FILL = PatternFill(
-    start_color="F3E6D8",
-    end_color="F3E6D8",
+    start_color="FDECC8",
+    end_color="FDECC8",
     fill_type="solid",
 )
 _FOUND_AMOUNT_FILL = PatternFill(
-    start_color="DCE8D8",
-    end_color="DCE8D8",
+    start_color="D4EDDA",
+    end_color="D4EDDA",
+    fill_type="solid",
+)
+_ACTIVITY_ONLY_FILL = PatternFill(
+    start_color="FADBD8",
+    end_color="FADBD8",
     fill_type="solid",
 )
 
@@ -124,16 +135,31 @@ def _header_keys(
 ) -> tuple[str | None, str | None, str | None, str | None]:
     """Resolve Rate/Amount/Qty/Unit keys across client header formats."""
     rate_key = amount_key = qty_key = unit_key = None
+    
+    # Smart pass 1: unambiguous amount columns
+    for header in headers:
+        key = str(header.get("key") or "").lower()
+        if not amount_key and ("amount" in key or key == "amt"):
+            amount_key = header.get("key")
+
     for header in headers:
         key = str(header.get("key") or "").lower()
         if not rate_key and key in _RATE_KEYS:
-            rate_key = header["key"]
+            rate_key = header.get("key")
         if not amount_key and key in _AMOUNT_KEYS:
-            amount_key = header["key"]
+            amount_key = header.get("key")
         if not qty_key and key in _QTY_KEYS:
-            qty_key = header["key"]
+            qty_key = header.get("key")
         if not unit_key and key in _UNIT_KEYS:
-            unit_key = header["key"]
+            unit_key = header.get("key")
+
+    # Smart pass 2: if total exists and isn't the amount, it might be quantity (e.g. "Ground", "Basement", "Total")
+    if not qty_key:
+        for header in headers:
+            key = str(header.get("key") or "").lower()
+            if key == "total" and header.get("key") != amount_key:
+                qty_key = header.get("key")
+                break
 
     for header in headers:
         key = str(header.get("key") or "")
@@ -159,7 +185,7 @@ def _scan_sheet_column(
     max_header_rows: int = 6,
 ) -> int | None:
     """Find a header column by scanning the first rows of the original sheet."""
-    last_col = min(int(sheet.max_column or 1), 40)
+    last_col = min(sheet.max_column or 1, 40)
     for row_idx in range(1, max_header_rows + 1):
         for col_idx in range(1, last_col + 1):
             raw = sheet.cell(row=row_idx, column=col_idx).value
@@ -516,12 +542,20 @@ def _highlight_row(
 ) -> None:
     paint = fill or _MISSING_PRODUCT_FILL
     last_col = max_column or sheet.max_column or 1
-    for col_idx in range(1, int(last_col) + 1):
+    for col_idx in range(1, last_col + 1):
         sheet.cell(row=row_number, column=col_idx).fill = paint
 
 
 def _style_cell(cell) -> None:
-    cell.alignment = _CELL_ALIGNMENT
+    if cell.alignment:
+        align = copy(cell.alignment)
+        align.wrap_text = True
+        align.vertical = "top"
+        if not align.horizontal:
+            align.horizontal = "left"
+        cell.alignment = align
+    else:
+        cell.alignment = _CELL_ALIGNMENT
     cell.border = _DARK_BORDER
 
 
@@ -530,6 +564,7 @@ def _style_used_range(
     *,
     skip_blank_rows: bool = True,
     red_header_columns: set[int] | None = None,
+    yellow_header: bool = False,
 ) -> None:
     """Apply top/right wrap alignment and dark borders to used cells."""
     if sheet.max_row is None or sheet.max_column is None:
@@ -544,6 +579,8 @@ def _style_used_range(
         if row_idx == 1:
             for col_idx, cell in enumerate(row_cells, start=1):
                 cell.font = _RED_HEADER_FONT if col_idx in red_cols else _HEADER_FONT
+                if yellow_header:
+                    cell.fill = _YELLOW_HEADER_FILL
 
 
 def _autosize_columns(sheet: Worksheet, *, min_width: int = 10, max_width: int = 42) -> None:
@@ -597,7 +634,7 @@ def _export_stem_from_upload(boq: BOQ) -> str:
     if stem:
         stem = _DJANGO_COLLISION_SUFFIX.sub("", stem)
     if not stem:
-        stem = str(boq.boq_name or "").strip() or "boq"
+        stem = (boq.boq_name or "").strip() or "boq"
     stem = _UNSAFE_FILENAME_CHARS.sub("_", stem).strip(" ._")
     return stem or "boq"
 
@@ -616,7 +653,7 @@ class BOQExportService:
         self.confirmations = confirmations or {}
 
     def run(self, kind: str = EXPORT_KIND_REVIEW) -> tuple[bytes, str]:
-        kind = str(kind or EXPORT_KIND_REVIEW).strip().lower()
+        kind = (kind or EXPORT_KIND_REVIEW).strip().lower()
         if kind not in _EXPORT_KINDS:
             raise ValueError("Export kind must be 'review' or 'boq'.")
 
@@ -696,10 +733,11 @@ class BOQExportService:
                 workbook.create_sheet(_BOQ_SHEET_TITLE)
 
         review_sheet = _ensure_review_sheet(workbook)
-        review_rows = self._write_review_sheet(
+        review_rows, activity_only_ids = self._write_review_sheet(
             review_sheet,
             display,
             boq_data,
+            workbook=workbook,
             orange_ids=orange_ids,
         )
         self._fill_boq_result_sheets(
@@ -708,6 +746,7 @@ class BOQExportService:
             pricing,
             highlight_ids,
             orange_ids,
+            activity_only_ids,
             review_title=review_sheet.title,
             review_rows=review_rows,
         )
@@ -723,6 +762,7 @@ class BOQExportService:
         pricing: dict[str, dict[str, Any]],
         highlight_ids: set[str],
         orange_ids: set[str],
+        activity_only_ids: set[str],
         *,
         review_title: str,
         review_rows: dict[str, list[int]],
@@ -788,11 +828,13 @@ class BOQExportService:
                 )
 
             fill = None
-            if row_id in orange_ids:
+            if row_id in activity_only_ids:
+                fill = _ACTIVITY_ONLY_FILL
+            elif row_id in orange_ids:
                 fill = _ZERO_OR_RATE_ONLY_FILL
             elif row_id in highlight_ids:
                 fill = _MISSING_PRODUCT_FILL
-            elif amount_formula or pricing.get(row_id, {}).get("amount") not in (None, ""):
+            else:
                 fill = _FOUND_AMOUNT_FILL
             if fill is not None:
                 _highlight_row(
@@ -814,6 +856,7 @@ class BOQExportService:
                 boq_data,
                 highlight_ids,
                 orange_ids,
+                activity_only_ids,
                 review_title=review_title,
                 review_rows=review_rows,
             )
@@ -824,6 +867,7 @@ class BOQExportService:
         boq_data: dict[str, Any],
         highlight_ids: set[str],
         orange_ids: set[str],
+        activity_only_ids: set[str],
         *,
         review_title: str,
         review_rows: dict[str, list[int]],
@@ -858,11 +902,13 @@ class BOQExportService:
             sheet.append([row_values.get(header.get("key")) for header in headers])
             if not is_slot:
                 continue
-            if row_id in orange_ids:
+            if row_id in activity_only_ids:
+                highlight_sheet_rows.append((sheet.max_row, _ACTIVITY_ONLY_FILL))
+            elif row_id in orange_ids:
                 highlight_sheet_rows.append((sheet.max_row, _ZERO_OR_RATE_ONLY_FILL))
             elif row_id in highlight_ids:
                 highlight_sheet_rows.append((sheet.max_row, _MISSING_PRODUCT_FILL))
-            elif mapped:
+            else:
                 highlight_sheet_rows.append((sheet.max_row, _FOUND_AMOUNT_FILL))
 
         for row_number, fill in highlight_sheet_rows:
@@ -881,11 +927,59 @@ class BOQExportService:
         display: dict[str, Any],
         boq_data: dict[str, Any] | None = None,
         *,
+        workbook=None,
         orange_ids: set[str] | None = None,
-    ) -> dict[str, list[int]]:
+    ) -> tuple[dict[str, list[int]], set[str]]:
         orange_ids = orange_ids or set()
         sheet.append(list(REVIEW_OUTPUT_HEADERS))
+        sheet.freeze_panes = "A2"
         col_count = len(REVIEW_OUTPUT_HEADERS)
+        
+        orig_serial_col = None
+        orig_desc_col = None
+        for h in ((boq_data or {}).get("headers") or []):
+            k = str(h.get("key") or "").lower()
+            if k == "serial":
+                orig_serial_col = int(h.get("index") or 0) + 1
+            elif k == "description":
+                orig_desc_col = int(h.get("index") or 0) + 1
+        
+        sheets_by_name = {name: workbook[name] for name in workbook.sheetnames} if workbook else {}
+        default_sheet = next(
+            (workbook[name] for name in workbook.sheetnames if name != _REVIEW_SHEET_TITLE),
+            workbook.active if workbook else None,
+        ) if workbook else None
+
+        def _copy_orig_format(row_id: str, dest_row: int) -> None:
+            if not workbook or not row_id or not boq_data:
+                return
+            b_row = next((r for r in (boq_data.get("rows") or []) if str(r.get("row_id") or "") == row_id), None)
+            if not b_row:
+                return
+            orig_row_num = _boq_excel_row_number(b_row)
+            if orig_row_num is None:
+                return
+            s_name = str(b_row.get("sheet_name") or "").strip()
+            orig_sheet = sheets_by_name.get(s_name) if s_name else None
+            if orig_sheet is None or orig_sheet.title == _REVIEW_SHEET_TITLE:
+                orig_sheet = default_sheet
+            if not orig_sheet:
+                return
+            
+            if orig_serial_col is not None:
+                o_cell = orig_sheet.cell(row=orig_row_num, column=orig_serial_col)
+                if o_cell.has_style:
+                    d_cell = sheet.cell(row=dest_row, column=1)
+                    if o_cell.font: d_cell.font = copy(o_cell.font)
+                    if o_cell.alignment: d_cell.alignment = copy(o_cell.alignment)
+            
+            if orig_desc_col is not None:
+                o_cell = orig_sheet.cell(row=orig_row_num, column=orig_desc_col)
+                if o_cell.has_style:
+                    d_cell = sheet.cell(row=dest_row, column=2)
+                    if o_cell.font: d_cell.font = copy(o_cell.font)
+                    if o_cell.alignment: d_cell.alignment = copy(o_cell.alignment)
+
         red_header_columns = {
             index
             for index, (_label, is_red) in enumerate(REVIEW_OUTPUT_HEADER_SPECS, start=1)
@@ -912,9 +1006,8 @@ class BOQExportService:
             empty[1] = line.get("description")
             sheet.append(empty)
             row_id = str(line.get("row_id") or "").strip()
+            _copy_orig_format(row_id, sheet.max_row)
             if row_id and row_id in orange_ids:
-                highlight_sheet_rows.append((sheet.max_row, _ZERO_OR_RATE_ONLY_FILL))
-            elif _is_zero_qty(line.get("qty")):
                 highlight_sheet_rows.append((sheet.max_row, _ZERO_OR_RATE_ONLY_FILL))
 
         def _append_products(products: list[dict[str, Any]]) -> None:
@@ -925,7 +1018,15 @@ class BOQExportService:
                 emitted_products.add(marker)
                 review_row = product.get("review_output") or {}
                 sheet.append(review_output_values(review_row))
-                excel_row = int(sheet.max_row)
+                excel_row = sheet.max_row
+                target = str(
+                    product.get("qty_row_id")
+                    or product.get("source_row_id")
+                    or product.get("row_id")
+                    or ""
+                ).strip()
+                _copy_orig_format(target, excel_row)
+                
                 for col, key in (
                     (_REVIEW_BASE_COL, "base_purchase_rate"),
                     (_REVIEW_DISCOUNT_COL, "discount"),
@@ -949,12 +1050,6 @@ class BOQExportService:
                     rate_sum=bool(line_output.get("amount_is_rate_sum"))
                     or _product_is_zero_or_rate_only(product),
                 )
-                target = str(
-                    product.get("qty_row_id")
-                    or product.get("source_row_id")
-                    or product.get("row_id")
-                    or ""
-                ).strip()
                 if target:
                     review_rows.setdefault(target, []).append(excel_row)
                 if _product_is_zero_or_rate_only(product) or (
@@ -966,7 +1061,24 @@ class BOQExportService:
                 else:
                     highlight_sheet_rows.append((excel_row, _FOUND_AMOUNT_FILL))
 
+        def _append_activity_only(line: dict[str, Any]) -> None:
+            empty = [None] * col_count
+            empty[0] = line.get("serial")
+            empty[1] = line.get("description")
+            empty[2] = line.get("description")
+            empty[17] = line.get("unit") or line.get("unit_display")
+            empty[19] = line.get("qty") or line.get("qty_display")
+            sheet.append(empty)
+            excel_row = sheet.max_row
+            row_id = str(line.get("row_id") or "").strip()
+            _copy_orig_format(row_id, excel_row)
+            if row_id:
+                review_rows.setdefault(row_id, []).append(excel_row)
+                activity_only_ids.add(row_id)
+            highlight_sheet_rows.append((excel_row, _ACTIVITY_ONLY_FILL))
+
         highlight_sheet_rows: list[tuple[int, PatternFill]] = []
+        activity_only_ids: set[str] = set()
         emitted_products: set[int] = set()
         review_rows: dict[str, list[int]] = {}
         ordered = _ordered_boq_rows(boq_data or {})
@@ -1005,6 +1117,10 @@ class BOQExportService:
             if not line:
                 continue
 
+            if line.get("is_activity_only") or is_job_unit(line.get("unit")):
+                _append_activity_only(line)
+                continue
+
             owned = list(line.get("products") or [])
             # Parent item whose products bind to child qty slots — write the
             # BOQ item text first; products appear later on those slot rows.
@@ -1033,6 +1149,7 @@ class BOQExportService:
             sheet,
             skip_blank_rows=True,
             red_header_columns=red_header_columns,
+            yellow_header=True,
         )
         _autosize_columns(sheet, max_width=36)
-        return review_rows
+        return review_rows, activity_only_ids

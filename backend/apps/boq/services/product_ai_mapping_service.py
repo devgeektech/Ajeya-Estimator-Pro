@@ -20,12 +20,9 @@ from apps.boq.services.product_ai_common import (
     _candidate_snapshot,
     _clear_weak_match_inputs,
     _compute_match_confidence,
-    _is_filled,
     _mapping_batch_size,
     _missing_attribute_keys,
-    _prefer_candidate_first,
     _product_summary,
-    _restore_expert_identity,
     _schema_attributes_from_rate,
     _should_blank_weak_match_inputs,
     _slim_candidate,
@@ -34,13 +31,10 @@ from apps.boq.services.product_ai_common import (
 from apps.boq.services.product_matching_service import ProductMatchingService
 from apps.database_manager.models import Rate_Master_Output
 from common.constants import (
-    ANALYSIS_INPUT_FILL_CONFIDENCE,
-    MATCH_CONFIDENCE_THRESHOLD,
     REFINE_MATCH_CONFIDENCE_TARGET,
 )
 from utils.attribute_parser import coerce_attributes_dict
 
-from .product_attribute_enrichment_service import compute_attribute_confidence
 
 logger = logging.getLogger("boq_ai")
 

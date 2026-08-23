@@ -520,7 +520,18 @@ def build_database_context() -> str:
     # Keep material on Attribute (valves use Class=0 + MATERIAL=DI).
     filtered_keys = sorted(attribute_keys)
 
+    valid_pairs = []
+    sub_cats = taxonomy.get("sub_categories_by_category") or {}
+    for cat in taxonomy.get("categories") or []:
+        subs = sub_cats.get(cat)
+        if subs:
+            for sub in subs:
+                valid_pairs.append({"category": cat, "sub_category": sub})
+        else:
+            valid_pairs.append({"category": cat, "sub_category": None})
+
     payload = {
+        "valid_category_and_subcategory_pairs": valid_pairs,
         "categories": taxonomy.get("categories") or [],
         "sub_categories_by_category": taxonomy.get("sub_categories_by_category") or {},
         "classes_by_category_sub_category": taxonomy.get(

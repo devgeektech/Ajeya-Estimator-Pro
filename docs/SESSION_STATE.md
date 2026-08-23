@@ -7,7 +7,7 @@ History: `docs/CHANGELOG.md` (do not duplicate session diaries here).
 
 - **Phase:** Fresh start on new master DB schema (Rate_Master_Output / Labour_master_Output)
 - **Migrations:** `database_manager.0002` (text `Product_ID` / `Rate_ID`) applied locally
-- **Tests:** Suite removed — needs restoration
+- **Tests:** Suite moved to root `tests/` folder and basic view coverage added for all apps
 - **Runtime:** `config.settings`, PostgreSQL `boq_db`, Django templates + HTMX, Celery
 - **Active apps:** accounts, users, database_manager, boq, dashboard, notifications, audit
 - **AI logging:** `AI_INSTRUCTION_LOGGING=True` for now (embedding dumps truncated)
@@ -67,13 +67,15 @@ uploads retained.
 
 Keep only the latest entry below. Older work is in `docs/CHANGELOG.md`.
 
-### 2026-08-19 — Review export spacing + BOQ-native serials
+### 2026-08-23 — Tests moved and codebase cleaned
 
-Completed: Review sheet blank rows follow original BOQ workbook gaps; Ser no uses
-BOQ S.No (`a)`, `b)`, `1.1`, …) not parent-qualified numbering.
-Pending: Re-export and compare Review vs BOQ tab layout.
+Completed: 
+- Moved all test files to a root `tests/` directory (e.g. `backend/test_pipeline.py` to `tests/test_pipeline.py`, `backend/apps/boq/tests/` to `tests/boq/`).
+- Executed `autoflake` across the backend codebase to remove all unused imports.
+- Executed `vulture` on `boq/services` and removed definitive dead code.
+Pending: None.
 Issues: None.
-Next: None.
+Next: Await user request.
 
 
 

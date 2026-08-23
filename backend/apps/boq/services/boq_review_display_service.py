@@ -14,6 +14,7 @@ from apps.boq.services.boq_row_fields import (
     QTY_KEYS as _QTY_KEYS,
     UNIT_KEYS as _UNIT_KEYS,
     field_from_map as _field_from_map,
+    is_job_unit,
     ordered_boq_rows as _ordered_boq_rows,
 )
 from apps.boq.services.boq_row_grouping_service import grouped_anchor_rows
@@ -23,7 +24,6 @@ from apps.boq.services.serial_normalizer import (
     display_serial_for_row,
     export_serial_with_suffix,
     format_boq_serial_text,
-    workbook_serial,
 )
 
 
@@ -100,7 +100,7 @@ def _product_base_serial(
 
     Letter slots stay ``a)`` / ``b)``; structural item rows keep ``1.7``, ``2.10``, etc.
     """
-    fallback_parent = str(parent_serial or "").strip()
+    fallback_parent = (parent_serial or "").strip()
     qty_row_id = ""
     for key in ("qty_row_id", "source_row_id"):
         candidate = str(product.get(key) or "").strip()
@@ -192,7 +192,7 @@ def _qty_row_description(
         slot = slots[0]
 
     serial = str(slot.get("serial") or "").strip()
-    text = str(slot.get("description") or "").strip()
+    text = str(slot.get("evidence_text") or slot.get("description") or "").strip()
     if serial and text:
         # Avoid "a) a) 150mm dia" when description already starts with the letter.
         serial_core = serial.rstrip(").").strip().casefold()
@@ -448,7 +448,17 @@ class BOQReviewDisplayService:
 
             _assign_export_serials(products)
 
-            if products:
+            is_act_only = (
+                is_job_unit(unit)
+                or is_job_unit(group.get("unit"))
+                or any(is_job_unit(p.get("unit")) or is_job_unit(p.get("quantity_unit")) for p in raw_products)
+                or any(is_job_unit(r.get("unit")) for r in (group.get("qty_rows") or []))
+            )
+
+            if is_act_only:
+                products = []
+                line_status = "default"
+            elif products:
                 product_statuses = [
                     str(product.get("status") or "") for product in products
                 ]
@@ -488,6 +498,7 @@ class BOQReviewDisplayService:
                     or qty not in (None, "")
                     or bool(unit),
                     "status": line_status,
+                    "is_activity_only": is_act_only,
                     "products": products,
                     "product_count": len(products),
                 }
@@ -497,9 +508,9 @@ class BOQReviewDisplayService:
         has_vendor = any(
             (row.get("products") or [])
             for row in (analysis.get("rows") or [])
-        )
+        ) or any(line.get("is_activity_only") for line in lines)
         return {
-            "has_analysis": bool(analysis.get("rows")) and has_vendor,
+            "has_analysis": bool(analysis.get("rows")) and (has_vendor or bool(lines)),
             "stats": {
                 "products_total": product_total,
                 "products_matched": matched_count,

@@ -6,14 +6,8 @@ import re
 from typing import Any
 
 from ai.context import load_rate_master_taxonomy
-from apps.boq.services.boq_extraction_fields import _apply_row_qty_unit
 from apps.boq.services.boq_extraction_slots import (
-    _apply_slot_evidence_fields,
-    _collapse_duplicate_slot_products,
-    _ensure_minimum_slot_products,
     _filter_spec_products,
-    _group_slots,
-    _share_section_attributes,
 )
 from apps.boq.services.boq_row_grouping_service import (
     anchor_qty_unit,

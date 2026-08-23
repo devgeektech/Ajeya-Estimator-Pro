@@ -169,8 +169,8 @@ def format_mapped_targets_display(
     cat_parts: list[str] = []
     sub_parts: list[str] = []
     for item in rows:
-        cat = str(item.get("category") or "").strip()
-        sub = str(item.get("sub_category") or "").strip()
+        cat = (item.get("category") or "").strip()
+        sub = (item.get("sub_category") or "").strip()
         if cat and cat not in cat_parts:
             cat_parts.append(cat)
         if sub:
@@ -359,7 +359,7 @@ def _heuristic_targets(
     if "sprinkler" in text and "rosette" in text:
         sprinkler = resolve_category_label("SPRINKLER", categories)
         accessories = resolve_category_label("ACCESSORIES", categories)
-        if sprinkler and not any(_normalize(str(t.get("category") or "")) == _normalize(sprinkler) for t in targets):
+        if sprinkler and not any(_normalize(t.get("category") or "") == _normalize(sprinkler) for t in targets):
             targets.insert(0, {"category": sprinkler, "sub_category": None})
         if accessories:
             rosette_sub = resolve_sub_category_label(
@@ -368,8 +368,8 @@ def _heuristic_targets(
                 sub_categories_by_category=sub_categories_by_category,
             )
             if not any(
-                _normalize(str(t.get("category") or "")) == _normalize(accessories)
-                and _normalize(str(t.get("sub_category") or ""))
+                _normalize(t.get("category") or "") == _normalize(accessories)
+                and _normalize(t.get("sub_category") or "")
                 == _normalize(rosette_sub or "")
                 for t in targets
             ):
@@ -390,20 +390,20 @@ def _heuristic_targets(
     cleaned: list[dict[str, str | None]] = []
     seen: set[tuple[str, str]] = set()
     for item in targets:
-        cat = str(item.get("category") or "").strip()
+        cat = (item.get("category") or "").strip()
         if not cat:
             continue
-        key = (_normalize(cat), _normalize(str(item.get("sub_category") or "")))
+        key = (_normalize(cat), _normalize(item.get("sub_category") or ""))
         if key in seen:
             continue
         seen.add(key)
         cleaned.append({"category": cat, "sub_category": item.get("sub_category")})
     # Prefer sprinkler before accessories when both present.
     if primary_norm == "accessories" and any(
-        _normalize(str(t.get("category") or "")) == "sprinkler" for t in cleaned
+        _normalize(t.get("category") or "") == "sprinkler" for t in cleaned
     ):
         cleaned.sort(
-            key=lambda t: 0 if _normalize(str(t.get("category") or "")) == "sprinkler" else 1
+            key=lambda t: 0 if _normalize(t.get("category") or "") == "sprinkler" else 1
         )
     return cleaned
 
@@ -708,9 +708,20 @@ class MakeListCategoryMappingService:
         mapped: list[dict[str, Any]],
     ) -> dict[str, dict[str, Any]]:
         template = AIService.load_prompt("map_make_list_categories.txt")
+        sub_cats = self._taxonomy.get("sub_categories_by_category") or {}
+        valid_pairs = []
+        for cat in categories:
+            subs = sub_cats.get(cat)
+            if subs:
+                for sub in subs:
+                    valid_pairs.append({"category": cat, "sub_category": sub})
+            else:
+                valid_pairs.append({"category": cat, "sub_category": None})
+
         taxonomy_payload = {
+            "valid_category_and_subcategory_pairs": valid_pairs,
             "categories": categories,
-            "sub_categories_by_category": self._taxonomy.get("sub_categories_by_category") or {},
+            "sub_categories_by_category": sub_cats,
         }
         by_ref: dict[str, dict[str, Any]] = {}
         for start in range(0, len(needs_ai), _BATCH_SIZE):

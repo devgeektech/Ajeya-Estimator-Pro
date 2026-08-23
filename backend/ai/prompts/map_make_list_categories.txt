@@ -15,6 +15,7 @@ Rules:
 - Return valid JSON only.
 - Do NOT invent categories outside the provided ``categories`` list.
 - Do NOT invent sub-categories outside ``sub_categories_by_category[category]``.
+- A mapped target (``category`` + ``sub_category``) MUST be a valid pair exactly matching an entry from the ``valid_category_and_subcategory_pairs`` array in TAXONOMY.
 - Prefer meaning over wording. Use the synonym map below.
 - One description may map to **multiple targets** when it names more than one
   product family. Example:

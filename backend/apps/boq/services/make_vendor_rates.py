@@ -139,7 +139,7 @@ class MakeVendorRatesMixin:
         sub_category: str,
     ) -> list[str]:
         """Distinct Rate_Master_Output makes for category / optional sub-category."""
-        if not database_version_id or not str(category or "").strip():
+        if not database_version_id or not (category or "").strip():
             return []
         makes: list[str] = []
         seen: set[str] = set()
@@ -148,12 +148,58 @@ class MakeVendorRatesMixin:
             category=category,
             sub_category=sub_category,
         ):
-            text = str(rate.get("make") or "").strip()
+            text = (rate.get("make") or "").strip()
             key = _normalize_text(text)
             if text and key not in seen:
                 seen.add(key)
                 makes.append(text)
         return sorted(makes, key=lambda item: item.lower())
+
+    def _all_database_makes(self, database_version_id: int) -> list[str]:
+        """All distinct Makes in Rate_Master_Output for a database version."""
+        if not database_version_id:
+            return []
+        if not hasattr(self, "_cached_db_makes"):
+            self._cached_db_makes = {}
+        if database_version_id not in self._cached_db_makes:
+            makes = list(
+                Rate_Master_Output.objects.filter(database_version_id=database_version_id)
+                .values_list("Make", flat=True)
+                .distinct()
+            )
+            seen: set[str] = set()
+            out: list[str] = []
+            for item in makes:
+                text = str(item or "").strip()
+                key = _normalize_text(text)
+                if text and key not in seen:
+                    seen.add(key)
+                    out.append(text)
+            self._cached_db_makes[database_version_id] = sorted(out, key=lambda s: s.lower())
+        return self._cached_db_makes[database_version_id]
+
+    def _all_database_vendors(self, database_version_id: int) -> list[str]:
+        """All distinct Vendors in Rate_Master_Output for a database version."""
+        if not database_version_id:
+            return []
+        if not hasattr(self, "_cached_db_vendors"):
+            self._cached_db_vendors = {}
+        if database_version_id not in self._cached_db_vendors:
+            vendors = list(
+                Rate_Master_Output.objects.filter(database_version_id=database_version_id)
+                .values_list("Vendor", flat=True)
+                .distinct()
+            )
+            seen: set[str] = set()
+            out: list[str] = []
+            for item in vendors:
+                text = str(item or "").strip()
+                key = _normalize_text(text)
+                if text and key not in seen:
+                    seen.add(key)
+                    out.append(text)
+            self._cached_db_vendors[database_version_id] = sorted(out, key=lambda s: s.lower())
+        return self._cached_db_vendors[database_version_id]
 
 
     def _format_preview_amount(self, value: Any) -> str:
@@ -182,8 +228,8 @@ class MakeVendorRatesMixin:
             category=category,
             sub_category=sub_category,
         ):
-            make = str(rate.get("make") or "").strip()
-            vendor = str(rate.get("vendor") or "").strip()
+            make = (rate.get("make") or "").strip()
+            vendor = (rate.get("vendor") or "").strip()
             if not make:
                 continue
             if approved_makes and not MakeListConstraintService.make_is_allowed(
@@ -291,7 +337,7 @@ class MakeVendorRatesMixin:
                     rate.get("make"), [make]
                 ):
                     continue
-                text = str(rate.get("vendor") or "").strip()
+                text = (rate.get("vendor") or "").strip()
                 key = _normalize_text(text)
                 if text and key not in seen:
                     seen.add(key)
@@ -307,7 +353,7 @@ class MakeVendorRatesMixin:
         # Sub-category may be too narrow for vendor variety — fall back to category.
         if (
             len(vendors) < 2
-            and str(sub_category or "").strip()
+            and (sub_category or "").strip()
             and sub_category != "—"
         ):
             category_vendors = _collect(
@@ -496,6 +542,15 @@ class MakeVendorRatesMixin:
                     if vendor and key not in seen:
                         seen.add(key)
                         vendor_options.append(vendor)
+        if not self.has_make_list:
+            all_db_vendors = self._all_database_vendors(database_version_id)
+            seen_v = {_normalize_text(v) for v in vendor_options}
+            for v in all_db_vendors:
+                key = _normalize_text(v)
+                if key not in seen_v:
+                    seen_v.add(key)
+                    vendor_options.append(v)
+
         selected_vendor = _align_option_label(selected_vendor, vendor_options)
         if selected_vendor and selected_vendor not in vendor_options:
             vendor_options = [selected_vendor, *vendor_options]
@@ -553,6 +608,20 @@ class MakeVendorRatesMixin:
                 makes_by_vendor.setdefault(vendor, [])
                 if make not in makes_by_vendor[vendor]:
                     makes_by_vendor[vendor].append(make)
+
+        if not self.has_make_list:
+            all_db_makes = self._all_database_makes(database_version_id)
+            for m in all_db_makes:
+                m_key = _normalize_text(m)
+                if m_key not in seen_makes:
+                    seen_makes.add(m_key)
+                    makes.append(m)
+            all_db_vendors = self._all_database_vendors(database_version_id)
+            for v in all_db_vendors:
+                v_key = _normalize_text(v)
+                if v_key not in seen_vendors:
+                    seen_vendors.add(v_key)
+                    vendor_options.append(v)
 
         selected_make = str(
             (product.get("vendor_selection") or {}).get("make")
@@ -740,8 +809,8 @@ class MakeVendorRatesMixin:
         )
         # Prefer Rate_Master Make/Vendor for UI selection so dropdown options match.
         # Make-list canonical labels (NEWAGE vs NEW AGE) are for filtering only.
-        display_make = str(rate.Make or "").strip() or resolved_make or make
-        display_vendor = str(rate.Vendor or "").strip() or vendor
+        display_make = (rate.Make or "").strip() or resolved_make or make
+        display_vendor = (rate.Vendor or "").strip() or vendor
         notes = ""
         if same_price_choices:
             notes = SAME_PRICE_TIE_LABEL

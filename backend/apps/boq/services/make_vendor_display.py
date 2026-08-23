@@ -14,6 +14,7 @@ from apps.boq.services.boq_row_fields import (
     QTY_KEYS as _QTY_KEYS,
     UNIT_KEYS as _UNIT_KEYS,
     field_from_map as _field_from_map,
+    is_job_unit,
     ordered_boq_rows as _ordered_boq_rows,
 )
 from apps.boq.services.make_list_constraint_service import NO_APPROVED_MAKE_LABEL
@@ -102,16 +103,36 @@ class MakeVendorDisplayMixin:
             if analysis_row.get("skip_reason") == "lineage_child_row":
                 continue
             products = list(analysis_row.get("products") or [])
-            if not products:
-                continue
-
             group = group_by_row.get(row_id, {})
-            products = rehydrate_products_quantity_from_group(products, group)
 
             fields = analysis_fields(boq_row)
-            qty = _field_from_map(fields, _QTY_KEYS)
-            unit = _field_from_map(fields, _UNIT_KEYS)
+            qty = group.get("qty")
+            unit = group.get("unit")
+            qty_status = str(group.get("qty_status") or "empty")
+            qty_rows = list(group.get("qty_rows") or [])
+            if qty in (None, "") and qty_rows:
+                qty = qty_rows[0].get("qty")
+                unit = unit or qty_rows[0].get("unit")
+                qty_status = str(qty_rows[0].get("qty_status") or qty_status)
+            if qty in (None, "") and not qty_rows:
+                qty = _field_from_map(fields, _QTY_KEYS)
+                unit = unit or _field_from_map(fields, _UNIT_KEYS)
             description = _field_from_map(fields, _DESCRIPTION_KEYS) or ""
+
+            is_act_only = (
+                is_job_unit(unit)
+                or is_job_unit(group.get("unit"))
+                or any(is_job_unit(p.get("unit")) or is_job_unit(p.get("quantity_unit")) for p in products)
+                or any(is_job_unit(r.get("unit")) for r in qty_rows)
+            )
+
+            if not products and not is_act_only:
+                continue
+
+            if is_act_only:
+                products = []
+
+            products = rehydrate_products_quantity_from_group(products, group)
 
             shaped_products = []
             for index, product in enumerate(products):
@@ -178,19 +199,6 @@ class MakeVendorDisplayMixin:
             else:
                 selection_mode = ""
 
-            # Prefer grouped Unit/Qty (same as Analysis), including qty 0 / Rate Only.
-            qty = group.get("qty")
-            unit = group.get("unit")
-            qty_status = str(group.get("qty_status") or "empty")
-            qty_rows = list(group.get("qty_rows") or [])
-            if qty in (None, "") and qty_rows:
-                qty = qty_rows[0].get("qty")
-                unit = unit or qty_rows[0].get("unit")
-                qty_status = str(qty_rows[0].get("qty_status") or qty_status)
-            if qty in (None, "") and not qty_rows:
-                # Fall back to the BOQ row cells when grouping has no qty slot.
-                qty = _field_from_map(fields, _QTY_KEYS)
-                unit = unit or _field_from_map(fields, _UNIT_KEYS)
             show_qty_unit = qty_status in {"numeric", "zero", "rate_only", "multi"} or qty not in (
                 None,
                 "",
@@ -202,6 +210,11 @@ class MakeVendorDisplayMixin:
             else:
                 qty_display = ""
             unit_display = str(unit).strip() if unit not in (None, "") else "—"
+
+            if is_act_only:
+                shaped_products = []
+                selection_mode = ""
+                line_status = "default"
 
             lines.append(
                 {
@@ -220,6 +233,7 @@ class MakeVendorDisplayMixin:
                     "show_qty_unit": show_qty_unit,
                     "products": shaped_products,
                     "product_count": len(shaped_products),
+                    "is_activity_only": is_act_only,
                     "line_status": line_status,
                     "selection_mode": selection_mode,
                 }
@@ -228,7 +242,7 @@ class MakeVendorDisplayMixin:
         vendor_review_count = _flag_same_material_rate_vendor_review(lines)
 
         return {
-            "has_products": product_count > 0,
+            "has_products": len(lines) > 0 or product_count > 0 or bool(analysis.get("rows")),
             "database_version_id": database_version_id,
             "stats": {
                 "product_count": product_count,
@@ -283,13 +297,13 @@ class MakeVendorDisplayMixin:
         seen_vendors: set[str] = set()
         for vendors in vendors_by_make.values():
             for vendor in vendors or []:
-                text = str(vendor or "").strip()
+                text = (vendor or "").strip()
                 if not text or text in seen_vendors:
                     continue
                 seen_vendors.add(text)
                 all_vendor_options.append(text)
         for vendor in vendor_options:
-            text = str(vendor or "").strip()
+            text = (vendor or "").strip()
             if text and text not in seen_vendors:
                 seen_vendors.add(text)
                 all_vendor_options.append(text)
@@ -307,7 +321,7 @@ class MakeVendorDisplayMixin:
                 make=selected_make,
             )
             for vendor in vendors_by_make.get(selected_make) or []:
-                text = str(vendor or "").strip()
+                text = (vendor or "").strip()
                 if text and text not in seen_vendors:
                     seen_vendors.add(text)
                     all_vendor_options.append(text)
@@ -446,10 +460,15 @@ class MakeVendorDisplayMixin:
             "line_output": line_output,
             "notes": notes,
             "make_status": make_status,
-            "approved_make_found": bool(approved_make_found),
+            "approved_make_found": approved_make_found,
             "highlight_no_make": make_status == "not_found",
             "is_no_match": is_no_match,
-            "show_manual_apply": make_status == "not_found" or is_no_match,
+            "show_manual_apply": (
+                make_status == "not_found"
+                or is_no_match
+                or same_price_tie
+                or bool(same_price_choices)
+            ),
             "allow_typed_make_vendor": allow_typed_make_vendor,
             "vendor_rate_review": False,
             "same_price_tie": same_price_tie,

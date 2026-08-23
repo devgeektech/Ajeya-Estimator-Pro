@@ -50,6 +50,9 @@ def _product_target_row_id(product: dict[str, Any], line: dict[str, Any]) -> str
     return ""
 
 
+from apps.boq.services.boq_row_fields import is_job_unit
+
+
 def build_row_pricing(display: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Map priced output onto each product's Unit/Qty BOQ row (not the section)."""
     pricing: dict[str, dict[str, Any]] = {}
@@ -57,6 +60,10 @@ def build_row_pricing(display: dict[str, Any]) -> dict[str, dict[str, Any]]:
         for product in line.get("products") or []:
             target_row_id = _product_target_row_id(product, line)
             if not target_row_id:
+                continue
+
+            unit_val = product.get("unit") or product.get("quantity_unit") or line.get("unit")
+            if is_job_unit(unit_val) or product.get("is_activity_only") or line.get("is_activity_only"):
                 continue
 
             line_output = product.get("line_output") or {}

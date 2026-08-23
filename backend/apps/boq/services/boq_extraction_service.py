@@ -5,7 +5,7 @@ import json
 import logging
 from typing import Any
 
-from ai.context import build_database_context, load_rate_master_taxonomy, snap_product_taxonomy
+from ai.context import build_database_context, load_rate_master_taxonomy
 from ai.service import AIService
 from apps.boq.services.boq_extraction_fields import (
     _apply_row_qty_unit,
@@ -19,7 +19,6 @@ from apps.boq.services.boq_extraction_groups import (
     _build_anchor_groups,
     _compact_anchor_payload,
     _consolidate_to_anchors,
-    _extract_batch_size,
     _iter_extract_batches,
     _resolve_batch_row,
     should_skip_anchor_group,
@@ -29,12 +28,10 @@ from apps.boq.services.boq_extraction_slots import (
     _collapse_duplicate_slot_products,
     _ensure_minimum_slot_products,
     _filter_spec_products,
-    _group_slots,
     _missing_product_slots,
 )
 from apps.boq.services.boq_row_grouping_service import resolve_anchor_row_id
 from common.exceptions import AIServiceError
-from utils.attribute_parser import coerce_attributes_dict
 from utils.product_synonyms import format_synonym_map_for_ai
 
 logger = logging.getLogger("boq_ai")
@@ -43,7 +40,8 @@ logger = logging.getLogger("boq_ai")
 _MINIMUM_SLOT_RETRY_INSTRUCTION = """
 
 CORRECTION — slot coverage required:
-- Return ≥ slot_count products; every slots[].qty_row_id must appear on a product.
+- STRICT RULE: Return EXACTLY ONE product per slot. Do NOT return more products than there are slots.
+- Every slots[].qty_row_id must appear on exactly one product.
 - Per-product size from that slot only; shared PN/seat/IS on all.
 - ``description_hint`` = AI Description in plain English naming class/material,
   sub-category, category, size + unit, capacity and key attributes.
@@ -243,10 +241,10 @@ class BOQExtractionService:
             raise AIServiceError("OPENAI_API_KEY is not configured.")
 
         flat_rows = self.boq_data.get("rows") or []
-        if not any(str(row.get("row_id")) == str(row_id) for row in flat_rows):
+        if not any(str(row.get("row_id")) == row_id for row in flat_rows):
             raise AIServiceError(f"Unknown BOQ row: {row_id}")
 
-        anchor_id = resolve_anchor_row_id(self.boq_data, str(row_id))
+        anchor_id = resolve_anchor_row_id(self.boq_data, row_id)
         groups = _build_anchor_groups(self.boq_data)
         group = next((item for item in groups if str(item.get("row_id")) == anchor_id), None)
         if group is None:

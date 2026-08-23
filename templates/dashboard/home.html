@@ -336,6 +336,7 @@
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+        display: block !important;
     }
 
     .dash-table__meta {
@@ -710,4 +711,19 @@
         </aside>
     </section>
 </div>
+
+{% if metrics.1.value > 0 %}
+<script>
+    setTimeout(() => {
+        if (document.visibilityState === 'visible') {
+            window.location.reload();
+        } else {
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') window.location.reload();
+            });
+        }
+    }, 5000);
+</script>
+{% endif %}
+
 {% endblock %}

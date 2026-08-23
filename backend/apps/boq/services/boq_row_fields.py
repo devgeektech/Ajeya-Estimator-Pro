@@ -12,7 +12,7 @@ import re
 from typing import Any
 
 DESCRIPTION_KEYS = ("description", "item_description", "particulars", "item")
-QTY_KEYS = ("qty", "quantity", "qnty", "nos")
+QTY_KEYS = ("qty", "quantity", "qnty", "nos", "total", "ground", "basement")
 UNIT_KEYS = ("unit", "uom")
 
 
@@ -40,6 +40,16 @@ def normalize_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip().lower())
 
 
+def is_job_unit(unit: Any) -> bool:
+    """Return True if unit string represents 'job' (activity only)."""
+    if unit is None:
+        return False
+    val = normalize_text(unit)
+    if not val:
+        return False
+    return val == "job" or val == "jobs" or val.startswith("job.") or val.startswith("job ") or val == "job activity"
+
+
 def ordered_boq_rows(boq_data: dict) -> list[dict[str, Any]]:
     """Return BOQ rows in workbook order; fall back to ``rows_tree`` when flat rows are missing."""
     flat_rows = boq_data.get("rows") or []
@@ -48,3 +58,4 @@ def ordered_boq_rows(boq_data: dict) -> list[dict[str, Any]]:
     from apps.boq.services.make_list_constraint_service import walk_rows_tree
 
     return walk_rows_tree(boq_data.get("rows_tree") or [])
+

@@ -182,6 +182,14 @@ document.addEventListener('alpine:init', () => {
                     if (data.polling) {
                         this.timer = setTimeout(() => this.poll(), 2500);
                         return;
+                    } else {
+                        if (document.visibilityState === 'visible') {
+                            window.location.reload();
+                        } else {
+                            document.addEventListener('visibilitychange', () => {
+                                if (document.visibilityState === 'visible') window.location.reload();
+                            });
+                        }
                     }
                 })
                 .catch(() => {

@@ -4,7 +4,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
-from apps.database_manager.models import Rate_Master_Output, product_display_key
+from apps.database_manager.models import Rate_Master_Output
 
 
 def _decimal(value: Decimal | None) -> str | None:

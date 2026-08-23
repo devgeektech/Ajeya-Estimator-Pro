@@ -20,26 +20,26 @@ Extract as PRODUCT when the slot describes:
 - Hardware: hydrants, nozzles, expansion joints, rosette plates
 
 Mark as NON-PRODUCT (``skip_matching: true``, ``products: []``) when:
-- Unit is "Job" / "LS" / "Lump Sum" AND description is a service activity
+- The row describes WORK/LABOUR/ACTIVITY, not a thing to buy.
+- Unit is "Job" / "LS" / "Lump Sum" / "Lot" AND description is an activity.
 - Description talks about: testing, commissioning, dismantling, removing,
   refixing, painting, site preparation, shop drawings, hydraulic calculations,
-  approvals, documentation, as-built drawings, insurance, transportation
-- The row describes WORK/LABOUR, not a thing to buy
-- Even if qty > 0, if the text is about an activity — skip it
+  approvals, documentation, as-built drawings, insurance, transportation, making connections, etc.
+- IMPORTANT: Even if the row has a quantity (like 1) and unit (like NOS, Set), if the description is primarily about a job/activity (like "installation of..."), MARK AS NON-PRODUCT. Do not extract the item being worked on as a product if this is just an installation line.
 
 When unsure: if you cannot identify a specific purchasable product category
 from the DATABASE_CONTEXT, set ``skip_matching: true``.
 
 STEP 3 — EXTRACT PRODUCTS from product slots:
 
-Binding:
-- Usually one product per slot. Extract multiple only when the slot clearly
-  describes distinct purchasable items (e.g. "Sluice valve with Y strainer").
+Binding & Product Count:
+- STRICT RULE: You must extract EXACTLY one product per rate/quantity slot.
+- In multi-slot sections (e.g., 3 or 4 rows with quantities), do NOT hallucinate or extract more products than there are slots.
+- Extract multiple products for a single slot ONLY if that single slot explicitly mandates purchasing multiple distinct items (e.g. "Sluice valve with Y strainer as one set"). This should be very rare.
 - Always set ``qty_row_id``, ``source_row_id``, ``slot_index`` from that slot.
 - ``quantity`` / ``quantity_unit`` from the slot (keep 0; Rate Only / RO → ``"Rate Only"``).
 - Size/unit from that slot only. Shared parent specs (PN, flanged, IS, material)
   on every product in the section.
-- Product count for a section MUST be at least the number of product slots.
 
 ``description_hint`` — REQUIRED AI Description (one natural-language line, max ~200 chars):
 - Write plain English, NOT a slash-separated field dump.
@@ -56,7 +56,7 @@ Binding:
   ("providing and fixing…", "of approved make").
 
 Taxonomy (use DATABASE_CONTEXT exact labels):
-- ``category`` + ``sub_category`` required when a product exists.
+- ``category`` + ``sub_category`` required when a product exists. They MUST be a valid pair exactly matching an entry from the ``valid_category_and_subcategory_pairs`` array in DATABASE_CONTEXT.
 - Use the SYNONYM_MAP below to identify products: if BOQ text matches ANY synonym
   for a Category > Sub-category, use that exact Category and Sub-category.
 - ``class`` = exact listed label (``0`` valid for valves). Body material → ``attributes.material`` when Class is ``0``.

@@ -1,7 +1,6 @@
 """Shared Product AI mapping constants and helpers."""
 from __future__ import annotations
 
-import re
 from decimal import Decimal
 from typing import Any
 
@@ -20,10 +19,9 @@ from common.constants import (
 )
 from utils.attribute_parser import (
     coerce_attributes_dict,
-    normalize_attribute_key,
     parse_attributes,
 )
-from utils.product_synonyms import display_material_label, is_known_material_label
+from utils.product_synonyms import is_known_material_label
 
 from .product_attribute_enrichment_service import (
     compute_attribute_confidence,

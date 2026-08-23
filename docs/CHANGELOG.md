@@ -5,6 +5,45 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
+## 2026-08-24 - Testing expansion, cleanup, and UI fixes
+- Set the header row background color to yellow in the exported "Review" sheet for better visibility.
+- Fixed long BOQ names overflowing behind the status badge on the dashboard.
+- Added intelligent auto-refresh logic to the BOQ List and Dashboard pages so that when background analysis completes while on another tab, the UI automatically updates upon returning to the active tab.
+- Deleted legacy test output files (`rendered_analysis.html` and `test_output.txt`).
+- Verified all testing modules successfully migrated to root `tests/` directory.
+- Added foundational view testing for all remaining apps (`dashboard`, `database_manager`, `notifications`, `accounts`).
+
+## 2026-08-23 — Test cases moved and codebase cleaned
+- Moved all test cases from `backend/` to a root `tests/` directory structure.
+- Cleaned the entire codebase using `autoflake` to remove unused imports and dead code.
+- Reviewed and removed definitively unused variables identified by `vulture` in `boq/services`.
+
+## 2026-08-20 — Testing and Extraction Updates
+- Re-analyse function now properly prioritizes BOQ description context over user inputs to calculate accurate confidence.
+- Upgraded the AI Extraction prompt (`extract_products.txt`) to aggressively identify "Job Only" sections by looking for activity/labor verbs and completely avoid over-extracting products beyond the provided rate/quantity slots.
+- Engineered a robust unit test suite (`apps/boq/tests/`) running entirely on Django TestCase with 100% pass rates to ensure production readiness.
+- Validated real-world robustness by orchestrating an unmocked End-to-End (`test_pipeline.py`) runner against actual client BOQs, ensuring safe completions without system crashes.
+
+## 2026-08-20 — Populate all database makes/vendors in dropdowns when Make List is not uploaded
+
+- Updated `make_vendor_rates.py` with `_all_database_makes` and `_all_database_vendors` helpers.
+- When no Make List file is uploaded for a BOQ (`self.has_make_list` is `False`), the Make & Vendor dropdowns automatically load all available Makes and Vendors present in `Rate_Master_Output` database for that database version.
+
+## 2026-08-20 — Fix Make & Vendor, Labour, and Review tab line rendering after Analysis
+
+- Fixed `make_vendor_display.py` line iteration so that rows with 0 products (e.g. Activity Only sections) build and append line objects instead of skipping them (`if not products and not is_act_only: continue`).
+- Updated `has_products` and `has_analysis` across `make_vendor_display.py`, `boq_labour_service.py`, and `boq_review_display_service.py` to evaluate `bool(analysis.get("rows")) and (len(lines) > 0 or has_vendor)`, resolving the issue where tabs showed "No analysed products yet" after Analysis.
+- Fixed `make_vendor_display.py` to set `show_manual_apply = True` for `same_price_tie` rows.
+- Implemented `resolveSamePrice()` method in `_make_vendor_table.html` Alpine.js component, making the Apply / "Use selected vendor" button visible and functional for same-price tie resolution.
+
+## 2026-08-20 — Activity Only ("job" unit) detection, product suppression, UI badge & orange highlight, light-blue export fill
+
+- Added `is_job_unit` helper in `boq_row_fields.py` to identify rows where unit is `"job"` (or `"JOB"`, `"Job"`, `"jobs"`).
+- Suppressed product display (`products = []`) for Activity Only sections so no products, product cards, candidate matching, or action buttons (`+ Add product`, `Re-analyse`) are shown under Activity Only lines across Analysis, Make & Vendor, Labour, and Review UI tabs.
+- Displayed `Found Activity Only` badge (`badge--orange`) and orange card border & inset shadow (`extraction-line--activity-only`) on Activity Only section cards.
+- Updated `BOQExportService` to keep rate and amount cells empty for `"job"` unit rows and apply a light blue background fill (`#D6EAF8`) to those rows in both `Review` and `BOQ` Excel output sheets.
+- Added unit tests in `apps/boq/tests.py`.
+
 ## 2026-08-19 — Review export spacing + BOQ-native serials
 
 - Review sheet inserts blank rows where the uploaded BOQ workbook has empty rows

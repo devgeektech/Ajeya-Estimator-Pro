@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from ai.context import is_catalog_class, snap_product_taxonomy
+from ai.context import is_catalog_class
 from apps.boq.services.boq_row_fields import is_blank as _is_blank_value
 from apps.boq.services.boq_row_grouping_service import grouped_anchor_rows
 from utils.attribute_parser import coerce_attributes_dict
