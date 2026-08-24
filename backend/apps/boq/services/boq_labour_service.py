@@ -24,8 +24,8 @@ from apps.boq.services.boq_row_fields import (
     QTY_KEYS as _QTY_KEYS,
     UNIT_KEYS as _UNIT_KEYS,
     field_from_map as _field_from_map,
-    is_job_unit,
     ordered_boq_rows as _ordered_boq_rows,
+    resolve_activity_only,
 )
 from apps.boq.services.labour_detail_retrieval_service import LabourDetailRetrievalService
 from apps.boq.services.serial_normalizer import analysis_fields
@@ -519,10 +519,13 @@ class BOQLabourService:
                 list(analysis_row.get("products") or []),
                 group,
             )
-            is_act_only = (
-                is_job_unit(group.get("unit"))
-                or any(is_job_unit(p.get("unit")) or is_job_unit(p.get("quantity_unit")) for p in products)
-                or any(is_job_unit(r.get("unit")) for r in group.get("qty_rows") or [])
+            is_act_only = resolve_activity_only(
+                analysis_row,
+                products=products,
+                units=[
+                    group.get("unit"),
+                    *[row.get("unit") for row in (group.get("qty_rows") or [])],
+                ],
             )
             line_status = "default" if is_act_only else ""
 

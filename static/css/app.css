@@ -1182,13 +1182,14 @@ body:has(.auth) {
     max-width: 100%;
     width: 100%;
 }
-.table.boq-sheet { width: max-content; min-width: 100%; table-layout: auto; }
+.table.boq-sheet { width: 100%; min-width: 100%; table-layout: auto; }
 .table.boq-sheet > thead > tr > th,
 .table.boq-sheet > tbody > tr > td {
     text-align: left !important;
     vertical-align: top;
     white-space: normal;
-    overflow-wrap: break-word;
+    overflow-wrap: normal;
+    word-break: normal;
     color: var(--text);
 }
 .boq-sheet th {
@@ -1198,8 +1199,8 @@ body:has(.auth) {
     letter-spacing: normal !important;
     color: var(--text) !important;
     line-height: 1.25;
-    white-space: normal;
-    hyphens: auto;
+    white-space: nowrap;
+    hyphens: none;
 }
 .boq-sheet td { font-weight: 500; }
 /* Keep sheet depth backgrounds; do not apply list zebra striping */
@@ -1259,8 +1260,9 @@ body:has(.auth) {
 }
 .table.boq-sheet:not(.boq-sheet--make-list) col.boq-sheet__col-desc,
 .table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__col-desc {
-    min-width: 18rem;
-    width: 28rem;
+    min-width: 16rem;
+    width: auto;
+    white-space: normal !important;
 }
 .table.boq-sheet:not(.boq-sheet--make-list) col.boq-sheet__col-unit,
 .table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__col-unit {
@@ -1286,22 +1288,33 @@ body:has(.auth) {
 }
 .table.boq-sheet:not(.boq-sheet--make-list) col.boq-sheet__col-other,
 .table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__col-other {
-    min-width: 4.5rem;
-    width: 5.5rem;
+    min-width: max-content;
+    width: max-content;
+    max-width: none;
+    white-space: nowrap !important;
+    overflow-wrap: normal !important;
+    word-break: keep-all !important;
+    hyphens: none !important;
 }
 .table.boq-sheet:not(.boq-sheet--make-list) col.boq-sheet__col-floor,
 .table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__col-floor {
-    min-width: 5.5rem;
-    width: auto;
-    max-width: 9.5rem;
+    min-width: max-content;
+    width: max-content;
+    max-width: none;
     text-align: center !important;
-    white-space: normal;
+    white-space: nowrap !important;
+    overflow-wrap: normal !important;
+    word-break: keep-all !important;
+    hyphens: none !important;
     font-size: .78rem;
 }
 .table.boq-sheet:not(.boq-sheet--make-list) th.boq-sheet__col-floor {
     font-size: .72rem !important;
     line-height: 1.25;
-    overflow-wrap: anywhere;
+    white-space: nowrap !important;
+    overflow-wrap: normal !important;
+    word-break: keep-all !important;
+    hyphens: none !important;
 }
 
 .analysis-table--compact {
@@ -1892,8 +1905,8 @@ body:has(.auth) {
     .table.boq-sheet {
         width: 100% !important;
         min-width: 100% !important;
-        max-width: 100%;
-        table-layout: fixed !important;
+        max-width: none !important;
+        table-layout: auto !important;
     }
     .make-list-sheet__head,
     .make-list-sheet__row {
@@ -1909,13 +1922,22 @@ body:has(.auth) {
     .table.boq-sheet th,
     .table.boq-sheet td {
         text-align: left !important;
+        white-space: nowrap !important;
+        hyphens: none !important;
+    }
+    .table.boq-sheet .boq-sheet__col-desc,
+    .table.boq-sheet td.boq-sheet__col-desc {
         white-space: normal !important;
     }
     .table.boq-sheet .boq-sheet__col-sno,
-    .table.boq-sheet .boq-sheet__col-unit {
+    .table.boq-sheet .boq-sheet__col-unit,
+    .table.boq-sheet .boq-sheet__col-floor,
+    .table.boq-sheet .boq-sheet__col-other {
         white-space: nowrap !important;
         overflow-wrap: normal !important;
         word-break: keep-all !important;
+        hyphens: none !important;
+        max-width: none !important;
     }
     .analysis-table--compact {
         table-layout: auto;

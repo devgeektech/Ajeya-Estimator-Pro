@@ -30,7 +30,6 @@ from apps.boq.services.boq_review_display_service import (
 from apps.boq.services.boq_row_fields import (
     QTY_KEYS as _QTY_KEYS,
     UNIT_KEYS as _UNIT_KEYS,
-    is_job_unit,
     ordered_boq_rows as _ordered_boq_rows,
 )
 from apps.boq.services.serial_normalizer import cell_value
@@ -648,9 +647,8 @@ def _export_download_filename(boq: BOQ, kind: str) -> str:
 class BOQExportService:
     """Write one workbook: Review tab plus original BOQ tab linked by formulas."""
 
-    def __init__(self, boq_id: int, confirmations: dict[str, dict[str, Any]] | None = None):
+    def __init__(self, boq_id: int):
         self.boq_id = boq_id
-        self.confirmations = confirmations or {}
 
     def run(self, kind: str = EXPORT_KIND_REVIEW) -> tuple[bytes, str]:
         kind = (kind or EXPORT_KIND_REVIEW).strip().lower()
@@ -664,7 +662,7 @@ class BOQExportService:
         ):
             raise ValueError("Finish Labour (Next to Review) before exporting.")
 
-        display = BOQReviewDisplayService(boq, self.confirmations).build()
+        display = BOQReviewDisplayService(boq).build()
         if not display.get("has_analysis"):
             raise ValueError("Complete Make & Vendor and Labour before exporting.")
 
@@ -1117,7 +1115,7 @@ class BOQExportService:
             if not line:
                 continue
 
-            if line.get("is_activity_only") or is_job_unit(line.get("unit")):
+            if line.get("is_activity_only"):
                 _append_activity_only(line)
                 continue
 

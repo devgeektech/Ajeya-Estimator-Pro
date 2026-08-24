@@ -14,8 +14,8 @@ from apps.boq.services.boq_row_fields import (
     QTY_KEYS as _QTY_KEYS,
     UNIT_KEYS as _UNIT_KEYS,
     field_from_map as _field_from_map,
-    is_job_unit,
     ordered_boq_rows as _ordered_boq_rows,
+    resolve_activity_only,
 )
 from apps.boq.services.boq_row_grouping_service import grouped_anchor_rows
 from apps.boq.services.serial_normalizer import (
@@ -284,10 +284,8 @@ def review_output_values(row: dict[str, Any]) -> list[Any]:
 class BOQReviewDisplayService:
     """Review / export display from vendor_selection (not fuzzy product_matches)."""
 
-    def __init__(self, boq: BOQ, confirmations: dict[str, dict[str, Any]] | None = None):
+    def __init__(self, boq: BOQ):
         self.boq = boq
-        # Confirmations unused in the new pipeline; kept for call-site compatibility.
-        self.confirmations = confirmations or {}
 
     def build(self) -> dict[str, Any]:
         analysis = self.boq.analysis_data or {}
@@ -359,6 +357,16 @@ class BOQReviewDisplayService:
             lineage_parts = list(group.get("lineage_parts") or [])
             lineage_count = int(group.get("lineage_count") or 1)
 
+            is_act_only = resolve_activity_only(
+                analysis_row,
+                products=list(analysis_row.get("products") or []),
+                units=[
+                    unit,
+                    group.get("unit"),
+                    *[row.get("unit") for row in (group.get("qty_rows") or [])],
+                ],
+            )
+
             if analysis_row.get("skip_matching"):
                 lines.append(
                     {
@@ -374,6 +382,7 @@ class BOQReviewDisplayService:
                         "status": "skipped",
                         "products": [],
                         "product_count": 0,
+                        "is_activity_only": is_act_only,
                         "show_qty_unit": qty not in (None, "") or bool(unit),
                     }
                 )
@@ -448,11 +457,14 @@ class BOQReviewDisplayService:
 
             _assign_export_serials(products)
 
-            is_act_only = (
-                is_job_unit(unit)
-                or is_job_unit(group.get("unit"))
-                or any(is_job_unit(p.get("unit")) or is_job_unit(p.get("quantity_unit")) for p in raw_products)
-                or any(is_job_unit(r.get("unit")) for r in (group.get("qty_rows") or []))
+            is_act_only = resolve_activity_only(
+                analysis_row,
+                products=raw_products,
+                units=[
+                    unit,
+                    group.get("unit"),
+                    *[row.get("unit") for row in (group.get("qty_rows") or [])],
+                ],
             )
 
             if is_act_only:
@@ -517,10 +529,6 @@ class BOQReviewDisplayService:
                 "products_pending": pending_count,
                 **(analysis.get("stats") or {}),
             },
-            "confirmation_stats": {
-                "confirmed_count": 0,
-                "pending_count": pending_count,
-            },
             "labour_mode": labour_config.get("mode") or "",
             "labour_ready": bool(labour_config.get("labour_ready")),
             "pricing_ready": bool(analysis.get("pricing_ready")),
@@ -572,7 +580,6 @@ class BOQReviewDisplayService:
         return {
             "product_index": int(product.get("product_index") or 0),
             "status": status,
-            "is_confirmed": False,
             "confidence": confidence,
             "extracted_category": product.get("category"),
             "extracted_sub_category": product.get("sub_category"),

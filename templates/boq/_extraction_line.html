@@ -60,14 +60,14 @@
                 class="btn btn--xsmall btn--primary"
                 title="Add product"
                 aria-label="Add product"
-                @click="window.extractionAjaxPost('{% url 'boq:extraction_edit' boq.pk %}', { action: 'add_product', row_id: '{{ line.row_id }}' }).then(() => { try { const el = document.getElementById('line-{{ line.row_id }}'); sessionStorage.setItem('boq-detail-scroll-{{ boq.pk }}-analysis', JSON.stringify({ y: window.scrollY, rowId: '{{ line.row_id }}', offset: el ? el.getBoundingClientRect().top : null })); } catch (e) {} window.location.reload(); })"
+                @click="window.addExtractionProduct('{% url 'boq:extraction_edit' boq.pk %}', '{{ line.row_id }}', '{{ boq.pk }}')"
             >+ Add product</button>
             <button
                 type="button"
                 class="btn btn--xsmall btn--boq-analyse"
-                title="Re-analyse this section"
+                title="Re-analyse this section with AI"
                 @click="window.reanalyseEmptyExtractionLine && window.reanalyseEmptyExtractionLine($el, '{% url "boq:row_extract" boq.pk line.row_id %}', '{{ line.row_id }}')"
-            >Re-analyse</button>
+            >Re-analyse with AI</button>
         </div>
         {% endif %}
 
@@ -148,7 +148,7 @@
                     class="btn btn--xsmall btn--primary extraction-product-tabs__add"
                     title="Add product"
                     aria-label="Add product"
-                    @click="window.extractionAjaxPost('{% url 'boq:extraction_edit' boq.pk %}', { action: 'add_product', row_id: '{{ line.row_id }}' }).then(() => { try { const el = document.getElementById('line-{{ line.row_id }}'); sessionStorage.setItem('boq-detail-scroll-{{ boq.pk }}-analysis', JSON.stringify({ y: window.scrollY, rowId: '{{ line.row_id }}', offset: el ? el.getBoundingClientRect().top : null })); } catch (e) {} window.location.reload(); })"
+                    @click="window.addExtractionProduct('{% url 'boq:extraction_edit' boq.pk %}', '{{ line.row_id }}', '{{ boq.pk }}')"
                     :disabled="activeIsReanalysing"
                 >+</button>
                 {% endif %}
@@ -165,10 +165,10 @@
                         type="button"
                         class="btn btn--xsmall btn--boq-analyse"
                         :disabled="activeIsReanalysing"
-                        title="Re-analyse using your AI Description, filled inputs, and the full BOQ section"
+                        title="Re-analyse with AI using your AI Description, filled inputs, and the full BOQ section"
                         @click="window.reanalyseActiveExtractionProduct($el, '{% url "boq:row_extract" boq.pk line.row_id %}')"
                     >
-                        <span x-text="activeIsReanalysing ? 'Re-analysing…' : 'Re-analyse'"></span>
+                        <span x-text="activeIsReanalysing ? 'Re-analysing with AI…' : 'Re-analyse with AI'"></span>
                     </button>
                     <button
                         type="button"
@@ -211,7 +211,7 @@
                     aria-live="polite"
                     aria-busy="true"
                 >
-                    <span class="extraction-product-card__busy-text">Re-analysing…</span>
+                    <span class="extraction-product-card__busy-text">Re-analysing with AI…</span>
                 </div>
                 {% endif %}
                 {% if product.db_match %}
@@ -236,9 +236,9 @@
                         <button
                             type="button"
                             class="btn btn--xsmall btn--primary extraction-confirm-match"
-                            title="Confirm this product is correct and set match to 100%"
+                            title="Confirm this product manually and set match to 100%"
                             @click="window.confirmExtractionMatch($el, '{% url 'boq:extraction_edit' boq.pk %}', '{{ product.source_row_id }}', {{ product.product_index }})"
-                        >Confirm</button>
+                        >Confirm Manually</button>
                         {% endif %}
                     </div>
                     {% if product.show_weak_match_warning and product.weak_match_message %}
@@ -247,7 +247,7 @@
                     {% if product.missing_attribute_count and not product.show_weak_match_warning %}
                     <p class="extraction-db-match__missing">
                         {{ product.missing_attribute_count }} missing attribute(s) —
-                        fill them below, then click <strong>Re-analyse</strong> on
+                        fill them below, then click <strong>Re-analyse with AI</strong> on
                         this product. Rematch uses your AI Description (editable),
                         filled values, the full BOQ section, and refreshes
                         database candidates.
@@ -274,9 +274,9 @@
                         <button
                             type="button"
                             class="btn btn--xsmall btn--primary extraction-confirm-match"
-                            title="Confirm this product is correct and set match to 100%"
+                            title="Confirm this product manually and set match to 100%"
                             @click="window.confirmExtractionMatch($el, '{% url 'boq:extraction_edit' boq.pk %}', '{{ product.source_row_id }}', {{ product.product_index }})"
-                        >Confirm</button>
+                        >Confirm Manually</button>
                         {% endif %}
                     </div>
                     {% if product.weak_match_message %}
@@ -286,11 +286,11 @@
                         {% if product.db_candidates %}
                         Similar products are listed under <strong>Top database candidates</strong>
                         below — select any of them, or edit the inputs and click
-                        <strong>Re-analyse</strong>.
+                        <strong>Re-analyse with AI</strong>.
                         {% else %}
                         Edit the <strong>AI Description</strong> (e.g. correct the
                         product in plain language) and input columns, then click
-                        <strong>Re-analyse</strong> on this product.
+                        <strong>Re-analyse with AI</strong> on this product.
                         {% endif %}
                     </p>
                     {% endif %}
@@ -347,15 +347,24 @@
 
                     <div class="extraction-field-grid">
                         {% for field in product.fields %}
-                        <label class="extraction-field {% if field.key == 'description_hint' %}extraction-field--full{% endif %}{% if field.missing %} extraction-field--missing{% endif %}">
+                        <label class="extraction-field {% if field.key == 'description_hint' %}extraction-field--full{% endif %}{% if field.missing %} extraction-field--missing{% endif %}{% if field.readonly %} extraction-field--readonly{% endif %}">
                             <span class="extraction-field__label">{{ field.label }}{% if field.missing %} *{% endif %}</span>
                             {% if field.key == 'description_hint' %}
                             <textarea
                                 name="{{ field.key }}"
                                 class="extraction-input extraction-input--textarea extraction-input--wrap"
                                 rows="2"
-                                placeholder="Plain-language product description — edit if wrong, then Re-analyse"
+                                placeholder="Plain-language product description — edit if wrong, then Re-analyse with AI"
                             >{{ field.value }}</textarea>
+                            {% elif field.readonly %}
+                            <input
+                                type="text"
+                                class="extraction-input extraction-input--readonly"
+                                value="{{ field.value|default:'—' }}"
+                                readonly
+                                tabindex="-1"
+                                title="Loaded or selected Product Id (view only)"
+                            >
                             {% else %}
                             <input
                                 type="text"

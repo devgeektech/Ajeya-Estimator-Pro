@@ -525,6 +525,7 @@ BOQ_AI currently uses a single EC2 runtime:
   not part of the active workflow.
 * Production-ready work only: use real client data, real PostgreSQL migrations,
   and real operational assumptions.
+* First-time EC2 go-live and later `git pull` deploys: `docs/OPS.md`.
 
 # Golden Rule
 

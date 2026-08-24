@@ -57,6 +57,42 @@ def _catalog_product_id(product: dict[str, Any] | None) -> str:
     return ""
 
 
+def loaded_catalog_product_id(product: dict[str, Any] | None) -> str:
+    """Catalog Product_ID for a product that has been matched or selected.
+
+    Suggested-only IDs do not count until the expert Selects or Confirms.
+    """
+    item = product or {}
+    text = str(item.get("catalog_product_id") or "").strip()
+    if text:
+        return text
+    if item.get("db_product_id") in (None, ""):
+        return ""
+    text = str(item.get("suggested_catalog_product_id") or "").strip()
+    if text:
+        return text
+    summary = str(item.get("db_product_summary") or "").strip()
+    if " / " in summary:
+        first = summary.split(" / ", 1)[0].strip()
+        if first and first.lower() not in {"null", "none", "—", "-"}:
+            return first
+    return ""
+
+
+def count_missing_loaded_product_ids(analysis: dict[str, Any] | None) -> int:
+    """How many Analysis products still need Select / Confirm (no Product Id)."""
+    missing = 0
+    for row in (analysis or {}).get("rows") or []:
+        if str(row.get("skip_reason") or "") == "lineage_child_row":
+            continue
+        if bool(row.get("is_activity_only")) and not (row.get("products") or []):
+            continue
+        for product in row.get("products") or []:
+            if not loaded_catalog_product_id(product):
+                missing += 1
+    return missing
+
+
 def _analysis_rate_master_pk(product: dict[str, Any] | None) -> int | None:
     """Rate_Master_Output pk chosen on Analysis (Select / match / confirm)."""
     item = product or {}

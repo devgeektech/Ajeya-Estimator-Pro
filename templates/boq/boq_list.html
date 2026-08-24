@@ -70,45 +70,7 @@
                     <th class="table__actions" style="text-align: right;">Actions</th>
                 </tr>
             </thead>
-            <tbody>
-                {% for item in boq_items %}
-                <tr
-                    class="boq-list-row"
-                    data-search="{{ item.boq.boq_name|lower }} {{ item.boq.user.full_name|lower }} {{ item.status_display.label|lower }} {{ item.boq.status|lower }} {{ item.database_label|lower }}"
-                    {% if item.needs_status_poll %}
-                    x-data="boqListStatus({
-                        statusUrl: '{% url 'boq:status' item.boq.pk %}',
-                        label: '{{ item.status_display.label|escapejs }}',
-                        badge: '{{ item.status_display.badge|escapejs }}',
-                        expect: '{% if item.boq.status == 'MATCHING' %}match{% else %}extract{% endif %}'
-                    })"
-                    x-init="start()"
-                    {% endif %}
-                >
-                    <td style="text-align: left;">{{ item.boq.boq_name }}</td>
-                    <td style="text-align: left;">{{ item.boq.user.full_name }}</td>
-                    <td style="text-align: left;">
-                        {% if item.needs_status_poll %}
-                        <span class="badge" :class="badge" x-text="label">{{ item.status_display.label }}</span>
-                        {% else %}
-                        <span class="badge {{ item.status_display.badge }}">{{ item.status_display.label }}</span>
-                        {% endif %}
-                    </td>
-                    <td style="text-align: left;" class="muted">{% if item.database_label %}{{ item.database_label }}{% else %}—{% endif %}</td>
-                    <td style="text-align: left;">{{ item.boq.created_at|date:"M d, H:i" }}</td>
-                    <td class="table__actions" style="text-align: right;">
-                        <a href="{% url 'boq:detail' item.boq.pk %}?tab={{ item.detail_tab }}" class="btn btn--small btn--primary">View</a>
-                    </td>
-                </tr>
-                {% empty %}
-                <tr class="boq-list-empty-static">
-                    <td colspan="6" class="table__empty">No BOQs uploaded yet.</td>
-                </tr>
-                {% endfor %}
-                <tr class="boq-list-empty-filter" x-show="noMatches" x-cloak>
-                    <td colspan="6" class="table__empty">No BOQs match the search.</td>
-                </tr>
-            </tbody>
+            {% include "boq/_boq_list_table_body.html" %}
         </table>
     </div>
 </div>
@@ -183,11 +145,21 @@ document.addEventListener('alpine:init', () => {
                         this.timer = setTimeout(() => this.poll(), 2500);
                         return;
                     } else {
-                        if (document.visibilityState === 'visible') {
+                        const kick = () => {
+                            if (
+                                window.BOQListRefreshIfChanged &&
+                                typeof window.BOQListRefreshIfChanged === 'function'
+                            ) {
+                                window.BOQListRefreshIfChanged();
+                                return;
+                            }
                             window.location.reload();
+                        };
+                        if (document.visibilityState === 'visible') {
+                            kick();
                         } else {
                             document.addEventListener('visibilitychange', () => {
-                                if (document.visibilityState === 'visible') window.location.reload();
+                                if (document.visibilityState === 'visible') kick();
                             });
                         }
                     }
@@ -199,4 +171,72 @@ document.addEventListener('alpine:init', () => {
     }));
 });
 </script>
+
+<script>
+(function () {
+    const table = document.getElementById('boq-list-table');
+    if (!table) return;
+
+    const refreshUrlBase = "{% url 'boq:refresh_list' %}?sort={{ sort }}&dir={{ dir }}";
+
+    const computeSigFromDom = () => {
+        const rows = Array.from(table.querySelectorAll('tr.boq-list-row'));
+        return rows
+            .map((tr) => (tr.dataset.boqId || '') + ':' + (tr.dataset.boqStatus || ''))
+            .join('|');
+    };
+
+    let lastSig = computeSigFromDom();
+    let inflight = false;
+
+    async function refreshIfChanged() {
+        if (inflight) return;
+        if (document.visibilityState !== 'visible') return;
+
+        inflight = true;
+        try {
+            const res = await fetch(refreshUrlBase, {
+                headers: { 'Accept': 'application/json' },
+                credentials: 'same-origin',
+            });
+            const data = await res.json();
+            if (!data || typeof data.sig !== 'string') return;
+
+            if (data.sig !== lastSig && data.tbody_html) {
+                const oldTbody = table.querySelector('tbody');
+                if (oldTbody) oldTbody.outerHTML = data.tbody_html;
+
+                // Ensure new x-data/x-init nodes start polling.
+                if (window.Alpine && typeof window.Alpine.initTree === 'function') {
+                    window.Alpine.initTree(table);
+                }
+
+                // Re-apply current client-side search filter after DOM swap.
+                const input = document.querySelector('.list-search__input');
+                if (input) input.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+            lastSig = data.sig;
+        } catch (e) {
+            // Network failures are non-fatal.
+        } finally {
+            inflight = false;
+        }
+    }
+
+    // Allow other components (like row-status pollers) to trigger a lightweight
+    // table refresh without a full page reload.
+    window.BOQListRefreshIfChanged = refreshIfChanged;
+
+    // When returning via back/forward cache (or switching away then back),
+    // refresh once immediately.
+    window.addEventListener('pageshow', () => refreshIfChanged());
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') refreshIfChanged();
+    });
+
+    // Light periodic refresh so newly uploaded BOQs appear without manual F5.
+    setInterval(() => refreshIfChanged(), 15000);
+})();
+</script>
+
 {% endblock %}

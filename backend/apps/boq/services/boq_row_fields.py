@@ -50,6 +50,26 @@ def is_job_unit(unit: Any) -> bool:
     return val == "job" or val == "jobs" or val.startswith("job.") or val.startswith("job ") or val == "job activity"
 
 
+def resolve_activity_only(
+    analysis_row: dict[str, Any] | None = None,
+    *,
+    products: list[Any] | None = None,
+    units: list[Any] | None = None,
+) -> bool:
+    """Job Only when a section has no products.
+
+    Any stored/added product clears the mark. Empty sections stay Job Only when
+    the expert flag is set, or when Unit is Job (AI default).
+    """
+    row = analysis_row or {}
+    items = list(products if products is not None else (row.get("products") or []))
+    if items:
+        return False
+    if "is_activity_only" in row:
+        return bool(row.get("is_activity_only"))
+    return any(is_job_unit(unit) for unit in (units or []))
+
+
 def ordered_boq_rows(boq_data: dict) -> list[dict[str, Any]]:
     """Return BOQ rows in workbook order; fall back to ``rows_tree`` when flat rows are missing."""
     flat_rows = boq_data.get("rows") or []

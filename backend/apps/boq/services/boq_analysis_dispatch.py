@@ -1,4 +1,4 @@
-"""Queue or run BOQ extraction and matching via Celery."""
+"""Queue or run BOQ extraction via Celery."""
 from __future__ import annotations
 
 import logging
@@ -13,9 +13,7 @@ from apps.boq.models import BOQ
 from apps.boq.services.celery_worker_heartbeat import celery_worker_heartbeat_is_fresh
 from apps.boq.tasks import (
     process_boq_extraction_task,
-    process_boq_matching_task,
     run_boq_extraction,
-    run_boq_matching,
 )
 from common.choices import BOQStatus
 from config.celery import app as celery_app
@@ -44,17 +42,6 @@ def dispatch_boq_extraction(boq_id: int) -> AnalysisDispatchResult:
         runner=run_boq_extraction,
         job_label="extraction",
         pending_status=BOQStatus.PROCESSING,
-    )
-
-
-def dispatch_boq_matching(boq_id: int) -> AnalysisDispatchResult:
-    """Queue or run database matching for one BOQ."""
-    return _dispatch_boq_job(
-        boq_id,
-        task=process_boq_matching_task,
-        runner=run_boq_matching,
-        job_label="matching",
-        pending_status=BOQStatus.MATCHING,
     )
 
 
@@ -101,7 +88,7 @@ def _dispatch_boq_job(
             start_web_progress_echo,
         )
 
-        phase = "match" if pending_status == BOQStatus.MATCHING else "extract"
+        phase = "extract"
         set_boq_job_progress(
             boq_id,
             percent=1,
@@ -125,8 +112,6 @@ def _dispatch_boq_job(
         # Roll status back so the UI is not left PROCESSING with no task.
         BOQ.objects.filter(pk=boq_id, status=pending_status).update(
             status=BOQStatus.ANALYSIS_FAILED
-            if pending_status == BOQStatus.PROCESSING
-            else BOQStatus.EXTRACTED
         )
         if settings.DEBUG:
             runner(boq_id)

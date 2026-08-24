@@ -5,6 +5,59 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
+## 2026-08-24 — Go-live documentation
+
+- README and `docs/OPS.md` now have a complete first-boot EC2 sequence, including
+  master-database upload, `check_celery`, Postgres schema grants, and Nginx
+  default-site removal. Subsequent `git pull` deploys are a separate section.
+
+## 2026-08-24 — Production go-live settings
+
+- Hardened `config.settings` for EC2 HTTP go-live: CSRF trusted origins, cookie
+  flags, Postgres `CONN_MAX_AGE`, upload field limits, and refuse eager Celery
+  when `DEBUG=False`.
+- Added `backend/config/gunicorn.conf.py` (10-minute timeout for sync database
+  import) and matching Nginx proxy timeouts in `docs/OPS.md`.
+- Default AI instruction logging is off unless `DEBUG=True`.
+
+## 2026-08-24 — Analysis Product Id column + Next gate
+
+- Analysis product form shows a view-only **Product Id** column before Category
+  for the loaded/selected catalog id.
+- Analysis **Next** already blocked missing Product Ids; warning copy now tells
+  experts to confirm or remove the product from Analysis first.
+
+## 2026-08-24 — Analysis button labels
+
+- Analysis **Re-analyse** is now **Re-analyse with AI**; **Confirm** is now **Confirm Manually**.
+
+## 2026-08-24 — Job Only Add/Remove product
+
+- **+ Add product** on a Job Only section now keeps the product visible and
+  clears the Job Only mark (Unit=Job no longer hides added products).
+- Removing the last product in a section marks it Job Only by default.
+
+## 2026-08-24 — Keep chapter products before 1.1 on Analysis
+
+- Oversized BOQ chapters still split at ``1.1`` / ``2.1``, but leftover chapter
+  qty rows (BOQ_4 pipes ``c)``–``j)`` under ``1``) now appear as Section 1 in
+  sheet order instead of after ``1.14``.
+
+## 2026-08-24 — BOQ sheet extra-column headers stay horizontal
+
+- Floor/other BOQ columns (Ground, basement, remarks) now keep one-line headers (`nowrap`, no hyphenation, no max-width squeeze).
+- Description absorbs leftover table width so unused space on the right is used; the sheet still scrolls horizontally when columns overflow.
+
+## 2026-08-24 — Remove dead Match/Confirm/HTMX code
+
+- Deleted unused BOQ Match / row-match / match-results / calculate-price / session-confirm views and URLs (live matching stays inside Analyse).
+- Removed Celery `boq.process_matching`, `BOQAnalysisEnrichmentService`, `BOQConfirmationService`, match-results JSON writers, and django-htmx (unused; UI is Alpine + fetch).
+- Kept `MATCHING` / `PROCESSED` statuses for existing rows and `boq.process_analysis` as an extract-only Celery alias.
+
+## 2026-08-24 — BOQ list auto-refresh after upload
+- Added a JSON endpoint + client polling to refresh the BOQ list table body when returning to the BOQs page (browser back/forward cache + no manual refresh).
+- BOQ list rows now include `data-boq-id`/`data-boq-status` so the client can detect changes and swap the table DOM.
+
 ## 2026-08-24 - Testing expansion, cleanup, and UI fixes
 - Set the header row background color to yellow in the exported "Review" sheet for better visibility.
 - Fixed long BOQ names overflowing behind the status badge on the dashboard.

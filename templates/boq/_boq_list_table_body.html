@@ -1,0 +1,42 @@
+<tbody>
+    {% for item in boq_items %}
+    <tr
+        class="boq-list-row"
+        data-boq-id="{{ item.boq.pk }}"
+        data-boq-status="{{ item.boq.status }}"
+        data-search="{{ item.boq.boq_name|lower }} {{ item.boq.user.full_name|lower }} {{ item.status_display.label|lower }} {{ item.boq.status|lower }} {{ item.database_label|lower }}"
+        {% if item.needs_status_poll %}
+        x-data="boqListStatus({
+            statusUrl: '{% url 'boq:status' item.boq.pk %}',
+            label: '{{ item.status_display.label|escapejs }}',
+            badge: '{{ item.status_display.badge|escapejs }}',
+            expect: '{% if item.boq.status == 'MATCHING' %}match{% else %}extract{% endif %}'
+        })"
+        x-init="start()"
+        {% endif %}
+    >
+        <td style="text-align: left;">{{ item.boq.boq_name }}</td>
+        <td style="text-align: left;">{{ item.boq.user.full_name }}</td>
+        <td style="text-align: left;">
+            {% if item.needs_status_poll %}
+            <span class="badge" :class="badge" x-text="label">{{ item.status_display.label }}</span>
+            {% else %}
+            <span class="badge {{ item.status_display.badge }}">{{ item.status_display.label }}</span>
+            {% endif %}
+        </td>
+        <td style="text-align: left;" class="muted">{% if item.database_label %}{{ item.database_label }}{% else %}—{% endif %}</td>
+        <td style="text-align: left;">{{ item.boq.created_at|date:"M d, H:i" }}</td>
+        <td class="table__actions" style="text-align: right;">
+            <a href="{% url 'boq:detail' item.boq.pk %}?tab={{ item.detail_tab }}" class="btn btn--small btn--primary">View</a>
+        </td>
+    </tr>
+    {% empty %}
+    <tr class="boq-list-empty-static">
+        <td colspan="6" class="table__empty">No BOQs uploaded yet.</td>
+    </tr>
+    {% endfor %}
+    <tr class="boq-list-empty-filter" x-show="noMatches" x-cloak>
+        <td colspan="6" class="table__empty">No BOQs match the search.</td>
+    </tr>
+</tbody>
+

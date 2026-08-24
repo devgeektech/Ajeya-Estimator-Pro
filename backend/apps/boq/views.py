@@ -19,8 +19,7 @@ from common.exceptions import AIServiceError, BOQAIError, ValidationError
 
 from .forms import BOQUploadForm
 from .models import BOQ
-from .services.boq_analysis_dispatch import dispatch_boq_extraction, dispatch_boq_matching
-from .services.boq_confirmation_service import BOQConfirmationService
+from .services.boq_analysis_dispatch import dispatch_boq_extraction
 from .services.boq_export_service import BOQExportService
 from .services.boq_labour_service import BOQLabourService
 from .services.boq_review_display_service import BOQReviewDisplayService
@@ -308,6 +307,83 @@ class BOQListView(LoginRequiredMixin, ListView):
         return context
 
 
+class BOQListRefreshView(LoginRequiredMixin, View):
+    """Return updated BOQ list table body for client-side auto-refresh.
+
+    Used when the user navigates away during uploads / background analysis and
+    returns later (including browser back/forward cache scenarios).
+    """
+
+    def get(self, request):
+        user = cast(User, request.user)
+
+        sort_key = (request.GET.get("sort") or "created").strip().lower()
+        direction = (request.GET.get("dir") or "desc").strip().lower()
+        if sort_key not in BOQListView._SORT_FIELDS:
+            sort_key = "created"
+        if direction not in {"asc", "desc"}:
+            direction = "desc"
+
+        qs = _boq_queryset_for_user(user)
+
+        # Match BOQListView ordering so we swap the table without re-sorting.
+        if sort_key == "owner":
+            if direction == "desc":
+                qs = qs.order_by(
+                    "-user__first_name", "-user__last_name", "-user__email", "-id"
+                )
+            else:
+                qs = qs.order_by("user__first_name", "user__last_name", "user__email", "-id")
+        elif sort_key == "status":
+            status_rank = Case(
+                When(status=BOQStatus.UPLOADED, then=Value(10)),
+                When(status=BOQStatus.PROCESSING, then=Value(20)),
+                When(status=BOQStatus.EXTRACTED, then=Value(30)),
+                When(status=BOQStatus.MAKE_VENDOR, then=Value(40)),
+                When(status=BOQStatus.LABOUR, then=Value(50)),
+                When(status=BOQStatus.MATCHING, then=Value(55)),
+                When(status=BOQStatus.PROCESSED, then=Value(60)),
+                When(status=BOQStatus.READY_EXPORT, then=Value(70)),
+                When(status=BOQStatus.EXPORTED, then=Value(80)),
+                When(status=BOQStatus.ANALYSIS_FAILED, then=Value(90)),
+                default=Value(100),
+                output_field=IntegerField(),
+            )
+            qs = qs.annotate(_status_rank=status_rank)
+            if direction == "desc":
+                qs = qs.order_by("-_status_rank", "-created_at", "-id")
+            else:
+                qs = qs.order_by("_status_rank", "created_at", "-id")
+        else:
+            order_field = BOQListView._SORT_FIELDS[sort_key]
+            if direction == "desc":
+                order_field = f"-{order_field}"
+            qs = qs.order_by(order_field, "-id")
+
+        boqs = list(qs)
+        sig = "|".join(f"{b.pk}:{b.status}" for b in boqs)
+
+        session = request.session
+        boq_items = [
+            {
+                "boq": boq,
+                "status_display": build_boq_status_display(boq, session),
+                "database_label": resolve_boq_database_label(boq),
+                "detail_tab": default_detail_tab_for_boq(boq, session),
+                "needs_status_poll": boq.status
+                in {BOQStatus.PROCESSING, BOQStatus.MATCHING},
+            }
+            for boq in boqs
+        ]
+
+        tbody_html = render_to_string(
+            "boq/_boq_list_table_body.html", {"boq_items": boq_items}, request=request
+        )
+        response = JsonResponse({"sig": sig, "tbody_html": tbody_html})
+        response["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        return response
+
+
 class BOQDetailView(LoginRequiredMixin, DetailView):
     model = BOQ
     template_name = "boq/boq_detail.html"
@@ -430,8 +506,6 @@ class BOQDetailView(LoginRequiredMixin, DetailView):
             and not _job_is_running(boq)
         )
         context["can_export"] = is_export_ready(boq) and bool(boq.analysis_data)
-        context["can_rematch"] = False
-        context["can_match"] = False
         context["can_edit_extraction"] = boq.status in {
             BOQStatus.EXTRACTED,
             BOQStatus.MAKE_VENDOR,
@@ -471,7 +545,6 @@ class BOQDetailView(LoginRequiredMixin, DetailView):
             "has_analysis": False,
             "lines": [],
             "stats": {},
-            "confirmation_stats": {},
             "review_headers": [],
         }
         empty_make_vendor = {"has_products": False, "lines": [], "stats": {}}
@@ -510,10 +583,7 @@ class BOQDetailView(LoginRequiredMixin, DetailView):
             except Exception:
                 logger.exception("Failed to build Labour display for BOQ id=%s", boq.pk)
         elif active_tab == "review":
-            confirmations = BOQConfirmationService(boq.pk, self.request.session).all()
-            context["analysis_display"] = BOQReviewDisplayService(
-                boq, confirmations
-            ).build()
+            context["analysis_display"] = BOQReviewDisplayService(boq).build()
         return context
 
 
@@ -689,54 +759,6 @@ class BOQRowExtractView(LoginRequiredMixin, View):
         except Exception:
             logger.exception("BOQ row extract failed for id=%s row=%s", boq.pk, row_id)
             message = "Failed to re-analyse this row."
-            if ajax:
-                return _extraction_edit_json_error(message, status=500)
-            messages.error(request, message)
-        return HttpResponseRedirect(redirect_url)
-
-
-class BOQRowMatchView(LoginRequiredMixin, View):
-    """Re-match a single BOQ anchor group."""
-
-    def post(self, request, pk: int, row_id: str):
-        user = cast(User, request.user)
-        boq = get_object_or_404(_boq_queryset_for_user(user), pk=pk)
-        redirect_url = _detail_tab_url(boq.pk, "review")
-        ajax = _extraction_edit_is_ajax(request)
-        row_id = (row_id or request.POST.get("row_id") or "").strip()
-
-        if _job_is_running(boq):
-            message = "Wait for the current job to finish."
-            if ajax:
-                return _extraction_edit_json_error(message)
-            messages.info(request, message)
-            return HttpResponseRedirect(redirect_url)
-
-        if not row_id:
-            message = "Missing BOQ row."
-            if ajax:
-                return _extraction_edit_json_error(message)
-            messages.error(request, message)
-            return HttpResponseRedirect(redirect_url)
-
-        clear_exported_in_session(boq.pk, request.session)
-        try:
-            BOQAnalysisService(boq.pk).re_match_row(row_id)
-            message = "Row re-matched."
-            if ajax:
-                return _extraction_edit_json_ok(message, row_id=row_id)
-            messages.success(request, message)
-        except ValidationError as exc:
-            if ajax:
-                return _extraction_edit_json_error(str(exc))
-            messages.error(request, str(exc))
-        except (AIServiceError, BOQAIError) as exc:
-            if ajax:
-                return _extraction_edit_json_error(str(exc))
-            messages.error(request, str(exc))
-        except Exception:
-            logger.exception("BOQ row match failed for id=%s row=%s", boq.pk, row_id)
-            message = "Failed to re-match this row."
             if ajax:
                 return _extraction_edit_json_error(message, status=500)
             messages.error(request, message)
@@ -1177,122 +1199,6 @@ class BOQMakeVendorSelectView(LoginRequiredMixin, View):
         return HttpResponseRedirect(redirect_url)
 
 
-class BOQMatchView(LoginRequiredMixin, View):
-    """Match extracted products against the master database."""
-
-    def post(self, request, pk: int):
-        user = cast(User, request.user)
-        boq = get_object_or_404(_boq_queryset_for_user(user), pk=pk)
-        wants_json = _request_wants_json(request)
-        analysis_url = _detail_tab_url(boq.pk, "analysis")
-        match_url = _detail_tab_url(boq.pk, "review")
-
-        if _job_is_running(boq):
-            message = "A job is already running for this BOQ."
-            if wants_json:
-                boq.refresh_from_db(fields=["status"])
-                return JsonResponse(
-                    {
-                        "ok": True,
-                        "message": message,
-                        "mode": "async",
-                        **_status_payload(boq, request.session, expect="match"),
-                    }
-                )
-            messages.info(request, message)
-            return HttpResponseRedirect(match_url)
-
-        if not (boq.analysis_data or {}).get("rows"):
-            message = "Run Analyse first to extract products."
-            if wants_json:
-                return JsonResponse({"ok": False, "message": message}, status=400)
-            messages.error(request, message)
-            return HttpResponseRedirect(analysis_url)
-
-        try:
-            result = dispatch_boq_matching(boq.pk)
-            boq.refresh_from_db(fields=["status"])
-            if result.mode == "failed":
-                message = result.message or "Could not start matching."
-                if wants_json:
-                    return JsonResponse(
-                        {
-                            "ok": False,
-                            "message": message,
-                            "mode": result.mode,
-                            **_status_payload(boq, request.session, expect="match"),
-                        },
-                        status=400,
-                    )
-                messages.error(request, message)
-                return HttpResponseRedirect(analysis_url)
-            if result.mode == "sync":
-                message = f"Matching completed for '{boq.boq_name}'."
-                if wants_json:
-                    return JsonResponse(
-                        {
-                            "ok": True,
-                            "message": message,
-                            "mode": result.mode,
-                            **_status_payload(boq, request.session, expect="match"),
-                        }
-                    )
-                messages.success(request, message)
-            else:
-                message = (
-                    f"Matching started for '{boq.boq_name}'. "
-                    "Results will appear when complete."
-                )
-                if wants_json:
-                    return JsonResponse(
-                        {
-                            "ok": True,
-                            "message": message,
-                            "mode": result.mode,
-                            **_status_payload(boq, request.session, expect="match"),
-                        }
-                    )
-                messages.info(request, message)
-        except (AIServiceError, BOQAIError) as exc:
-            if wants_json:
-                return JsonResponse({"ok": False, "message": str(exc)}, status=400)
-            messages.error(request, str(exc))
-            return HttpResponseRedirect(analysis_url)
-        except Exception:
-            logger.exception("Failed to start BOQ matching for id=%s", boq.pk)
-            message = "Failed to start matching."
-            if wants_json:
-                return JsonResponse({"ok": False, "message": message}, status=500)
-            messages.error(request, message)
-            return HttpResponseRedirect(analysis_url)
-
-        return HttpResponseRedirect(match_url)
-
-
-class BOQMatchResultsView(LoginRequiredMixin, View):
-    """Backward-compatible redirect to the Review tab on BOQ detail."""
-
-    def get(self, request, pk: int):
-        user = cast(User, request.user)
-        boq = get_object_or_404(_boq_queryset_for_user(user), pk=pk)
-        if boq.status in {
-            BOQStatus.EXTRACTED,
-            BOQStatus.MAKE_VENDOR,
-            BOQStatus.UPLOADED,
-        }:
-            messages.info(request, "Complete Make & Vendor, then continue to Labour.")
-            if boq.status == BOQStatus.MAKE_VENDOR or (
-                (boq.analysis_data or {}).get("make_vendor_defaults_applied")
-            ):
-                return HttpResponseRedirect(_detail_tab_url(boq.pk, "make_vendor"))
-            return HttpResponseRedirect(_detail_tab_url(boq.pk, "analysis"))
-        if boq.status == BOQStatus.LABOUR and not (
-            (boq.analysis_data or {}).get("pricing_ready")
-        ):
-            return HttpResponseRedirect(_detail_tab_url(boq.pk, "labour"))
-        return HttpResponseRedirect(_detail_tab_url(boq.pk, "review"))
-
-
 class BOQLabourView(LoginRequiredMixin, View):
     """Labour tab actions: unlock, apply auto/manual, complete → Review."""
 
@@ -1424,55 +1330,6 @@ class BOQLabourView(LoginRequiredMixin, View):
             return HttpResponseRedirect(labour_url)
 
 
-class BOQCalculatePriceView(LoginRequiredMixin, View):
-    """Legacy endpoint — redirects to Labour complete (pricing + Review)."""
-
-    def post(self, request, pk: int):
-        user = cast(User, request.user)
-        boq = get_object_or_404(_boq_queryset_for_user(user), pk=pk)
-        wants_json = _request_wants_json(request)
-        redirect_url = _detail_tab_url(boq.pk, "review")
-
-        if _job_is_running(boq):
-            message = "Wait for the current job to finish."
-            if wants_json:
-                return JsonResponse({"ok": False, "message": message}, status=400)
-            messages.error(request, message)
-            return HttpResponseRedirect(_detail_tab_url(boq.pk, "labour"))
-
-        try:
-            result = BOQLabourService(boq.pk).complete()
-            clear_exported_in_session(boq.pk, request.session)
-            message = (
-                f"Prices calculated for {result.get('row_count', 0)} row(s). "
-                "Ready to export."
-            )
-            if wants_json:
-                return JsonResponse(
-                    {
-                        "ok": True,
-                        "message": message,
-                        "status": result.get("status"),
-                        "redirect": redirect_url,
-                    }
-                )
-            messages.success(request, message)
-        except ValidationError as exc:
-            if wants_json:
-                return JsonResponse({"ok": False, "message": str(exc)}, status=400)
-            messages.error(request, str(exc))
-            return HttpResponseRedirect(_detail_tab_url(boq.pk, "labour"))
-        except Exception:
-            logger.exception("BOQ calculate price failed for id=%s", boq.pk)
-            message = "Failed to calculate prices."
-            if wants_json:
-                return JsonResponse({"ok": False, "message": message}, status=500)
-            messages.error(request, message)
-            return HttpResponseRedirect(_detail_tab_url(boq.pk, "labour"))
-
-        return HttpResponseRedirect(redirect_url)
-
-
 class BOQAnalysisStatusView(LoginRequiredMixin, View):
     """JSON status for polling while Celery jobs run."""
 
@@ -1493,43 +1350,6 @@ class BOQAnalysisStatusView(LoginRequiredMixin, View):
         return response
 
 
-class BOQConfirmView(LoginRequiredMixin, View):
-    """Confirm one analysis line for the current session (no database write)."""
-
-    def post(self, request, pk: int):
-        user = cast(User, request.user)
-        boq = get_object_or_404(_boq_queryset_for_user(user), pk=pk)
-
-        line_key = (request.POST.get("line_key") or request.POST.get("override_key") or "").strip()
-        rate_master_id_raw = (request.POST.get("rate_master_id") or "").strip()
-        action = (request.POST.get("action") or "confirm").strip().lower()
-
-        redirect_url = _detail_tab_url(boq.pk, "review")
-        confirmation_service = BOQConfirmationService(boq.pk, request.session)
-
-        if action == "unconfirm":
-            if line_key:
-                confirmation_service.unconfirm(line_key)
-                messages.success(request, "Confirmation removed for this line.")
-            return HttpResponseRedirect(redirect_url)
-
-        if not line_key:
-            messages.error(request, "Missing analysis line.")
-            return HttpResponseRedirect(redirect_url)
-
-        try:
-            rate_master_id = int(rate_master_id_raw) if rate_master_id_raw else None
-            confirmation_service.confirm(line_key=line_key, rate_master_id=rate_master_id)
-            messages.success(request, "Line confirmed for this session.")
-        except ValidationError as exc:
-            messages.error(request, str(exc))
-        except Exception:
-            logger.exception("BOQ confirmation failed for id=%s", boq.pk)
-            messages.error(request, "Failed to confirm line.")
-
-        return HttpResponseRedirect(redirect_url)
-
-
 class BOQExportView(LoginRequiredMixin, View):
     """Download the combined Review + original BOQ workbook."""
 
@@ -1539,8 +1359,7 @@ class BOQExportView(LoginRequiredMixin, View):
         kind = str(request.GET.get("kind") or "review").strip().lower()
 
         try:
-            confirmations = BOQConfirmationService(boq.pk, request.session).all()
-            content, filename = BOQExportService(boq.pk, confirmations).run(kind=kind)
+            content, filename = BOQExportService(boq.pk).run(kind=kind)
             mark_exported_in_session(boq.pk, request.session)
         except ValueError as exc:
             messages.error(request, str(exc))

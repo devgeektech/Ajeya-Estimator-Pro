@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Ajeya Estimator Pro{% endblock %}</title>
     <meta name="csrf-token" content="{{ csrf_token }}">
-<link rel="stylesheet" href="{% static 'css/app.css' %}?v=107">
+<link rel="stylesheet" href="{% static 'css/app.css' %}?v=108">
     <style>
         /* Override stale collected CSS (DEBUG=False keeps old hashed files until server restart). */
         :root { --card-stripe: #e2e8f0; }
@@ -403,15 +403,39 @@
             padding-left: 28px !important;
         }
         /* BOQ / Make List sheets: normal header styling vs list-table uppercase */
+        .table.boq-sheet {
+            width: 100% !important;
+            min-width: 100% !important;
+            table-layout: auto !important;
+        }
         .table.boq-sheet th {
             text-transform: none !important;
             font-size: .85rem !important;
             letter-spacing: normal !important;
             color: var(--text) !important;
+            white-space: nowrap !important;
+            hyphens: none !important;
+            overflow-wrap: normal !important;
+            word-break: keep-all !important;
         }
         .table.boq-sheet > thead > tr > th,
         .table.boq-sheet > tbody > tr > td {
             text-align: left !important;
+        }
+        .table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__col-desc {
+            min-width: 16rem !important;
+            width: auto !important;
+            white-space: normal !important;
+        }
+        .table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__col-floor,
+        .table.boq-sheet:not(.boq-sheet--make-list) .boq-sheet__col-other {
+            min-width: max-content !important;
+            width: max-content !important;
+            max-width: none !important;
+            white-space: nowrap !important;
+            overflow-wrap: normal !important;
+            word-break: keep-all !important;
+            hyphens: none !important;
         }
         .dark-mode .table.boq-sheet tbody tr:nth-child(odd) td,
         .dark-mode .table.boq-sheet tbody tr:nth-child(even) td {
@@ -2091,6 +2115,19 @@
             max-width: 12rem;
         }
 
+        .analysis-tab-canvas .extraction-input--readonly,
+        .extraction-input--readonly {
+            background: var(--surface-alt, #f8fafc);
+            color: var(--text);
+            font-weight: 600;
+            cursor: default;
+            opacity: 1;
+        }
+        .dark-mode .analysis-tab-canvas .extraction-input--readonly,
+        .dark-mode .extraction-input--readonly {
+            background: rgba(148, 163, 184, 0.12);
+        }
+
         .make-vendor-fields .extraction-input--readonly {
             background: var(--surface-alt, #f8fafc);
             color: var(--text);
@@ -2808,19 +2845,28 @@
             .table.boq-sheet {
                 width: 100% !important;
                 min-width: 100% !important;
-                max-width: 100%;
-                table-layout: fixed !important;
+                max-width: none !important;
+                table-layout: auto !important;
             }
             .table.boq-sheet th,
             .table.boq-sheet td {
                 text-align: left !important;
+                white-space: nowrap !important;
+                hyphens: none !important;
+            }
+            .table.boq-sheet .boq-sheet__col-desc,
+            .table.boq-sheet td.boq-sheet__col-desc {
                 white-space: normal !important;
             }
             .table.boq-sheet .boq-sheet__col-sno,
-            .table.boq-sheet .boq-sheet__col-unit {
+            .table.boq-sheet .boq-sheet__col-unit,
+            .table.boq-sheet .boq-sheet__col-floor,
+            .table.boq-sheet .boq-sheet__col-other {
                 white-space: nowrap !important;
                 overflow-wrap: normal !important;
                 word-break: keep-all !important;
+                hyphens: none !important;
+                max-width: none !important;
             }
             .sidebar-backdrop {
                 position: fixed;
@@ -3563,7 +3609,6 @@
     </style>
     {% block head_extra %}{% endblock %}
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-    <script src="https://unpkg.com/htmx.org@2.0.2"></script>
 </head>
 <body>
 {% if user.is_authenticated %}

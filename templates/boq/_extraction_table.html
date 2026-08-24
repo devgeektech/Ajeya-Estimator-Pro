@@ -32,6 +32,23 @@ document.addEventListener('alpine:init', () => {
         return data;
     };
 
+    window.addExtractionProduct = async function addExtractionProduct(url, rowId, boqPk) {
+        try {
+            await window.extractionAjaxPost(url, { action: 'add_product', row_id: rowId });
+            try {
+                const el = document.getElementById('line-' + rowId);
+                sessionStorage.setItem('boq-detail-scroll-' + boqPk + '-analysis', JSON.stringify({
+                    y: window.scrollY,
+                    rowId: rowId,
+                    offset: el ? el.getBoundingClientRect().top : null,
+                }));
+            } catch (e) { /* ignore */ }
+            window.location.reload();
+        } catch (error) {
+            alert(error.message || 'Failed to add product.');
+        }
+    };
+
     window.captureExtractionScroll = function captureExtractionScroll(rowId) {
         const el = rowId ? document.getElementById('line-' + rowId) : null;
         return {
@@ -318,7 +335,7 @@ document.addEventListener('alpine:init', () => {
             btn.dataset.busy = '1';
             btn.disabled = true;
             btn.dataset.prevLabel = btn.textContent;
-            btn.textContent = 'Re-analysing…';
+            btn.textContent = 'Re-analysing with AI…';
         }
         try {
             await window.extractionAjaxPost(rematchUrl, { mode: 'reextract' });
@@ -366,14 +383,14 @@ document.addEventListener('alpine:init', () => {
         try {
             await window.extractionAjaxPost(editUrl, {
                 action: 'remove_product',
-                row_id: data.productRowId,
+                row_id: data.rowId || data.productRowId,
                 product_index: String(data.productIndex),
             });
             try {
-                const lineEl = document.getElementById('line-' + (data.productRowId || ''));
+                const lineEl = document.getElementById('line-' + (data.rowId || data.productRowId || ''));
                 sessionStorage.setItem('boq-detail-scroll-' + boqPk + '-analysis', JSON.stringify({
                     y: window.scrollY,
-                    rowId: data.productRowId || '',
+                    rowId: data.rowId || data.productRowId || '',
                     offset: lineEl ? lineEl.getBoundingClientRect().top : null,
                 }));
             } catch (e) { /* ignore */ }

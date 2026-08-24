@@ -13,10 +13,15 @@ from apps.boq.services.boq_extraction_service import (
 from apps.boq.services.boq_row_fields import (
     is_blank as _is_blank,
     is_job_unit,
+    resolve_activity_only,
 )
 from apps.boq.services.boq_row_grouping_service import grouped_anchor_rows
 from apps.boq.services.extraction_attribute_fields import COMMON_ATTRIBUTE_LABELS
 from apps.boq.services.make_list_constraint_service import MakeListConstraintService
+from apps.boq.services.make_vendor_common import (
+    count_missing_loaded_product_ids,
+    loaded_catalog_product_id,
+)
 from apps.boq.services.product_attribute_enrichment_service import (
     compute_attribute_confidence,
     confidence_band,
@@ -402,7 +407,18 @@ def _shape_product(
 
     fields: list[dict[str, Any]] = []
     missing_count = 0
+    product_id_value = loaded_catalog_product_id(product)
     for key, label in _PRODUCT_FIELDS:
+        if key == "category":
+            fields.append(
+                {
+                    "key": "product_id",
+                    "label": "Product Id",
+                    "value": product_id_value,
+                    "missing": False,
+                    "readonly": True,
+                }
+            )
         value = product.get(key)
         if blank_inputs and key != "description_hint":
             value = None
@@ -415,6 +431,7 @@ def _shape_product(
                 "label": label,
                 "value": "" if value is None else str(value),
                 "missing": missing,
+                "readonly": False,
             }
         )
 
@@ -469,12 +486,12 @@ def _shape_product(
             weak_match_message = (
                 "Unable to match this product confidently. Similar products are "
                 "listed under Top database candidates — select any of them, or "
-                "enter the details in the input fields below and click Re-analyse."
+                "enter the details in the input fields below and click Re-analyse with AI."
             )
         else:
             weak_match_message = (
                 "Unable to match this product confidently. Enter the details in "
-                "the input fields below and click Re-analyse."
+                "the input fields below and click Re-analyse with AI."
             )
     return {
         "product_index": int(product.get("product_index") or 0),
@@ -484,6 +501,7 @@ def _shape_product(
         "display_label": f"Product {display_number}" + (f" of {total}" if total > 1 else ""),
         "is_user_added": (product.get("source") or "").lower() == "user",
         "is_activity_only": is_job_unit(product.get("unit")) or is_job_unit(product.get("quantity_unit")),
+        "catalog_product_id": product_id_value,
         "fields": fields,
         "attributes": attribute_fields,
         "extra_attrs_json": json.dumps([]),
@@ -713,11 +731,14 @@ class BOQExtractionDisplayService:
                 qty = qty_rows[0].get("qty")
                 unit = unit or qty_rows[0].get("unit")
 
-            is_activity_only = (
-                is_job_unit(unit)
-                or is_job_unit(group.get("unit"))
-                or any(is_job_unit(p.get("unit")) or is_job_unit(p.get("quantity_unit")) for p in products)
-                or any(is_job_unit(r.get("unit")) for r in qty_rows)
+            is_activity_only = resolve_activity_only(
+                analysis_row,
+                products=products,
+                units=[
+                    unit,
+                    group.get("unit"),
+                    *[row.get("unit") for row in qty_rows],
+                ],
             )
 
             if is_activity_only:
@@ -828,13 +849,7 @@ class BOQExtractionDisplayService:
                     "skip_reason": analysis_row.get("skip_reason") or "",
                     "product_count": product_total,
                     "multiproduct_review": multiproduct_review,
-                    "is_activity_only": (
-                        is_job_unit(unit)
-                        or is_job_unit(group.get("unit"))
-                        or any(bool(p.get("is_activity_only")) for p in shaped_products)
-                        or any(is_job_unit(product.get("unit")) or is_job_unit(product.get("quantity_unit")) for product in products)
-                        or any(is_job_unit(r.get("unit")) for r in qty_rows)
-                    ),
+                    "is_activity_only": is_activity_only,
                     "needs_product": product_total == 0 and qty_row_count > 0,
                     "products": shaped_products,
                     "activities": [],
@@ -858,6 +873,7 @@ class BOQExtractionDisplayService:
             "product_count": product_count,
             "activity_count": 0,
             "missing_field_count": missing_field_count,
+            "missing_product_id_count": count_missing_loaded_product_ids(analysis),
             "multiproduct_review_count": multiproduct_review_count,
             "has_make_list": self.has_make_list_file and self.make_list_service.has_constraints,
             "lines": lines,

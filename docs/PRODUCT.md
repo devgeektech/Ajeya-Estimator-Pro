@@ -113,8 +113,11 @@ Upload BOQ (+ optional make list) → parse to JSON → store files + hierarchy
   Analysis card (parent + children). Oversized chapter trees (too many lines / qty
   rows / characters) are split at dotted packages (``1.1``, ``2.1``, …) so products
   under large BOQ chapters are extracted separately; shared ancestor text is still
-  passed to AI. Extract batches are also packed by payload size so huge sections are
-  not dropped in one OpenAI call. Amounts still come only from filled Unit/Qty cells
+  passed to AI. Chapter-owned qty rows that sit **before** those packages (for
+  example pipe sizes ``c)``–``j)`` under ``1`` before ``1.1``) stay on a Section
+  ``1`` card **in sheet order**, not after ``1.14``. Extract batches are also packed
+  by payload size so huge sections are not dropped in one OpenAI call. Amounts still
+  come only from filled Unit/Qty cells
   inside each section (``0`` kept as 0; ``Rate Only`` keeps that marker and copies
   BOQ ``boq_rate``).
 - Hierarchy also nests Operating Temp / roman-numeral continuation lines under the
@@ -188,7 +191,11 @@ Step 4 — Review:        (material + labour) × quantity → Export Excel
   into blank-serial fragments.
 - Products keep `quantity`, `quantity_unit`, `qty_row_id`, `slot_index`, `rate_only`
   in `analysis_data` through Make & Vendor → Labour → Review.
-- Empty sections with qty slots stay visible: **+ Add product** and **Re-analyse**.
+- Empty sections with qty slots stay visible: **+ Add product** and **Re-analyse with AI**.
+- **Job Only:** empty-product sections with Unit ``Job`` (AI default), or any
+  section after the expert removes every product. **+ Add product** clears Job
+  Only and shows the product form. Removing the last product marks Job Only
+  again. Make & Vendor / Labour / Review / Export follow the same mark.
 
 **Status pipeline** (persisted on `BOQ.status`):
 
@@ -352,12 +359,16 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
 
 **Step 2 — Make & Vendor** (BOQ detail → **Make & Vendor** tab, after Analyse):
 
-- From Analysis, toolbar **Next** (blue) sends each product's Analysis
-  ``catalog_product_id`` into Make & Vendor, queries PostgreSQL Rate_Master_Output
-  by that Product_ID, and prefills the **lowest-price** row among **approved makes**
-  when a make list exists (or among all makes for that Product_ID when none was
-  uploaded / no approved make), then opens **Make & Vendor** and sets status
-  `MAKE_VENDOR`.
+- From Analysis, toolbar **Next** (blue) requires every product to have a loaded
+  or selected **Product Id**. If any are missing, Next shows a warning to
+  **Confirm Manually** / Select a candidate, or remove the product from Analysis.
+  When all Product Ids are present, Next sends each ``catalog_product_id`` into
+  Make & Vendor, queries PostgreSQL Rate_Master_Output by that Product_ID, and
+  prefills the **lowest-price** row among **approved makes** when a make list
+  exists (or among all makes for that Product_ID when none was uploaded / no
+  approved make), then opens **Make & Vendor** and sets status `MAKE_VENDOR`.
+- Analysis shows a view-only **Product Id** column before Category for the
+  matched or selected catalog id.
 - After full Analyse completes, the page **stays on Analysis** (review first;
   use Next to continue).
 - Enabled when `analysis_data.rows` exist and Make & Vendor defaults have been
@@ -470,10 +481,7 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
 Poll `GET /boqs/<id>/status/?expect=extract` while `PROCESSING`.
 
 **Output:** `media/extract_json/{boq_name}/boq_analysis.json` plus `BOQ.analysis_data`
-JSONField (`phase`: `extracted` | `matched`). After matching, a dedicated
-`boq_match_results.json` in the same folder stores full `product_matches` snapshots
-(candidates, scores, rate/labour enrichment) for internal tracking even when the
-live analysis is edited before re-match.
+JSONField (`phase`: `extracted`).
 
 **Services:**
 
@@ -541,14 +549,15 @@ and category-wide null-sub rows.
 3. **Make list filter** — drop candidates whose `Make` is not in `approved_makes_list`
    when the row maps to a make-list material.
 
-Confidence &lt; 30% → pending product, no auto selection on **Match**. Analyse uses AI
-to validate product/attribute mapping for expert review; Match still applies
-structured scoring, make-list filters, and rate/labour enrichment.
+Confidence &lt; 30% → pending product, no auto selection. Analyse uses AI
+to validate product/attribute mapping for expert review, plus structured
+scoring and Rate_Master candidate recall. Make-list approved-make filters
+apply on Make & Vendor, not as a separate Match job.
 
 ### BOQ analysis phase 2 — enrichment, confirmation, export
 
 ```text
-matched products → rate + labour lookup → line output → session confirm → Excel export
+matched products → rate + labour lookup → line output → Excel export
 ```
 
 **After phase 1 matching:**
@@ -559,12 +568,11 @@ matched products → rate + labour lookup → line output → session confirm �
    recalculation).
 4. `BOQExtractionDisplayService` — shapes extracted products for the **Analysis** tab.
 
-**Expert confirmation (session only):**
+**Expert confirmation (Analysis tab):**
 
-- Any logged-in user with access to the BOQ can **Confirm** lines on the Analysis tab.
-- Confirmations are stored in the **user session only** — not written to PostgreSQL.
-- Pending lines require picking a candidate product before confirm; matched lines confirm the auto-selection.
-- Re-running analysis does not clear session confirmations (user may undo per line).
+- Experts **Select** a top candidate or **Confirm Manually** (locks match % at 100%).
+- **Re-analyse with AI** rematches from the expert’s inputs and BOQ section.
+- Those edits persist in `analysis_data` (PostgreSQL), not in the browser session.
 
 **Labour charges:** `LabourDetailRetrievalService` links `Product_ID` →
 `Labour_master_Output` (size-aware when multiple rows share a key). Per-unit
@@ -586,8 +594,7 @@ Successful download sets `EXPORTED`.
 
 - **No recalculation** of client workbook formulas — read precomputed values from
   `Rate_Master_Output` / `Labour_master_Output` when the pipeline returns.
-- **Session confirmation** on the Analysis tab before export (not stored in PostgreSQL).
-- **Confidence below 30%** → no auto product selection; user must pick a candidate and confirm.
+- **Confidence below 30%** → no auto product selection; user must pick a candidate (Select) or Confirm on Analysis.
 - **AI** may understand descriptions, extract products, validate matches.
   AI must **not** calculate costs, profits, select vendors, or set pricing.
   Labour/installation activities are **not** extracted on Analysis — labour comes
@@ -603,7 +610,7 @@ Successful download sets `EXPORTED`.
 ## Architecture
 
 ```text
-Browser → Django (templates + HTMX) → Services → PostgreSQL
+Browser → Django (templates + Alpine/fetch) → Services → PostgreSQL
                                       ↘ AI (OpenAI) + Chroma (embeddings)
 ```
 
@@ -628,19 +635,19 @@ analyses (`CELERY_WORKER_CONCURRENCY`).
 ```text
 BOQ_AI/
 ├── backend/
-│   ├── config/           # settings, urls, celery, wsgi
+│   ├── config/           # settings, urls, celery, wsgi, gunicorn.conf.py
 │   ├── apps/
 │   │   ├── accounts/     # auth, sessions
 │   │   ├── users/        # user CRUD
 │   │   ├── database_manager/  # master DB import, versioning
-│   │   ├── boq/          # BOQ upload only
+│   │   ├── boq/          # BOQ upload, Analyse, Make & Vendor, Labour, Review, Export
 │   │   ├── dashboard/
 │   │   ├── notifications/
 │   │   └── audit/
 │   ├── ai/               # OpenAI client + Chroma embeddings
 │   ├── common/           # choices, constants, exceptions, middleware, mixins
 │   ├── utils/            # excel, text, files
-│   └── tests/
+├── tests/                # Django test suite (repo root)
 ├── templates/
 ├── static/
 ├── media/                # uploads, chroma index (gitignored)
@@ -714,7 +721,10 @@ BOQ_AI/
 
 ## Runtime
 
-- Settings: `config.settings` (PostgreSQL only in production).
+- Settings: `config.settings` (PostgreSQL only in production). `DEBUG=False`
+  requires a strong `SECRET_KEY`, `DATABASE_URL`, explicit `ALLOWED_HOSTS`, and
+  Celery (not eager). CSRF origins follow `CSRF_TRUSTED_ORIGINS` or `ALLOWED_HOSTS`.
+  Gunicorn config: `backend/config/gunicorn.conf.py`.
 - **Timezone:** `TIME_ZONE = Asia/Kolkata` (IST). UI, logs, JSON ISO
   timestamps, and Celery use IST. PostgreSQL still stores UTC (`USE_TZ=True`);
   display/serialization converts via `utils.timestamps` / Django localtime.
@@ -724,4 +734,6 @@ BOQ_AI/
   sorted by confidence then id before AI so the same BOQ tends to pick the same
   Product_ID.
 - Embeddings: `text-embedding-3-small` → Chroma at `media/chroma`.
-- See `docs/OPS.md` for setup and deployment commands.
+- **Go live:** `docs/OPS.md` section **Go live on EC2** (packages → `.env` →
+  migrate → systemd → Nginx → Superadmin → **upload master database**).
+  Subsequent `git pull` steps are under **Subsequent deploys**.

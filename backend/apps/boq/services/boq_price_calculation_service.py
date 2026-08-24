@@ -50,9 +50,6 @@ def _product_target_row_id(product: dict[str, Any], line: dict[str, Any]) -> str
     return ""
 
 
-from apps.boq.services.boq_row_fields import is_job_unit
-
-
 def build_row_pricing(display: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Map priced output onto each product's Unit/Qty BOQ row (not the section)."""
     pricing: dict[str, dict[str, Any]] = {}
@@ -62,8 +59,7 @@ def build_row_pricing(display: dict[str, Any]) -> dict[str, dict[str, Any]]:
             if not target_row_id:
                 continue
 
-            unit_val = product.get("unit") or product.get("quantity_unit") or line.get("unit")
-            if is_job_unit(unit_val) or product.get("is_activity_only") or line.get("is_activity_only"):
+            if line.get("is_activity_only"):
                 continue
 
             line_output = product.get("line_output") or {}
@@ -156,9 +152,8 @@ def unmatched_qty_row_ids(
 class BOQPriceCalculationService:
     """Persist final prices mapped to original BOQ rows; unlock export."""
 
-    def __init__(self, boq_id: int, confirmations: dict[str, dict[str, Any]] | None = None):
+    def __init__(self, boq_id: int):
         self.boq_id = boq_id
-        self.confirmations = confirmations or {}
 
     def run(self) -> dict[str, Any]:
         try:
@@ -180,7 +175,7 @@ class BOQPriceCalculationService:
         if not (analysis.get("labour_config") or {}).get("labour_ready"):
             raise ValidationError("Apply Auto or Manual labour before continuing.")
 
-        display = BOQReviewDisplayService(boq, self.confirmations).build()
+        display = BOQReviewDisplayService(boq).build()
         if not display.get("has_analysis"):
             raise ValidationError("No Make & Vendor products available to price.")
 

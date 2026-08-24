@@ -653,20 +653,6 @@ def _split_child_candidates(
     return []
 
 
-def _residual_group_ids(
-    root_id: str,
-    *,
-    children: dict[str, list[str]],
-    covered: set[str],
-) -> list[str]:
-    """Root + descendants not already owned by a split child section."""
-    residual = [root_id]
-    for descendant_id in _collect_all_descendant_ids(root_id, children):
-        if descendant_id not in covered:
-            residual.append(descendant_id)
-    return residual
-
-
 def _residual_worth_extracting(
     section: dict[str, Any],
     *,
@@ -689,6 +675,21 @@ def _residual_worth_extracting(
     return False
 
 
+def _split_owned_ids(
+    split_children: list[dict[str, Any]],
+    rows: list[dict[str, Any]],
+) -> tuple[set[str], set[str]]:
+    split_ids: set[str] = set()
+    owned: set[str] = set()
+    for child in split_children:
+        child_id = str(child.get("row_id") or "")
+        if not child_id:
+            continue
+        split_ids.add(child_id)
+        owned.update(group_ids_for_anchor(child_id, rows))
+    return split_ids, owned
+
+
 def grouped_anchor_rows(boq_data: dict[str, Any]) -> list[dict[str, Any]]:
     """
     Return extractable sections keyed by serial lineage.
@@ -698,7 +699,9 @@ def grouped_anchor_rows(boq_data: dict[str, Any]) -> list[dict[str, Any]]:
 
     Oversized trees (too many lines / qty rows / characters) are split at dotted
     children (``1.1``, ``2.1``, …) and recursively when those packages are still
-    large. Shared ancestor text remains on each split section via ``lineage_ids``.
+    large. Chapter-owned products that sit before those packages (for example
+    ``1`` pipe sizes ``c)``–``j)`` before ``1.1``) stay in document order.
+    Shared ancestor text remains on each split section via ``lineage_ids``.
     """
     rows = boq_data.get("rows") or []
     if not rows:
@@ -735,30 +738,36 @@ def grouped_anchor_rows(boq_data: dict[str, Any]) -> list[dict[str, Any]]:
             covered.update(str(item) for item in section.get("group_ids") or [])
             return
 
-        for child in split_children:
-            emit_or_split(child)
+        split_ids, owned_by_splits = _split_owned_ids(split_children, rows)
+        residual_run: list[str] = []
 
-        residual_ids = _residual_group_ids(
-            root_id,
-            children=children,
-            covered=covered,
-        )
-        if len(residual_ids) <= 1:
-            covered.add(root_id)
-            return
+        def flush_residual() -> None:
+            residual_ids = [item for item in residual_run if item not in covered]
+            residual_run.clear()
+            if len(residual_ids) <= 1:
+                covered.update(residual_ids)
+                if root_id not in covered:
+                    covered.add(root_id)
+                return
+            residual = _emit_lineage_section(
+                root=root,
+                rows=rows,
+                index=index,
+                children=children,
+                group_ids=residual_ids,
+            )
+            if _residual_worth_extracting(residual, index=index):
+                grouped.append(residual)
+            covered.update(residual_ids)
 
-        residual = _emit_lineage_section(
-            root=root,
-            rows=rows,
-            index=index,
-            children=children,
-            group_ids=residual_ids,
-        )
-        if _residual_worth_extracting(residual, index=index):
-            grouped.append(residual)
-            covered.update(residual_ids)
-        else:
-            covered.update(residual_ids)
+        ordered_ids = [root_id, *_collect_all_descendant_ids(root_id, children)]
+        for row_id in ordered_ids:
+            if row_id in split_ids:
+                flush_residual()
+                emit_or_split(index[row_id])
+            elif row_id not in owned_by_splits:
+                residual_run.append(row_id)
+        flush_residual()
 
     for row in rows:
         row_id = str(row.get("row_id") or "")

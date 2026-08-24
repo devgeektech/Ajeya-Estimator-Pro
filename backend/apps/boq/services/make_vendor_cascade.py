@@ -25,6 +25,7 @@ from apps.boq.services.make_vendor_common import (
     _is_lowest_make,
     _product_matches_subcategory,
     _subcategory_storage_key,
+    count_missing_loaded_product_ids,
 )
 from apps.boq.services.serial_normalizer import analysis_fields
 from common.choices import BOQStatus
@@ -754,6 +755,12 @@ class MakeVendorCascadeMixin:
             raise ValidationError("No active master database. Upload a database first.")
 
         analysis = dict(boq.analysis_data or {})
+        missing_ids = count_missing_loaded_product_ids(analysis)
+        if missing_ids:
+            raise ValidationError(
+                f"{missing_ids} product(s) are missing a Product Id. "
+                "Confirm the product or remove it from the Analysis section before continuing."
+            )
         rows = list(analysis.get("rows") or [])
         boq_by_id = {
             str(row.get("row_id")): row

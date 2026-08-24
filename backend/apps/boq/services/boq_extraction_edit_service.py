@@ -182,16 +182,22 @@ class BOQExtractionEditService:
         rows = list(analysis.get("rows") or [])
         row = self._find_row(rows, row_id)
         if row is None:
-            raise ValidationError(f"Unknown BOQ row: {row_id}")
-        if row.get("skip_matching") and not row.get("products"):
-            row["skip_matching"] = False
-
+            row = {
+                "row_id": row_id,
+                "skip_matching": False,
+                "products": [],
+                "activities": [],
+            }
+            rows.append(row)
         products = list(row.get("products") or [])
         next_index = len(products)
         product = _blank_product(next_index)
         products.append(product)
         row["products"] = products
         row["skip_matching"] = False
+        row["is_activity_only"] = False
+        if row.get("skip_reason") in {"section_or_empty_row", "activity_only"}:
+            row.pop("skip_reason", None)
         analysis["rows"] = rows
         self._persist(boq, analysis)
         return product
@@ -213,8 +219,12 @@ class BOQExtractionEditService:
 
         products.pop(position)
         row["products"] = _reindex_products(products)
-        if not row["products"]:
+        if row["products"]:
+            row["skip_matching"] = False
+            row["is_activity_only"] = False
+        else:
             row["skip_matching"] = True
+            row["is_activity_only"] = True
         analysis["rows"] = rows
         self._persist(boq, analysis)
 
@@ -327,6 +337,22 @@ class BOQExtractionEditService:
         updated["attribute_confidence"] = 100.0
         updated["needs_extraction_review"] = False
         updated["slot_fallback"] = False
+        # Resolve Product_Helper Product_ID for Analysis display + Next gate.
+        if not str(updated.get("catalog_product_id") or "").strip():
+            from apps.database_manager.models import Rate_Master_Output
+
+            rate = (
+                Rate_Master_Output.objects.filter(pk=rate_pk)
+                .only("Product_ID")
+                .first()
+            )
+            product_id = str(getattr(rate, "Product_ID", "") or "").strip() if rate else ""
+            if product_id:
+                updated["catalog_product_id"] = product_id
+            elif str(updated.get("suggested_catalog_product_id") or "").strip():
+                updated["catalog_product_id"] = str(
+                    updated.get("suggested_catalog_product_id")
+                ).strip()
         mapping = dict(updated.get("ai_mapping") or {})
         mapping["selected_id"] = rate_pk
         mapping["selected_rate_master_id"] = rate_pk

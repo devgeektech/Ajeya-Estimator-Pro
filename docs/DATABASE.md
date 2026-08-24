@@ -25,6 +25,8 @@ Schema and import rules for PostgreSQL. Update when models or migrations change.
   (`{stem}_{YYYYMMDD_HHMMSS}.xlsx`); download still uses original
   `source_filename`
 - **No rollback** — new upload replaces the active database
+- **Go live:** after `createsuperuser`, the Superadmin must upload a master
+  workbook in the UI before any BOQ can be processed (see `docs/OPS.md` step 14)
 
 ---
 

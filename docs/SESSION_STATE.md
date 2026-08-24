@@ -8,9 +8,9 @@ History: `docs/CHANGELOG.md` (do not duplicate session diaries here).
 - **Phase:** Fresh start on new master DB schema (Rate_Master_Output / Labour_master_Output)
 - **Migrations:** `database_manager.0002` (text `Product_ID` / `Rate_ID`) applied locally
 - **Tests:** Suite moved to root `tests/` folder and basic view coverage added for all apps
-- **Runtime:** `config.settings`, PostgreSQL `boq_db`, Django templates + HTMX, Celery
+- **Runtime:** `config.settings`, PostgreSQL `boq_db`, Django templates + Alpine/fetch, Celery
 - **Active apps:** accounts, users, database_manager, boq, dashboard, notifications, audit
-- **AI logging:** `AI_INSTRUCTION_LOGGING=True` for now (embedding dumps truncated)
+- **AI logging:** `AI_INSTRUCTION_LOGGING=False` in production; default follows `DEBUG`
 
 ## Active Workflows
 
@@ -50,32 +50,30 @@ uploads retained.
 ## Pending
 
 - Fill Rate_Master_Output with full Make/Vendor price rows; re-import if needed
-- Restore `backend/tests/`
-- Fresh migrations on EC2 after deploy
+- Restore `backend/tests/` (suite is at repo-root `tests/` today)
+- First EC2 go-live: follow `docs/OPS.md` through master-database upload
 - UAT Analyse / Re-analyse on 2.13 sand buckets → Product_ID 40; confirm rematch % not forced to 100
 - Optional later: qty/slot hard-enforce; retire legacy Match/Confirm URLs
 
 ## Verify
 
 ```powershell
-.venv\Scripts\python.exe backend\manage.py check
+.venv\Scripts\python.exe backend\manage.py check --deploy
 # After Celery code changes: restart the worker
 # After embedding code changes: re-activate/re-import the master DB
+# Go live: docs/OPS.md steps 1–14
 ```
 
 ## Session Log
 
 Keep only the latest entry below. Older work is in `docs/CHANGELOG.md`.
 
-### 2026-08-23 — Tests moved and codebase cleaned
+### 2026-08-24 — Go-live docs
 
-Completed: 
-- Moved all test files to a root `tests/` directory (e.g. `backend/test_pipeline.py` to `tests/test_pipeline.py`, `backend/apps/boq/tests/` to `tests/boq/`).
-- Executed `autoflake` across the backend codebase to remove all unused imports.
-- Executed `vulture` on `boq/services` and removed definitive dead code.
-Pending: None.
-Issues: None.
-Next: Await user request.
+Completed: Rewrote README + `docs/OPS.md` into a full EC2 go-live sequence (AWS SG, Postgres grants, `.env`/OpenAI, migrate, systemd, Nginx default site, `check_celery`, first master-DB upload). Gunicorn socket umask 007 for Nginx.
+Pending: Run OPS steps 1–14 on `13.205.90.58`; domain + TLS later.
+Issues: HTTP-only until a domain/cert exists.
+Next: Follow `docs/OPS.md` **Go live on EC2**.
 
 
 

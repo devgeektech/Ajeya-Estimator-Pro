@@ -11,6 +11,8 @@ import sys
 import environ
 from django.core.exceptions import ImproperlyConfigured
 
+from common.host_origins import csrf_trusted_origins_from_hosts
+
 # Make Django model fields resolve to Python types under pyright/django-stubs.
 try:
     import django_stubs_ext
@@ -24,6 +26,9 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 # Project root (contains backend/, docs/, templates/, static/, media/, ...)
 ROOT_DIR = BASE_DIR.parent
 
+# Repo-root ``tests/`` plus ``backend/`` (apps, config, common).
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 if str(BASE_DIR) not in sys.path:
     sys.path.append(str(BASE_DIR))
 
@@ -38,12 +43,17 @@ if env_file.exists():
 
 SECRET_KEY = env.str("SECRET_KEY", default="insecure-dev-key-change-me")
 DEBUG = env.bool("DEBUG", default=False)
-ALLOWED_HOSTS = env.list("ALLOWED_HOSTS")
+ALLOWED_HOSTS = [host.strip() for host in env.list("ALLOWED_HOSTS") if str(host).strip()]
 
-if not DEBUG and SECRET_KEY == "insecure-dev-key-change-me":
-    raise ImproperlyConfigured(
-        "SECRET_KEY must be set in the environment before starting BOQ_AI."
-    )
+if not DEBUG:
+    if SECRET_KEY == "insecure-dev-key-change-me" or len(SECRET_KEY) < 50:
+        raise ImproperlyConfigured(
+            "SECRET_KEY must be a strong value in the environment before starting BOQ_AI."
+        )
+    if not ALLOWED_HOSTS:
+        raise ImproperlyConfigured("ALLOWED_HOSTS must be set when DEBUG=False.")
+    if "*" in ALLOWED_HOSTS:
+        raise ImproperlyConfigured("ALLOWED_HOSTS must not include '*' when DEBUG=False.")
 
 # --- Applications -----------------------------------------------------------
 
@@ -56,10 +66,6 @@ DJANGO_APPS = [
     "django.contrib.staticfiles",
 ]
 
-THIRD_PARTY_APPS = [
-    "django_htmx",
-]
-
 LOCAL_APPS = [
     "apps.accounts",
     "apps.users",
@@ -69,7 +75,7 @@ LOCAL_APPS = [
     "apps.audit",
 ]
 
-INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
+INSTALLED_APPS = DJANGO_APPS + LOCAL_APPS
 
 # --- Middleware -------------------------------------------------------------
 
@@ -83,7 +89,6 @@ MIDDLEWARE = [
     "common.middleware.NoStoreAuthenticatedMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "django_htmx.middleware.HtmxMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -113,6 +118,8 @@ ASGI_APPLICATION = "config.asgi.application"
 DATABASE_URL = env.str("DATABASE_URL", default="")
 if DATABASE_URL:
     DATABASES = {"default": env.db_url_config(DATABASE_URL)}
+    DATABASES["default"]["CONN_MAX_AGE"] = env.int("CONN_MAX_AGE", default=60)
+    DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
 elif DEBUG:
     DATABASES = {
         "default": {
@@ -190,6 +197,11 @@ CELERY_TASK_TIME_LIMIT = 60 * 30
 CELERY_TASK_ACKS_LATE = True
 CELERY_TASK_REJECT_ON_WORKER_LOST = True
 CELERY_TASK_ALWAYS_EAGER = env.bool("CELERY_TASK_ALWAYS_EAGER", default=DEBUG)
+if not DEBUG and CELERY_TASK_ALWAYS_EAGER:
+    raise ImproperlyConfigured(
+        "CELERY_TASK_ALWAYS_EAGER must be False when DEBUG=False. "
+        "Run Redis and the Celery worker for Analyse."
+    )
 # Shared heartbeat file max age — Analyse refuses to queue when stale/missing.
 CELERY_WORKER_HEARTBEAT_MAX_AGE = env.float("CELERY_WORKER_HEARTBEAT_MAX_AGE", default=45.0)
 # Skip liveness checks only for controlled tests.
@@ -204,7 +216,7 @@ OPENAI_EMBEDDING_DIMENSIONS = env.int("OPENAI_EMBEDDING_DIMENSIONS", default=153
 OPENAI_EMBEDDING_BATCH_SIZE = env.int("OPENAI_EMBEDDING_BATCH_SIZE", default=500)
 OPENAI_TIMEOUT_SECONDS = env.int("OPENAI_TIMEOUT_SECONDS", default=120)
 OPENAI_MAX_RETRIES = env.int("OPENAI_MAX_RETRIES", default=1)
-AI_INSTRUCTION_LOGGING = env.bool("AI_INSTRUCTION_LOGGING", default=True)
+AI_INSTRUCTION_LOGGING = env.bool("AI_INSTRUCTION_LOGGING", default=DEBUG)
 # How many BOQ sections to send per extract_products AI call.
 AI_ROW_EXTRACTION_BATCH_SIZE = env.int("AI_ROW_EXTRACTION_BATCH_SIZE", default=5)
 # How many products to map per map_product_match AI call.
@@ -234,11 +246,24 @@ else:
 
 DEFAULT_FROM_EMAIL = env.str("DEFAULT_FROM_EMAIL", default="no-reply@boq-ai.local")
 
+# --- Uploads ----------------------------------------------------------------
+
+# Nginx allows 50MB; keep a modest in-memory cap so large workbooks spill to disk.
+DATA_UPLOAD_MAX_MEMORY_SIZE = env.int("DATA_UPLOAD_MAX_MEMORY_SIZE", default=10 * 1024 * 1024)
+FILE_UPLOAD_MAX_MEMORY_SIZE = env.int("FILE_UPLOAD_MAX_MEMORY_SIZE", default=10 * 1024 * 1024)
+DATA_UPLOAD_MAX_NUMBER_FIELDS = env.int("DATA_UPLOAD_MAX_NUMBER_FIELDS", default=10000)
+FILE_UPLOAD_PERMISSIONS = 0o640
+FILE_UPLOAD_DIRECTORY_PERMISSIONS = 0o750
+
 # --- Security ---------------------------------------------------------------
 
 SECURE_SSL_REDIRECT = env.bool("SECURE_SSL_REDIRECT", default=False)
 SESSION_COOKIE_SECURE = env.bool("SESSION_COOKIE_SECURE", default=SECURE_SSL_REDIRECT)
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SECURE = env.bool("CSRF_COOKIE_SECURE", default=SECURE_SSL_REDIRECT)
+CSRF_COOKIE_HTTPONLY = True
+CSRF_COOKIE_SAMESITE = "Lax"
 SECURE_HSTS_SECONDS = env.int(
     "SECURE_HSTS_SECONDS",
     default=(60 * 60 * 24 * 365 if SECURE_SSL_REDIRECT else 0),
@@ -249,7 +274,28 @@ SECURE_HSTS_INCLUDE_SUBDOMAINS = env.bool(
 )
 SECURE_HSTS_PRELOAD = env.bool("SECURE_HSTS_PRELOAD", default=SECURE_SSL_REDIRECT)
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = "same-origin"
 X_FRAME_OPTIONS = "DENY"
+
+_csrf_from_env = [
+    origin.strip()
+    for origin in env.list("CSRF_TRUSTED_ORIGINS", default=[])
+    if str(origin).strip()
+]
+CSRF_TRUSTED_ORIGINS = _csrf_from_env or csrf_trusted_origins_from_hosts(
+    ALLOWED_HOSTS, https=SECURE_SSL_REDIRECT
+)
+
+# HTTP-on-IP is the current EC2 go-live mode (no domain/TLS yet). Re-enable these
+# checks automatically when SECURE_SSL_REDIRECT=True after certbot.
+if not SECURE_SSL_REDIRECT:
+    SILENCED_SYSTEM_CHECKS = [
+        "security.W004",
+        "security.W008",
+        "security.W012",
+        "security.W016",
+    ]
 
 # --- Logging ----------------------------------------------------------------
 
@@ -324,6 +370,11 @@ LOGGING = {
         "django.request": {
             "handlers": ["console", "error_file"],
             "level": "ERROR",
+            "propagate": False,
+        },
+        "django.security": {
+            "handlers": ["console", "error_file"],
+            "level": "WARNING",
             "propagate": False,
         },
         "django.server": {

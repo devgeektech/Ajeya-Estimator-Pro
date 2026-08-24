@@ -478,9 +478,6 @@
                     payload.rowId = vis.rowId;
                     payload.offset = vis.offset;
                 }
-                if (y <= 0 && !payload.rowId) {
-                    if (sessionStorage.getItem(key)) return;
-                }
                 sessionStorage.setItem(key, JSON.stringify(payload));
             } catch (e) { /* ignore */ }
         },
@@ -611,7 +608,10 @@
                 });
                 const data = await response.json().catch(() => ({}));
                 if (!response.ok || data.ok === false) {
-                    throw new Error(data.message || 'Failed to prefill lowest make/vendor.');
+                    throw new Error(
+                        data.message
+                        || 'Failed to prefill lowest make/vendor.'
+                    );
                 }
                 this.makeVendorEnabled = true;
                 this.reloadWithCacheBust(this.detailMakeVendorUrl);
@@ -1069,7 +1069,6 @@
             // bfcache restore kills timers — resume Analyse polling.
             if (analysing || matching) startPolling();
         });
-        window.addEventListener('load', () => restoreScroll());
         window.addEventListener('beforeunload', () => persistScroll());
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible' && analysing) {
@@ -1168,6 +1167,9 @@
                     {% endif %}
                     {% if extraction_display.missing_field_count %}
                         <span class="extraction-missing-summary">{{ extraction_display.missing_field_count }} field(s) need review.</span>
+                    {% endif %}
+                    {% if extraction_display.missing_product_id_count %}
+                        <span class="extraction-missing-summary">{{ extraction_display.missing_product_id_count }} product(s) need a Product Id (Select or Confirm Manually) before Next.</span>
                     {% endif %}
                     {% if can_edit_extraction %}
                         Confirm products, then <strong>Next</strong> → Make &amp; Vendor.
@@ -1509,6 +1511,14 @@
                     stop();
                     applyProgress(100, data.progress_label || 'Analysis complete', { ready: true });
                     var sep = reloadUrl.indexOf('?') >= 0 ? '&' : '?';
+                    // Persist scroll right before the reload so we restore the
+                    // exact position every time the user hits refresh/ready.
+                    try {
+                        var key = 'boq-detail-scroll-{{ boq.pk }}-analysis';
+                        var root = document.scrollingElement || document.documentElement;
+                        var y = Number(window.scrollY || (root && root.scrollTop) || document.body.scrollTop || 0) || 0;
+                        sessionStorage.setItem(key, JSON.stringify({ y: y }));
+                    } catch (e) { /* ignore */ }
                     window.location.replace(reloadUrl + sep + '_t=' + Date.now());
                     return;
                 }

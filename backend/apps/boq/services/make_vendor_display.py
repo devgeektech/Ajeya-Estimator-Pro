@@ -14,8 +14,8 @@ from apps.boq.services.boq_row_fields import (
     QTY_KEYS as _QTY_KEYS,
     UNIT_KEYS as _UNIT_KEYS,
     field_from_map as _field_from_map,
-    is_job_unit,
     ordered_boq_rows as _ordered_boq_rows,
+    resolve_activity_only,
 )
 from apps.boq.services.make_list_constraint_service import NO_APPROVED_MAKE_LABEL
 from apps.boq.services.make_vendor_common import (
@@ -119,11 +119,14 @@ class MakeVendorDisplayMixin:
                 unit = unit or _field_from_map(fields, _UNIT_KEYS)
             description = _field_from_map(fields, _DESCRIPTION_KEYS) or ""
 
-            is_act_only = (
-                is_job_unit(unit)
-                or is_job_unit(group.get("unit"))
-                or any(is_job_unit(p.get("unit")) or is_job_unit(p.get("quantity_unit")) for p in products)
-                or any(is_job_unit(r.get("unit")) for r in qty_rows)
+            is_act_only = resolve_activity_only(
+                analysis_row,
+                products=products,
+                units=[
+                    unit,
+                    group.get("unit"),
+                    *[row.get("unit") for row in qty_rows],
+                ],
             )
 
             if not products and not is_act_only:

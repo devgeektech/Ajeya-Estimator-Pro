@@ -22,16 +22,6 @@ def run_boq_extraction(boq_id: int) -> dict:
     return BOQAnalysisService(boq_id).run_extraction()
 
 
-def run_boq_matching(boq_id: int) -> dict:
-    """Match extracted products against the master database (sync entry point)."""
-    from apps.boq.services.boq_analysis_service import BOQAnalysisService
-    from apps.boq.services.celery_worker_heartbeat import touch_celery_worker_heartbeat
-
-    touch_celery_worker_heartbeat()
-    logger.info("Starting BOQ matching for id=%s", boq_id)
-    return BOQAnalysisService(boq_id).run_matching()
-
-
 def _fail_boq_job(boq_id: int, *, reason: str) -> None:
     """Unblock the UI when a Celery task dies without a clean service failure path."""
     try:
@@ -70,32 +60,6 @@ def process_boq_extraction_task(boq_id: int) -> dict:
         _fail_boq_job(
             boq_id,
             reason="Analysis failed - click Analyse BOQ to retry",
-        )
-        raise
-
-
-@shared_task(
-    name="boq.process_matching",
-    ignore_result=False,
-    max_retries=0,
-    soft_time_limit=_SOFT_TIME_LIMIT_SECONDS,
-)
-def process_boq_matching_task(boq_id: int) -> dict:
-    """Celery wrapper for BOQ matching."""
-    try:
-        return run_boq_matching(boq_id)
-    except SoftTimeLimitExceeded:
-        logger.error("BOQ matching timed out for id=%s", boq_id)
-        _fail_boq_job(
-            boq_id,
-            reason="Matching timed out - open Analysis and retry when ready",
-        )
-        raise
-    except Exception:
-        logger.exception("BOQ matching task crashed for id=%s", boq_id)
-        _fail_boq_job(
-            boq_id,
-            reason="Matching failed - open Analysis and retry when ready",
         )
         raise
 

@@ -7,13 +7,9 @@ from typing import Any
 from common.db import atomic
 
 from apps.boq.models import BOQ
-from apps.boq.services.boq_analysis_enrichment_service import BOQAnalysisEnrichmentService
 from apps.boq.services.boq_analysis_store import (
     analysis_json_relative_path,
-    build_match_results_payload,
-    match_results_json_relative_path,
     save_boq_analysis_json,
-    save_boq_match_results_json,
 )
 from apps.boq.services.boq_extraction_service import (
     BOQExtractionService,
@@ -26,10 +22,9 @@ from apps.boq.services.boq_job_progress import (
 )
 from apps.boq.services.boq_row_fields import DESCRIPTION_KEYS
 from apps.boq.services.boq_row_grouping_service import full_description_for_row, resolve_anchor_row_id
-from apps.boq.services.make_list_constraint_service import MakeListConstraintService, walk_rows_tree
+from apps.boq.services.make_list_constraint_service import walk_rows_tree
 from apps.boq.services.product_ai_mapping_service import ProductAIMappingService
 from apps.boq.services.product_attribute_enrichment_service import product_needs_attribute_enrichment
-from apps.boq.services.product_matching_service import ProductMatchingService
 from apps.boq.services.serial_normalizer import structure_for_analysis
 from apps.database_manager.services.activation import get_active_database_version
 from common.choices import BOQStatus
@@ -40,7 +35,6 @@ from utils.json_safe import json_safe
 logger = logging.getLogger("boq_ai")
 
 PHASE_EXTRACTED = "extracted"
-PHASE_MATCHED = "matched"
 
 
 def _database_snapshot(version) -> dict[str, Any]:
@@ -112,36 +106,6 @@ def _compute_extraction_stats(rows: list[dict[str, Any]]) -> dict[str, int]:
     return stats
 
 
-def _compute_match_stats(rows: list[dict[str, Any]]) -> dict[str, int]:
-    stats = {
-        "rows_total": 0,
-        "rows_skipped": 0,
-        "products_total": 0,
-        "products_matched": 0,
-        "products_pending": 0,
-        "activities_total": 0,
-    }
-    for row in rows:
-        stats["rows_total"] += 1
-        if row.get("skip_matching"):
-            stats["rows_skipped"] += 1
-            continue
-        product_matches = row.get("product_matches") or []
-        if product_matches:
-            for item in product_matches:
-                stats["products_total"] += 1
-                match = item.get("match") or {}
-                if match.get("status") == "matched":
-                    stats["products_matched"] += 1
-                else:
-                    stats["products_pending"] += 1
-        else:
-            product_count = len(row.get("products") or [])
-            stats["products_total"] += product_count
-            stats["products_pending"] += product_count
-    return stats
-
-
 def _replace_rows(
     existing_rows: list[dict[str, Any]],
     replacements: list[dict[str, Any]],
@@ -165,7 +129,7 @@ def _replace_rows(
 
 
 class BOQAnalysisService:
-    """Run BOQ extraction and matching as separate pipeline steps."""
+    """Run BOQ extraction and persist analysis_data."""
 
     def __init__(self, boq_id: int):
         self.boq_id = boq_id
@@ -646,220 +610,6 @@ class BOQAnalysisService:
                 raise
             raise BOQAIError(f"BOQ row re-extraction failed: {exc}") from exc
 
-    def run_matching(self) -> dict[str, Any]:
-        """Match extracted products against the active master database."""
-        boq = self._get_boq()
-        existing = boq.analysis_data or {}
-        if not existing.get("rows"):
-            raise BOQAIError("Run Analyse first to extract products from this BOQ.")
-
-        active_version = get_active_database_version()
-        if active_version is None:
-            raise BOQAIError("No active master database. Upload and activate a database first.")
-
-        self._set_status(boq, BOQStatus.MATCHING)
-        try:
-            boq_payload, make_list_payload = load_extract_data(boq)
-            boq_data = structure_for_analysis(boq_payload)
-            make_list_data = structure_for_analysis(make_list_payload) if make_list_payload else {}
-            make_list_service = MakeListConstraintService(make_list_data)
-            matcher = ProductMatchingService(active_version.pk)
-
-            extraction_by_row = {
-                str(row.get("row_id")): row
-                for row in existing.get("rows") or []
-                if row.get("row_id")
-            }
-
-            analyzed_rows: list[dict[str, Any]] = []
-            for row_id in _row_order(boq_payload, existing):
-                row = extraction_by_row.get(row_id)
-                if not row:
-                    continue
-                analyzed_rows.append(
-                    self._match_one_row(
-                        row,
-                        boq_data=boq_data,
-                        make_list_service=make_list_service,
-                        matcher=matcher,
-                    )
-                )
-
-            enricher = BOQAnalysisEnrichmentService(active_version.pk)
-            analyzed_rows = enricher.enrich_rows(analyzed_rows)
-
-            analysis_payload = {
-                "schema_version": 2,
-                "phase": PHASE_MATCHED,
-                "boq_id": boq.pk,
-                "boq_name": boq.boq_name,
-                **_database_snapshot(active_version),
-                "stats": _compute_match_stats(analyzed_rows),
-                "extraction": existing.get("extraction") or {},
-                # Keep Make & Vendor unlock + cascade filters after Match.
-                "make_vendor_defaults_applied": bool(
-                    existing.get("make_vendor_defaults_applied")
-                ),
-                "subcategory_make_selections": existing.get("subcategory_make_selections")
-                or {},
-                # Match invalidates prior Calculate Price output.
-                "pricing_ready": False,
-                "row_pricing": {},
-                "rows": analyzed_rows,
-            }
-            self._persist_analysis(boq, analysis_payload, BOQStatus.PROCESSED)
-            logger.info("BOQ matching completed for id=%s (%s)", boq.pk, boq.boq_name)
-            self._audit(boq, "Matched BOQ")
-            self._notify_user(
-                boq,
-                "BOQ matched",
-                f"BOQ '{boq.boq_name}' matching finished. Review Match Results.",
-            )
-            return analysis_payload
-        except Exception as exc:
-            logger.exception("BOQ matching failed for id=%s", boq.pk)
-            self._set_status(boq, BOQStatus.ANALYSIS_FAILED)
-            self._audit(boq, "Matching failed")
-            self._notify_user(
-                boq,
-                "BOQ matching failed",
-                f"BOQ '{boq.boq_name}' matching failed. Open the BOQ to retry.",
-            )
-            if isinstance(exc, (AIServiceError, BOQAIError)):
-                raise
-            raise BOQAIError(f"BOQ matching failed: {exc}") from exc
-
-    def re_match_row(self, row_id: str) -> dict[str, Any]:
-        """Re-run matching for one anchor row and merge into analysis_data."""
-        boq = self._get_boq()
-        existing = dict(boq.analysis_data or {})
-        if not existing.get("rows"):
-            raise ValidationError("Run Analyse first to extract products from this BOQ.")
-        if boq.status in {BOQStatus.PROCESSING, BOQStatus.MATCHING}:
-            raise ValidationError("Wait for the current job to finish.")
-
-        active_version = get_active_database_version()
-        if active_version is None:
-            raise ValidationError("No active master database. Upload and activate a database first.")
-
-        previous_status = boq.status
-        self._set_status(boq, BOQStatus.MATCHING)
-        try:
-            boq_payload, make_list_payload = load_extract_data(boq)
-            boq_data = structure_for_analysis(boq_payload)
-            make_list_data = structure_for_analysis(make_list_payload) if make_list_payload else {}
-            make_list_service = MakeListConstraintService(make_list_data)
-            matcher = ProductMatchingService(active_version.pk)
-            anchor_id = resolve_anchor_row_id(boq_data, str(row_id))
-
-            target = next(
-                (
-                    row
-                    for row in (existing.get("rows") or [])
-                    if str(row.get("row_id")) == anchor_id
-                ),
-                None,
-            )
-            if target is None:
-                raise ValidationError(f"Unknown BOQ row: {anchor_id}")
-            if target.get("skip_matching") and not (target.get("products") or []):
-                raise ValidationError("This row has no products to match.")
-
-            matched_row = self._match_one_row(
-                target,
-                boq_data=boq_data,
-                make_list_service=make_list_service,
-                matcher=matcher,
-            )
-            enricher = BOQAnalysisEnrichmentService(active_version.pk)
-            matched_row = enricher.enrich_rows([matched_row])[0]
-
-            updated_rows = _replace_rows(list(existing.get("rows") or []), [matched_row])
-            analysis_payload = {
-                **existing,
-                "schema_version": 2,
-                "phase": PHASE_MATCHED,
-                "boq_id": boq.pk,
-                "boq_name": boq.boq_name,
-                **_database_snapshot(active_version),
-                "stats": _compute_match_stats(updated_rows),
-                "extraction": existing.get("extraction") or {},
-                "pricing_ready": False,
-                "row_pricing": {},
-                "rows": updated_rows,
-            }
-            self._persist_analysis(boq, analysis_payload, BOQStatus.PROCESSED)
-            logger.debug("BOQ row rematch completed for id=%s row=%s", boq.pk, anchor_id)
-            return analysis_payload
-        except Exception as exc:
-            logger.exception("BOQ row rematch failed for id=%s row=%s", boq.pk, row_id)
-            self._set_status(boq, previous_status if previous_status else BOQStatus.ANALYSIS_FAILED)
-            if isinstance(exc, (AIServiceError, BOQAIError, ValidationError)):
-                raise
-            raise BOQAIError(f"BOQ row rematch failed: {exc}") from exc
-
-    @staticmethod
-    def _match_one_row(
-        row: dict[str, Any],
-        *,
-        boq_data: dict[str, Any],
-        make_list_service: MakeListConstraintService,
-        matcher: ProductMatchingService,
-    ) -> dict[str, Any]:
-        row_id = str(row.get("row_id") or "")
-        if row.get("skip_matching"):
-            return {**row, "product_matches": []}
-
-        description = _row_description(boq_data, row_id)
-        row_make_list = row.get("make_list") or {}
-        selected_make = row_make_list.get("selected_make")
-        prefer_lowest_price = bool(row_make_list.get("prefer_lowest_price")) or (
-            MakeListConstraintService.is_lowest_make_selection(selected_make)
-        )
-        if not make_list_service.has_constraints and not selected_make:
-            prefer_lowest_price = True
-
-        description_makes = make_list_service.approved_makes_for_description(description)
-        stored_options = list(row_make_list.get("approved_makes") or [])
-
-        product_matches: list[dict[str, Any]] = []
-        for product in row.get("products") or []:
-            # Prefer category-mapped approved makes for this product.
-            category_makes = make_list_service.approved_makes_for_category(
-                str(product.get("category") or ""),
-                str(product.get("sub_category") or ""),
-            )
-            approved_makes = category_makes or description_makes
-            if prefer_lowest_price:
-                approved_makes = (
-                    stored_options
-                    or approved_makes
-                    or make_list_service.all_approved_makes()
-                )
-            elif selected_make:
-                approved_makes = [selected_make]
-
-            product_for_match = dict(product)
-            if (
-                selected_make
-                and not prefer_lowest_price
-                and not product_for_match.get("make_hint")
-            ):
-                product_for_match["make_hint"] = selected_make
-            match_result = matcher.match_product(
-                product_for_match,
-                approved_makes=approved_makes,
-                prefer_lowest_price=prefer_lowest_price,
-            )
-            product_matches.append(
-                {
-                    "product_index": product.get("product_index", 0),
-                    "extracted": product,
-                    "match": match_result,
-                }
-            )
-        return {**row, "product_matches": product_matches}
-
     @staticmethod
     def _enrich_extracted_attributes(
         rows: list[dict[str, Any]],
@@ -974,12 +724,6 @@ class BOQAnalysisService:
         safe_payload = json_safe(analysis_payload)
         save_boq_analysis_json(boq.boq_name, safe_payload)
         safe_payload["analysis_json_path"] = analysis_json_relative_path(boq.boq_name)
-        if safe_payload.get("phase") == PHASE_MATCHED:
-            match_payload = json_safe(build_match_results_payload(safe_payload))
-            save_boq_match_results_json(boq.boq_name, match_payload)
-            safe_payload["match_results_json_path"] = match_results_json_relative_path(
-                boq.boq_name
-            )
         # Use queryset update so a BOQ deleted mid-Celery job does not raise
         # ``Save with update_fields did not affect any rows``.
         updated = BOQ.objects.filter(pk=boq.pk).update(
