@@ -70,10 +70,10 @@ Keep only the latest entry below. Older work is in `docs/CHANGELOG.md`.
 
 ### 2026-08-25 — BOQ visibility: Superadmin all / Admin underlings
 
-Completed: Superadmin sees all BOQs. Admin sees own + Experts they created (`created_by`); not other Admins or their Experts. Expert still own-only. Updated service, tests, PRODUCT. (Earlier: labour manual missing-charge copy.)
-Pending: Deploy to EC2 when ready.
+Completed: Superadmin sees all BOQs. Admin sees own + Experts they created (`created_by`); not other Admins or their Experts. Expert still own-only. Merged to `main` and deployed on EC2 (`331fd77`).
+Pending: Confirm in UI with two Admins + their Experts.
 Issues: Experts with null `created_by` (or created by Superadmin) are not visible to any Admin until re-linked.
-Next: Confirm in UI with two Admins + their Experts.
+Next: None unless further BOQ visibility tweaks.
 
 
 
