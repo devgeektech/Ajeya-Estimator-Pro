@@ -5,6 +5,13 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
+## 2026-08-25 — BOQ visibility Superadmin / Admin underlings
+
+- Superadmin lists and opens all BOQs.
+- Admin lists/opens own BOQs plus Experts where `created_by` is that Admin —
+  not other Admins or those Admins' Experts.
+- Expert remains own-BOQs only. Tests and PRODUCT updated.
+
 ## 2026-08-25 — Manual deploy guide
 
 - Added `docs/DEPLOY.md`: first EC2 go-live and subsequent manual `git pull`

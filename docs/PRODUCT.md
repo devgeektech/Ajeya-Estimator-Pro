@@ -33,16 +33,16 @@ Upload → Analyse (extract + map) → Make & Vendor → Labour → Review → E
 
 | Role | Access |
 | --- | --- |
-| **Superadmin** | Full access; user management; database management; **own BOQs only** |
-| **Admin** | User management; database management; **own BOQs + all Expert BOQs** |
+| **Superadmin** | Full access; user management; database management; **all BOQs** |
+| **Admin** | User management; database management; **own BOQs + Experts they created** |
 | **Expert** | Upload/process BOQs; **own BOQs only**; database access only when granted |
 
-BOQ ownership stays with the uploader. Admins may list and open Expert BOQs so
-they can review work; they do not see other Admins' or Superadmins' BOQs.
-Superadmins do not see Admin/Expert BOQs.
+BOQ ownership stays with the uploader. Superadmin sees every BOQ. An Admin sees
+only their own uploads and BOQs from Experts where ``created_by`` is that Admin
+— not other Admins or those Admins' Experts. Experts see only their own.
 
 Authentication: email login, password reset, no public registration. Users are
-created by admins.
+created by admins (``created_by`` links underlings for Admin BOQ visibility).
 
 ---
 

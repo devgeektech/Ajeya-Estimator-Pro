@@ -13,11 +13,16 @@ def boqs_visible_to_user(user) -> QuerySet[BOQ]:
 
     Ownership stays with the uploader. Visibility:
 
-    - **Expert** / **Superadmin**: only their own BOQs.
-    - **Admin**: their own BOQs plus every Expert's BOQs (not other Admins'
-      or Superadmins' BOQs).
+    - **Superadmin**: every BOQ (Admin and Expert uploads).
+    - **Admin**: their own BOQs plus BOQs from Experts they created
+      (``user.created_by``). Not other Admins or those Admins' Experts.
+    - **Expert**: only their own BOQs.
     """
     qs = BOQ.objects.select_related("user")
+    if getattr(user, "is_superadmin", False) or getattr(user, "is_superuser", False):
+        return qs
     if getattr(user, "is_admin", False):
-        return qs.filter(Q(user=user) | Q(user__role=UserRole.EXPERT))
+        return qs.filter(
+            Q(user=user) | Q(user__role=UserRole.EXPERT, user__created_by=user)
+        )
     return qs.filter(user=user)

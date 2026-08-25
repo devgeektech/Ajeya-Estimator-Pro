@@ -68,12 +68,12 @@ uploads retained.
 
 Keep only the latest entry below. Older work is in `docs/CHANGELOG.md`.
 
-### 2026-08-25 — Labour manual missing-charge copy
+### 2026-08-25 — BOQ visibility: Superadmin all / Admin underlings
 
-Completed: Manual mode missing-labour note is now “No Manual Charge percentage is applied”; Auto still shows “No labour charge found for this product”.
-Pending: None.
-Issues: None.
-Next: None.
+Completed: Superadmin sees all BOQs. Admin sees own + Experts they created (`created_by`); not other Admins or their Experts. Expert still own-only. Updated service, tests, PRODUCT. (Earlier: labour manual missing-charge copy.)
+Pending: Deploy to EC2 when ready.
+Issues: Experts with null `created_by` (or created by Superadmin) are not visible to any Admin until re-linked.
+Next: Confirm in UI with two Admins + their Experts.
 
 
 
