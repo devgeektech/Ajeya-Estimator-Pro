@@ -105,12 +105,21 @@ class ProductAICandidatesMixin:
                 )
             return product_for_recall
 
+        # AI Description leads recall for Analyse and Re-analyse (DB search key).
+        from apps.boq.services.product_matching_service import _significant_type_tokens
+
+        if hint and _significant_type_tokens(hint):
+            product_for_recall["_hint_first_recall"] = True
+            return product_for_recall
+
         if slot_line and slot_line.lower() not in hint.lower():
             # Prefer the qty/unit slot line as supporting evidence — not the full
             # section title dump when identity fields already exist.
             product_for_recall["description_hint"] = (
                 f"{hint}\n{slot_line}".strip() if hint else slot_line
             )
+            if product_for_recall.get("description_hint"):
+                product_for_recall["_hint_first_recall"] = True
 
         return product_for_recall
 

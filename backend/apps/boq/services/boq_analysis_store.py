@@ -13,10 +13,28 @@ logger = logging.getLogger("boq_ai")
 
 ANALYSIS_FILENAME = "boq_analysis.json"
 
+# Old extract-activities / Match-list fields. Never written; stripped on persist
+# so existing analysis JSON is cleaned on the next save.
+_LEGACY_ROW_KEYS = ("activities", "product_matches")
+
+
+def strip_legacy_analysis_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Remove unused activities / product_matches from analysis JSON."""
+    stats = payload.get("stats")
+    if isinstance(stats, dict):
+        stats.pop("activities_total", None)
+    rows = payload.get("rows")
+    if isinstance(rows, list):
+        for row in rows:
+            if isinstance(row, dict):
+                for key in _LEGACY_ROW_KEYS:
+                    row.pop(key, None)
+    return payload
+
 
 def save_boq_analysis_json(boq_name: str, payload: dict[str, Any]) -> Path:
     path = boq_extract_dir(boq_name) / ANALYSIS_FILENAME
-    _write_json(path, payload)
+    _write_json(path, strip_legacy_analysis_payload(payload))
     logger.info("Saved BOQ analysis JSON for '%s' at %s", boq_name, path)
     return path
 

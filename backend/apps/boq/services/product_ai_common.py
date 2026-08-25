@@ -13,7 +13,6 @@ from apps.boq.services.product_matching_service import (
 )
 from apps.database_manager.models import Rate_Master_Output
 from common.constants import (
-    ANALYSIS_INPUT_FILL_CONFIDENCE,
     MATCH_CONFIDENCE_THRESHOLD,
     REFINE_MATCH_CONFIDENCE_TARGET,
 )
@@ -67,16 +66,6 @@ _EXPERT_IDENTITY_FIELDS = (
 )
 
 
-_WEAK_MATCH_INPUT_FIELDS = (
-    "category",
-    "sub_category",
-    "class",
-    "size",
-    "unit",
-    "capacity",
-)
-
-
 def _mapping_batch_size() -> int:
     from django.conf import settings
 
@@ -100,18 +89,13 @@ def product_needs_match_refine(
 
 
 def _clear_weak_match_inputs(product: dict[str, Any]) -> dict[str, Any]:
-    """Blank Analysis inputs for a weak match; keep description, qty, and candidates."""
-    cleared = dict(product)
-    for key in _WEAK_MATCH_INPUT_FIELDS:
-        cleared[key] = None
-    schema_keys = [
-        str(key)
-        for key in (cleared.get("attribute_schema") or [])
-        if str(key).strip()
-    ]
-    cleared["attributes"] = {}
-    cleared["missing_attribute_keys"] = schema_keys
-    return cleared
+    """No-op: keep extract identity and Attribute values that AI already found.
+
+    Weak matches still show the warning banner and hide Product Id until Select /
+    strong rematch. Experts should not retype Category/Sub/Size or Attributes
+    that Analyse already filled from the BOQ.
+    """
+    return dict(product)
 
 
 def _should_blank_weak_match_inputs(
@@ -120,13 +104,8 @@ def _should_blank_weak_match_inputs(
     confidence: float,
     rematch: bool = False,
 ) -> bool:
-    """True when Analyse should leave inputs empty for expert fill / Select."""
-    if rematch:
-        return False
-    source = str((product.get("ai_mapping") or {}).get("selection_source") or "")
-    if source == "expert":
-        return False
-    return float(confidence or 0.0) < float(ANALYSIS_INPUT_FILL_CONFIDENCE)
+    """Legacy hook — Analyse no longer blanks filled inputs on weak matches."""
+    return False
 
 
 def _restore_expert_identity(

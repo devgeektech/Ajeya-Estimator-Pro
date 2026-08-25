@@ -38,6 +38,10 @@ MATCH_CONFIDENCE_THRESHOLD = 30
 # provisional rules still use MATCH_CONFIDENCE_THRESHOLD.
 ANALYSIS_INPUT_FILL_CONFIDENCE = 50
 
+# Product Id auto-fills only when match % is orange/green (≥90). Red tabs (<90)
+# stay without Product Id until expert Select or a high-confidence rematch.
+PRODUCT_ID_CONFIRM_CONFIDENCE = 90
+
 # After first DB mapping, rematch weak products until this confidence (or unmatched).
 # Mirrors expert Re-analyse gains from taxonomy/schema alignment.
 REFINE_MATCH_CONFIDENCE_TARGET = 70

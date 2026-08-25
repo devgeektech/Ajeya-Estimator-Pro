@@ -32,6 +32,13 @@ from .services.boq_extraction_display_service import (
 )
 from .services.make_vendor_selection_service import MakeVendorSelectionService
 from .services.boq_service import BOQCreationService
+from .services.boq_upload_progress import (
+    begin_upload,
+    is_upload_busy,
+    mark_upload_failed,
+    mark_upload_succeeded,
+    read_upload_status,
+)
 from .services.boq_status_display_service import (
     build_boq_status_display,
     build_boq_tab_access,
@@ -303,6 +310,7 @@ class BOQListView(LoginRequiredMixin, ListView):
             }
             for boq in context["boqs"]
         ]
+        context["upload_busy"] = is_upload_busy(self.request.user.pk)
         return context
 
 
@@ -1385,6 +1393,7 @@ class BOQUploadView(LoginRequiredMixin, FormView):
         from apps.database_manager.services.activation import get_active_database_version
 
         context["has_active_database"] = get_active_database_version() is not None
+        context["upload_busy"] = is_upload_busy(self.request.user.pk)
         return context
 
     def _wants_json(self) -> bool:
@@ -1396,11 +1405,27 @@ class BOQUploadView(LoginRequiredMixin, FormView):
 
     def post(self, request, *args, **kwargs):
         form = self.get_form()
+        user_id = int(request.user.pk)
+        boq_name = str(request.POST.get("boq_name") or "").strip()
+        # Mark busy as soon as the POST arrives so the list Upload button greys
+        # out if the user switches tabs while parsing/validating.
+        if not begin_upload(user_id=user_id, boq_name=boq_name):
+            message = "A BOQ upload is already in progress. Wait for it to finish."
+            form.add_error(None, message)
+            if not self._wants_json():
+                messages.error(request, message)
+            return self.form_invalid(form)
         if form.is_valid():
             return self.form_valid(form)
+        mark_upload_failed(
+            user_id=user_id,
+            message="Upload validation failed. Fix the errors and try again.",
+        )
         return self.form_invalid(form)
 
     def form_valid(self, form):
+        user_id = int(self.request.user.pk)
+        boq_name = str(form.cleaned_data.get("boq_name") or "").strip()
         try:
             BOQCreationService(
                 user=self.request.user,
@@ -1411,11 +1436,17 @@ class BOQUploadView(LoginRequiredMixin, FormView):
         except Exception as exc:  # pragma: no cover - defensive
             logger.exception("BOQ upload failed")
             message = _upload_error_message(exc)
+            mark_upload_failed(user_id=user_id, message=f"Upload failed: {message}")
             form.add_error(None, f"Upload failed: {message}")
             if not self._wants_json():
                 messages.error(self.request, f"Upload failed: {message}")
             return self.form_invalid(form)
 
+        mark_upload_succeeded(
+            user_id=user_id,
+            boq_name=boq_name,
+            message=f"BOQ '{boq_name}' uploaded successfully.",
+        )
         messages.success(
             self.request,
             f"BOQ '{form.cleaned_data['boq_name']}' uploaded successfully.",
@@ -1457,6 +1488,15 @@ class BOQUploadView(LoginRequiredMixin, FormView):
 
     def get_success_url(self):
         return reverse("boq:list")
+
+
+class BOQUploadStatusView(LoginRequiredMixin, View):
+    """JSON status for the current user's BOQ upload (survives tab switches)."""
+
+    def get(self, request):
+        status = read_upload_status(request.user.pk)
+        status["busy"] = status.get("status") == "processing"
+        return JsonResponse(status)
 
 
 class BOQNameCheckView(LoginRequiredMixin, View):

@@ -106,12 +106,16 @@ MAKE_LIST_DESCRIPTION_HINTS: tuple[tuple[str, str], ...] = (
     ("wet chemical extinguisher", "EXTINGUISHER"),
     ("water based extinguisher", "EXTINGUISHER"),
     ("extinguisher", "EXTINGUISHER"),
-    # PIPE (specific first)
+    # PIPE (specific first — before bare "sprinkler" so pipework ≠ sprinkler head)
     ("sprinkler flexible", "PIPE"),
     ("flexible connector", "PIPE"),
     ("flexible pipe", "PIPE"),
     ("flex drop", "PIPE"),
     ("flexible drop", "PIPE"),
+    ("pipework", "PIPE"),
+    ("piping", "PIPE"),
+    ("dia pipe", "PIPE"),
+    ("mm dia pipe", "PIPE"),
     ("ms pipe", "PIPE"),
     ("m.s. pipe", "PIPE"),
     ("m.s pipe", "PIPE"),
@@ -193,6 +197,9 @@ MAKE_LIST_DESCRIPTION_HINTS: tuple[tuple[str, str], ...] = (
     ("non return", "VALVE"),
     ("nrv", "VALVE"),
     ("nr valve", "VALVE"),
+    ("reflux type", "VALVE"),
+    ("reflux valve", "VALVE"),
+    ("reflux", "VALVE"),
     ("check valve", "VALVE"),
     ("reflex valve", "VALVE"),
     ("reflex", "VALVE"),
@@ -277,6 +284,10 @@ MAKE_LIST_SUB_CATEGORY_HINTS: tuple[tuple[str, str], ...] = (
     ("non return", "non return valve"),
     ("nrv", "non return valve"),
     ("nr valve", "non return valve"),
+    ("reflux type check valve", "non return valve"),
+    ("reflux type", "non return valve"),
+    ("reflux valve", "non return valve"),
+    ("reflux", "non return valve"),
     ("check valve", "non return valve"),
     ("reflex valve", "non return valve"),
     ("reflex", "non return valve"),
@@ -599,7 +610,18 @@ _AI_SYNONYM_CATALOG: dict[tuple[str, str], tuple[str, ...]] = {
     ("VALVE", "SLUICE VALVE"): ("Sluice Valve", "Gate Valve", "Gate Isolation Valve", "GV", "Fire Sluice Valve"),
     ("VALVE", "BUTTERFLY"): ("Butterfly Valve", "BFV", "BF Valve", "Gear Operated Butterfly Valve"),
     ("VALVE", "BALL VALVE"): ("Ball Valve", "BV", "Ball Isolation Valve", "Full Port Ball Valve"),
-    ("VALVE", "NON RETURN VALVE"): ("Non Return Valve", "NRV", "NR Valve", "Check Valve", "Non-Return Valve", "Reflex Valve"),
+    ("VALVE", "NON RETURN VALVE"): (
+        "Non Return Valve",
+        "NRV",
+        "NR Valve",
+        "Check Valve",
+        "Non-Return Valve",
+        "Reflex Valve",
+        "Reflux Valve",
+        "Reflux Type Check Valve",
+        "Reflux Type",
+        "Reflux",
+    ),
     ("VALVE", "AIR RELEASE VALVE"): ("Air Release Valve", "ARV", "Air Valve"),
     ("VALVE", "Y STRAINER"): ("Y Strainer", "Y-Type Strainer", "Y Filter"),
     # HYDRANT
@@ -663,11 +685,53 @@ for (_cat, _sub), _synonyms in _AI_SYNONYM_CATALOG.items():
         _PHRASE_TO_CANONICAL.setdefault(_phrase, _canon)
 
 
-def format_synonym_map_for_ai() -> str:
-    """Compact synonym map for AI prompt injection.
+def format_synonym_rules_for_ai() -> str:
+    """Short meaning-first rules for AI prompts (no product phrase catalog).
 
-    Groups synonyms by category → sub-category for context-aware matching.
-    Single source of truth — substituted into prompts via ``{{SYNONYM_MAP}}``.
+    Materials abbreviations stay listed so GI ≈ galvanized iron is explicit.
+    Product family synonyms stay in code (``_AI_SYNONYM_CATALOG``, scoring,
+    snap, SQL) — the model must understand BOQ meaning and map onto
+    DATABASE_CONTEXT / candidates, not look up a phrase list.
+    """
+    lines: list[str] = [
+        "Meaning-first rules (do NOT require exact wording):",
+        "- Understand the purchasable product from BOQ meaning (owning sentence,",
+        "  slot, size/class/capacity). Map onto exact DATABASE_CONTEXT / candidate",
+        "  labels. Never invent catalog rows or Product_IDs.",
+        "- Treat common MEP material abbreviations as the SAME material, e.g.:",
+    ]
+    for canon in sorted(_CANONICAL_QUERY_EXPANSIONS.keys()):
+        terms = [_CANONICAL_DISPLAY.get(canon, canon.upper())]
+        for item in _CANONICAL_QUERY_EXPANSIONS[canon]:
+            if item not in terms:
+                terms.append(item)
+        lines.append(f"    {' = '.join(terms)}")
+    lines.extend(
+        [
+            "- Abbreviations, spelling variants, and industry synonyms must NOT",
+            "  lower confidence when the meaning matches (GI pipe = galvanized iron pipe).",
+            "- Pipe class phrases map to Rate_Master Class when listed: Heavy Class",
+            "  → C, Medium Class → B, Light Class → A (do not invent other classes).",
+            "- Valve subtypes are distinct: sluice ≠ butterfly ≠ ball ≠ non-return",
+            "  (check / reflux / NRV). Wrong subtype → reject even if both are VALVE.",
+            "- Do NOT match by shared words alone. Wrong product family or wrong",
+            "  nominal size → reject even if some tokens overlap (e.g. hose reel vs",
+            "  hose box; sluice valve vs hydrant chapter title; sluice valve vs PIPE).",
+            "- Prefer the candidate / taxonomy label that satisfies the BOQ",
+            "  requirement, not the one with the most string overlap.",
+            "- If no catalog row matches the product family/subtype, select null",
+            "  (do not pick a wrong product at high confidence).",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def format_synonym_map_for_ai() -> str:
+    """Full synonym catalog string (code/debug only — not injected into AI prompts).
+
+    Prefer ``format_synonym_rules_for_ai()`` for prompt injection. Product phrase
+    groups remain available here for inspection; scoring/snap use the catalog
+    structures directly.
     """
     cat_sub: dict[str, dict[str, list[str]]] = {}
     for (cat, sub), synonyms in _AI_SYNONYM_CATALOG.items():

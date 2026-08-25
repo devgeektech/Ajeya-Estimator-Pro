@@ -8,6 +8,7 @@ urlpatterns = [
     path("", views.BOQListView.as_view(), name="list"),
     path("refresh/", views.BOQListRefreshView.as_view(), name="refresh_list"),
     path("upload/", views.BOQUploadView.as_view(), name="upload"),
+    path("upload/status/", views.BOQUploadStatusView.as_view(), name="upload_status"),
     path("upload/check-name/", views.BOQNameCheckView.as_view(), name="check_name"),
     path("<int:pk>/", views.BOQDetailView.as_view(), name="detail"),
     path("<int:pk>/extract/", views.BOQExtractView.as_view(), name="extract"),

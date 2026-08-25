@@ -67,13 +67,26 @@ def should_skip_anchor_group(group: dict[str, Any], *, lineage_has_qty: bool) ->
 
 
 def _iter_extract_batches(groups: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
-    """Pack groups into AI batches by count and approximate payload size."""
+    """Pack groups into AI batches by count and approximate payload size.
+
+    Multi-slot sections always travel alone so product families do not leak
+    across packages in one OpenAI JSON response.
+    """
     batches: list[list[dict[str, Any]]] = []
     current: list[dict[str, Any]] = []
     current_chars = 0
     for group in groups:
         payload = _compact_anchor_payload(group)
         size = len(json.dumps(payload, ensure_ascii=False))
+        slot_count = int(group.get("slot_count") or len(group.get("slots") or []) or 0)
+        # Multi-slot / mixed packages: one section per call for stable identity.
+        if slot_count > 1:
+            if current:
+                batches.append(current)
+                current = []
+                current_chars = 0
+            batches.append([group])
+            continue
         would_overflow = (
             current
             and (
@@ -120,10 +133,11 @@ def _consolidate_to_anchors(
             **existing,
             "row_id": anchor_id,
             "products": _filter_spec_products(merged_products, taxonomy=taxonomy),
-            "activities": [],
             "skip_matching": not bool(merged_products),
         }
         anchor_row.pop("skip_reason", None)
+        anchor_row.pop("activities", None)
+        anchor_row.pop("product_matches", None)
         extracted_by_id[anchor_id] = anchor_row
 
         for row_id in group_ids:
@@ -135,7 +149,6 @@ def _consolidate_to_anchors(
                 "row_id": row_id,
                 "skip_matching": True,
                 "products": [],
-                "activities": [],
                 "skip_reason": "lineage_child_row",
             }
 
@@ -161,7 +174,6 @@ def _resolve_batch_row(
         "row_id": anchor_id,
         "skip_matching": True,
         "products": [],
-        "activities": [],
         "skip_reason": "ai_missing_row",
     }
 
@@ -212,6 +224,8 @@ def _compact_anchor_payload(group: dict[str, Any]) -> dict[str, Any]:
                 "rate_only": bool(slot.get("rate_only")),
                 "boq_rate": slot.get("boq_rate"),
                 "evidence_text": slot.get("evidence_text"),
+                # Owning supply sentence (product family). Prefer this over chapter title.
+                "product_context": slot.get("product_context") or "",
             }
         )
     # Send the full lineage so the model understands the section (system title +
@@ -225,8 +239,13 @@ def _compact_anchor_payload(group: dict[str, Any]) -> dict[str, Any]:
         "slot_count": int(group.get("slot_count") or len(slots)),
         "slots": slots,
         "section_note": (
-            "description/lineage_lines are CONTEXT only. "
+            "description/lineage_lines are CONTEXT only (system / chapter). "
             "Products only from slots. "
+            "For each slot, category/sub_category/product noun come from "
+            "slots[].product_context (owning supply sentence) + that slot — "
+            "NOT from the chapter title alone (e.g. HYDRANT SYSTEM). "
+            "Size-only slots (a) 150 mm dia) inherit the product family from "
+            "product_context. "
             "Slots with unit Job/LS describing services (testing, commissioning, "
             "dismantling, painting, shop drawings) → skip_matching: true, products: []."
         ),

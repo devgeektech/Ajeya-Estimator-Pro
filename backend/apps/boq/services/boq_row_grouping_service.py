@@ -45,6 +45,24 @@ _DOTTED_STRUCTURAL = re.compile(r"^(\d+(?:\.\d+)+)$")
 _SIZE_HINT_FROM_TEXT = re.compile(
     r"(?i)(?:^|[^0-9])(\d+(?:\.\d+)?)\s*(?:mm|nb|inch|in|cm)?\b"
 )
+# Size-only Unit/Qty lines need an owning supply sentence for product family.
+_SIZE_ONLY_SLOT_LINE = re.compile(
+    r"(?i)^\s*(?:[a-z]\)?\s*)?\d+(?:\.\d+)?\s*(?:mm|nb|inch|in|cm)?\s*"
+    r"(?:dia(?:meter)?)?\s*(?:\([^)]*\))?\s*$"
+)
+_SUPPLY_SENTENCE = re.compile(
+    r"(?i)\b(providing|supplying|supply|fixing|installing|erecting)\b"
+)
+_MATERIAL_OR_SPEC_LINE = re.compile(
+    r"(?i)^\s*(material|fittings?|protection|painting|class|make|notes?)\s*[:\-]|"
+    r"\bconforming\s+to\s+is\b"
+)
+_PRODUCT_NOUN_HINT = re.compile(
+    r"(?i)\b(sluice\s+valve|butterfly\s+valve|ball\s+valve|gate\s+valve|"
+    r"non[\s-]?return\s+valve|check\s+valve|landing\s+valve|hose\s+reel|"
+    r"sprinkler|fire\s+pump|jockey\s+pump|ms\s+pipe|gi\s+pipe|"
+    r"pipework|piping|pipes?|hydrant|valve|tank|gauge|extinguisher)\b"
+)
 
 
 def _parse_size_hint_from_description(text: Any) -> tuple[str | None, str | None]:
@@ -414,6 +432,83 @@ def _qty_rows_in_lineage(
     return found
 
 
+def _is_size_only_slot_line(text: str) -> bool:
+    return bool(_SIZE_ONLY_SLOT_LINE.match(str(text or "").strip()))
+
+
+def _is_supply_sentence(text: str) -> bool:
+    """True for a BOQ line that names the purchasable product (not size-only)."""
+    blob = str(text or "").strip()
+    if not blob or len(blob) < 12:
+        return False
+    if _is_size_only_slot_line(blob):
+        return False
+    if _MATERIAL_OR_SPEC_LINE.match(blob) and not _SUPPLY_SENTENCE.search(blob):
+        return False
+    if _SUPPLY_SENTENCE.search(blob):
+        return True
+    # Package root / named product without "Providing…" still owns lettered sizes.
+    return bool(_PRODUCT_NOUN_HINT.search(blob)) and len(blob) >= 20
+
+
+def _is_material_or_spec_line(text: str) -> bool:
+    blob = str(text or "").strip()
+    if not blob or _is_size_only_slot_line(blob):
+        return False
+    return bool(_MATERIAL_OR_SPEC_LINE.search(blob))
+
+
+def _slot_product_context(
+    index: dict[str, dict[str, Any]],
+    owned: list[str],
+    *,
+    qty_pos: int,
+    qty_id_set: set[str],
+) -> str:
+    """
+    Nearest owning supply sentence + material/class lines for one Unit/Qty slot.
+
+    Size-only slots (``a) 150 mm dia``) get the preceding ``Providing and fixing…``
+    line so extract/match use the product family, not the chapter title alone.
+    """
+    preceding: list[str] = []
+    for row_id in owned[: max(qty_pos, 0)]:
+        if row_id in qty_id_set:
+            continue
+        row = index.get(row_id)
+        if not row:
+            continue
+        # Chapter banners (HYDRANT SYSTEM) stay on section context, not product family.
+        if _is_section_title_row(row, analysis_fields(row)):
+            continue
+        text = row_description(row)
+        if text:
+            preceding.append(text)
+
+    if not preceding:
+        return ""
+
+    owner_index = None
+    for index_pos in range(len(preceding) - 1, -1, -1):
+        if _is_supply_sentence(preceding[index_pos]):
+            owner_index = index_pos
+            break
+    if owner_index is None:
+        # Fall back to the longest preceding non-size line (package root).
+        owner_index = max(
+            range(len(preceding)),
+            key=lambda i: len(preceding[i]),
+        )
+
+    parts = [preceding[owner_index]]
+    for text in preceding[owner_index + 1 :]:
+        if _is_supply_sentence(text):
+            break
+        if _is_material_or_spec_line(text) or _PRODUCT_NOUN_HINT.search(text):
+            parts.append(text)
+    return " ".join(parts).strip()
+
+
 def build_slots_for_section(
     index: dict[str, dict[str, Any]],
     owned_ids: list[str],
@@ -424,7 +519,8 @@ def build_slots_for_section(
 
     Context rows between the previous slot and this qty row are bound as local
     evidence (specs, letter headers, size lines). Shared section text stays on
-    the section ``lineage_parts`` / ``full_description``.
+    the section ``lineage_parts`` / ``full_description``. Each slot also gets
+    ``product_context`` — the nearest owning supply sentence (product family).
     """
     if not qty_rows:
         return []
@@ -460,6 +556,17 @@ def build_slots_for_section(
 
         description = qty_row.get("description") or ""
         size_hint, _size_unit = _parse_size_hint_from_description(description)
+        product_context = _slot_product_context(
+            index,
+            owned,
+            qty_pos=qty_pos,
+            qty_id_set=qty_id_set,
+        )
+        # When the qty row itself names the product, prefer that over a distant parent.
+        if description and not _is_size_only_slot_line(description) and _is_supply_sentence(
+            description
+        ):
+            product_context = description.strip()
         slots.append(
             {
                 "slot_index": slot_index,
@@ -475,6 +582,7 @@ def build_slots_for_section(
                 "boq_rate": qty_row.get("boq_rate"),
                 "context_row_ids": local_ids,
                 "evidence_text": combine_row_descriptions(index, evidence_ids),
+                "product_context": product_context,
             }
         )
         cursor = qty_pos + 1

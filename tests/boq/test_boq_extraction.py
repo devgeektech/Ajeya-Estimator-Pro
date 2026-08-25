@@ -1,6 +1,6 @@
 import json
 from unittest.mock import patch, MagicMock
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from apps.boq.models import BOQ
 from apps.boq.services.boq_extraction_service import BOQExtractionService
 from common.choices import BOQStatus
@@ -74,7 +74,33 @@ class BOQExtractionTestCase(TestCase):
         self.assertEqual(len(extracted_data["rows"]), 1)
         row = extracted_data["rows"][0]
         self.assertEqual(row["row_id"], "r1")
+        self.assertNotIn("activities", row)
+        self.assertNotIn("product_matches", row)
+        self.assertNotIn("activities_total", extracted_data.get("stats") or {})
         # We don't check skip_matching here because the mocked structure might lack proper lineage_has_qty properties
         if not row.get("skip_matching"):
             self.assertEqual(len(row["products"]), 1)
             self.assertEqual(row["products"][0]["category"], "PUMP")
+
+
+class StripLegacyAnalysisPayloadTests(SimpleTestCase):
+    def test_drops_empty_activities_and_product_matches(self):
+        from apps.boq.services.boq_analysis_store import strip_legacy_analysis_payload
+
+        payload = strip_legacy_analysis_payload(
+            {
+                "stats": {"rows_total": 2, "activities_total": 0, "products_total": 1},
+                "rows": [
+                    {
+                        "row_id": "r1",
+                        "products": [{"product_index": 0}],
+                        "activities": [],
+                        "product_matches": [],
+                    }
+                ],
+            }
+        )
+        self.assertNotIn("activities_total", payload["stats"])
+        self.assertNotIn("activities", payload["rows"][0])
+        self.assertNotIn("product_matches", payload["rows"][0])
+        self.assertEqual(payload["stats"]["products_total"], 1)

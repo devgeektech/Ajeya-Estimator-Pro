@@ -18,13 +18,11 @@ from apps.boq.services.product_ai_common import (
     _REFINE_PASSES,
     _REMATCH_CHROMA_LIMIT,
     _candidate_snapshot,
-    _clear_weak_match_inputs,
     _compute_match_confidence,
     _mapping_batch_size,
     _missing_attribute_keys,
     _product_summary,
     _schema_attributes_from_rate,
-    _should_blank_weak_match_inputs,
     _slim_candidate,
     product_needs_match_refine,
 )
@@ -370,31 +368,13 @@ class ProductAIMappingService(
         self,
         rows: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """Blank Analysis inputs for weak matches after map + refine are done.
+        """Keep extract identity and Attributes after map + refine (no blanking).
 
-        Must run after refine — blanking earlier zeroes identity fields and
-        rematch scores collapse to 0%.
+        Historically blanked weak-match inputs; Analyse now leaves AI-found
+        Category/Sub/Size/Attributes filled. Product Id visibility is handled
+        separately. Kept as a pass-through for call-site compatibility.
         """
-        updated_rows: list[dict[str, Any]] = []
-        for row in rows:
-            products: list[dict[str, Any]] = []
-            for product in row.get("products") or []:
-                if not isinstance(product, dict):
-                    products.append(product)
-                    continue
-                confidence = float(
-                    product.get("db_match_confidence")
-                    or product.get("attribute_confidence")
-                    or 0.0
-                )
-                if _should_blank_weak_match_inputs(
-                    product, confidence=confidence, rematch=False
-                ):
-                    products.append(_clear_weak_match_inputs(product))
-                else:
-                    products.append(product)
-            updated_rows.append({**row, "products": products})
-        return updated_rows
+        return rows
 
 
     def refine_rows(

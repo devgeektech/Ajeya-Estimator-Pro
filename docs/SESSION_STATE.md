@@ -36,7 +36,7 @@ in the request). UI shows **Uploading…** across tab switches via
 | Sections | Serial-lineage groups with qty **slots**; empty slots show Add + Re-analyse |
 | Analysis | Product tabs in **BOQ slot order**; match %; multi-product review **only** when product count ≠ Unit/Qty slot count |
 | Matching | Chroma = Product_Helper only (AI validates top **5**; UI shows top **3**); Product_ID → Rate_Master / Labour from Postgres |
-| Candidates UI | Summary = **Product ID** / Category / Sub / Class / Size / Unit / Capacity; open on unmatched; weak banner only when effective % below 50 |
+| Candidates UI | Summary = **Product ID** / Category / Sub / Class / Size / Unit / Capacity; open on unmatched; weak banner only when effective % below 50; Category/Sub/Size/**Attributes** stay prefilled from extract when found |
 | Re-analyse | Saves expert UI inputs + **AI Description**; empty inputs use full section; edited description leads recall + section; real match % (not forced 100%) |
 | Confirm | Sets match to **100%** when product is correct but % is lower (hidden at 100%) |
 | Select candidate | Prefills Rate_Master core fields + Attribute values into Analysis inputs; keeps that candidate's listed match % |
@@ -69,12 +69,12 @@ in the request). UI shows **Uploading…** across tab switches via
 
 Keep only the latest entry below. Older work is in `docs/CHANGELOG.md`.
 
-### 2026-08-25 — Sync DB upload (no Celery) + embedding gate
+### 2026-08-25 — Prefill Attributes on weak matches
 
-Completed: Master DB import runs synchronously in the upload request under a global lock. UI Upload becomes Uploading… and polls status across tabs. Embeddings must succeed before activate; previous master data purged only on success; failed import leaves current DB. Django admin cannot force-activate.
-Pending: Deploy when approved.
-Issues: Long imports hold the HTTP worker; raise proxy/gunicorn timeouts if needed.
-Next: Commit/merge/deploy when ready.
+Completed: Keep AI-found Attribute values on weak/provisional Analysis cards (no blanking); identity fields already kept; Product Id still gated.
+Pending: Re-Analyse BOQs that were saved with blanked Attributes.
+Issues: None.
+Next: UAT — Attributes show values when present in BOQ extract.
 
 
 

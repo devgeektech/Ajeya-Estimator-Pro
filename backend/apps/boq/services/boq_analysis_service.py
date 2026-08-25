@@ -95,10 +95,8 @@ def _compute_extraction_stats(rows: list[dict[str, Any]]) -> dict[str, int]:
         "rows_total": 0,
         "rows_skipped": 0,
         "products_total": 0,
-        "activities_total": 0,
     }
     for row in rows:
-        row["activities"] = []
         stats["rows_total"] += 1
         if row.get("skip_matching"):
             stats["rows_skipped"] += 1
@@ -205,7 +203,7 @@ class BOQAnalysisService:
                 row = extraction_by_row.get(row_id)
                 if not row:
                     continue
-                extracted_rows.append({**row, "product_matches": []})
+                extracted_rows.append(row)
 
             set_boq_job_progress(
                 boq.pk,
@@ -571,10 +569,7 @@ class BOQAnalysisService:
                     {},
                 )
                 make_list = existing_row.get("make_list") if str(row.get("row_id")) == anchor_id else None
-                replacement = {
-                    **row,
-                    "product_matches": [],
-                }
+                replacement = dict(row)
                 if make_list:
                     replacement["make_list"] = make_list
                 replacements.append(replacement)

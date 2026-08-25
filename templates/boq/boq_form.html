@@ -23,6 +23,8 @@
         novalidate
         data-check-name-url="{% url 'boq:check_name' %}"
         data-list-url="{% url 'boq:list' %}"
+        data-status-url="{% url 'boq:upload_status' %}"
+        data-initial-busy="{% if upload_busy %}1{% else %}0{% endif %}"
         {% if not has_active_database %}data-blocked="1"{% endif %}
     >
         {% csrf_token %}
@@ -53,8 +55,8 @@
                 type="button"
                 class="btn btn--primary"
                 id="boq-upload-submit"
-                {% if not has_active_database %}disabled aria-disabled="true"{% endif %}
-            >Upload BOQ</button>
+                {% if not has_active_database or upload_busy %}disabled aria-disabled="true"{% endif %}
+            >{% if upload_busy %}Uploading…{% else %}Upload BOQ{% endif %}</button>
         </div>
     </form>
 </div>
@@ -76,8 +78,66 @@
     const statusEl = document.getElementById('boq-upload-status');
     const checkNameUrl = form.dataset.checkNameUrl;
     const listUrl = form.dataset.listUrl || '/boqs/';
+    const statusUrl = form.dataset.statusUrl || '';
     const nameInput = form.querySelector('[name="boq_name"]');
-    let uploading = false;
+    let uploading = form.dataset.initialBusy === '1';
+    let pollTimer = null;
+
+    function setBusyUi(busy, message) {
+        uploading = !!busy;
+        submitBtn.disabled = uploading;
+        submitBtn.setAttribute('aria-disabled', uploading ? 'true' : 'false');
+        submitBtn.textContent = uploading ? 'Uploading…' : 'Upload BOQ';
+        if (uploading) {
+            setStatus(
+                message
+                || 'Uploading and parsing… PDF make lists can take up to a minute. '
+                + 'You can switch to BOQs — the Upload button stays locked until this finishes.'
+            );
+        } else if (!message) {
+            setStatus('');
+        }
+    }
+
+    async function pollUploadStatus() {
+        if (!statusUrl) return;
+        try {
+            const res = await fetch(statusUrl, {
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                credentials: 'same-origin',
+            });
+            if (!res.ok) return;
+            const data = await res.json();
+            const busy = !!data.busy || data.status === 'processing';
+            const wasBusy = uploading;
+            if (busy) {
+                setBusyUi(true, data.message || '');
+                return;
+            }
+            if (wasBusy && data.status === 'succeeded') {
+                setStatus('Upload complete. Opening BOQs…');
+                window.location.replace(listUrl);
+                return;
+            }
+            if (wasBusy) {
+                setBusyUi(false);
+                if (data.message) {
+                    showErrors({ __all__: [data.message] }, data.message);
+                }
+            }
+        } catch (_err) { /* keep last known */ }
+    }
+
+    if (uploading) {
+        setBusyUi(true);
+    }
+    if (statusUrl) {
+        pollUploadStatus();
+        pollTimer = setInterval(pollUploadStatus, 2000);
+        window.addEventListener('pagehide', () => {
+            if (pollTimer) clearInterval(pollTimer);
+        });
+    }
 
     function clearErrors() {
         form.querySelectorAll('[data-error-for]').forEach((el) => { el.textContent = ''; });
@@ -178,14 +238,7 @@
             return;
         }
 
-        uploading = true;
-        submitBtn.disabled = true;
-        const previousLabel = submitBtn.textContent;
-        submitBtn.textContent = 'Uploading…';
-        setStatus(
-            'Uploading and parsing… PDF make lists can take up to a minute. '
-            + 'You will be taken to the BOQs page when this finishes.'
-        );
+        setBusyUi(true);
 
         let navigated = false;
         try {
@@ -255,9 +308,7 @@
             });
         } finally {
             if (!navigated) {
-                uploading = false;
-                submitBtn.disabled = false;
-                submitBtn.textContent = previousLabel || 'Upload BOQ';
+                setBusyUi(false);
             }
         }
     });

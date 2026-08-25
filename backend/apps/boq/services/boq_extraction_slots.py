@@ -5,7 +5,11 @@ import logging
 import re
 from typing import Any
 
-from ai.context import snap_product_taxonomy
+from ai.context import (
+    resolve_category_label,
+    resolve_sub_category_label,
+    snap_product_taxonomy,
+)
 from apps.boq.services.boq_extraction_fields import (
     _apply_one_qty,
     _is_qty_uom,
@@ -16,6 +20,10 @@ from utils.attribute_parser import coerce_attributes_dict
 from apps.boq.services.extraction_attribute_fields import COMMON_ATTRIBUTE_LABELS
 from apps.boq.services.product_attribute_enrichment_service import (
     humanize_attribute_key,
+)
+from utils.product_synonyms import (
+    MAKE_LIST_DESCRIPTION_HINTS,
+    MAKE_LIST_SUB_CATEGORY_HINTS,
 )
 
 logger = logging.getLogger("boq_ai")
@@ -228,24 +236,34 @@ def _parse_pn_capacity(text: Any) -> str | None:
 def _section_product_noun(section_text: str) -> str:
     """Pull a short product noun from parent BOQ text for weak size-only hints.
 
-    Prefer the purchasable family (pipe / valve) over incidental system names
-    like ``Yard Hydrant System`` that appear before ``MS Pipe``.
+    Prefer the purchasable family (pipe / valve) over system chapter names
+    like ``Sprinkler System`` / ``Yard Hydrant System``.
     """
     blob = str(section_text or "").strip()
     if not blob:
         return ""
+    # Pipework / "65 mm dia pipe" before bare "sprinkler" (system title noise).
     priority_patterns = (
         r"(?i)\b(sluice\s+valve|butterfly\s+valve|ball\s+valve|gate\s+valve|"
         r"non[\s-]?return\s+valve|check\s+valve|y[\s-]?strainer|strainer|"
-        r"landing\s+valve|hose\s+reel|sprinkler|fire\s+pump|jockey\s+pump|"
-        r"pressure\s+switch|flow\s+switch|ms\s+pipe|gi\s+pipe)\b",
-        r"(?i)\b(pipework|piping|pipes?)\b",
+        r"landing\s+valve|hose\s+reel|fire\s+pump|jockey\s+pump|"
+        r"pressure\s+switch|flow\s+switch|ms\s+pipe|gi\s+pipe|"
+        r"upright\s+sprinkler|pendant\s+sprinkler|pendent\s+sprinkler|"
+        r"side\s*wall\s+sprinkler)\b",
+        r"(?i)\b(pipework|piping|\d+\s*mm\s*dia\s+pipes?|pipes?)\b",
+        r"(?i)\b(sprinkler\s+head|sprinkler)\b",
         r"(?i)\b(hydrant)\b",
     )
     for pattern in priority_patterns:
         match = re.search(pattern, blob)
         if match:
-            return re.sub(r"\s+", " ", match.group(1)).strip()
+            noun = re.sub(r"\s+", " ", match.group(1)).strip()
+            # Normalize "150 mm dia pipe" → "pipe"
+            if re.match(r"(?i)^\d+\s*mm\s*dia\s+pipes?$", noun):
+                return "pipe"
+            if noun.lower() in {"pipework", "piping", "pipes"}:
+                return "pipe"
+            return noun
     return ""
 
 
@@ -338,27 +356,35 @@ def _natural_capacity_phrase(capacity: Any) -> str:
 
 
 def compose_description_hint(product: dict[str, Any]) -> str:
-    """Write AI Description as one natural-language product line.
+    """Write AI Description as a search-ready identity line.
 
-    Mentions Class, Sub-category, Category, Size, Unit, Capacity and a few
-    attributes, e.g.
-    ``SS branch pipe for hydrant, 20 mm dia, with is standard 903, type short
-    branch pipe``.
+    Always names Sub-category (primary), Category, Class, Size, Unit, Capacity
+    in plain English so Chroma/SQL can fetch the right family — e.g.
+    ``class C MS pipe (PIPE), 65 mm dia``.
     """
     category = str(product.get("category") or "").strip()
     sub_category = str(product.get("sub_category") or "").strip()
     product_class = str(product.get("class") or "").strip()
+    if product_class.lower() in {"0", "0.0", "-", "--", "n/a", "na", "none"}:
+        product_class = ""
 
-    noun = (sub_category or category).lower()
-    if not noun:
+    # Sub_Category is nearest to the purchasable name; Category is the family.
+    identity = (sub_category or category).strip()
+    if not identity:
         return ""
-    lead_words = []
-    if product_class and product_class not in {"0", "0.0"}:
-        lead_words.append(product_class)
-    lead_words.append(noun)
-    lead = " ".join(lead_words)
-    if sub_category and category and category.lower() not in sub_category.lower():
-        lead = f"{lead} for {category.lower()}"
+    identity_l = identity.lower()
+    cat_l = category.lower()
+
+    if product_class:
+        lead = f"class {product_class} {identity_l}"
+    else:
+        lead = identity_l
+    # Avoid "ms for pipe" when sub already implies pipe; still tag Category.
+    if category and cat_l not in lead and cat_l not in identity_l:
+        if sub_category:
+            lead = f"{lead} ({cat_l})"
+        else:
+            lead = f"{lead} ({cat_l})"
 
     details: list[str] = []
     size_phrase = _natural_size_phrase(product.get("size"), product.get("unit"))
@@ -372,7 +398,120 @@ def compose_description_hint(product: dict[str, Any]) -> str:
         details.append(f"with {attr_text}")
 
     sentence = lead if not details else f"{lead}, {', '.join(details)}"
-    return sentence[:500]
+    return sentence[:400]
+
+
+_CHAPTER_OR_SIZE_ONLY_HINT = re.compile(
+    r"(?i)^\s*(?:[a-z]\)?\s*)?(?:\d+(?:\.\d+)?\s*(?:mm|nb)?\s*(?:dia(?:meter)?)?\s*)?"
+    r"(?:sprinkler|hydrant|yard\s+hydrant|fire\s+fighting)?(?:\s+system)?\s*$"
+)
+
+
+def _hint_lacks_product_identity(
+    hint: str,
+    product: dict[str, Any],
+) -> bool:
+    """True when AI Description cannot drive DB search (size-only / chapter title)."""
+    text = str(hint or "").strip()
+    if not text:
+        return True
+    if _SIZE_ONLY_HINT.match(text):
+        return True
+    if _CHAPTER_OR_SIZE_ONLY_HINT.match(text):
+        return True
+    # "65mm dia SPRINKLER" / "200mm" — no sub/category noun from taxonomy.
+    sub = str(product.get("sub_category") or "").strip().lower()
+    cat = str(product.get("category") or "").strip().lower()
+    lowered = text.lower()
+    if sub and sub in lowered:
+        return False
+    if cat and cat in lowered and cat not in {"sprinkler", "hydrant"}:
+        return False
+    # Must contain a product-family token beyond size/system titles.
+    family_tokens = (
+        "pipe",
+        "valve",
+        "pump",
+        "hose",
+        "tank",
+        "gauge",
+        "nozzle",
+        "extinguisher",
+        "fitting",
+        "branch",
+        "strainer",
+        "hydrant",
+        "sprinkler",
+        "panel",
+        "joint",
+    )
+    # Bare system word + size is not enough when Category is PIPE.
+    has_family = any(tok in lowered for tok in family_tokens)
+    if not has_family:
+        return True
+    if cat == "pipe" and "pipe" not in lowered and "piping" not in lowered:
+        # "65mm dia sprinkler" while Category is PIPE — wrong identity for search.
+        return True
+    if cat == "valve" and "valve" not in lowered:
+        return True
+    return False
+
+
+_BOQ_SUPPLY_PREFIX = re.compile(
+    r"(?i)^(providing\s+and\s+fixing|supply(?:ing)?(?:\s+and\s+"
+    r"(?:fixing|installing|laying))?|fixing)\s+"
+)
+_BOQ_COMPLETE_TAIL = re.compile(
+    r"(?i)\s*,?\s*complete\s+with\b.*?(?=\(|$)|"
+    r"\s*,?\s*all\s+complete\b.*?(?=\(|$)|"
+    r"\s*,?\s*of\s+approved\s+make\b.*?(?=\(|$)"
+)
+_IS_STANDARD_REF = re.compile(r"(?i)\(\s*as\s+per\s+(IS\s*:?\s*[\d]+)\s*\)")
+
+
+def _trim_product_context(product_context: str) -> str:
+    """Owning supply sentence → compact product understanding (no BOQ boilerplate)."""
+    text = " ".join(str(product_context or "").split()).strip()
+    if not text:
+        return ""
+    is_ref = ""
+    match = _IS_STANDARD_REF.search(text)
+    if match:
+        is_ref = re.sub(r"\s+", "", match.group(1), flags=re.IGNORECASE)
+        is_ref = re.sub(r"(?i)^IS", "IS:", is_ref)
+        if not is_ref.upper().startswith("IS:"):
+            is_ref = f"IS:{is_ref}"
+    text = _BOQ_SUPPLY_PREFIX.sub("", text).strip(" ,;")
+    text = _BOQ_COMPLETE_TAIL.sub("", text).strip(" ,;")
+    text = _IS_STANDARD_REF.sub("", text).strip(" ,;")
+    if is_ref and is_ref.lower() not in text.lower():
+        text = f"{text}, as per {is_ref}" if text else f"as per {is_ref}"
+    return text[:320]
+
+
+def _understanding_from_context(
+    product: dict[str, Any],
+    *,
+    product_context: str,
+    slot_desc: str = "",
+) -> str:
+    """Long AI Description grounded in the owning supply sentence + this size."""
+    core = _trim_product_context(product_context)
+    if not core:
+        return ""
+    size_phrase = _natural_size_phrase(product.get("size"), product.get("unit"))
+    if not size_phrase:
+        size, unit = _parse_size_from_text(slot_desc)
+        size_phrase = _natural_size_phrase(size, unit)
+    line = core
+    if size_phrase and size_phrase.lower() not in line.lower():
+        size_num = str(product.get("size") or "").strip()
+        if not size_num or size_num not in line:
+            line = f"{line}, {size_phrase}"
+    capacity_phrase = _natural_capacity_phrase(product.get("capacity"))
+    if capacity_phrase and capacity_phrase.lower() not in line.lower():
+        line = f"{line}, {capacity_phrase}"
+    return line[:400]
 
 
 def _enrich_description_hint(
@@ -380,47 +519,260 @@ def _enrich_description_hint(
     *,
     section_text: str,
     slot_desc: str,
+    product_context: str = "",
 ) -> str:
-    """Prefer taxonomy + attributes; fall back to AI prose / synthetic noun+size.
+    """AI Description = search identity for this slot (cat/sub/class/size/…).
 
-    Experts see ``description_hint`` as AI Description. When Category / Sub-category
-    (or other core fields) are present, compose them into one line so the field
-    always mentions Category, Sub-category, Class, Size, Unit, Capacity, and
-    key attributes.
+    Prefer a composed line from mapped Category/Sub_Category/Class/Size/Unit/
+    Capacity. Never leave size-only or chapter-title text (``65mm dia SPRINKLER``,
+    ``200mm``) — that breaks DB recall.
     """
-    composed = compose_description_hint(product)
-    if composed:
-        return composed
-
     hint = str(product.get("description_hint") or "").strip()
-    size = str(product.get("size") or "").strip()
-    unit = str(product.get("unit") or "").strip() or "mm"
-    sub = str(product.get("sub_category") or "").strip()
-    cat = str(product.get("category") or "").strip()
-    noun = sub or _section_product_noun(section_text) or cat
-    size_phrase = ""
-    if size:
-        size_phrase = f"{size}{unit}" if unit and unit.lower() not in size.lower() else size
-        if "dia" not in (hint or slot_desc).lower() and unit.lower() == "mm":
-            size_phrase = f"{size}mm dia"
-
+    composed = compose_description_hint(product)
+    understanding = _understanding_from_context(
+        product,
+        product_context=product_context or section_text,
+        slot_desc=slot_desc,
+    )
     weak = (
-        (not hint)
-        or bool(_SIZE_ONLY_HINT.match(hint))
+        _hint_lacks_product_identity(hint, product)
         or _is_raw_slot_paste(hint, slot_desc)
     )
-    if not weak:
-        return hint[:500]
 
+    # Owning-sentence understanding wins when taxonomy compose disagrees
+    # (e.g. wrong PIPE fields vs sluice-valve context).
+    if understanding and composed and not _significant_overlap(understanding, composed):
+        if weak or not _significant_overlap(hint, composed):
+            return understanding
+
+    if composed:
+        if weak:
+            return composed
+        sub = str(product.get("sub_category") or "").strip().lower()
+        cat = str(product.get("category") or "").strip().lower()
+        same_family = (
+            _significant_overlap(hint, composed)
+            or (sub and sub in hint.lower())
+            or (cat and cat in hint.lower())
+        )
+        if same_family:
+            if sub and sub not in hint.lower():
+                return composed
+            if len(hint) >= 50 and not _hint_lacks_product_identity(hint, product):
+                return hint[:400]
+            return composed
+        return composed
+
+    if understanding and weak:
+        return understanding
+    if not weak and hint:
+        return hint[:400]
+    if understanding:
+        return understanding
+
+    size_phrase = _natural_size_phrase(product.get("size"), product.get("unit"))
+    noun = (
+        str(product.get("sub_category") or "").strip()
+        or _section_product_noun(product_context or section_text)
+        or str(product.get("category") or "").strip()
+    )
     if noun and size_phrase:
-        return f"{size_phrase} {noun}".strip()[:500]
+        return f"{noun.lower()}, {size_phrase}"[:400]
     if noun:
-        return str(noun).strip()[:500]
-    if hint and not _is_raw_slot_paste(hint, slot_desc):
-        return hint[:500]
+        return str(noun).strip()[:400]
     if size_phrase:
-        return size_phrase[:500]
-    return (hint or slot_desc or "")[:500]
+        return size_phrase[:400]
+    return (hint or slot_desc or "")[:400]
+
+
+def _significant_overlap(left: str, right: str) -> bool:
+    """True when both strings share a product-type noun (len≥4)."""
+    left_tokens = {
+        tok
+        for tok in re.findall(r"[a-z0-9]+", (left or "").lower())
+        if len(tok) >= 4
+    }
+    right_tokens = {
+        tok
+        for tok in re.findall(r"[a-z0-9]+", (right or "").lower())
+        if len(tok) >= 4
+    }
+    return bool(left_tokens & right_tokens)
+
+
+def _family_key(product: dict[str, Any]) -> tuple[str, str]:
+    return (
+        str(product.get("category") or "").strip().upper(),
+        str(product.get("sub_category") or "").strip().upper(),
+    )
+
+
+def _hint_category_sub_from_text(
+    text: str,
+    *,
+    taxonomy: dict[str, Any] | None = None,
+) -> tuple[str | None, str | None]:
+    """Map owning-sentence / hint text onto Rate_Master category + sub.
+
+    Prefer purchasable product phrases (pipework, GI pipe, sluice valve) over
+    system/chapter titles (External Hydrant System, Sprinkler System).
+    """
+    blob = str(text or "").strip().lower()
+    if not blob:
+        return None, None
+
+    # Product-supply phrases beat system titles when both appear in one section.
+    _PRODUCT_FIRST_CAT: tuple[tuple[str, str], ...] = (
+        ("gi pipe", "PIPE"),
+        ("g.i. pipe", "PIPE"),
+        ("g.i pipe", "PIPE"),
+        ("ms pipe", "PIPE"),
+        ("m.s. pipe", "PIPE"),
+        ("mild steel pipe", "PIPE"),
+        ("galvanized iron pipe", "PIPE"),
+        ("galvanised iron pipe", "PIPE"),
+        ("dia pipe", "PIPE"),
+        ("mm dia pipe", "PIPE"),
+        ("pipework", "PIPE"),
+        ("piping", "PIPE"),
+        ("sluice valve", "VALVE"),
+        ("butterfly valve", "VALVE"),
+        ("ball valve", "VALVE"),
+        ("check valve", "VALVE"),
+        ("non return", "VALVE"),
+        ("reflux", "VALVE"),
+    )
+    category_hint = None
+    for phrase, cat in _PRODUCT_FIRST_CAT:
+        if phrase in blob:
+            category_hint = cat
+            break
+    if not category_hint:
+        for phrase, cat in MAKE_LIST_DESCRIPTION_HINTS:
+            if phrase in blob:
+                category_hint = cat
+                break
+
+    _PRODUCT_FIRST_SUB: tuple[tuple[str, str], ...] = (
+        ("gi pipe", "gi"),
+        ("g.i. pipe", "gi"),
+        ("g.i pipe", "gi"),
+        ("ms pipe", "ms"),
+        ("m.s. pipe", "ms"),
+        ("mild steel pipe", "ms"),
+        ("galvanized iron pipe", "gi"),
+        ("galvanised iron pipe", "gi"),
+        ("sluice valve", "sluice valve"),
+        ("butterfly valve", "butterfly"),
+        ("check valve", "non return valve"),
+        ("non return", "non return valve"),
+        ("reflux", "non return valve"),
+    )
+    sub_hint = None
+    for phrase, sub in _PRODUCT_FIRST_SUB:
+        if phrase in blob:
+            sub_hint = sub
+            break
+    if not sub_hint:
+        for phrase, sub in MAKE_LIST_SUB_CATEGORY_HINTS:
+            # Skip hydrant system titles when the section is clearly pipework.
+            if category_hint == "PIPE" and "hydrant" in phrase:
+                continue
+            if category_hint == "PIPE" and phrase in {
+                "sprinkler",
+                "upright sprinkler",
+                "pendant sprinkler",
+            }:
+                continue
+            if phrase in blob:
+                sub_hint = sub
+                break
+    if not category_hint and not sub_hint:
+        return None, None
+
+    taxonomy = taxonomy or {}
+    categories = list(taxonomy.get("categories") or [])
+    by_category = dict(taxonomy.get("sub_categories_by_category") or {})
+    category = None
+    if category_hint:
+        category = resolve_category_label(category_hint, categories) or (
+            category_hint if not categories else None
+        )
+    sub_category = None
+    if sub_hint:
+        sub_category = resolve_sub_category_label(
+            sub_hint,
+            category=category,
+            sub_categories_by_category=by_category,
+        )
+        # Never keep a free-text sub that is not a valid pair for this category.
+        if not sub_category and not by_category:
+            sub_category = sub_hint.upper()
+    return category, sub_category
+
+
+_CLASS_FROM_TEXT: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"(?i)\bheavy\s*class\b|\bclass\s*[\"']?c[\"']?\b"), "C"),
+    (re.compile(r"(?i)\bmedium\s*class\b|\bclass\s*[\"']?b[\"']?\b"), "B"),
+    (re.compile(r"(?i)\blight\s*class\b|\bclass\s*[\"']?a[\"']?\b"), "A"),
+)
+_PLACEHOLDER_CLASS_SNAP = frozenset(
+    {"", "0", "0.0", "-", "--", "n/a", "na", "none", "null", "nil"}
+)
+
+
+def _snap_class_from_text(product: dict[str, Any], blob: str) -> dict[str, Any]:
+    """Map free-text class phrases (Heavy Class → C) when Class is blank."""
+    item = dict(product)
+    current = str(item.get("class") or "").strip()
+    if current.lower() not in _PLACEHOLDER_CLASS_SNAP:
+        return item
+    text = str(blob or "")
+    if not text:
+        return item
+    for pattern, label in _CLASS_FROM_TEXT:
+        if pattern.search(text):
+            item["class"] = label
+            break
+    return item
+
+
+def _snap_identity_from_product_context(
+    product: dict[str, Any],
+    *,
+    product_context: str,
+    taxonomy: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Prefer category/sub/class from the owning supply sentence when AI drifted.
+
+    Size-only slots under ``Providing and fixing Cast Iron sluice valve`` must
+    stay VALVE / SLUICE VALVE even if the model returned PIPE from chapter noise.
+    """
+    item = dict(product)
+    blob = " ".join(
+        part
+        for part in (
+            str(product_context or "").strip(),
+            str(item.get("description_hint") or "").strip(),
+        )
+        if part
+    )
+    category, sub_category = _hint_category_sub_from_text(blob, taxonomy=taxonomy)
+    current_cat = str(item.get("category") or "").strip().upper()
+    current_sub = str(item.get("sub_category") or "").strip().upper()
+    target_cat = str(category or "").strip().upper()
+    target_sub = str(sub_category or "").strip().upper()
+
+    # Strong owning noun wins when AI category/sub disagree or are blank.
+    if category and (not current_cat or (target_cat and current_cat != target_cat)):
+        item["category"] = category
+    if sub_category and (
+        not current_sub or (target_sub and current_sub != target_sub)
+    ):
+        item["sub_category"] = sub_category
+    item = _snap_class_from_text(item, blob)
+    return snap_product_taxonomy(item, taxonomy)
 
 
 def _slot_size_hint(slot: dict[str, Any]) -> str | None:
@@ -439,13 +791,14 @@ def _apply_slot_evidence_fields(
     *,
     group: dict[str, Any],
     slots: list[dict[str, Any]] | None = None,
+    taxonomy: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Bind per-slot size/unit/description from BOQ evidence and share parent specs.
 
     AI sometimes copies the first letter size onto later products, or fills only
     product 0 with shared PN / seat / IS attributes. This pass repairs those
-    using the section's authoritative slots + full description.
+    using the section's authoritative slots + owning ``product_context``.
     """
     if not products:
         return products
@@ -461,7 +814,6 @@ def _apply_slot_evidence_fields(
         or group.get("description")
         or ""
     )
-    section_pn = _parse_pn_capacity(section_text)
 
     filled: list[dict[str, Any]] = []
     for index, product in enumerate(products):
@@ -472,10 +824,11 @@ def _apply_slot_evidence_fields(
         if slot is None and index < len(rows):
             slot = rows[index]
 
+        product_context = str((slot or {}).get("product_context") or "").strip()
         if slot:
             slot_desc = str(slot.get("description") or "").strip()
             evidence = str(
-                slot.get("evidence_text") or slot_desc or section_text
+                slot.get("evidence_text") or product_context or slot_desc or section_text
             ).strip()
             size_hint = _slot_size_hint(slot)
             size_from_slot, unit_from_slot = _parse_size_from_text(
@@ -496,18 +849,27 @@ def _apply_slot_evidence_fields(
                 ):
                     item["unit"] = unit_from_slot
 
-        if section_pn:
+        # PN / capacity from owning sentence first (not whole chapter dump).
+        context_pn = _parse_pn_capacity(product_context) or _parse_pn_capacity(
+            str((slot or {}).get("evidence_text") or "")
+        )
+        if context_pn:
             current_cap = str(item.get("capacity") or "").strip()
             current_pn = _parse_pn_capacity(current_cap)
             if _is_blank_value(item.get("capacity")) or (
-                current_pn and current_pn != section_pn
+                current_pn and current_pn != context_pn
             ):
-                item["capacity"] = section_pn
+                item["capacity"] = context_pn
 
+        item = _snap_identity_from_product_context(
+            item,
+            product_context=product_context,
+            taxonomy=taxonomy,
+        )
         filled.append(normalize_product_fields(item, preserve_class=True))
 
     filled = _share_section_attributes(filled)
-    # Compose AI Description after size/capacity/attrs are final.
+    # Keep / repair AI Description after size/capacity/attrs + identity snap.
     finalized: list[dict[str, Any]] = []
     for index, product in enumerate(filled):
         item = dict(product)
@@ -516,10 +878,12 @@ def _apply_slot_evidence_fields(
         if slot is None and index < len(rows):
             slot = rows[index]
         slot_desc = str((slot or {}).get("description") or "").strip()
+        product_context = str((slot or {}).get("product_context") or "").strip()
         item["description_hint"] = _enrich_description_hint(
             item,
             section_text=section_text,
             slot_desc=slot_desc,
+            product_context=product_context,
         )
         finalized.append(item)
     return finalized
@@ -528,44 +892,49 @@ def _apply_slot_evidence_fields(
 def _share_section_attributes(
     products: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Copy shared parent attributes onto sibling products that are missing them."""
+    """Copy shared parent attributes only within the same category/sub family."""
     if len(products) < 2:
         return products
-    shared: dict[str, Any] = {}
-    for product in products:
-        attrs = coerce_attributes_dict(product.get("attributes"))
-        for key, value in attrs.items():
-            key_norm = str(key).strip().lower()
-            if key_norm not in _SHARED_SECTION_ATTR_KEYS:
-                continue
-            if _is_blank_value(value):
-                continue
-            if key_norm not in shared:
-                shared[key_norm] = value
-    if not shared:
-        return products
 
-    updated: list[dict[str, Any]] = []
-    for product in products:
-        item = dict(product)
-        attrs = coerce_attributes_dict(item.get("attributes"))
-        changed = False
-        for key, value in shared.items():
-            # Keep original key casing when already present; else use canonical key.
-            existing_key = next(
-                (
-                    candidate
-                    for candidate in attrs
-                    if str(candidate).strip().lower() == key
-                ),
-                key,
-            )
-            if _is_blank_value(attrs.get(existing_key)):
-                attrs[existing_key] = value
-                changed = True
-        if changed:
-            item["attributes"] = attrs
-        updated.append(item)
+    # Group by product family so pipe IS=1239 never lands on a sluice valve.
+    by_family: dict[tuple[str, str], list[int]] = {}
+    for index, product in enumerate(products):
+        by_family.setdefault(_family_key(product), []).append(index)
+
+    updated = [dict(product) for product in products]
+    for indexes in by_family.values():
+        if len(indexes) < 2:
+            continue
+        shared: dict[str, Any] = {}
+        for index in indexes:
+            attrs = coerce_attributes_dict(updated[index].get("attributes"))
+            for key, value in attrs.items():
+                key_norm = str(key).strip().lower()
+                if key_norm not in _SHARED_SECTION_ATTR_KEYS:
+                    continue
+                if _is_blank_value(value):
+                    continue
+                if key_norm not in shared:
+                    shared[key_norm] = value
+        if not shared:
+            continue
+        for index in indexes:
+            attrs = coerce_attributes_dict(updated[index].get("attributes"))
+            changed = False
+            for key, value in shared.items():
+                existing_key = next(
+                    (
+                        candidate
+                        for candidate in attrs
+                        if str(candidate).strip().lower() == key
+                    ),
+                    key,
+                )
+                if _is_blank_value(attrs.get(existing_key)):
+                    attrs[existing_key] = value
+                    changed = True
+            if changed:
+                updated[index]["attributes"] = attrs
     return updated
 
 
@@ -619,6 +988,7 @@ def _slot_fallback_product(
     """
     evidence = str(
         slot.get("evidence_text")
+        or slot.get("product_context")
         or slot.get("description")
         or group.get("full_description")
         or "Product from BOQ Unit/Qty row"
@@ -630,14 +1000,19 @@ def _slot_fallback_product(
     )
     if size_hint and not size:
         size = size_hint
-    capacity = _parse_pn_capacity(
+    product_context = str(slot.get("product_context") or "").strip()
+    capacity = _parse_pn_capacity(product_context) or _parse_pn_capacity(
         group.get("full_description") or group.get("description") or evidence
     )
     # Prefer a short synthetic understanding over dumping the raw qty row.
     section_text = str(
         group.get("full_description") or group.get("description") or ""
     )
-    noun = _section_product_noun(section_text) or _section_product_noun(evidence)
+    noun = (
+        _section_product_noun(product_context)
+        or _section_product_noun(evidence)
+        or _section_product_noun(section_text)
+    )
     size_phrase = ""
     if size:
         unit_label = size_unit or "mm"
@@ -670,6 +1045,10 @@ def _slot_fallback_product(
         "slot_fallback": True,
         "needs_extraction_review": True,
     }
+    product = _snap_identity_from_product_context(
+        product,
+        product_context=product_context,
+    )
     return _apply_one_qty(
         normalize_product_fields(product),
         qty=slot.get("qty"),

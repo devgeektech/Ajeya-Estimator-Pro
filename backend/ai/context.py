@@ -341,7 +341,11 @@ def snap_product_taxonomy(
     product: dict[str, Any],
     taxonomy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Snap product category/sub_category/class onto Rate_Master_Output labels."""
+    """Snap product category/sub_category/class onto Rate_Master_Output labels.
+
+    Invalid Category/Sub pairs (e.g. PIPE + EXTERNAL HYDRANT) are cleared and
+    Sub is re-resolved only within the Category's valid list.
+    """
     taxonomy = taxonomy or load_rate_master_taxonomy()
     categories = list(taxonomy.get("categories") or [])
     by_category = dict(taxonomy.get("sub_categories_by_category") or {})
@@ -363,7 +367,38 @@ def snap_product_taxonomy(
             sub_categories_by_category=by_category,
         )
         if resolved_sub:
-            item["sub_category"] = resolved_sub
+            # Only keep when the label is a valid pair for this category.
+            valid_subs = {
+                str(value).strip().upper()
+                for value in (by_category.get(category) or [])
+            }
+            if not category or not valid_subs or resolved_sub.upper() in valid_subs:
+                item["sub_category"] = resolved_sub
+            else:
+                item["sub_category"] = None
+        elif category and category in by_category:
+            # AI invented a sub that is not under this category — drop it.
+            item["sub_category"] = None
+        # else: keep raw only when taxonomy is empty (no active DB yet)
+
+    # Recover Sub from description / material words within the Category.
+    if category and not str(item.get("sub_category") or "").strip():
+        evidence = " ".join(
+            part
+            for part in (
+                str(item.get("description_hint") or "").strip(),
+                str(raw_sub or "").strip(),
+            )
+            if part
+        )
+        if evidence:
+            recovered = resolve_sub_category_label(
+                evidence,
+                category=category,
+                sub_categories_by_category=by_category,
+            )
+            if recovered:
+                item["sub_category"] = recovered
 
     sub_category = str(item.get("sub_category") or "").strip() or None
     raw_class = item.get("class")
@@ -476,12 +511,17 @@ def align_product_taxonomy_from_rate(
     taxonomy: dict[str, Any] | None = None,
     overwrite_core_fields: bool = False,
 ) -> dict[str, Any]:
-    """Set product taxonomy and core fields from a Rate_Master_Output row."""
+    """Set product taxonomy and core fields from a Rate_Master_Output row.
+
+    When ``overwrite_core_fields`` is False (Analyse default), only blank
+    Category/Sub/Class/Size/Unit/Capacity are filled — BOQ extract identity stays.
+    """
     item = align_product_taxonomy_from_db_labels(
         product,
         category=rate.Category,
         sub_category=rate.Sub_Category,
         taxonomy=taxonomy,
+        fill_blanks_only=not overwrite_core_fields,
     )
     return fill_product_core_fields_from_rate(
         item,

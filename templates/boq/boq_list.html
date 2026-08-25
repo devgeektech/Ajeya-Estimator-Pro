@@ -2,8 +2,21 @@
 {% block title %}BOQs &middot; Ajeya Estimator Pro{% endblock %}
 {% block heading %}BOQs{% endblock %}
 {% block topbar_actions %}
-<div class="topbar__actions">
-    <a href="{% url 'boq:upload' %}" class="btn btn--primary">Upload</a>
+<div
+    class="topbar__actions"
+    x-data="boqUploadNav({
+        statusUrl: '{% url 'boq:upload_status' %}',
+        initialBusy: {{ upload_busy|yesno:'true,false' }}
+    })"
+>
+    <a
+        href="{% url 'boq:upload' %}"
+        class="btn btn--primary"
+        :class="{ 'is-disabled': busy }"
+        :aria-disabled="busy"
+        @click="if (busy) { $event.preventDefault(); }"
+        x-text="busy ? 'Uploading…' : 'Upload'"
+    >{% if upload_busy %}Uploading…{% else %}Upload{% endif %}</a>
 </div>
 {% endblock %}
 
@@ -169,8 +182,44 @@ document.addEventListener('alpine:init', () => {
                 });
         },
     }));
+
+    Alpine.data('boqUploadNav', (cfg) => ({
+        statusUrl: cfg.statusUrl,
+        busy: !!cfg.initialBusy,
+        timer: null,
+        init() {
+            this.poll();
+            this.timer = setInterval(() => this.poll(), 2000);
+        },
+        destroy() {
+            if (this.timer) clearInterval(this.timer);
+        },
+        async poll() {
+            try {
+                const res = await fetch(this.statusUrl, {
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                    credentials: 'same-origin',
+                });
+                if (!res.ok) return;
+                const data = await res.json();
+                const wasBusy = this.busy;
+                this.busy = !!data.busy || data.status === 'processing';
+                if (wasBusy && !this.busy) {
+                    window.location.reload();
+                }
+            } catch (e) { /* keep last known */ }
+        },
+    }));
 });
 </script>
+<style>
+.btn.is-disabled,
+.btn[aria-disabled="true"] {
+    opacity: 0.6;
+    pointer-events: none;
+    cursor: not-allowed;
+}
+</style>
 
 <script>
 (function () {

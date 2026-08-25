@@ -29,21 +29,23 @@ CANDIDATE_LIMIT = 3
 # Wider pool for AI validation on initial Analyse / rematch (UI still shows 3).
 AI_CANDIDATE_LIMIT = 5
 
-# Size dominates when filled — wrong dia must not beat a correct size on soft cat/sub.
+# Sub_Category is nearest to product identity; Category next; size still gates
+# wrong dia but must not outrank a wrong family.
 _TEXT_WEIGHTS = {
-    "category": 22.0,
-    "sub_category": 18.0,
+    "sub_category": 30.0,
+    "category": 24.0,
     "class": 10.0,
-    "size": 28.0,
+    "size": 18.0,
     "unit": 5.0,
-    "capacity": 10.0,
-    "attributes": 14.0,
+    "capacity": 8.0,
+    "attributes": 12.0,
 }
 _CHROMA_WEIGHT = 0.25
 _STRUCTURED_WEIGHT = 0.75
 _SIZE_MISMATCH_PENALTY = 45.0
-# Soft penalty when description nouns disagree with catalog labels (not a hard 29% floor).
-_TYPE_MISMATCH_PENALTY = 35.0
+# Hard ceiling when description/family disagrees with the catalog row (below
+# MATCH_CONFIDENCE_THRESHOLD so wrong family cannot auto-confirm).
+_TYPE_MISMATCH_SCORE_CAP = 29.0
 # Distinct product phrases that share family tokens (e.g. "hose") but must not match.
 _CONFLICTING_PHRASE_PAIRS: tuple[tuple[str, str], ...] = (
     ("hose box", "hose reel"),
@@ -54,6 +56,32 @@ _CONFLICTING_PHRASE_PAIRS: tuple[tuple[str, str], ...] = (
     ("hose reel", "hose cabinet"),
     ("hose reel", "fire hose box"),
     ("hose reel", "fire hose cabinet"),
+    ("sluice valve", "pipe"),
+    ("butterfly valve", "pipe"),
+    ("ball valve", "pipe"),
+    ("non return valve", "pipe"),
+    ("check valve", "pipe"),
+)
+# Valve subtypes share the token "valve" — must not match across subtypes.
+_VALVE_SUBTYPE_GROUPS: tuple[tuple[str, ...], ...] = (
+    ("sluice", "sluice valve", "gate valve"),
+    ("butterfly", "butterfly valve", "bfv", "bf valve"),
+    ("ball", "ball valve"),
+    (
+        "non return",
+        "non-return",
+        "non return valve",
+        "check valve",
+        "nrv",
+        "nr valve",
+        "reflux",
+        "reflux valve",
+        "reflux type",
+        "reflex",
+        "reflex valve",
+    ),
+    ("air release", "air relief", "air valve", "arv"),
+    ("y strainer", "y-strainer", "y type strainer"),
 )
 # Class ``0`` is a real Rate_Master token (valves). Only wipe non-class junk.
 _PLACEHOLDER_CLASS = frozenset({"-", "--", "n/a", "na", "none", "null", "nil"})
@@ -170,12 +198,25 @@ def _significant_type_tokens(value: Any) -> set[str]:
     return tokens
 
 
+def _valve_subtype(text: Any) -> str | None:
+    """Canonical valve subtype from free text / catalog labels, or None."""
+    norm = _normalize_text(text)
+    if not norm:
+        return None
+    for group in _VALVE_SUBTYPE_GROUPS:
+        for phrase in group:
+            if phrase in norm:
+                return group[0]
+    return None
+
+
 def product_type_conflicts(extracted: dict[str, Any], rate: Rate_Master_Output) -> bool:
     """True when BOQ wording names a different product family than the catalog row.
 
     Compares description nouns to Category + Sub_Category + Class (not Sub alone).
-    Otherwise ``80mm pipe`` vs Sub_Category ``MS`` looked like a conflict and every
-    correct PIPE match was hard-capped at 29%.
+    ``description_hint`` / AI understanding wins: agreeing Category fields alone
+    must not clear a conflict (PIPE extract + ``sluice valve`` hint vs PIPE row).
+    Valve subtypes that share ``valve`` (butterfly vs sluice vs NRV) also conflict.
     """
     hint = extracted.get("description_hint")
     catalog_blob = " ".join(
@@ -194,6 +235,11 @@ def product_type_conflicts(extracted: dict[str, Any], rate: Rate_Master_Output) 
             if phrase_b in left_text and phrase_a in right_text:
                 return True
 
+    left_valve = _valve_subtype(extract_blob)
+    right_valve = _valve_subtype(catalog_blob)
+    if left_valve and right_valve and left_valve != right_valve:
+        return True
+
     hint_tokens = _significant_type_tokens(hint)
     if not hint_tokens:
         return False
@@ -205,12 +251,7 @@ def product_type_conflicts(extracted: dict[str, Any], rate: Rate_Master_Output) 
         return False
     if hint_tokens & catalog_tokens:
         return False
-
-    # Filled extract taxonomy that already agrees with the row is not a conflict.
-    if _text_match_score(extracted.get("category"), rate.Category) >= 0.75:
-        return False
-    if _text_match_score(extracted.get("sub_category"), rate.Sub_Category) >= 0.75:
-        return False
+    # Hint names a family absent from catalog labels (sluice/valve vs PIPE/GI).
     return True
 
 
@@ -399,9 +440,9 @@ def structured_match_score(
         total = max(0.0, total - _SIZE_MISMATCH_PENALTY)
         breakdown["size_mismatch_penalty"] = _SIZE_MISMATCH_PENALTY
 
-    # Soft type penalty — keep related family matches usable (no rigid 29% floor).
+    # Hard family gate: wrong product type cannot clear the match threshold.
     if product_type_conflicts(extracted, rate):
-        total = max(0.0, total - _TYPE_MISMATCH_PENALTY)
+        total = min(total, _TYPE_MISMATCH_SCORE_CAP)
         breakdown["description_type_mismatch"] = True
 
     return total, breakdown
@@ -409,13 +450,14 @@ def structured_match_score(
 def build_match_query_text(extracted: dict[str, Any]) -> str:
     """Build Chroma query text from filled product properties only (no make/vendor).
 
-    Default: structured fields first so category/sub/size outweigh incidental nouns
-    in a long description_hint.
+    Default: ``description_hint`` (AI Description) leads so search uses the
+    understood product line. Structured fields follow for SQL/Chroma filters.
 
-    Re-analyse with an edited description_hint sets ``_hint_first_recall`` so the
-    hint leads the query and stale taxonomy cannot dominate recall.
+    Re-analyse with an edited description_hint also sets ``_hint_first_recall``.
     """
-    hint_first = bool(extracted.get("_hint_first_recall"))
+    hint_first = bool(extracted.get("_hint_first_recall")) or bool(
+        str(extracted.get("description_hint") or "").strip()
+    )
     hint = str(extracted.get("description_hint") or "").strip()
     parts: list[str] = []
 
@@ -433,16 +475,12 @@ def build_match_query_text(extracted: dict[str, Any]) -> str:
 
     if hint_first and hint:
         _append_field("description_hint")
-        for key in ("size", "unit", "capacity", "class"):
-            _append_field(key)
-        # Stale category/sub from a wrong prior match stay last (or skipped when
-        # the hint already names the product family).
-        for key in ("category", "sub_category"):
+        for key in ("sub_category", "category", "class", "size", "unit", "capacity"):
             _append_field(key)
     else:
         for key in (
-            "category",
             "sub_category",
+            "category",
             "class",
             "size",
             "unit",
@@ -681,6 +719,10 @@ class ProductMatchingService:
                 confidence = min(100.0, confidence + 12.0)
             elif hint_boost >= 0.7:
                 confidence = min(100.0, confidence + 6.0)
+            # Wrong family/subtype cannot rise above the match floor via Chroma.
+            type_mismatch = product_type_conflicts(extracted, rate)
+            if type_mismatch:
+                confidence = min(confidence, _TYPE_MISMATCH_SCORE_CAP)
             candidates.append(
                 {
                     "rate_master_id": rate.pk,
@@ -695,6 +737,7 @@ class ProductMatchingService:
                     "score_breakdown": breakdown,
                     "selection_amount": float(selection_amount(rate)),
                     "rate": rate,
+                    "type_mismatch": type_mismatch,
                 }
             )
 
@@ -735,12 +778,19 @@ class ProductMatchingService:
         if prefer_lowest_price and candidates:
             candidates.sort(
                 key=lambda item: (
+                    1 if item.get("type_mismatch") else 0,
                     float(item.get("selection_amount") or 0.0),
                     -float(item.get("confidence") or 0.0),
                 )
             )
         else:
-            candidates.sort(key=lambda item: item["confidence"], reverse=True)
+            # Same family/subtype first, then confidence — wrong-family size twins last.
+            candidates.sort(
+                key=lambda item: (
+                    1 if item.get("type_mismatch") else 0,
+                    -float(item.get("confidence") or 0.0),
+                )
+            )
 
         best = candidates[0] if candidates else None
         confidence = best["confidence"] if best else 0.0

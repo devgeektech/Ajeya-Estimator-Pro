@@ -69,7 +69,13 @@ class ProductIdDisplayTests(SimpleTestCase):
                 {
                     "row_id": "r1",
                     "products": [
-                        {"catalog_product_id": "6", "db_product_id": 1},
+                        {
+                            "catalog_product_id": "6",
+                            "db_product_id": 1,
+                            "db_match_status": "matched",
+                            "db_match_confidence": 96.0,
+                            "ai_mapping": {"selection_source": "ai"},
+                        },
                         {"description_hint": "blank"},
                     ],
                 },

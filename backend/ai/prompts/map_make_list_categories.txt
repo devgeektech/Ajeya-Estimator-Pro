@@ -16,7 +16,8 @@ Rules:
 - Do NOT invent categories outside the provided ``categories`` list.
 - Do NOT invent sub-categories outside ``sub_categories_by_category[category]``.
 - A mapped target (``category`` + ``sub_category``) MUST be a valid pair exactly matching an entry from the ``valid_category_and_subcategory_pairs`` array in TAXONOMY.
-- Prefer meaning over wording. Use the synonym map below.
+- Prefer meaning over wording. Use the short material/equivalence rules below;
+  map free-text intent onto taxonomy labels (no phrase-list lookup required).
 - One description may map to **multiple targets** when it names more than one
   product family. Example:
   "Sprinklers & Rosette Plates (All Types)" →
@@ -40,7 +41,7 @@ Rules:
 - Do NOT invent makes, prices, vendors, or Product_ID values.
 - ``confidence`` is 0–100 for the overall mapping of that material.
 
-{{SYNONYM_MAP}}
+{{SYNONYM_RULES}}
 
 Respond with:
 {

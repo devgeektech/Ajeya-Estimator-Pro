@@ -3,68 +3,65 @@ You extract purchasable products from BOQ sections (fire protection / MEP).
 Return valid JSON only. Prefer null over guessing. No prices, vendors, or invented catalog rows.
 
 STEP 1 — UNDERSTAND THE SECTION (read everything before extracting):
-- ``description`` / ``lineage_lines`` tell you WHAT SYSTEM this section covers
-  (e.g. "Yard Hydrant System", "Sprinkler System for Basement").
-  These are CONTEXT — never a product by themselves.
-- ``slots`` are the individual rows with Quantity + Unit — these are the ONLY
-  source of products. Read every slot's description AND unit together.
-- Spec-only lines (Speed, Head, Pressure, IS standard, notes) are shared
-  attributes — apply them to the relevant slot products.
+- Read ``description`` / ``lineage_lines`` / ``slots[].product_context`` first.
+  Decide WHAT is being purchased (pipe, valve, sprinkler head, pump, …).
+- Chapter titles (``SPRINKLER SYSTEM``, ``HYDRANT SYSTEM``, ``External Hydrant
+  System``) are CONTEXT only — never Category, Sub_Category, or the AI
+  Description noun by themselves.
+- ``slots[].product_context`` is the owning supply sentence. Product family MUST
+  come from that sentence + the slot.
+  Examples:
+  - ``pipework for External Hydrant System`` + ``G.I. pipe`` + ``a) 150 mm dia``
+    → PIPE / GI (never PIPE / EXTERNAL HYDRANT — that pair is invalid)
+  - ``pipework for Sprinkler System`` + ``g) 65 mm dia pipe`` → PIPE (not SPRINKLER)
+  - ``Cast Iron sluice valve`` + ``a) 250 mm dia`` → VALVE / SLUICE VALVE (not PIPE)
+- Size-only slots inherit the product from ``product_context``.
+- Spec-only lines (Speed, Head, PN, IS) are shared attributes within that family only.
 
 STEP 2 — CLASSIFY EACH SLOT (product vs. non-product):
-For each slot, ask: "Is this a PHYSICAL ITEM that can be purchased/procured?"
+Extract as PRODUCT when the slot is a PHYSICAL ITEM to buy (pipes, valves,
+sprinkler heads, pumps, hydrants, tanks, gauges, hose reels/boxes, panels, …).
 
-Extract as PRODUCT when the slot describes:
-- Equipment: pumps, valves, sprinklers, extinguishers, tanks, gauges, panels
-- Materials: pipes, fittings, hose reels, hose boxes, branch pipes, cables
-- Hardware: hydrants, nozzles, expansion joints, rosette plates
+Mark NON-PRODUCT (``skip_matching: true``, ``products: []``) for labour/activity/
+Job/LS/testing/commissioning/documentation lines.
 
-Mark as NON-PRODUCT (``skip_matching: true``, ``products: []``) when:
-- The row describes WORK/LABOUR/ACTIVITY, not a thing to buy.
-- Unit is "Job" / "LS" / "Lump Sum" / "Lot" AND description is an activity.
-- Description talks about: testing, commissioning, dismantling, removing,
-  refixing, painting, site preparation, shop drawings, hydraulic calculations,
-  approvals, documentation, as-built drawings, insurance, transportation, making connections, etc.
-- IMPORTANT: Even if the row has a quantity (like 1) and unit (like NOS, Set), if the description is primarily about a job/activity (like "installation of..."), MARK AS NON-PRODUCT. Do not extract the item being worked on as a product if this is just an installation line.
+STEP 3 — EXTRACT (identity first, then specs):
 
-When unsure: if you cannot identify a specific purchasable product category
-from the DATABASE_CONTEXT, set ``skip_matching: true``.
+Priority order for every product:
+1. **Category + Sub_Category** (highest weight) — map BOQ meaning onto exact
+   ``valid_category_and_subcategory_pairs`` in DATABASE_CONTEXT. Sub_Category is
+   nearest to the product name (MS, GI, SLUICE VALVE, PENDANT, …).
+   ONLY use pairs listed in DATABASE_CONTEXT. Never invent cross pairs such as
+   PIPE + EXTERNAL HYDRANT (EXTERNAL HYDRANT belongs under HYDRANT only).
+   System titles are not Sub_Category.
+2. **Class** (Heavy Class → listed Class such as ``C`` when present).
+3. **Size / Unit / Capacity** from that slot.
+4. **Attributes** only from ``attribute_keys``.
 
-STEP 3 — EXTRACT PRODUCTS from product slots:
+Binding:
+- Exactly one product per Unit/Qty slot (rare exception: one slot mandates two buys).
+- Set ``qty_row_id``, ``source_row_id``, ``slot_index``, ``quantity``, ``quantity_unit``.
 
-Binding & Product Count:
-- STRICT RULE: You must extract EXACTLY one product per rate/quantity slot.
-- In multi-slot sections (e.g., 3 or 4 rows with quantities), do NOT hallucinate or extract more products than there are slots.
-- Extract multiple products for a single slot ONLY if that single slot explicitly mandates purchasing multiple distinct items (e.g. "Sluice valve with Y strainer as one set"). This should be very rare.
-- Always set ``qty_row_id``, ``source_row_id``, ``slot_index`` from that slot.
-- ``quantity`` / ``quantity_unit`` from the slot (keep 0; Rate Only / RO → ``"Rate Only"``).
-- Size/unit from that slot only. Shared parent specs (PN, flanged, IS, material)
-  on every product in the section.
+``description_hint`` — REQUIRED AI Description (search key, max ~400 chars):
+- Write plain English that includes **Category, Sub_Category, Class, Size, Unit,
+  Capacity** (skip only truly unknown fields). This text is used to search the
+  database — it must identify the product family clearly.
+- Good: ``class C MS pipe (PIPE), 65 mm dia``
+- Good: ``Cast Iron sluice valve (VALVE / SLUICE VALVE), 250 mm dia, as per IS:14846``
+- Bad: ``65mm dia SPRINKLER`` (system title, not the pipe being bought)
+- Bad: ``200mm`` or size-only / chapter-title-only text
+- Prefer purchasable naming from ``product_context`` over BOQ boilerplate
+  ("providing and fixing…", "complete with bolts…").
 
-``description_hint`` — REQUIRED AI Description (one natural-language line, max ~200 chars):
-- Write plain English, NOT a slash-separated field dump.
-- Mention what is known: Class/material, Sub-category, Category, Size + Unit,
-  Capacity, and key attributes (IS, Type, Material, connection, etc.).
-  Example: ``SS branch pipe for hydrant, 20 mm dia, with is standard 903, type short branch pipe``
-  Example: ``ductile iron sluice valve, 200 mm dia, PN16, flanged ends``
-- Skip only fields that are truly unknown/null (do not invent).
-- This text is shown to the expert as **AI Description** so they can correct it.
-- NEVER paste the raw Unit/Qty row text alone (size-only lines, "as above", blanks).
-- NEVER paste the system/section title alone (e.g. not "Yard Hydrant System").
-- NEVER dump the full multi-line section. One clear product line only.
-- Prefer catalog-style naming (what would be bought) over BOQ boilerplate
-  ("providing and fixing…", "of approved make").
+Taxonomy:
+- ``category`` + ``sub_category`` required; exact DATABASE_CONTEXT pair labels.
+- ``class`` = exact listed label (``0`` valid for valves).
+- Electrical / MCC panels are never ACCESSORIES / ROSETTEE PLATE.
 
-Taxonomy (use DATABASE_CONTEXT exact labels):
-- ``category`` + ``sub_category`` required when a product exists. They MUST be a valid pair exactly matching an entry from the ``valid_category_and_subcategory_pairs`` array in DATABASE_CONTEXT.
-- Use the SYNONYM_MAP below to identify products: if BOQ text matches ANY synonym
-  for a Category > Sub-category, use that exact Category and Sub-category.
-- ``class`` = exact listed label (``0`` valid for valves). Body material → ``attributes.material`` when Class is ``0``.
-- Electrical / MCC / control panels are never ACCESSORIES / ROSETTEE PLATE.
+Fields: ``size``, ``unit`` (mm/NB — not qty UOM), ``capacity``, ``make_hint`` only
+if brand stated, ``attributes`` only from ``attribute_keys``.
 
-Fields: ``size``, ``unit`` (mm/NB — not qty UOM), ``capacity``, ``make_hint`` only if brand stated, ``attributes`` only from ``attribute_keys``.
-
-{{SYNONYM_MAP}}
+{{SYNONYM_RULES}}
 
 Database context:
 {{DATABASE_CONTEXT}}
@@ -78,17 +75,17 @@ Respond with:
       "products": [
         {
           "product_index": 0,
-          "description_hint": "ductile iron sluice valve, 200 mm dia, PN16, flanged connection",
-          "category": "VALVE",
-          "sub_category": "SLUICE VALVE",
-          "class": "0",
-          "size": "200",
-          "capacity": "PN16",
+          "description_hint": "class C MS pipe (PIPE), 65 mm dia",
+          "category": "PIPE",
+          "sub_category": "MS",
+          "class": "C",
+          "size": "65",
+          "capacity": null,
           "unit": "mm",
           "make_hint": null,
-          "attributes": {"connection_type": "flanged", "material": "ductile iron"},
-          "quantity": 9,
-          "quantity_unit": "Each",
+          "attributes": {},
+          "quantity": 10,
+          "quantity_unit": "M",
           "qty_row_id": "r17",
           "source_row_id": "r17",
           "slot_index": 0,

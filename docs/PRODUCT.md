@@ -102,6 +102,9 @@ Upload BOQ (+ optional make list) → parse to JSON → store files + hierarchy
 - **Requires an active master database.** If none is active, upload is blocked
   (service raises validation error; upload form shows a warning and disables
   submit) until a database is uploaded and activated.
+- While a BOQ upload is in progress for the user, the BOQs list **Upload**
+  button shows **Uploading…**, is greyed out, and polls `/boqs/upload/status/`
+  (same pattern as database import). Concurrent uploads for that user are refused.
 - BOQ workbook: `.xlsx` / `.xlsm` / `.xls` (legacy `.xls` is converted to
   `.xlsx` on upload via `XlsUploadConversionService`, then parsed with openpyxl)
 - Make list: `.xlsx`, `.xlsm`, `.xls`, or `.pdf` (same `.xls` conversion)
@@ -178,10 +181,12 @@ Upload BOQ (+ optional make list) → parse to JSON → store files + hierarchy
   (no per-product N+1).
 - Attribute value synonyms (e.g. MS→mild steel, DI→ductile iron) are applied during
   Analyse attribute comparison via `utils/attribute_parser.py`.
-- Product/material synonym map lives in `utils/product_synonyms.py` (materials +
-  phrases such as NRV/Reflex Valve/check valve). The same map is injected into
-  AI prompts (`extract_products`, `map_product_match`, `map_make_list_categories`)
-  via ``{{SYNONYM_MAP}}`` so extraction and matching share one source of truth.
+- Product/material synonym catalog lives in `utils/product_synonyms.py` (materials +
+  phrases such as NRV/Reflex Valve/check valve). It is used **in code** for
+  structured scoring, Chroma/SQL recall expansion, post-extract noun snap, and
+  make-list soft heuristics — not dumped into AI prompts. AI prompts receive
+  short meaning-first rules via ``{{SYNONYM_RULES}}`` (material abbreviations +
+  “understand BOQ requirement; do not match by shared words alone”).
 
 Entry point: `BOQCreationService` in `apps/boq/services/boq_service.py`.
 
@@ -208,6 +213,31 @@ Step 4 — Review:        (material + labour) × quantity → Export Excel
 - Products keep `quantity`, `quantity_unit`, `qty_row_id`, `slot_index`, `rate_only`
   in `analysis_data` through Make & Vendor → Labour → Review.
 - Empty sections with qty slots stay visible: **+ Add product** and **Re-analyse with AI**.
+- **AI extract payload:** OpenAI is called per **actionable section group**, not
+  per Excel row. Each call sends the full section (`description` + `lineage_lines`
+  from the parent and related rows) plus every Unit/Qty **slot** (qty, unit,
+  size hint, rate-only / BOQ rate, and ``product_context`` — the nearest owning
+  supply sentence for that slot’s product family). Size-only slots inherit
+  category/sub from ``product_context``, not the chapter title alone.
+  Multi-slot sections are extracted **one section per OpenAI call** so families
+  do not leak across packages. Title-only chapter rows and lineage children
+  are not separate extract calls. After extract, code snaps category/sub/class
+  from ``product_context`` when AI drifts (including Heavy Class → ``C``), builds
+  **AI Description** as a search-ready identity line naming Category /
+  Sub_Category / Class / Size / Unit / Capacity (never size-only or chapter
+  titles like ``65mm dia SPRINKLER`` for pipework), and shares IS/PN only within
+  the same category/sub family. Extract and match weight **Sub_Category then
+  Category** above size. Chroma recall leads with AI Description. Matching
+  rejects Rate_Master rows whose family conflicts with AI Description and scores
+  confidence from **extract fields vs catalog** — Analysis UI keeps BOQ-extracted
+  Category/Sub/Class/Size (not Rate_Master overwrite on Analyse). Wrong family or
+  valve subtype (sluice ≠ butterfly ≠ non-return/reflux) is hard-capped below the
+  match threshold; AI “no suitable candidate” notes leave the product **unmatched**
+  instead of confirming a size twin at 100%. Top candidates prefer the same
+  category/sub family. Category/Sub must be a valid Rate_Master pair (pipework +
+  G.I. pipe → PIPE/GI, never PIPE/EXTERNAL HYDRANT). **Product Id** auto-fills
+  only when match % is orange/green (≥90%); red tabs show candidates only until
+  expert Select or a strong rematch.
 - **Job Only:** empty-product sections with Unit ``Job`` (AI default), or any
   section after the expert removes every product. **+ Add product** clears Job
   Only and shows the product form. Removing the last product marks Job Only
@@ -278,26 +308,26 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
   3. **AI mapping layer** (`ProductAIMappingService`) selects the best candidate when
      blended confidence ≥ 30%; otherwise status is `provisional` (schema for
      gap-fill, no confirmed `db_product_id` / Product_ID) or `unmatched`
-  4. After a confirmed match with confidence **≥ 50%**, **category / sub_category /
-     class / size / unit / capacity are filled from the matched Rate_Master row**
-     into the Analysis UI columns (so experts see the fetched product details).
-     When confidence is **below 50%**, those inputs (and Attribute values) stay
-     **empty** for expert fill or candidate Select; a warning explains that no
-     confident match was found and points to the top **3** selectable database
-     candidates (or manual entry + Re-analyse). The suggestion banner and top
-     candidates remain visible. Attributes from BOQ evidence still map onto the
-     DB schema when confidence is ≥ 50%.
+  4. Analysis UI **Category / Sub_Category / Class / Size / Unit / Capacity** and
+     **Attribute** values stay as **BOQ-extracted** (mapped onto Rate_Master
+     taxonomy / schema) whenever AI found them — including low-confidence /
+     provisional matches — so experts do not retype extract evidence. Match
+     confidence compares those extract fields to the selected Rate_Master row —
+     Analyse does **not** overwrite core fields from the match. When confidence
+     is **below 50%**, a warning points to the top **3** selectable database
+     candidates; empty Attribute keys remain blank only when not found in the
+     BOQ. **Select candidate** still loads Rate_Master details into the UI when
+     the expert confirms a row.
   5. Attribute UI uses the selected candidate’s Attribute schema; values are filled
-     only from BOQ-extracted evidence the AI can map (empty keys stay blank for experts)
+     from BOQ-extracted evidence the AI can map (keys with no evidence stay blank)
   6. If the wrong product was picked, the reviewer edits fields/attributes (blank
      or wrong columns, including **AI Description** / ``description_hint``) and
-     clicks **Re-analyse** on **that product**. AI Description is composed as
-     ``Category / Sub-category / Class / Size / Unit / Capacity`` plus key
-     attributes (IS, Type, Material, …). Experts may rewrite it in plain language
-     for rematch; rematch uses that text first plus the **full BOQ section**,
-     refreshes database candidates, and AI picks the best Rate_Master neighbor
-     (`rematch_product`). System titles (e.g. Yard Hydrant System) must not
-     override slot products (pipe/valve).
+     clicks **Re-analyse** on **that product**. AI Description must name
+     Category / Sub-category / Class / Size / Unit / Capacity in plain language
+     and is the primary DB search key. Experts may rewrite it; rematch uses that
+     text first plus the **full BOQ section**, refreshes database candidates, and
+     AI picks the best Rate_Master neighbor (`rematch_product`). Chapter titles
+     (e.g. Sprinkler System) must not override slot products (pipe/valve).
      Expert-filled inputs (including Class ``0``) are kept; one-product rematch
      does not change sibling products. Empty sections with no products still
      **re-extract** from the workbook.
@@ -503,7 +533,8 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
 Poll `GET /boqs/<id>/status/?expect=extract` while `PROCESSING`.
 
 **Output:** `media/extract_json/{boq_name}/boq_analysis.json` plus `BOQ.analysis_data`
-JSONField (`phase`: `extracted`).
+JSONField (`phase`: `extracted`). Stats are `rows_total` / `rows_skipped` /
+`products_total` only. Empty `activities` lists and `product_matches` are not stored.
 
 **Services:**
 

@@ -31,7 +31,32 @@ from apps.boq.services.product_attribute_enrichment_service import (
 from apps.boq.services.product_matching_service import structured_match_score
 from apps.database_manager.models import Rate_Master_Output
 from common.constants import ANALYSIS_INPUT_FILL_CONFIDENCE
-from utils.attribute_parser import coerce_attributes_dict
+from utils.attribute_parser import coerce_attributes_dict, normalize_attribute_key
+
+
+def _attribute_value_for_schema_key(
+    attrs: dict[str, Any],
+    schema_key: str,
+) -> Any:
+    """Resolve a stored attribute for a Rate_Master schema key.
+
+    Coercion may rename keys (``PN`` → ``pressure_rating``) while the schema
+    still uses the catalog label — match either form so AI-found values show.
+    """
+    if not schema_key:
+        return None
+    if schema_key in attrs and not _is_blank(attrs.get(schema_key)):
+        return attrs.get(schema_key)
+    key_l = str(schema_key).strip().lower()
+    for raw_key, value in attrs.items():
+        if str(raw_key).strip().lower() == key_l and not _is_blank(value):
+            return value
+    wanted = normalize_attribute_key(schema_key)
+    if wanted:
+        for raw_key, value in attrs.items():
+            if normalize_attribute_key(str(raw_key)) == wanted and not _is_blank(value):
+                return value
+    return None
 
 
 def _candidate_confidence_value(raw: Any) -> float | None:
@@ -254,16 +279,18 @@ def _shape_attribute_fields(product: dict[str, Any]) -> dict[str, Any]:
     ]
 
     # Needed DB schema attributes only — never show free-form additional attributes.
-    fields = [
-        {
-            "key": key,
-            "label": _attribute_label(key),
-            "value": "" if attrs.get(key) is None else str(attrs.get(key)),
-            "filled": not _is_blank(attrs.get(key)),
-            "removable": False,
-        }
-        for key in schema_keys
-    ]
+    fields = []
+    for key in schema_keys:
+        value = _attribute_value_for_schema_key(attrs, key)
+        fields.append(
+            {
+                "key": key,
+                "label": _attribute_label(key),
+                "value": "" if value is None else str(value),
+                "filled": not _is_blank(value),
+                "removable": False,
+            }
+        )
 
     confidence = product.get("attribute_confidence")
     if confidence is None:
@@ -373,12 +400,12 @@ def _shape_product(
 
     # Weak banner only when effective % is below the Analysis fill threshold.
     # A 68% top candidate must not show "Unable to match…".
-    blank_inputs = (
+    # Identity fields and Attribute values stay prefilled from extract when found.
+    unable_to_match = (
         selection_source != "expert"
         and match_percentage < fill_threshold
         and not product.get("db_product_id")
     )
-    unable_to_match = blank_inputs
 
     # Unmatched with no stored neighbors — recall live so Select is available.
     if unable_to_match and not candidates:
@@ -398,12 +425,11 @@ def _shape_product(
         if top_candidate_pct > match_percentage:
             match_percentage = top_candidate_pct
             match_band = match_percentage_band(match_percentage)
-            blank_inputs = (
+            unable_to_match = (
                 selection_source != "expert"
                 and match_percentage < fill_threshold
                 and not product.get("db_product_id")
             )
-            unable_to_match = blank_inputs
 
     fields: list[dict[str, Any]] = []
     missing_count = 0
@@ -420,8 +446,6 @@ def _shape_product(
                 }
             )
         value = product.get(key)
-        if blank_inputs and key != "description_hint":
-            value = None
         missing = _is_blank(value) and key in _REQUIRED_FIELDS
         if missing:
             missing_count += 1
@@ -435,8 +459,7 @@ def _shape_product(
             }
         )
 
-    attr_source = {**product, "attributes": {}} if blank_inputs else product
-    attribute_fields = _shape_attribute_fields(attr_source)
+    attribute_fields = _shape_attribute_fields(product)
     missing_attr_keys = [
         str(key)
         for key in (product.get("missing_attribute_keys") or [])
@@ -852,7 +875,6 @@ class BOQExtractionDisplayService:
                     "is_activity_only": is_activity_only,
                     "needs_product": product_total == 0 and qty_row_count > 0,
                     "products": shaped_products,
-                    "activities": [],
                     "confidence_border": confidence_border,
                     "make_list": _shape_make_list(
                         full_description=group.get("full_description") or "",
@@ -871,7 +893,6 @@ class BOQExtractionDisplayService:
             "phase": analysis.get("phase"),
             "stats": stats,
             "product_count": product_count,
-            "activity_count": 0,
             "missing_field_count": missing_field_count,
             "missing_product_id_count": count_missing_loaded_product_ids(analysis),
             "multiproduct_review_count": multiproduct_review_count,

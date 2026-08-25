@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from ai.context import (
@@ -31,18 +32,21 @@ from apps.boq.services.product_ai_common import (
     _should_blank_weak_match_inputs,
     _slim_candidate,
 )
-from apps.boq.services.product_matching_service import structured_match_score
+from apps.boq.services.product_matching_service import (
+    product_type_conflicts,
+    structured_match_score,
+)
 from apps.database_manager.models import Rate_Master_Output
 from common.constants import (
-    ANALYSIS_INPUT_FILL_CONFIDENCE,
     MATCH_CONFIDENCE_THRESHOLD,
+    PRODUCT_ID_CONFIRM_CONFIDENCE,
 )
 from utils.attribute_parser import (
     coerce_attributes_dict,
     normalize_attribute_key,
     parse_attributes,
 )
-from utils.product_synonyms import format_synonym_map_for_ai
+from utils.product_synonyms import format_synonym_rules_for_ai
 
 from .product_attribute_enrichment_service import (
     compute_attribute_confidence,
@@ -50,6 +54,19 @@ from .product_attribute_enrichment_service import (
 )
 
 logger = logging.getLogger("boq_ai")
+
+_AI_NO_MATCH_NOTES = re.compile(
+    r"(?i)\b("
+    r"no suitable candidate|no matching product|no candidate|"
+    r"not (?:found|available|present) in (?:the )?database|"
+    r"product not (?:found|available)|no match"
+    r")\b"
+)
+
+
+def _ai_notes_reject_match(notes: str) -> bool:
+    """True when the mapping model explicitly said no DB product fits."""
+    return bool(_AI_NO_MATCH_NOTES.search(str(notes or "")))
 
 
 class ProductAIApplyMixin:
@@ -122,8 +139,8 @@ class ProductAIApplyMixin:
             if not payload:
                 continue
             prompt = template.replace(
-                "{{SYNONYM_MAP}}",
-                format_synonym_map_for_ai(),
+                "{{SYNONYM_RULES}}",
+                format_synonym_rules_for_ai(),
             ).replace(
                 "{{PRODUCTS_PAYLOAD}}",
                 json.dumps(payload, ensure_ascii=False, default=str),
@@ -178,6 +195,13 @@ class ProductAIApplyMixin:
                 ai_confidence = None
             notes = str(ai_result.get("notes") or "").strip()
 
+        # AI sometimes returns a selected_id together with "no suitable candidate"
+        # notes — treat that as an explicit reject, not a confirmation.
+        if _ai_notes_reject_match(notes):
+            selected_id = None
+            if ai_confidence is None or ai_confidence > 0:
+                ai_confidence = 0.0
+
         # Re-score every candidate against current filled fields so listed % is honest.
         product_for_score = dict(enriched)
         product_for_score["make_hint"] = None
@@ -231,12 +255,22 @@ class ProductAIApplyMixin:
                 seen_ids.add(selected_id)
 
         rescored.sort(
-            key=lambda row: float(row.get("confidence") or 0.0),
-            reverse=True,
+            key=lambda row: (
+                1
+                if (
+                    rate_map.get(int(row.get("id") or 0)) is not None
+                    and product_type_conflicts(
+                        enriched, rate_map[int(row.get("id") or 0)]
+                    )
+                )
+                else 0,
+                -float(row.get("confidence") or 0.0),
+            )
         )
         if selected_id is not None:
             head = [item for item in rescored if int(item.get("id") or 0) == selected_id]
             tail = [item for item in rescored if int(item.get("id") or 0) != selected_id]
+            # Keep AI pick visible, but list non-conflicting neighbors first after it.
             candidates = (head + tail)[:_CANDIDATE_LIMIT]
         else:
             candidates = rescored[:_CANDIDATE_LIMIT]
@@ -251,7 +285,9 @@ class ProductAIApplyMixin:
 
         # Never invent a product. Prefer AI selection; otherwise pick the best
         # structured neighbor when filled fields already look plausible.
-        if selected_id is None and candidates:
+        # If AI already said no suitable candidate, do not auto-confirm a
+        # wrong-family size twin — only a non-conflicting row may still win.
+        if selected_id is None and candidates and not _ai_notes_reject_match(notes):
             top = candidates[0]
             try:
                 top_structured = float(top.get("confidence") or 0.0)
@@ -267,12 +303,26 @@ class ProductAIApplyMixin:
                     structured, _ = structured_match_score(enriched, top_rate)
                     if structured >= MATCH_CONFIDENCE_THRESHOLD:
                         selected_id = int(top["id"])
+
+        # Reject catalog rows whose family conflicts with AI understanding
+        # (e.g. sluice valve hint vs PIPE/GI size twin). Try next candidates.
+        selected_id = self._first_non_conflicting_rate_id(
+            selected_id,
+            enriched=enriched,
+            candidates=candidates,
+            rate_map=rate_map,
+            rematch=rematch,
+        )
         if selected_id is None:
+            unmatched_notes = notes.strip() if _ai_notes_reject_match(notes) else (
+                notes
+                or "No matching product found in database for this BOQ identity."
+            )
             return self._fallback_without_match(
                 enriched,
                 extracted_attrs,
                 candidates=slim_candidates,
-                notes=notes or "No Rate_Master_Output candidate selected.",
+                notes=unmatched_notes,
             )
 
         snapshot = candidate_by_id.get(selected_id)
@@ -286,6 +336,13 @@ class ProductAIApplyMixin:
                 extracted_attrs,
                 candidates=slim_candidates,
                 notes="Selected Rate_Master_Output row not found.",
+            )
+        if product_type_conflicts(enriched, rate):
+            return self._fallback_without_match(
+                enriched,
+                extracted_attrs,
+                candidates=slim_candidates,
+                notes="No matching product found for AI Description identity.",
             )
 
         schema_keys = list(
@@ -344,9 +401,12 @@ class ProductAIApplyMixin:
         # Selected / suggested product first so Analysis UI shows the best pick on top.
         slim_candidates = _prefer_candidate_first(slim_candidates, rate.pk)
 
-        # Confirm only when blended confidence clears the threshold — never stamp
-        # Product identity from a weak / unrelated candidate.
-        if confidence < MATCH_CONFIDENCE_THRESHOLD:
+        # Confirm Product Id only when match % is orange/green (≥90). Red tabs
+        # stay provisional (candidates visible, no Product Id) until Select.
+        if confidence < MATCH_CONFIDENCE_THRESHOLD or (
+            not rematch
+            and float(confidence or 0.0) < float(PRODUCT_ID_CONFIRM_CONFIDENCE)
+        ):
             provisional = self._provisional_schema_match(
                 enriched,
                 rate=rate,
@@ -358,7 +418,13 @@ class ProductAIApplyMixin:
                 confidence=confidence,
                 candidates=slim_candidates,
                 attribute_map=attribute_map,
-                notes=notes or "Suggested DB product — fill missing attributes, then Re-analyse to rematch.",
+                notes=notes
+                or (
+                    "Suggested DB product — review top candidates and Select, "
+                    "or Re-analyse after correcting Category/Sub."
+                    if float(confidence or 0.0) >= float(MATCH_CONFIDENCE_THRESHOLD)
+                    else "Suggested DB product — fill missing attributes, then Re-analyse to rematch."
+                ),
                 ai_confidence=ai_confidence,
                 blank_weak_inputs=blank_weak_inputs,
             )
@@ -397,23 +463,13 @@ class ProductAIApplyMixin:
             "match_status": DB_MATCH_MATCHED,
             "selection_source": "rematch" if rematch else "ai",
         }
-        # Initial Analyse fills blanks/core from Rate_Master when confidence is
-        # strong enough for the UI. Also promote Rate-aligned identity when the
-        # product already cleared the match floor but sat below the fill gate
-        # (e.g. hose box ~40% from Size=0 noise → align → ~100% like Re-analyse).
-        fill_inputs = (
-            not rematch
-            and float(confidence or 0.0) >= float(ANALYSIS_INPUT_FILL_CONFIDENCE)
-        )
-        promote_identity = (
-            not rematch
-            and not fill_inputs
-            and float(confidence or 0.0) >= float(MATCH_CONFIDENCE_THRESHOLD)
-        )
+        # Analysis UI keeps BOQ-extracted identity (Category/Sub/Class/Size/…).
+        # Match % compares extract vs Rate_Master — never overwrite core fields
+        # from the matched row on Analyse (expert Select candidate still can).
         aligned = align_product_taxonomy_from_rate(
             enriched,
             rate,
-            overwrite_core_fields=bool(fill_inputs or promote_identity),
+            overwrite_core_fields=False,
         )
         if rematch:
             aligned = _restore_expert_identity(aligned, product)
@@ -430,31 +486,6 @@ class ProductAIApplyMixin:
                     "attributes",
                 )
             }
-        elif fill_inputs or promote_identity:
-            # Analysis shows Rate_Master-filled fields — score that identity so
-            # correct fills are not stuck at ~40% / ~90–92% from pre-align wording.
-            confidence = _compute_match_confidence(
-                aligned,
-                rate,
-                mapped_attributes=coerce_attributes_dict(aligned.get("attributes")),
-                schema_keys=schema_keys,
-                ai_confidence=ai_confidence,
-                prefer_filled_fields=True,
-                # Hose-box style: promote Rate-aligned Analyse identity to 100%.
-                # Never use this on Re-analyse (that forced every rematch to 100%).
-                promote_identity_ceiling=True,
-            )
-            aligned["db_match_confidence"] = confidence
-            aligned["attribute_confidence"] = confidence
-            for item in slim_candidates:
-                try:
-                    if int(item.get("id") or 0) == int(rate.pk):
-                        item["confidence"] = confidence
-                        break
-                except (TypeError, ValueError):
-                    continue
-            aligned["db_candidates"] = slim_candidates
-            score_against = aligned
         else:
             score_against = {
                 key: enriched.get(key)
@@ -734,6 +765,51 @@ class ProductAIApplyMixin:
 
 
     @staticmethod
+    def _first_non_conflicting_rate_id(
+        selected_id: int | None,
+        *,
+        enriched: dict[str, Any],
+        candidates: list[dict[str, Any]],
+        rate_map: dict[int, Any],
+        rematch: bool,
+    ) -> int | None:
+        """Keep the first Rate row that does not fight AI Description identity."""
+        auto_floor = 20.0 if rematch else float(MATCH_CONFIDENCE_THRESHOLD)
+
+        def _acceptable(rate_id: int | None) -> int | None:
+            if rate_id is None:
+                return None
+            try:
+                rid = int(rate_id)
+            except (TypeError, ValueError):
+                return None
+            rate = rate_map.get(rid)
+            if rate is None:
+                return None
+            if product_type_conflicts(enriched, rate):
+                return None
+            return rid
+
+        chosen = _acceptable(selected_id)
+        if chosen is not None:
+            return chosen
+
+        for item in candidates:
+            raw_id = item.get("id")
+            if raw_id in (None, ""):
+                continue
+            try:
+                conf = float(item.get("confidence") or 0.0)
+            except (TypeError, ValueError):
+                conf = 0.0
+            if conf < auto_floor:
+                continue
+            chosen = _acceptable(raw_id)
+            if chosen is not None:
+                return chosen
+        return None
+
+    @staticmethod
     def _fallback_without_match(
         product: dict[str, Any],
         extracted_attrs: dict[str, str] | None = None,
@@ -849,16 +925,37 @@ class ProductAIApplyMixin:
 
 
     def _attach_catalog_product_id(self, product: dict[str, Any]) -> dict[str, Any]:
-        """Resolve Product_Helper Product_ID for Make & Vendor / Labour joins."""
+        """Resolve Product_Helper Product_ID for Make & Vendor / Labour joins.
+
+        Product Id is only stamped when Analysis has a confirmed match
+        (``db_product_id`` + status matched) at orange/green confidence, or the
+        expert already selected a catalog id.
+        """
         from apps.boq.services.product_helper_matching_service import (
             ProductHelperMatchingService,
         )
 
         enriched = dict(product)
         helper_service = ProductHelperMatchingService(self.database_version_id)
+        status = str(enriched.get("db_match_status") or "").strip().lower()
+        try:
+            match_conf = float(enriched.get("db_match_confidence") or 0.0)
+        except (TypeError, ValueError):
+            match_conf = 0.0
+        selection_source = str(
+            (enriched.get("ai_mapping") or {}).get("selection_source") or ""
+        ).strip().lower()
+        confirmed = (
+            status == DB_MATCH_MATCHED
+            and enriched.get("db_product_id") not in (None, "")
+            and (
+                selection_source == "expert"
+                or match_conf >= float(PRODUCT_ID_CONFIRM_CONFIDENCE)
+            )
+        )
 
         # Prefer Product_ID from the confirmed Rate_Master_Output row.
-        rate_pk = enriched.get("db_product_id")
+        rate_pk = enriched.get("db_product_id") if confirmed else None
         if rate_pk not in (None, ""):
             try:
                 rate = Rate_Master_Output.objects.filter(
@@ -879,6 +976,18 @@ class ProductAIApplyMixin:
                 enriched["catalog_product_id"] = str(rate.Product_ID).strip()
                 return enriched
 
+        # Clear stale Product Id on provisional / red matches.
+        if not confirmed:
+            enriched.pop("catalog_product_id", None)
+            # Fall back to structured Product_Helper match as suggestion only.
+            match = helper_service.match_product(enriched)
+            best = match.get("best") or {}
+            product_id = str(best.get("product_id") or "").strip()
+            if product_id:
+                enriched["suggested_catalog_product_id"] = product_id
+                enriched["catalog_match_confidence"] = match.get("confidence")
+            return enriched
+
         # Fall back to structured Product_Helper match from BOQ taxonomy.
         match = helper_service.match_product(enriched)
         best = match.get("best") or {}
@@ -888,7 +997,6 @@ class ProductAIApplyMixin:
             enriched["product_helper_id"] = best.get("product_helper_id")
             enriched["catalog_match_confidence"] = match.get("confidence")
         elif product_id:
-            # Keep a suggested Product_ID for Find in DB without claiming a match.
             enriched["suggested_catalog_product_id"] = product_id
             enriched["catalog_match_confidence"] = match.get("confidence")
         return enriched

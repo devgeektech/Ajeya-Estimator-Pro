@@ -60,9 +60,28 @@ def _catalog_product_id(product: dict[str, Any] | None) -> str:
 def loaded_catalog_product_id(product: dict[str, Any] | None) -> str:
     """Catalog Product_ID for a product that has been matched or selected.
 
-    Suggested-only IDs do not count until the expert Selects or Confirms.
+    Suggested-only IDs do not count. Red match tabs (<90%) also do not count
+    until the expert Selects or Confirms, or rematch reaches orange/green %.
     """
+    from common.constants import PRODUCT_ID_CONFIRM_CONFIDENCE
+
     item = product or {}
+    mapping = item.get("ai_mapping") or {}
+    selection_source = str(mapping.get("selection_source") or "").strip().lower()
+    status = str(item.get("db_match_status") or "").strip().lower()
+    try:
+        match_conf = float(item.get("db_match_confidence") or 0.0)
+    except (TypeError, ValueError):
+        match_conf = 0.0
+
+    expert_locked = selection_source in {"expert", "confirm"}
+    strong_match = (
+        status == "matched"
+        and match_conf >= float(PRODUCT_ID_CONFIRM_CONFIDENCE)
+    )
+    if not expert_locked and not strong_match:
+        return ""
+
     text = str(item.get("catalog_product_id") or "").strip()
     if text:
         return text
@@ -72,6 +91,8 @@ def loaded_catalog_product_id(product: dict[str, Any] | None) -> str:
     if text:
         return text
     summary = str(item.get("db_product_summary") or "").strip()
+    if summary.lower().startswith("suggested:"):
+        return ""
     if " / " in summary:
         first = summary.split(" / ", 1)[0].strip()
         if first and first.lower() not in {"null", "none", "—", "-"}:

@@ -32,7 +32,7 @@ from apps.boq.services.boq_extraction_slots import (
 )
 from apps.boq.services.boq_row_grouping_service import resolve_anchor_row_id
 from common.exceptions import AIServiceError
-from utils.product_synonyms import format_synonym_map_for_ai
+from utils.product_synonyms import format_synonym_rules_for_ai
 
 logger = logging.getLogger("boq_ai")
 
@@ -184,7 +184,6 @@ class BOQExtractionService:
                             "row_id": row_id,
                             "skip_matching": True,
                             "products": [],
-                            "activities": [],
                             "skip_reason": "section_or_empty_row",
                         }
                     )
@@ -197,7 +196,6 @@ class BOQExtractionService:
                             "row_id": row_id,
                             "skip_matching": True,
                             "products": [],
-                            "activities": [],
                             "skip_reason": "ai_missing_row",
                         },
                     )
@@ -210,7 +208,6 @@ class BOQExtractionService:
                         "row_id": row_id,
                         "skip_matching": True,
                         "products": [],
-                        "activities": [],
                         "skip_reason": "lineage_child_row",
                     }
                 )
@@ -222,7 +219,6 @@ class BOQExtractionService:
                     "row_id": row_id,
                     "skip_matching": True,
                     "products": [],
-                    "activities": [],
                     "skip_reason": "section_or_empty_row",
                 }
             )
@@ -258,7 +254,6 @@ class BOQExtractionService:
                     "row_id": anchor_id,
                     "skip_matching": True,
                     "products": [],
-                    "activities": [],
                     "skip_reason": "section_or_empty_row",
                 },
                 *[
@@ -266,7 +261,6 @@ class BOQExtractionService:
                         "row_id": child_id,
                         "skip_matching": True,
                         "products": [],
-                        "activities": [],
                         "skip_reason": "lineage_child_row",
                     }
                     for child_id in group_ids[1:]
@@ -296,7 +290,6 @@ class BOQExtractionService:
                             "row_id": anchor_id,
                             "skip_matching": True,
                             "products": [],
-                            "activities": [],
                             "skip_reason": "ai_missing_row",
                         },
                     )
@@ -307,7 +300,6 @@ class BOQExtractionService:
                         "row_id": group_id,
                         "skip_matching": True,
                         "products": [],
-                        "activities": [],
                         "skip_reason": "lineage_child_row",
                     }
                 )
@@ -396,7 +388,7 @@ class BOQExtractionService:
         template = AIService.load_prompt("extract_products.txt")
         payload = [_compact_anchor_payload(group) for group in groups]
         prompt = (
-            template.replace("{{SYNONYM_MAP}}", format_synonym_map_for_ai())
+            template.replace("{{SYNONYM_RULES}}", format_synonym_rules_for_ai())
             .replace("{{DATABASE_CONTEXT}}", self._database_context_text())
             .replace("{{ROWS_PAYLOAD}}", json.dumps(payload, ensure_ascii=False, default=str))
         )
@@ -433,9 +425,11 @@ class BOQExtractionService:
                     ),
                     group=group,
                     slots=list(group.get("slots") or []),
+                    taxonomy=taxonomy,
                 )
             )
-            row["activities"] = []
+            row.pop("activities", None)
+            row.pop("product_matches", None)
             row.setdefault("skip_matching", not row.get("products"))
             normalized.append(row)
         return normalized

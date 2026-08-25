@@ -186,7 +186,6 @@ class BOQExtractionEditService:
                 "row_id": row_id,
                 "skip_matching": False,
                 "products": [],
-                "activities": [],
             }
             rows.append(row)
         products = list(row.get("products") or [])
@@ -526,22 +525,18 @@ class BOQExtractionEditService:
         products_total = 0
         rows_skipped = 0
         for row in analysis.get("rows") or []:
-            # Keep empty activities list for backward-compatible JSON shape.
-            row["activities"] = []
             if row.get("skip_matching"):
                 rows_skipped += 1
             products_total += len(row.get("products") or [])
         stats.update(
             {
                 "products_total": products_total,
-                "activities_total": 0,
                 "rows_skipped": rows_skipped,
             }
         )
+        stats.pop("activities_total", None)
         analysis["stats"] = stats
         analysis["phase"] = PHASE_EXTRACTED
-        for row in analysis.get("rows") or []:
-            row.pop("product_matches", None)
 
         with atomic():
             safe_analysis = json_safe(analysis)

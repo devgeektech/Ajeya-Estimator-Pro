@@ -5,6 +5,83 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
+## 2026-08-25 — Prefill Attributes on weak Analysis matches
+
+- Attribute values AI mapped from the BOQ stay prefilled on low-confidence /
+  provisional products (same as Category/Sub/Size). Keys with no BOQ evidence
+  stay blank. Product Id still waits for ≥90% or expert Select.
+
+## 2026-08-25 — Prefill Category/Sub/Size on weak Analysis matches
+
+- Low-confidence / provisional products keep BOQ-extracted Category, Sub-category,
+  Class, Size, Unit, and Capacity in the Analysis inputs. Only Attribute values
+  stay empty below 50% until Select or Re-analyse. Product Id still waits for
+  ≥90% or expert Select.
+
+## 2026-08-25 — BOQ Upload button greys out across tab switches
+
+- While a BOQ upload is parsing, the BOQs list **Upload** button shows
+  **Uploading…**, is disabled, and polls `/boqs/upload/status/` (same UX as
+  database import). Concurrent uploads for that user are refused.
+
+## 2026-08-25 — Valid cat/sub pairs + no Product Id on red tabs
+
+- Enforce Rate_Master Category/Sub pairs (PIPE + EXTERNAL HYDRANT cleared;
+  pipework + G.I. pipe → PIPE / GI). System titles are not Sub_Category.
+- Product Id auto-fills only at ≥90% (orange/green). Red tabs stay provisional
+  with top candidates until expert Select or high-confidence rematch.
+
+## 2026-08-25 — No fake 100% when product missing / wrong subtype
+
+- Wrong family or valve subtype (sluice≠butterfly≠NRV/reflux/check) is hard-capped
+  below 30% and cannot auto-confirm. AI notes like "No suitable candidate…" clear
+  a contradictory selected_id; unmatched when no same-family row clears the floor.
+- Candidate ranking prefers non-conflicting category/sub rows; reflux/check map to
+  NON RETURN VALVE.
+
+## 2026-08-25 — AI Description = search identity (cat/sub first)
+
+- AI Description must name Category / Sub_Category / Class / Size / Unit /
+  Capacity in plain language (never size-only or chapter titles like
+  ``65mm dia SPRINKLER`` for pipework). Used as the primary Chroma search key.
+- Extract/match weight Sub_Category then Category above size. Pipework maps to
+  PIPE before bare ``sprinkler``. Analyse keeps BOQ-extracted UI fields; confidence
+  = extract vs Rate_Master (no Rate overwrite of core fields on Analyse).
+
+## 2026-08-25 — AI Description understanding + block family mismatch
+
+- AI Description is grounded in the owning supply sentence (`product_context`)
+  plus slot size (long understanding line, not a short hint / taxonomy dump).
+- Match rejects Rate_Master rows that conflict with AI Description nouns
+  (e.g. sluice valve vs PIPE/GI), even when extract Category already said PIPE.
+- Class snap: Heavy/Medium/Light Class → C/B/A when Class is blank.
+- Strong AI Description leads Chroma recall on initial Analyse (not size-only slot).
+
+## 2026-08-25 — Shorter AI prompts (meaning-first synonyms)
+
+- Removed the full product synonym catalog (~5KB) from extract / product-map /
+  make-list prompts. Prompts now inject short ``{{SYNONYM_RULES}}`` (material
+  abbreviations + meaning-first instructions).
+- Synonym catalog stays in code for scoring, recall expansion, noun snap, and
+  make-list heuristics. AI must understand BOQ intent, not look up phrase lists.
+
+## 2026-08-25 — Extract identity: product_context + safer match %
+
+- Each Unit/Qty slot now carries ``product_context`` (nearest owning supply
+  sentence + material lines). Extract prompt and post-processing use that for
+  product family instead of the chapter title alone.
+- Keep a good AI Description; share IS/PN only within the same category/sub;
+  snap wrong AI category/sub from owning-sentence nouns before matching.
+- Multi-slot sections extract one section per OpenAI call.
+- Match % scores extract fields vs catalog (no 100% promote after Rate_Master fill).
+
+## 2026-08-25 — Drop unused analysis JSON fields
+
+- Stopped writing empty `activities`, `product_matches`, and `stats.activities_total`
+  on Analyse persist. Next save strips them from existing analysis JSON.
+- Documented that extract AI receives actionable **section groups** (full lineage
+  text + Unit/Qty slots), not one call per Excel row.
+
 ## 2026-08-25 — Sync DB upload (no Celery) + global lock UX
 
 - Master-database import runs **synchronously** in the upload HTTP request

@@ -16,7 +16,7 @@ from utils.product_synonyms import (
     MAKE_LIST_DESCRIPTION_HINTS,
     MAKE_LIST_SUB_CATEGORY_HINTS,
     expand_make_list_search_text,
-    format_synonym_map_for_ai,
+    format_synonym_rules_for_ai,
 )
 
 logger = logging.getLogger("boq_ai")
@@ -740,7 +740,7 @@ class MakeListCategoryMappingService:
                     }
                 )
             prompt = (
-                template.replace("{{SYNONYM_MAP}}", format_synonym_map_for_ai())
+                template.replace("{{SYNONYM_RULES}}", format_synonym_rules_for_ai())
                 .replace("{{TAXONOMY}}", json.dumps(taxonomy_payload, ensure_ascii=False))
                 .replace(
                     "{{MATERIALS_PAYLOAD}}",

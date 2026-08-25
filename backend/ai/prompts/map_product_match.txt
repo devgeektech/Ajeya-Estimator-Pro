@@ -2,22 +2,30 @@ Pick the best Rate_Master_Output candidate for each extracted BOQ product.
 
 Return valid JSON only. Prefer null over a weak guess. Never invent Product_ID, prices, or vendors.
 
-{{SYNONYM_MAP}}
+{{SYNONYM_RULES}}
 
 Section vs product:
-- ``boq_row.description`` (FULL section) and ``boq_row.slot_description`` are the ULTIMATE SOURCE OF TRUTH. You must analyze the description carefully to find the correct product.
-- ``extracted`` fields (description_hint, category, sub_category, class, size, etc.) and ``expert_filled_fields`` are provided as a HELPING HAND (hints). 
-- If the expert inputs or description_hint contradict the actual BOQ row text, IGNORE the expert inputs and find the product that truly matches the BOQ row.
+- ``extracted.description_hint`` (AI Description) is the primary search identity —
+  it should already name Category / Sub_Category / Class / Size.
+- ``extracted.category`` + ``extracted.sub_category`` carry the most weight after
+  the description (Sub_Category ≈ product name). Then class, size, unit, capacity.
+- ``boq_row.description`` / ``slot_description`` are section evidence to validate
+  meaning (pipework ≠ sprinkler head; sluice valve ≠ PIPE).
+- Expert fields are hints; if they contradict the BOQ purchasable item, ignore them.
 
 Rules:
 - ``selected_id`` = a candidate ``id`` (Rate_Master_Output PK) or null.
 - Candidates are best-first. On a true tie, pick the first.
-- Prefer: size digits → category/sub_category → class/capacity/attributes.
-- Wrong size or wrong product family → null.
+- Choose the candidate that satisfies product family first (category/sub), then
+  nominal size, class/capacity, attributes — not the one with the most token overlap.
+- Wrong product family → null even if size matches (sluice valve vs PIPE;
+  pipework vs SPRINKLER head; hose reel vs hose box).
 - Class ``0`` is a real valve class. PIPE MS/GI live in sub_category. Ignore make/vendor.
-- Rematch (``extracted.rematch`` true): Use the expert inputs as hints to find the product more accurately, BUT always validate them against the BOQ section text. If the expert provided random text or a wrong product, disregard it and find the correct product for the section. The confidence score should reflect how well the selected DB product matches the BOQ section (not just the expert inputs).
+- Rematch (``extracted.rematch`` true): use expert inputs as hints, but validate
+  against BOQ meaning. Confidence = how well the DB row matches extract identity.
 - Map attributes onto candidate schema; leftovers in ``unmapped_attributes``.
-- ``match_confidence`` 0–100 (0 if null; &lt;30 if uncertain).
+- ``match_confidence`` 0–100 (0 if null; &lt;30 if uncertain). Abbreviations /
+  industry wording that mean the same thing must not lower confidence.
 
 Respond with:
 {
@@ -29,7 +37,7 @@ Respond with:
       "attribute_map": {"port_type": "type"},
       "mapped_attributes": {"type": "full port"},
       "unmapped_attributes": {},
-      "notes": "Size and sub-category align."
+      "notes": "Sub-category and size align."
     }
   ]
 }
