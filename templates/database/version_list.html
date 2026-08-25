@@ -3,8 +3,21 @@
 {% block heading %}Database{% endblock %}
 {% block topbar_actions %}
 {% if user.is_super_admin or user.allow_db_access %}
-<div class="topbar__actions">
-    <a href="{% url 'database:upload' %}" class="btn btn--primary">Upload</a>
+<div
+    class="topbar__actions"
+    x-data="databaseImportNav({
+        statusUrl: '{% url 'database:import_status' %}',
+        initialBusy: {{ import_busy|yesno:'true,false' }}
+    })"
+>
+    <a
+        href="{% url 'database:upload' %}"
+        class="btn btn--primary"
+        :class="{ 'is-disabled': busy }"
+        :aria-disabled="busy"
+        @click="if (busy) { $event.preventDefault(); }"
+        x-text="busy ? 'Uploading…' : 'Upload'"
+    >{% if import_busy %}Uploading…{% else %}Upload{% endif %}</a>
 </div>
 {% endif %}
 {% endblock %}
@@ -172,5 +185,43 @@ document.addEventListener('alpine:init', () => {
         },
     }));
 });
+
+document.addEventListener('alpine:init', () => {
+    Alpine.data('databaseImportNav', (cfg) => ({
+        statusUrl: cfg.statusUrl,
+        busy: !!cfg.initialBusy,
+        timer: null,
+        init() {
+            this.poll();
+            this.timer = setInterval(() => this.poll(), 2000);
+        },
+        destroy() {
+            if (this.timer) clearInterval(this.timer);
+        },
+        async poll() {
+            try {
+                const res = await fetch(this.statusUrl, {
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                    credentials: 'same-origin',
+                });
+                if (!res.ok) return;
+                const data = await res.json();
+                const wasBusy = this.busy;
+                this.busy = !!data.busy || data.status === 'processing';
+                if (wasBusy && !this.busy) {
+                    window.location.reload();
+                }
+            } catch (e) { /* keep last known */ }
+        },
+    }));
+});
 </script>
+<style>
+.btn.is-disabled,
+.btn[aria-disabled="true"] {
+    opacity: 0.6;
+    pointer-events: none;
+    cursor: not-allowed;
+}
+</style>
 {% endblock %}

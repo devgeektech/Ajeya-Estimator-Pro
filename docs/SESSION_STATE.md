@@ -14,10 +14,11 @@ History: `docs/CHANGELOG.md` (do not duplicate session diaries here).
 
 ## Active Workflows
 
-**Database:** upload → validate → import **Product_Helper** +
-**Rate_Master_Output** + **Labour_master_Output** → activate → embeddings (sync).
-Other sheets counted for UI. Stored file stamped `_{YYYYMMDD_HHMMSS}`. Last 10
-uploads retained.
+**Database:** upload (global lock) → validate → import sheets (inactive) →
+**embeddings must succeed** → activate → purge previous master data (synchronous
+in the request). UI shows **Uploading…** across tab switches via
+`/database/import-status/`. Other sheets counted for UI. Stored file stamped
+`_{YYYYMMDD_HHMMSS}`. Last 10 upload records retained.
 
 **BOQ tabs:** BOQ → Make list → Analysis → Make & Vendor → Labour → Review → Export
 
@@ -68,12 +69,12 @@ uploads retained.
 
 Keep only the latest entry below. Older work is in `docs/CHANGELOG.md`.
 
-### 2026-08-25 — BOQ visibility: Superadmin all / Admin underlings
+### 2026-08-25 — Sync DB upload (no Celery) + embedding gate
 
-Completed: Superadmin sees all BOQs. Admin sees own + Experts they created (`created_by`); not other Admins or their Experts. Expert still own-only. Merged to `main` and deployed on EC2 (`331fd77`).
-Pending: Confirm in UI with two Admins + their Experts.
-Issues: Experts with null `created_by` (or created by Superadmin) are not visible to any Admin until re-linked.
-Next: None unless further BOQ visibility tweaks.
+Completed: Master DB import runs synchronously in the upload request under a global lock. UI Upload becomes Uploading… and polls status across tabs. Embeddings must succeed before activate; previous master data purged only on success; failed import leaves current DB. Django admin cannot force-activate.
+Pending: Deploy when approved.
+Issues: Long imports hold the HTTP worker; raise proxy/gunicorn timeouts if needed.
+Next: Commit/merge/deploy when ready.
 
 
 

@@ -132,39 +132,73 @@ def _index_helper_batch(
     return generated, errors
 
 
-def generate_embeddings_for_version(database_version_id: int) -> dict:
-    """Index Product_Helper rows for the active database version into Chroma.
+def generate_embeddings_for_version(
+    database_version_id: int,
+    *,
+    require_success: bool = False,
+) -> dict:
+    """Index Product_Helper rows for a database version into Chroma.
 
     One vector per Product_Helper row (complete catalog fields). Discontinued
     Status rows are never embedded. Rate_Master / Labour stay in Postgres and
     are joined by Product_ID after search.
 
-    Clears the entire Chroma collection first so only the active database has
-    embeddings at any time.
+    Does **not** clear other versions until the caller finishes a successful
+    import (see ``replace_embeddings_with_version``). That avoids wiping the
+    live index when a new import's embeddings fail.
+
+    When ``require_success`` is True (database import path):
+
+    - OpenAI must be configured when there are embeddable Product_Helper rows.
+    - Any batch/row embedding error fails the whole operation.
+    - Generated count must equal every non-skipped helper row.
     """
+    helpers_qs = Product_Helper.objects.filter(
+        database_version_id=database_version_id
+    ).select_related("database_version")
+    total = helpers_qs.count()
+
+    # Pre-count rows that must receive a vector (same skip rules as the loop).
+    embeddable = 0
+    for helper in helpers_qs.iterator(chunk_size=500):
+        if _is_discontinued(helper.Status):
+            continue
+        if not str(helper.Product_ID or "").strip():
+            continue
+        if not helper_document(helper).strip():
+            continue
+        embeddable += 1
+
     if not is_configured():
+        if require_success and embeddable > 0:
+            raise AIServiceError(
+                "OPENAI_API_KEY is required to generate embeddings before the "
+                "database import can succeed."
+            )
         logger.info(
             "Embedding generation skipped for version %s because AI is disabled.",
             database_version_id,
         )
-        return {"total": 0, "generated": 0, "skipped": 0, "errors": 0}
+        return {"total": total, "generated": 0, "skipped": total, "errors": 0}
 
     try:
-        version = DatabaseVersion.objects.get(pk=database_version_id, is_active=True)
-    except DatabaseVersion.DoesNotExist:
+        DatabaseVersion.objects.get(pk=database_version_id)
+    except DatabaseVersion.DoesNotExist as exc:
         logger.error(
-            "Active DatabaseVersion %s not found for embedding generation",
+            "DatabaseVersion %s not found for embedding generation",
             database_version_id,
         )
+        if require_success:
+            raise AIServiceError(
+                f"Database version {database_version_id} not found for embeddings."
+            ) from exc
         return {"total": 0, "generated": 0, "skipped": 0, "errors": 1}
 
-    helpers_qs = Product_Helper.objects.filter(database_version=version).select_related(
-        "database_version"
-    )
-    total = helpers_qs.count()
     generated = skipped = errors = 0
     store = ChromaEmbeddingStore()
-    store.reset_all()
+    # Clear only this version's prior vectors (safe retry); keep other versions
+    # until import activates and calls replace_embeddings_with_version.
+    store.reset_version(database_version_id)
 
     pending_helpers: list[Product_Helper] = []
     pending_texts: list[str] = []
@@ -207,10 +241,44 @@ def generate_embeddings_for_version(database_version_id: int) -> dict:
         "generated": generated,
         "skipped": skipped,
         "errors": errors,
+        "embeddable": embeddable,
     }
     logger.info(
         "Product_Helper embedding summary for version %s: %s",
         database_version_id,
         summary,
     )
+
+    if require_success:
+        if errors > 0:
+            store.reset_version(database_version_id)
+            raise AIServiceError(
+                f"Embedding generation failed for {errors} Product_Helper row(s). "
+                "Database import was not activated."
+            )
+        if embeddable > 0 and generated != embeddable:
+            store.reset_version(database_version_id)
+            raise AIServiceError(
+                f"Embedding generation incomplete ({generated}/{embeddable}). "
+                "Database import was not activated."
+            )
+
     return summary
+
+
+def replace_embeddings_with_version(database_version_id: int) -> None:
+    """After a successful import activate: keep only this version in Chroma."""
+    store = ChromaEmbeddingStore()
+    other_ids = list(
+        DatabaseVersion.objects.exclude(pk=database_version_id).values_list(
+            "pk", flat=True
+        )
+    )
+    for version_id in other_ids:
+        store.reset_version(int(version_id))
+    logger.info(
+        "Chroma now holds embeddings for database version %s only "
+        "(%s other version(s) cleared)",
+        database_version_id,
+        len(other_ids),
+    )

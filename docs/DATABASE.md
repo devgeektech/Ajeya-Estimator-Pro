@@ -169,10 +169,22 @@ labour % remains a Labour-page UI feature (not this sheet).
 
 ## Embeddings
 
-After each successful import, `generate_embeddings_for_version()` indexes active
-`Product_Helper` rows into Chroma (one vector per helper row). Discontinued
-Status and blank Product_ID rows are skipped. Rate_Master / Labour stay in
-PostgreSQL and are joined by Product_ID after search.
+Import order: HTTP runs `DatabaseImportService` under a global lock — sheets
+load into an **inactive** `DatabaseVersion`, then
+`generate_embeddings_for_version(..., require_success=True)` indexes
+`Product_Helper` rows. Only after embeddings succeed does the importer activate
+the version, clear other versions from Chroma
+(`replace_embeddings_with_version`), and purge previous master rows.
+
+A global lock + `media/job_progress/database_import_status.json` ensure only one
+import runs and the UI can show **Uploading…** across pages.
+
+Discontinued Status and blank Product_ID rows are skipped. Rate_Master / Labour
+stay in PostgreSQL and are joined by Product_ID after search.
+
+If embedding generation reports errors or an incomplete count, import raises
+`ImportError_` and the new version stays inactive (previous active DB remains).
+OpenAI must be configured when there are embeddable Product_Helper rows.
 
 **Embedded text fields (Product_Helper):** Product_ID, Category, Sub Category,
 Class, Size, Unit, Capacity, Attribute, Status.

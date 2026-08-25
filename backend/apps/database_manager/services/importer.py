@@ -311,27 +311,74 @@ class DatabaseImportService:
         source_filename: str | None = None,
         version_name: str = "",
         stored_name: str = "",
+        progress_callback=None,
     ):
         self.file_path = file_path
         self.uploaded_by = uploaded_by
         self.source_filename = source_filename or str(file_path)
         self.version_name = version_name
         self.stored_name = stored_name
+        self.progress_callback = progress_callback
+
+    def _emit(self, phase: str, message: str = "") -> None:
+        if self.progress_callback is None:
+            return
+        try:
+            self.progress_callback(phase, message)
+        except Exception:
+            logger.exception("Database import progress callback failed")
 
     def run(self) -> DatabaseVersion:
-        """Execute the full import workflow and return the activated version."""
+        """Execute the full import workflow and return the activated version.
+
+        Sheets are imported into an inactive version first. Embeddings must
+        complete successfully before activation. If embeddings fail, the new
+        version stays inactive and the previous active database / Chroma index
+        remain in place. On success, inactive master rows are purged.
+        """
         logger.info(
             "Database import started by %s", getattr(self.uploaded_by, "email", "?")
         )
 
+        self._emit("validating", "Validating workbook…")
         validate_workbook(self.file_path)
 
+        previous_active_id = (
+            DatabaseVersion.objects.filter(is_active=True)
+            .values_list("pk", flat=True)
+            .first()
+        )
+
         try:
+            self._emit("importing", "Importing workbook sheets…")
             with atomic():
                 version = self._create_version()
                 self._import_versioned_sheets(version)
-                self._activate(version)
+            # Embeddings run outside the PG transaction (Chroma + OpenAI).
+            # Activate only after embeddings succeed.
+            self._emit("embeddings", "Generating embeddings…")
             self._generate_embeddings(version)
+            self._emit("activating", "Activating new database…")
+            try:
+                with atomic():
+                    self._activate(version)
+                self._replace_chroma_with_active(version)
+            except Exception:
+                # Keep the previous active DB if post-embed activation/Chroma fails.
+                logger.exception(
+                    "Activation/Chroma replace failed for v%s; restoring previous",
+                    version.version_number,
+                )
+                DatabaseVersion.objects.filter(pk=version.pk).update(is_active=False)
+                if previous_active_id:
+                    previous = DatabaseVersion.objects.filter(pk=previous_active_id).first()
+                    if previous is not None:
+                        activate_database_version(previous)
+                from ai.embeddings.chroma_store import ChromaEmbeddingStore
+
+                ChromaEmbeddingStore().reset_version(version.pk)
+                raise
+            self._emit("purging", "Purging previous master data…")
             purge_inactive_master_data(version)
             enforce_version_retention()
         except ImportError_:
@@ -352,7 +399,11 @@ class DatabaseImportService:
         return version
 
     def _create_version(self) -> DatabaseVersion:
-        last = DatabaseVersion.objects.order_by("-version_number").first()
+        last = (
+            DatabaseVersion.objects.select_for_update()
+            .order_by("-version_number")
+            .first()
+        )
         next_number = (last.version_number + 1) if last else 1
         return DatabaseVersion.objects.create(
             version_number=next_number,
@@ -426,11 +477,24 @@ class DatabaseImportService:
 
     def _generate_embeddings(self, version: DatabaseVersion) -> None:
         from ai.embeddings.generator import generate_embeddings_for_version
+        from common.exceptions import AIServiceError
 
-        summary = generate_embeddings_for_version(version.pk)
+        try:
+            summary = generate_embeddings_for_version(
+                version.pk, require_success=True
+            )
+        except AIServiceError as exc:
+            raise ImportError_(
+                f"Database import failed during embedding generation: {exc}"
+            ) from exc
         logger.info(
             "Embedding generation finished for v%s: %s", version.version_number, summary
         )
+
+    def _replace_chroma_with_active(self, version: DatabaseVersion) -> None:
+        from ai.embeddings.generator import replace_embeddings_with_version
+
+        replace_embeddings_with_version(version.pk)
 
     def _activate(self, version: DatabaseVersion) -> None:
         activate_database_version(version)

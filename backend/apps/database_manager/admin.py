@@ -10,6 +10,8 @@ from .models import (
 
 @admin.register(DatabaseVersion)
 class DatabaseVersionAdmin(admin.ModelAdmin):
+    """Read-mostly. Activation must go through the embedding-gated import UI."""
+
     list_display = (
         "version_number",
         "name",
@@ -20,13 +22,14 @@ class DatabaseVersionAdmin(admin.ModelAdmin):
     )
     list_filter = ("is_active",)
     search_fields = ("name", "source_filename")
-
-    def save_model(self, request, obj, form, change):
-        super().save_model(request, obj, form, change)
-        if obj.is_active:
-            from .services.activation import activate_database_version
-
-            activate_database_version(obj)
+    readonly_fields = (
+        "version_number",
+        "is_active",
+        "uploaded_by",
+        "uploaded_at",
+        "source_filename",
+        "file",
+    )
 
 
 @admin.register(Product_Helper)

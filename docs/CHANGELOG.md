@@ -5,6 +5,34 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
+## 2026-08-25 — Sync DB upload (no Celery) + global lock UX
+
+- Master-database import runs **synchronously** in the upload HTTP request
+  (Celery task removed). Global file lock + status JSON still block concurrent
+  uploads and keep **Uploading…** visible across Database/BOQ tab switches.
+- Flow unchanged: validate → sheets → embeddings (required) → activate → purge
+  previous master data. Failure leaves the previous active DB unchanged.
+
+## 2026-08-25 — Global DB upload lock + Celery import UX
+
+- One global master-database import at a time (file lock + status JSON).
+- Upload button shows **Uploading…** and stays locked across Database/BOQ tab
+  switches via `/database/import-status/` polling.
+- Celery runs validate → sheets → embeddings (required) → activate → purge
+  previous master data. Failure leaves the previous active DB unchanged.
+- Django admin can no longer force-activate a version without embeddings.
+
+## 2026-08-25 — Embedding-gated import + Admin peer isolation
+
+- Database list/detail/download remain available to all signed-in users
+  (intentional awareness/share feature); upload still access-gated.
+- Master DB import activates only after embeddings complete successfully;
+  failed/partial embeddings leave the previous active DB and Chroma intact.
+- `SuperAdminRequiredMixin` is Superadmin-only (no longer an Admin alias).
+  Admins manage only Experts they created; only Superadmin manages Admins.
+- Audit: Admins see self + their Experts; Superadmin sees all (except
+  Superadmin accounts).
+
 ## 2026-08-25 — BOQ visibility Superadmin / Admin underlings
 
 - Superadmin lists and opens all BOQs.

@@ -149,9 +149,9 @@ Examples:
 * Exports.
 * Notifications.
 
-BOQ processing views must never block. Database upload/import is the active
-exception: it runs synchronously through the database import service so the
-database is active when the upload request completes.
+BOQ processing views must never block. Database upload runs import + embeddings
+**synchronously** in the web request under a **single global lock** (UI shows
+**Uploading…** and polls status; concurrent uploads are refused).
 
 ---
 

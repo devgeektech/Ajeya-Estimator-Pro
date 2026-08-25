@@ -4,12 +4,11 @@ import logging
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.files.storage import FileSystemStorage
-from django.http import FileResponse
+from django.http import FileResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy
 from django.views.generic import FormView, ListView, View
 
-from apps.audit.services import record
 from common.constants import DATABASE_UPLOADS_TO_RETAIN
 from common.exceptions import BOQAIError
 from common.mixins import DatabaseAccessRequiredMixin
@@ -23,7 +22,13 @@ from .models import (
     Rate_Master_Output,
 )
 from .services.activation import repair_duplicate_active_versions
-from .services.importer import DatabaseImportService, count_workbook_sheet_rows
+from .services.database_import_dispatch import run_database_import
+from .services.database_import_progress import (
+    STATUS_PROCESSING,
+    is_import_busy,
+    read_import_status,
+)
+from .services.importer import count_workbook_sheet_rows
 
 logger = logging.getLogger("boq_ai")
 
@@ -100,6 +105,7 @@ class DatabaseVersionListView(LoginRequiredMixin, ListView):
         context["search_q"] = (self.request.GET.get("q") or "").strip()
         context["sort"] = sort_key
         context["dir"] = direction
+        context["import_busy"] = is_import_busy()
         return context
 
 
@@ -108,7 +114,19 @@ class DatabaseUploadView(DatabaseAccessRequiredMixin, FormView):
     template_name = "database/upload.html"
     success_url = reverse_lazy("database:list")
 
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["import_busy"] = is_import_busy()
+        return context
+
     def form_valid(self, form):
+        if is_import_busy():
+            messages.error(
+                self.request,
+                "A database import is already in progress. Wait until it finishes.",
+            )
+            return self.form_invalid(form)
+
         name = form.cleaned_data["name"]
         upload = form.cleaned_data["workbook"]
         storage = FileSystemStorage()
@@ -118,21 +136,19 @@ class DatabaseUploadView(DatabaseAccessRequiredMixin, FormView):
         file_path = storage.path(stored_name)
 
         try:
-            DatabaseImportService(
+            version = run_database_import(
                 file_path=file_path,
                 uploaded_by=self.request.user,
                 source_filename=upload.name,
                 version_name=name,
                 stored_name=stored_name,
-            ).run()
-            record(self.request.user, "database_import", "Workbook", upload.name)
-            messages.success(self.request, "Database imported and activated.")
-            from apps.notifications.services import notify
-
-            notify(
-                self.request.user,
-                "Database activated",
-                f"'{name or upload.name}' was imported and is now the active database.",
+            )
+            messages.success(
+                self.request,
+                (
+                    f"Database v{version.version_number} is active. "
+                    "Embeddings completed and previous master data was purged."
+                ),
             )
         except BOQAIError as exc:
             messages.error(self.request, str(exc))
@@ -143,6 +159,15 @@ class DatabaseUploadView(DatabaseAccessRequiredMixin, FormView):
             return self.form_invalid(form)
 
         return super().form_valid(form)
+
+
+class DatabaseImportStatusView(LoginRequiredMixin, View):
+    """JSON status for the global database import (survives tab switches)."""
+
+    def get(self, request):
+        status = read_import_status()
+        status["busy"] = status.get("status") == STATUS_PROCESSING
+        return JsonResponse(status)
 
 
 class DatabaseDownloadView(LoginRequiredMixin, View):
@@ -190,5 +215,6 @@ class DatabaseVersionDetailView(LoginRequiredMixin, View):
             "rates_count": rates_count,
             "labour_count": labour_count,
             "product_helper_count": product_helper_count,
+            "import_busy": is_import_busy(),
         }
         return render(request, "database/version_detail.html", context)

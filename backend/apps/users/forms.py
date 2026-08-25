@@ -1,4 +1,4 @@
-"""User management forms (Super Admin)."""
+"""User management forms."""
 from django import forms
 from django.forms import ChoiceField
 
@@ -6,6 +6,16 @@ from apps.accounts.models import User
 from common.choices import UserRole
 
 _INPUT = {"class": "form-control"}
+
+
+def _is_superadmin_actor(user) -> bool:
+    return bool(
+        user
+        and (
+            getattr(user, "is_superuser", False)
+            or getattr(user, "is_superadmin", False)
+        )
+    )
 
 
 class UserCreateForm(forms.ModelForm):
@@ -30,15 +40,22 @@ class UserCreateForm(forms.ModelForm):
             "role": forms.Select(attrs=_INPUT),
         }
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, request_user=None, **kwargs):
         super().__init__(*args, **kwargs)
+        self.request_user = request_user
         self.fields["first_name"].required = True
         role_field = self.fields["role"]
         if isinstance(role_field, ChoiceField):
-            role_field.choices = [
-                (UserRole.ADMIN, "App Admin"),
-                (UserRole.EXPERT, "BOQ Expert"),
-            ]
+            if _is_superadmin_actor(request_user):
+                role_field.choices = [
+                    (UserRole.ADMIN, "App Admin"),
+                    (UserRole.EXPERT, "BOQ Expert"),
+                ]
+            else:
+                # Peer Admins cannot create other Admins.
+                role_field.choices = [
+                    (UserRole.EXPERT, "BOQ Expert"),
+                ]
 
     def clean(self):
         cleaned = super().clean()
@@ -48,6 +65,8 @@ class UserCreateForm(forms.ModelForm):
         if p1 and p2 and p1 != p2:
             self.add_error("password2", "Passwords do not match.")
         if cleaned.get("role") == UserRole.ADMIN:
+            if not _is_superadmin_actor(self.request_user):
+                self.add_error("role", "Only Superadmin can create Admin users.")
             cleaned["allow_db_access"] = True
         return cleaned
 
@@ -78,10 +97,15 @@ class UserEditForm(forms.ModelForm):
         self.fields["first_name"].required = True
         role_field = self.fields["role"]
         if isinstance(role_field, ChoiceField):
-            role_field.choices = [
-                (UserRole.ADMIN, "App Admin"),
-                (UserRole.EXPERT, "BOQ Expert"),
-            ]
+            if _is_superadmin_actor(request_user):
+                role_field.choices = [
+                    (UserRole.ADMIN, "App Admin"),
+                    (UserRole.EXPERT, "BOQ Expert"),
+                ]
+            else:
+                role_field.choices = [
+                    (UserRole.EXPERT, "BOQ Expert"),
+                ]
         if self.instance and self.request_user and self.instance.pk == self.request_user.pk:
             self.fields["email"].disabled = True
             self.fields["email"].help_text = "You cannot change your own email."
@@ -92,10 +116,12 @@ class UserEditForm(forms.ModelForm):
             return cleaned
         if self.instance and self.request_user and self.instance.pk == self.request_user.pk:
             cleaned["email"] = self.instance.email
-            
-        if self.request_user and self.request_user.role == UserRole.ADMIN:
-            if cleaned.get("role") == UserRole.ADMIN:
-                cleaned["role"] = self.instance.role if self.instance else UserRole.EXPERT
+
+        if not _is_superadmin_actor(self.request_user):
+            # Admins may only keep Experts as Experts — never promote to Admin.
+            cleaned["role"] = UserRole.EXPERT
+            if self.instance and self.instance.role == UserRole.ADMIN:
+                self.add_error(None, "Only Superadmin can manage Admin users.")
 
         if cleaned.get("role") == UserRole.ADMIN:
             cleaned["allow_db_access"] = True

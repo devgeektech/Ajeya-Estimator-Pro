@@ -33,16 +33,22 @@ Upload → Analyse (extract + map) → Make & Vendor → Labour → Review → E
 
 | Role | Access |
 | --- | --- |
-| **Superadmin** | Full access; user management; database management; **all BOQs** |
-| **Admin** | User management; database management; **own BOQs + Experts they created** |
-| **Expert** | Upload/process BOQs; **own BOQs only**; database access only when granted |
+| **Superadmin** | Full access; user management (including Admins); database upload; **all BOQs**; **full audit** |
+| **Admin** | Manage **Experts they created** only (not peer Admins); database upload; **own BOQs + their Experts' BOQs**; **audit for self + their Experts** |
+| **Expert** | Upload/process BOQs; **own BOQs only**; database **view/download** for awareness; database **upload** only when granted |
 
 BOQ ownership stays with the uploader. Superadmin sees every BOQ. An Admin sees
 only their own uploads and BOQs from Experts where ``created_by`` is that Admin
 — not other Admins or those Admins' Experts. Experts see only their own.
 
+**Master database visibility (intentional):** every signed-in user may open the
+Database list / detail / download so they know which master workbook is active
+and can share it. **Upload / import** still requires Admin, Superadmin, or an
+Expert with ``allow_db_access``.
+
 Authentication: email login, password reset, no public registration. Users are
-created by admins (``created_by`` links underlings for Admin BOQ visibility).
+created by Superadmin (Admins) or by Admin/Superadmin (Experts). ``created_by``
+links underlings for Admin BOQ and user-management visibility.
 
 ---
 
@@ -51,11 +57,13 @@ created by admins (``created_by`` links underlings for Admin BOQ visibility).
 ### Master database import
 
 ```text
-Upload workbook → Validate → Import Product_Helper + Rate_Master_Output +
-Labour_master_Output → Activate version → Generate embeddings
+Upload workbook → Validate → Import sheets (inactive version) →
+Generate embeddings (must succeed) → Activate → Purge previous master data
 ```
 
-- Runs **synchronously** in the upload request (no Celery).
+- HTTP upload runs import + embeddings **synchronously** in one global lock
+  (Superadmin / Admin / Expert with ``allow_db_access``). Concurrent uploads are
+  refused; the UI shows **Uploading…** and polls status across tab switches.
 - `Product_Helper`, `Rate_Master_Output`, and `Labour_master_Output` are **required**.
 - Other workbook sheets may exist; they are **not ingested** (UI counts only).
 - **Discontinued products:** Product_Helper rows whose ``Status`` (column I) is
@@ -70,13 +78,17 @@ Labour_master_Output → Activate version → Generate embeddings
   are always loaded from PostgreSQL (`Rate_Master_Output` /
   `Labour_master_Output`) by that Product_ID — never from the vector store.
 - Stored upload file is datetime-stamped; download uses original filename.
-- Last **10** uploads remain visible for view/download (metadata + workbook file).
-- Master sheet rows are stored in PostgreSQL only for the **active** upload.
-- No rollback — new upload replaces the active database.
+- Last **10** upload records remain visible for view/download (metadata + workbook).
+- Master sheet rows are stored in PostgreSQL only for the **active** upload;
+  on successful import, previous master rows are **purged** (first upload has
+  nothing to purge).
+- A **failed** embedding/import does **not** activate the new version — the
+  previous active database and Chroma stay live.
 - Catalog identity: **`Product_Helper.Product_ID`**. Pricing amount:
   **`Final_Material_Amount`**. Labour: **`Labour_With_State_Multiplier`** by
   Product_ID (model `Total_Labour_per_unit_with_labour_Multipler`).
-- Embeddings skip cleanly when OpenAI is not configured.
+- **Embeddings are required for import success** when there are embeddable
+  Product_Helper rows (OpenAI must be configured).
 
 Entry point: `DatabaseImportService` in `apps/database_manager/services/importer.py`.
 Views call the service directly (thin views).

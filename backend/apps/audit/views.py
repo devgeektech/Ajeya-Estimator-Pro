@@ -1,15 +1,31 @@
-"""Audit views (Super Admin only)."""
+"""Audit views — Superadmin sees all; Admin sees self + their Experts."""
 from django.contrib.auth import get_user_model
-from django.db.models import Q, Subquery, OuterRef
+from django.db.models import Q, QuerySet, Subquery, OuterRef
+from django.shortcuts import get_object_or_404
 from django.views.generic import ListView
 
 from common.choices import UserRole
-from common.mixins import SuperAdminRequiredMixin
+from common.mixins import AdminRequiredMixin
 
 from apps.audit.models import AuditLog
 
 
-class AuditLogListView(SuperAdminRequiredMixin, ListView):
+def _users_visible_in_audit(actor) -> QuerySet:
+    """Users whose audit activity the actor may review.
+
+    - Superadmin / Django superuser: everyone except SUPERADMIN role accounts.
+    - Admin: themselves plus Experts they created (not peer Admins).
+    """
+    User = get_user_model()
+    qs = User.objects.exclude(role=UserRole.SUPERADMIN)
+    if getattr(actor, "is_superuser", False) or getattr(actor, "is_superadmin", False):
+        return qs
+    if getattr(actor, "is_admin", False):
+        return qs.filter(Q(pk=actor.pk) | Q(role=UserRole.EXPERT, created_by=actor))
+    return qs.none()
+
+
+class AuditLogListView(AdminRequiredMixin, ListView):
     template_name = "audit/list.html"
     context_object_name = "users"
     paginate_by = 50
@@ -21,10 +37,9 @@ class AuditLogListView(SuperAdminRequiredMixin, ListView):
     }
 
     def get_queryset(self):
-        User = get_user_model()
         latest_audit = AuditLog.objects.filter(user=OuterRef("pk")).order_by("-timestamp")
 
-        qs = User.objects.exclude(role=UserRole.SUPERADMIN).annotate(
+        qs = _users_visible_in_audit(self.request.user).annotate(
             recent_action=Subquery(latest_audit.values("action")[:1]),
             recent_action_datetime=Subquery(latest_audit.values("timestamp")[:1]),
         )
@@ -70,7 +85,7 @@ class AuditLogListView(SuperAdminRequiredMixin, ListView):
         return context
 
 
-class UserAuditLogListView(SuperAdminRequiredMixin, ListView):
+class UserAuditLogListView(AdminRequiredMixin, ListView):
     template_name = "audit/user_list.html"
     context_object_name = "logs"
     paginate_by = 50
@@ -83,11 +98,11 @@ class UserAuditLogListView(SuperAdminRequiredMixin, ListView):
     }
 
     def get_queryset(self):
-        qs = (
-            AuditLog.objects.filter(user_id=self.kwargs.get("pk"))
-            .exclude(user__role=UserRole.SUPERADMIN)
-            .select_related("user")
+        audit_user = get_object_or_404(
+            _users_visible_in_audit(self.request.user),
+            pk=self.kwargs.get("pk"),
         )
+        qs = AuditLog.objects.filter(user=audit_user).select_related("user")
 
         query = (self.request.GET.get("q") or "").strip()
         if query:
@@ -112,8 +127,10 @@ class UserAuditLogListView(SuperAdminRequiredMixin, ListView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        User = get_user_model()
-        context["audit_user"] = User.objects.filter(pk=self.kwargs.get("pk")).first()
+        context["audit_user"] = get_object_or_404(
+            _users_visible_in_audit(self.request.user),
+            pk=self.kwargs.get("pk"),
+        )
         sort_key = (self.request.GET.get("sort") or "when").strip().lower()
         direction = (self.request.GET.get("dir") or "desc").strip().lower()
         if sort_key not in self._SORT_FIELDS:

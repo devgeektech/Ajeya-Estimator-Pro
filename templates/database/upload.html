@@ -3,14 +3,26 @@
 {% block heading %}Upload Database{% endblock %}
 
 {% block content %}
-<div class="panel panel--narrow">
+<div
+    class="panel panel--narrow"
+    x-data="databaseImportUpload({
+        statusUrl: '{% url 'database:import_status' %}',
+        listUrl: '{% url 'database:list' %}',
+        initialBusy: {{ import_busy|yesno:'true,false' }}
+    })"
+>
     <p class="panel__text" style="margin-bottom:20px;">
-        Upload the master database workbook. Required sheets:
-        <strong>Rate_Master_Output and Labour_master_Output</strong>. The workbook is validated,
-        the existing database is backed up, the new data is imported and the
-        new version is activated.
+        Upload one master database file at a time. The new database replaces the
+        current one only after the upload finishes successfully. If anything goes
+        wrong, the current database stays in place.
     </p>
-    <form method="post" enctype="multipart/form-data" novalidate x-data="{ isUploading: false }" @submit="if(isUploading) { $event.preventDefault(); return false; } isUploading = true">
+
+    <form
+        method="post"
+        enctype="multipart/form-data"
+        novalidate
+        @submit="onSubmit($event)"
+    >
         {% csrf_token %}
         {% for field in form %}
         <label class="field">
@@ -20,17 +32,58 @@
         </label>
         {% endfor %}
         <div class="form-actions">
-            <button type="submit" class="btn btn--primary" :disabled="isUploading">
-                <span x-show="!isUploading">Upload &amp; import</span>
-                <span x-show="isUploading" style="display: none; align-items: center; justify-content: center; gap: 8px;">
+            <button type="submit" class="btn btn--primary" :disabled="busy" :aria-busy="busy">
+                <span x-show="!busy">Upload</span>
+                <span x-show="busy" x-cloak style="display:inline-flex; align-items:center; justify-content:center; gap:8px;">
                     <svg class="spinner" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="animation: spin 1s linear infinite;"><line x1="12" y1="2" x2="12" y2="6"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="18" y1="12" x2="22" y2="12"></line><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line></svg>
-                    Processing...
+                    Uploading…
                 </span>
             </button>
+            <a href="{% url 'database:list' %}" class="btn btn--ghost">Back</a>
         </div>
     </form>
 </div>
 <style>
 @keyframes spin { 100% { transform: rotate(360deg); } }
 </style>
+<script>
+function databaseImportUpload(cfg) {
+    return {
+        statusUrl: cfg.statusUrl,
+        listUrl: cfg.listUrl,
+        busy: !!cfg.initialBusy,
+        timer: null,
+        init() {
+            this.poll();
+            this.timer = setInterval(() => this.poll(), 2000);
+        },
+        destroy() {
+            if (this.timer) clearInterval(this.timer);
+        },
+        async poll() {
+            try {
+                const res = await fetch(this.statusUrl, {
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                    credentials: 'same-origin',
+                });
+                if (!res.ok) return;
+                const data = await res.json();
+                const wasBusy = this.busy;
+                this.busy = !!data.busy || data.status === 'processing';
+                if (wasBusy && !this.busy && data.status === 'succeeded') {
+                    window.location.href = this.listUrl;
+                }
+            } catch (e) { /* keep last known state */ }
+        },
+        onSubmit(event) {
+            if (this.busy) {
+                event.preventDefault();
+                return false;
+            }
+            this.busy = true;
+            return true;
+        },
+    };
+}
+</script>
 {% endblock %}
