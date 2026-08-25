@@ -5,6 +5,49 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
+## 2026-08-25 — Manual deploy guide
+
+- Added `docs/DEPLOY.md`: first EC2 go-live and subsequent manual `git pull`
+  deploys (no CI/CD), including staticfile permissions and a copy/paste cheat
+  sheet. Linked from README, OPS, AGENTS, and PRODUCT.
+
+## 2026-08-24 — EC2 static CSS permissions
+
+- After `collectstatic`, Nginx could not read `/srv/boq_ai/staticfiles` (403)
+  because files were `boq_ai:boq_ai` mode 750/640. Fixed ownership to
+  `boq_ai:www-data` and documented the chown/chmod in `docs/OPS.md` for go-live
+  and subsequent deploys.
+
+## 2026-08-25 — Labour manual missing-charge copy
+
+- In Manual mode, products without labour show **No Manual Charge percentage is
+  applied** instead of the Auto “no labour charge found” wording.
+
+## 2026-08-25 — Labour Apply only in Manual
+
+- Auto mode has no Apply button (switching to Auto already reloads
+  Labour_master_Output). Manual mode keeps **Apply Labour**.
+
+## 2026-08-25 — Labour Auto restores master rates
+
+- Switching Manual → Auto reloads Labour_master_Output prices (no longer leaves
+  manual % amounts on the cards).
+- Apply button label follows mode: **Apply Auto Labour** / **Apply Manual Labour**.
+
+## 2026-08-25 — Make & Vendor filter clear, same-price badge, selection preserve
+
+- Filter × / Clear all restore lowest-price picks (same as initial Make & Vendor
+  load) for the filtered scope.
+- Duplicate **Same price** badge removed (one yellow badge only).
+- Returning from Analysis only refreshes rates for products whose Product_ID
+  changed; manual Apply / cascade work on other products is kept.
+
+## 2026-08-25 — BOQ visibility by role
+
+- Each uploader keeps their own BOQs. Superadmin and Expert see only their
+  uploads. Admin sees their own BOQs plus every Expert's BOQs (not other Admins'
+  or Superadmins'). List, detail, status, and dashboard use the same rule.
+
 ## 2026-08-24 — Go-live documentation
 
 - README and `docs/OPS.md` now have a complete first-boot EC2 sequence, including

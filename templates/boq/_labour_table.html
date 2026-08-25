@@ -17,13 +17,15 @@
                 type="button"
                 class="btn btn--small"
                 :class="{ 'btn--primary': mode === 'auto' }"
-                @click="mode = 'auto'"
+                :disabled="saving"
+                @click="setMode('auto')"
             >Auto</button>
             <button
                 type="button"
                 class="btn btn--small"
                 :class="{ 'btn--primary': mode === 'manual' }"
-                @click="mode = 'manual'"
+                :disabled="saving"
+                @click="setMode('manual')"
             >Manual</button>
         </div>
         <div class="labour-toolbar__spacer" aria-hidden="true"></div>
@@ -31,13 +33,13 @@
             <button
                 type="button"
                 class="btn btn--small btn--boq-analyse"
+                x-show="mode === 'manual'"
+                x-cloak
                 :disabled="!canApply || saving"
-                @click="mode === 'auto' ? applyAuto() : applyManual()"
-                :title="mode === 'auto'
-                    ? 'Load labour charges from Labour_master_Output for every product'
-                    : 'Apply the % labour rates entered per category'"
+                @click="applyManual()"
+                title="Apply the % labour rates entered per category"
             >
-                <span x-show="!saving">Apply labour</span>
+                <span x-show="!saving">Apply Labour</span>
                 <span x-show="saving" x-cloak>Applying…</span>
             </button>
             <button
@@ -192,7 +194,8 @@
                             <div class="make-vendor-card__heading">
                                 <h4 class="make-vendor-card__title">{{ product.description_hint|default:product.summary }}</h4>
                                 {% if product.highlight_no_labour %}
-                                <p class="make-vendor-card__no-make-note">No labour charge found for this product</p>
+                                <p class="make-vendor-card__no-make-note" x-show="mode === 'manual'" x-cloak>No Manual Charge percentage is applied</p>
+                                <p class="make-vendor-card__no-make-note" x-show="mode === 'auto'">No labour charge found for this product</p>
                                 {% endif %}
                             </div>
                             {% if product.highlight_no_labour %}
@@ -261,6 +264,17 @@ document.addEventListener('alpine:init', () => {
         saving: false,
         completing: false,
         error: '',
+        setMode(next) {
+            const mode = String(next || '').trim().toLowerCase() === 'manual' ? 'manual' : 'auto';
+            const previous = this.mode;
+            this.mode = mode;
+            this.error = '';
+            // Manual → Auto must reload Labour_master_Output amounts (not leave
+            // the last manual % prices on the cards).
+            if (mode === 'auto' && previous === 'manual') {
+                this.applyAuto();
+            }
+        },
         async applyAuto() {
             if (this.saving || !this.canApply) return;
             this.saving = true;

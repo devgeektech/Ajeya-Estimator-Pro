@@ -16,12 +16,14 @@ Django templates + Alpine.js
 | --- | --- |
 | [`docs/PRODUCT.md`](docs/PRODUCT.md) | Product scope, architecture, code structure |
 | [`docs/DATABASE.md`](docs/DATABASE.md) | Schema and import rules |
-| [`docs/OPS.md`](docs/OPS.md) | Local setup and **EC2 go-live** |
+| [`docs/DEPLOY.md`](docs/DEPLOY.md) | **Manual go-live + later `git pull` deploys** (no CI/CD) |
+| [`docs/OPS.md`](docs/OPS.md) | Local setup, systemd/Nginx templates, tests |
 | [`docs/SESSION_STATE.md`](docs/SESSION_STATE.md) | Current session status |
 | [`AGENTS.md`](AGENTS.md) | Instructions for AI agents |
 
-**Make it live:** follow [`docs/OPS.md`](docs/OPS.md) **Go live on EC2** from
-step 1 through first master-database upload. A `git pull` alone is not enough.
+**Make it live / update live:** follow [`docs/DEPLOY.md`](docs/DEPLOY.md).
+Unit-file templates and local setup stay in [`docs/OPS.md`](docs/OPS.md).
+A `git pull` alone is not enough — always migrate, collectstatic, and restart.
 
 ## Quick Start (local)
 

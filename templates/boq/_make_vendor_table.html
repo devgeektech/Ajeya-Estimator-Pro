@@ -317,7 +317,7 @@
                     >Same price</span>
                     <span
                         class="badge badge--yellow"
-                        x-show="vendorRateReview"
+                        x-show="vendorRateReview && !samePriceTie"
                         x-cloak
                         title="Confirm vendor — same material rate with different make/vendor"
                     >Vendor review</span>
@@ -328,10 +328,10 @@
                     >Not found</span>
                     <span
                         class="badge"
-                        x-show="!notFound"
+                        x-show="!notFound && !samePriceTie"
                         :class="{
-                            'badge--yellow': samePriceTie || status === 'pending',
-                            'badge--green': !samePriceTie && status === 'matched',
+                            'badge--yellow': vendorRateReview || status === 'pending',
+                            'badge--green': !vendorRateReview && status === 'matched',
                             'badge--red': status === 'unmatched',
                             'badge--gray': status === 'not_searched'
                         }"
@@ -914,7 +914,7 @@ document.addEventListener('alpine:init', () => {
             }, 300);
         },
         get statusLabel() {
-            if (this.samePriceTie) return 'Same price';
+            // Same-price uses its own badge; do not duplicate the label here.
             if (this.status === 'matched') return 'Matched';
             if (this.status === 'pending') return 'Review';
             if (this.status === 'unmatched') return 'No match';

@@ -74,10 +74,9 @@ def _structures_for_display(boq: BOQ) -> tuple[dict, dict]:
 
 
 def _boq_queryset_for_user(user: User):
-    qs = BOQ.objects.select_related("user")
-    if not user.is_super_admin:
-        qs = qs.filter(user=user)
-    return qs
+    from apps.boq.services.boq_visibility_service import boqs_visible_to_user
+
+    return boqs_visible_to_user(user)
 
 
 def _detail_tab_url(pk: int, tab: str) -> str:
@@ -1335,9 +1334,9 @@ class BOQAnalysisStatusView(LoginRequiredMixin, View):
 
     def get(self, request, pk: int):
         user = cast(User, request.user)
-        qs = BOQ.objects.only("pk", "status", "analysis_data", "boq_name", "user_id")
-        if not user.is_super_admin:
-            qs = qs.filter(user=user)
+        qs = _boq_queryset_for_user(user).only(
+            "pk", "status", "analysis_data", "boq_name", "user_id"
+        )
         boq = get_object_or_404(qs, pk=pk)
         expect = (request.GET.get("expect") or "extract").strip().lower()
         payload = _status_payload(boq, request.session, expect=expect)

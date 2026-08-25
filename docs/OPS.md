@@ -3,6 +3,10 @@
 Local development, testing, and EC2 go-live. Update when infrastructure or
 commands change.
 
+**Operator guide for first go-live and later manual `git pull` deploys (no
+CI/CD):** [`docs/DEPLOY.md`](DEPLOY.md). This file keeps the full unit/Nginx
+templates and local setup detail.
+
 ---
 
 ## Environment
@@ -164,6 +168,10 @@ cd /srv/boq_ai/backend
 sudo -u boq_ai bash -c 'set -a; source ../.env; set +a; ../.venv/bin/python manage.py check --deploy'
 sudo -u boq_ai bash -c 'set -a; source ../.env; set +a; ../.venv/bin/python manage.py migrate'
 sudo -u boq_ai bash -c 'set -a; source ../.env; set +a; ../.venv/bin/python manage.py collectstatic --noinput'
+# Nginx (www-data) must read STATIC_ROOT. collectstatic creates boq_ai:boq_ai files.
+sudo chown -R boq_ai:www-data /srv/boq_ai/staticfiles
+sudo find /srv/boq_ai/staticfiles -type d -exec chmod 2750 {} +
+sudo find /srv/boq_ai/staticfiles -type f -exec chmod 640 {} +
 sudo -u boq_ai bash -c 'set -a; source ../.env; set +a; ../.venv/bin/python manage.py createsuperuser'
 ```
 
@@ -296,6 +304,8 @@ BOQ upload is refused until an active master database exists.
 
 ## Subsequent deploys
 
+Day-to-day checklist and cheat sheet: [`docs/DEPLOY.md`](DEPLOY.md) **Part B**.
+
 Before pushing:
 
 - [ ] No secrets in git
@@ -316,6 +326,9 @@ cd backend
 sudo -u boq_ai bash -c 'set -a; source ../.env; set +a; ../.venv/bin/python manage.py check --deploy'
 sudo -u boq_ai bash -c 'set -a; source ../.env; set +a; ../.venv/bin/python manage.py migrate'
 sudo -u boq_ai bash -c 'set -a; source ../.env; set +a; ../.venv/bin/python manage.py collectstatic --noinput'
+sudo chown -R boq_ai:www-data /srv/boq_ai/staticfiles
+sudo find /srv/boq_ai/staticfiles -type d -exec chmod 2750 {} +
+sudo find /srv/boq_ai/staticfiles -type f -exec chmod 640 {} +
 sudo systemctl restart boq_ai-gunicorn boq_ai-celery
 sudo -u boq_ai bash -c 'set -a; source ../.env; set +a; ../.venv/bin/python manage.py check_celery'
 ```

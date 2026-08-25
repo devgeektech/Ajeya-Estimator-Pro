@@ -5,8 +5,8 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.views.generic import TemplateView
 
 from apps.accounts.models import User
-from apps.boq.models import BOQ
 from apps.boq.services.boq_status_display_service import build_boq_status_display
+from apps.boq.services.boq_visibility_service import boqs_visible_to_user
 from common.choices import BOQStatus
 
 
@@ -19,7 +19,7 @@ class DashboardHomeView(LoginRequiredMixin, TemplateView):
         ctx["greeting_name"] = user.full_name
         ctx["is_super_admin"] = user.is_super_admin
 
-        boqs = BOQ.objects.all() if user.is_super_admin else BOQ.objects.filter(user=user)
+        boqs = boqs_visible_to_user(user)
         total = boqs.count()
         analysing = boqs.filter(
             status__in=[BOQStatus.PROCESSING, BOQStatus.MATCHING]
@@ -40,7 +40,7 @@ class DashboardHomeView(LoginRequiredMixin, TemplateView):
 
         ctx["metrics"] = [
             {
-                "label": "All BOQs" if user.is_super_admin else "My BOQs",
+                "label": "BOQs" if user.is_admin else "My BOQs",
                 "value": total,
                 "tone": "blue",
             },

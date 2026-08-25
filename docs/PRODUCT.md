@@ -33,9 +33,13 @@ Upload → Analyse (extract + map) → Make & Vendor → Labour → Review → E
 
 | Role | Access |
 | --- | --- |
-| **Superadmin** | Full access; user management; database management; sees all BOQs |
-| **Admin** | User management; database management |
-| **Expert** | Upload BOQs; database access only when granted |
+| **Superadmin** | Full access; user management; database management; **own BOQs only** |
+| **Admin** | User management; database management; **own BOQs + all Expert BOQs** |
+| **Expert** | Upload/process BOQs; **own BOQs only**; database access only when granted |
+
+BOQ ownership stays with the uploader. Admins may list and open Expert BOQs so
+they can review work; they do not see other Admins' or Superadmins' BOQs.
+Superadmins do not see Admin/Expert BOQs.
 
 Authentication: email login, password reset, no public registration. Users are
 created by admins.
@@ -401,10 +405,15 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
   Rate_Master_Output rows for that make share the same lowest price (typically different
   vendors), the product is flagged **Multiple product detected in same price** and
   the expert must choose one. Applied filters list shows manual cascade applies.
-  Removing one filter (×) or **Clear all** restores those sub-category products
-  to the **lowest-price** Rate_Master make/vendor combination.
+  Removing one filter (×) or **Clear all** restores those filtered products to the
+  **same lowest-price Make & Vendor state as the initial Make & Vendor page load**
+  (not a blank card).
+- Returning from **Analysis** to Make & Vendor syncs Product_IDs but **reloads rates
+  only for products whose Product_ID changed** (or that still have no make/vendor
+  pick). Manual Apply and cascade filter work on other products is preserved.
 - Selection persisted per product as `selected_make`, `selected_vendor`, `vendor_selection`;
   sub-category choices stored in `analysis_data.subcategory_make_selections`.
+- Same-price ties show a single **Same price** badge (not duplicated with status).
 - AI does not choose make/vendor or calculate prices — rates are read from the master DB.
 - Make & Vendor UI shows **product rate only** in a view-only field beside
   Make/Vendor (labour charges belong on the Labour tab). Confidence / product
@@ -428,10 +437,11 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
   from **`Labour_With_State_Multiplier`** (fallback: `Total_Labour_Per_Unit`,
   then `Labour_Rate_Per_unit`)
   (`BOQLabourService.apply_auto` → `LabourDetailRetrievalService`).
-  Toolbar **Apply labour** re-runs this load (Auto or after switching back from Manual).
+  Switching to **Auto** (including Manual → Auto) reloads those amounts; there is
+  no separate Apply button in Auto mode.
 - **Manual:** enter a percentage per extraction category; labour =
   material × (percent / 100) for every product in that category
-  (`BOQLabourService.apply_manual`).
+  (`BOQLabourService.apply_manual`). Toolbar **Apply Labour** commits the %.
 - Line pricing: **(material + labour) × quantity** after Labour → Next
   (`BOQPriceCalculationService`).
 - Persist `analysis_data.labour_config` (`mode`, `category_percentages`, `labour_ready`).
@@ -669,6 +679,7 @@ BOQ_AI/
 | `apps/database_manager/services/activation.py` | Single active upload |
 | `apps/database_manager/views.py` | DB upload UI |
 | `apps/boq/services/boq_service.py` | BOQ file persistence |
+| `apps/boq/services/boq_visibility_service.py` | Role-based BOQ list/detail visibility |
 | `apps/boq/services/xls_upload_conversion_service.py` | Convert legacy `.xls` → `.xlsx` on upload |
 | `utils/xls_convert.py` | xlrd → openpyxl workbook conversion |
 | `apps/boq/services/boq_row_fields.py` | Shared BOQ field keys and tiny value helpers |
@@ -706,7 +717,7 @@ BOQ_AI/
 - Small, isolated changes; logic in services.
 - Update `docs/SESSION_STATE.md` and `docs/CHANGELOG.md` each session.
 - Update `docs/PRODUCT.md` when scope/structure changes; `docs/DATABASE.md` when
-  models change; `docs/OPS.md` when run/deploy steps change.
+  models change; `docs/OPS.md` / `docs/DEPLOY.md` when run/deploy steps change.
 
 **Do not:**
 
@@ -734,6 +745,5 @@ BOQ_AI/
   sorted by confidence then id before AI so the same BOQ tends to pick the same
   Product_ID.
 - Embeddings: `text-embedding-3-small` → Chroma at `media/chroma`.
-- **Go live:** `docs/OPS.md` section **Go live on EC2** (packages → `.env` →
-  migrate → systemd → Nginx → Superadmin → **upload master database**).
-  Subsequent `git pull` steps are under **Subsequent deploys**.
+- **Go live / later updates:** `docs/DEPLOY.md` (manual push + server `git pull`;
+  no CI/CD). Unit/Nginx templates and local setup: `docs/OPS.md`.

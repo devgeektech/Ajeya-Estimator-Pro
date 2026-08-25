@@ -36,6 +36,7 @@ Before development, read:
 2. `docs/DATABASE.md` — schema and import rules (when touching models)
 3. `docs/SESSION_STATE.md` — current session status and recent work
 4. `docs/OPS.md` — only when changing deploy or run commands
+5. `docs/DEPLOY.md` — when changing go-live or manual `git pull` deploy steps
 
 Update `docs/PRODUCT.md` when product scope or structure changes.
 
@@ -278,6 +279,7 @@ Active docs (keep lean — extend, do not duplicate):
 | `docs/PRODUCT.md` | Scope, structure, or architecture changes |
 | `docs/DATABASE.md` | Models, migrations, import rules |
 | `docs/OPS.md` | Run/deploy commands or infrastructure |
+| `docs/DEPLOY.md` | Manual go-live / subsequent `git pull` deploy steps |
 
 ### SESSION_STATE entry format
 
@@ -505,7 +507,8 @@ AI implements.
 | --- | --- |
 | `docs/PRODUCT.md` | Product scope, architecture, code structure, dev rules |
 | `docs/DATABASE.md` | Schema, import, versioning |
-| `docs/OPS.md` | Local setup, tests, EC2 deploy |
+| `docs/OPS.md` | Local setup, tests, systemd/Nginx templates |
+| `docs/DEPLOY.md` | Manual go-live and later `git pull` deploys (no CI/CD) |
 | `docs/SESSION_STATE.md` | Active session memory |
 | `docs/CHANGELOG.md` | Change history (compact) |
 | `docs/MAKE_VENDOR_APPROACH.md` | Client approach for Make & Vendor (experimental) |
@@ -525,7 +528,8 @@ BOQ_AI currently uses a single EC2 runtime:
   not part of the active workflow.
 * Production-ready work only: use real client data, real PostgreSQL migrations,
   and real operational assumptions.
-* First-time EC2 go-live and later `git pull` deploys: `docs/OPS.md`.
+* First-time EC2 go-live and later `git pull` deploys: `docs/DEPLOY.md`
+  (templates in `docs/OPS.md`).
 
 # Golden Rule
 

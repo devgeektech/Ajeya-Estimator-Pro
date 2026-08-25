@@ -453,7 +453,9 @@ class MakeVendorCascadeMixin:
         category: str,
         sub_category: str = "",
     ) -> dict[str, Any]:
-        """Remove a manual cascade filter and restore those products to lowest price."""
+        """Remove a manual cascade filter and restore those products to the same
+        lowest-price Make & Vendor state as the initial Make & Vendor load.
+        """
         boq = self._get_boq()
         self._ensure_editable(boq)
 
@@ -529,7 +531,9 @@ class MakeVendorCascadeMixin:
         }
 
     def clear_all_subcategory_filters(self) -> dict[str, Any]:
-        """Remove every manual cascade filter and restore lowest-price rates."""
+        """Remove every manual cascade filter and restore those products to the
+        same lowest-price state as the initial Make & Vendor page load.
+        """
         boq = self._get_boq()
         self._ensure_editable(boq)
 
@@ -595,9 +599,9 @@ class MakeVendorCascadeMixin:
         refresh_rates_if_changed: bool = True,
     ) -> dict[str, Any]:
         """
-        Re-capture Product_IDs from Analysis selections without wiping unchanged
-        Make & Vendor picks. When a Product_ID changes, reload Rate_Master + labour
-        rows for that id (lowest Final_Material_Amount).
+        Re-capture Product_IDs from Analysis without wiping unchanged Make & Vendor
+        picks. Rates reload only when a product's Product_ID changed (or it still
+        has no make/vendor selection). Manual Apply and cascade filters are kept.
         """
         boq = self._get_boq()
         self._ensure_editable(boq)
@@ -642,19 +646,19 @@ class MakeVendorCascadeMixin:
                     captured_ids.append(product_id)
 
                 selection = dict(updated.get("vendor_selection") or {})
-                selection_id = str(
-                    selection.get("catalog_product_id")
-                    or selection.get("product_id")
-                    or ""
-                ).strip()
+                has_pick = bool(
+                    selection.get("make")
+                    or selection.get("vendor")
+                    or selection.get("rate_detail")
+                    or selection.get("status") in {"matched", "unmatched", "pending"}
+                )
+                # Only reload rates when Analysis Product_ID actually changed (or
+                # there is no Make & Vendor pick yet). Preserve manual Apply /
+                # cascade filter work when returning from Analysis.
                 needs_rate_refresh = bool(
                     refresh_rates_if_changed
                     and product_id
-                    and (
-                        id_changed
-                        or selection_id != product_id
-                        or not selection.get("rate_detail")
-                    )
+                    and (id_changed or not has_pick)
                 )
                 if needs_rate_refresh:
                     category_text = str(updated.get("category") or "").strip()

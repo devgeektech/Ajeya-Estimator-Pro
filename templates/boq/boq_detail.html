@@ -621,8 +621,8 @@
             }
         },
         async openMakeVendorTab() {
-            // Re-capture Analysis Product_IDs when returning to Make & Vendor
-            // (preserves unchanged make/vendor; refreshes rates when Product_ID changed).
+            // Re-capture Analysis Product_IDs when returning to Make & Vendor.
+            // Rates refresh only for products whose Product_ID changed.
             if (!this.makeVendorEnabled || this.analysing || this.matching || this.prefillingMakeVendor) return;
             this.prefillingMakeVendor = true;
             try {
@@ -642,6 +642,21 @@
                 const data = await response.json().catch(() => ({}));
                 if (!response.ok || data.ok === false) {
                     throw new Error(data.message || 'Failed to sync Product_IDs.');
+                }
+                const selection = data.selection || {};
+                const changed = Number(selection.changed_count || 0);
+                const refreshed = Number(selection.refreshed_count || 0);
+                // Already on Make & Vendor with no Product_ID / rate changes — keep DOM.
+                if (this.activeTabPage === 'make_vendor' && changed === 0 && refreshed === 0) {
+                    this.tab = 'make_vendor';
+                    this.syncTabUrl('make_vendor');
+                    this.prefillingMakeVendor = false;
+                    return;
+                }
+                this.persistScroll(this.activeTabPage || this.tab);
+                if (changed === 0 && refreshed === 0) {
+                    window.location.assign(this.detailMakeVendorUrl);
+                    return;
                 }
                 this.reloadWithCacheBust(this.detailMakeVendorUrl);
             } catch (error) {

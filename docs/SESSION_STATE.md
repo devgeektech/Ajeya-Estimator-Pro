@@ -68,12 +68,12 @@ uploads retained.
 
 Keep only the latest entry below. Older work is in `docs/CHANGELOG.md`.
 
-### 2026-08-24 — Go-live docs
+### 2026-08-25 — Labour manual missing-charge copy
 
-Completed: Rewrote README + `docs/OPS.md` into a full EC2 go-live sequence (AWS SG, Postgres grants, `.env`/OpenAI, migrate, systemd, Nginx default site, `check_celery`, first master-DB upload). Gunicorn socket umask 007 for Nginx.
-Pending: Run OPS steps 1–14 on `13.205.90.58`; domain + TLS later.
-Issues: HTTP-only until a domain/cert exists.
-Next: Follow `docs/OPS.md` **Go live on EC2**.
+Completed: Manual mode missing-labour note is now “No Manual Charge percentage is applied”; Auto still shows “No labour charge found for this product”.
+Pending: None.
+Issues: None.
+Next: None.
 
 
 
