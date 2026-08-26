@@ -71,10 +71,10 @@ Keep only the latest entry below. Older work is in `docs/CHANGELOG.md`.
 
 ### 2026-08-26 — Speed up Analyse
 
-Completed: Batch defaults 8/8; parallel extract (4); refine only &lt;30% confidence; timing logs; docs/OPS/.env.example.
-Pending: Deploy to live `.env` + restart Celery; UAT wall time on ~100-product BOQ.
+Completed: Batch defaults 8/8; parallel extract (4); refine only &lt;30% confidence; timing logs; docs; live `.env` knobs + Celery restart (`c08c916`).
+Pending: UAT wall time on ~100-product BOQ.
 Issues: None.
-Next: Push speedup commit; live pull + env knobs + Celery restart.
+Next: Run Analyse on a large BOQ and confirm finish time / match quality.
 
 
 
