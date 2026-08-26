@@ -218,9 +218,11 @@ OPENAI_TIMEOUT_SECONDS = env.int("OPENAI_TIMEOUT_SECONDS", default=120)
 OPENAI_MAX_RETRIES = env.int("OPENAI_MAX_RETRIES", default=1)
 AI_INSTRUCTION_LOGGING = env.bool("AI_INSTRUCTION_LOGGING", default=DEBUG)
 # How many BOQ sections to send per extract_products AI call.
-AI_ROW_EXTRACTION_BATCH_SIZE = env.int("AI_ROW_EXTRACTION_BATCH_SIZE", default=5)
+AI_ROW_EXTRACTION_BATCH_SIZE = env.int("AI_ROW_EXTRACTION_BATCH_SIZE", default=8)
 # How many products to map per map_product_match AI call.
-AI_PRODUCT_MAPPING_BATCH_SIZE = env.int("AI_PRODUCT_MAPPING_BATCH_SIZE", default=4)
+AI_PRODUCT_MAPPING_BATCH_SIZE = env.int("AI_PRODUCT_MAPPING_BATCH_SIZE", default=8)
+# Max concurrent OpenAI extract batches within one Analyse job.
+AI_EXTRACT_PARALLELISM = env.int("AI_EXTRACT_PARALLELISM", default=4)
 
 # --- Chroma -----------------------------------------------------------------
 

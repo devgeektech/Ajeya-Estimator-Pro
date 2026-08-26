@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from common.db import atomic
@@ -28,7 +29,7 @@ from apps.boq.services.product_attribute_enrichment_service import product_needs
 from apps.boq.services.serial_normalizer import structure_for_analysis
 from apps.database_manager.services.activation import get_active_database_version
 from common.choices import BOQStatus
-from common.constants import ANALYSIS_INPUT_FILL_CONFIDENCE
+from common.constants import MATCH_CONFIDENCE_THRESHOLD
 from common.exceptions import AIServiceError, BOQAIError, ValidationError
 from utils.json_safe import json_safe
 
@@ -165,6 +166,7 @@ class BOQAnalysisService:
             )
             boq_data = structure_for_analysis(boq_payload)
             set_boq_job_progress(boq.pk, percent=3, label="Extracting products...", phase="extract")
+            extract_started = time.perf_counter()
 
             def _on_extract_progress(done: int, total: int) -> None:
                 total = max(total, 1)
@@ -192,6 +194,11 @@ class BOQAnalysisService:
             extraction = BOQExtractionService(boq_data).extract(
                 progress_callback=_on_extract_progress,
             )
+            logger.info(
+                "BOQ analysis extract phase id=%s elapsed_s=%.1f",
+                boq.pk,
+                time.perf_counter() - extract_started,
+            )
             extraction_by_row = {
                 str(row.get("row_id")): row
                 for row in extraction.get("rows") or []
@@ -211,6 +218,7 @@ class BOQAnalysisService:
                 label="Matching products to database...",
                 phase="extract",
             )
+            match_started = time.perf_counter()
 
             def _on_enrich_progress(done: int, total: int) -> None:
                 total = max(int(total or 0), 1)
@@ -263,6 +271,11 @@ class BOQAnalysisService:
                 extracted_rows,
                 database_version_id=db_snap.get("database_version_id"),
                 progress_callback=_on_enrich_progress,
+            )
+            logger.info(
+                "BOQ analysis match+refine phase id=%s elapsed_s=%.1f",
+                boq.pk,
+                time.perf_counter() - match_started,
             )
             # Mapping must not leave blank quantities when BOQ slots are known.
             extracted_rows = rehydrate_analysis_rows_quantity(boq_data, extracted_rows)
@@ -614,8 +627,8 @@ class BOQAnalysisService:
         """Map BOQ-extracted products to top Rate_Master neighbors.
 
         First pass maps every product. A second pass rematches only weak
-        (&lt;50%) products with refine=True so initial Analyse gains the same
-        BOQ-section + wider-recall path as expert Re-analyse.
+        products (&lt;30% confidence) so initial Analyse stays fast while hard
+        misses still get the wider-recall refine path.
         """
         version_id = int(database_version_id or 0)
         if not version_id:
@@ -637,10 +650,16 @@ class BOQAnalysisService:
                 first_total = max(int(total or 0), product_count, 1)
                 progress_callback(min(int(done or 0), first_total), first_total * 2)
 
+            map_started = time.perf_counter()
             mapped = mapper.map_rows(
                 rows,
                 progress_callback=_on_first,
                 blank_weak_inputs=False,
+            )
+            logger.info(
+                "BOQ product map first pass products=%s elapsed_s=%.1f",
+                product_count,
+                time.perf_counter() - map_started,
             )
 
             def _on_refine(done: int, total: int) -> None:
@@ -653,11 +672,17 @@ class BOQAnalysisService:
                     overall_total,
                 )
 
+            refine_started = time.perf_counter()
             refined = mapper.refine_rows(
                 mapped,
                 passes=1,
-                min_confidence=ANALYSIS_INPUT_FILL_CONFIDENCE,
+                min_confidence=MATCH_CONFIDENCE_THRESHOLD,
                 progress_callback=_on_refine,
+            )
+            logger.info(
+                "BOQ product refine pass products=%s elapsed_s=%.1f",
+                product_count,
+                time.perf_counter() - refine_started,
             )
             # Blank weak inputs only after refine so rematch still has identity fields.
             return mapper.apply_weak_match_blanking(refined)

@@ -5,6 +5,19 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
+## 2026-08-25 — In-app alert for Analysis Next blockers
+
+- Replaced browser `alert()` for Analysis → Make & Vendor (and related BOQ
+  tab notices) with the shared confirm modal via `BOQConfirm.alert` (OK only).
+
+## 2026-08-26 — Speed up Analyse (batches + parallel extract + narrow refine)
+
+- Default extract/map batch sizes raised to **8**; up to **4** extract batches run
+  in parallel within one Analyse job (`AI_EXTRACT_PARALLELISM`).
+- Automatic refine rematches only products below the **30%** match floor
+  (confidence-only), cutting a second OpenAI pass on most provisional products.
+- Phase timing logged (extract / map / refine elapsed seconds).
+
 ## 2026-08-25 — Prefill Attributes on weak Analysis matches
 
 - Attribute values AI mapped from the BOQ stay prefilled on low-confidence /

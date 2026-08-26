@@ -23,7 +23,7 @@ _MAX_BATCH_CHARS = 14000
 def _extract_batch_size() -> int:
     from django.conf import settings
 
-    return max(1, int(getattr(settings, "AI_ROW_EXTRACTION_BATCH_SIZE", 5) or 5))
+    return max(1, int(getattr(settings, "AI_ROW_EXTRACTION_BATCH_SIZE", 8) or 8))
 
 
 def _lineage_has_quantity(rows: list[dict[str, Any]], lineage_ids: list[str]) -> bool:

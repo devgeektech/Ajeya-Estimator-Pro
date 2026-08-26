@@ -69,12 +69,12 @@ in the request). UI shows **Uploading…** across tab switches via
 
 Keep only the latest entry below. Older work is in `docs/CHANGELOG.md`.
 
-### 2026-08-25 — Prefill Attributes on weak matches
+### 2026-08-26 — Speed up Analyse
 
-Completed: Keep AI-found Attribute values on weak/provisional Analysis cards (no blanking); identity fields already kept; Product Id still gated.
-Pending: Re-Analyse BOQs that were saved with blanked Attributes.
+Completed: Batch defaults 8/8; parallel extract (4); refine only &lt;30% confidence; timing logs; docs/OPS/.env.example.
+Pending: Deploy to live `.env` + restart Celery; UAT wall time on ~100-product BOQ.
 Issues: None.
-Next: UAT — Attributes show values when present in BOQ extract.
+Next: Push speedup commit; live pull + env knobs + Celery restart.
 
 
 

@@ -280,6 +280,10 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
 - Celery task: `boq.process_extraction` (full BOQ only)
 - Concurrent analyses: Celery worker `--concurrency` (default **8** via
   `scripts/run_celery_worker.*`; override with `CELERY_WORKER_CONCURRENCY`)
+- Analyse throughput knobs (`.env`): `AI_ROW_EXTRACTION_BATCH_SIZE` (default **8**,
+  single-slot sections only; multi-slot stays one call each),
+  `AI_PRODUCT_MAPPING_BATCH_SIZE` (default **8**), `AI_EXTRACT_PARALLELISM`
+  (default **4** concurrent extract batches within one job)
 - Stuck jobs: if progress stops for **5 minutes**, or shows 100% complete/failed
   while status is still `PROCESSING`/`MATCHING`, the BOQ is marked
   `ANALYSIS_FAILED` (or `EXTRACTED` if matching stalled with rows) so **Analyse**
@@ -298,7 +302,8 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
      then load Rate_Master_Output rows for that Product_ID (AI validates up to
      **5** neighbors; UI shows top **3**). Synonym-aware SQL remains a fallback.
      Initial Analyse also uses BOQ section text in recall and runs one weak
-     product rematch pass (&lt;50%). Wrong nominal sizes are penalized when extract
+     product rematch pass only for products below the match floor (&lt;30%).
+     Wrong nominal sizes are penalized when extract
      size is filled; candidates are deduped by Product_ID; Class ``0`` is a real
      score token. Description-vs-catalog type checks use **Category + Sub_Category
      + Class** (not Sub alone) and apply a soft penalty — they must not hard-floor

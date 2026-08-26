@@ -3,7 +3,11 @@ from __future__ import annotations
 
 import json
 import logging
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
+
+from django.conf import settings
 
 from ai.context import build_database_context, load_rate_master_taxonomy
 from ai.service import AIService
@@ -36,6 +40,9 @@ from utils.product_synonyms import format_synonym_rules_for_ai
 
 logger = logging.getLogger("boq_ai")
 
+
+def _extract_parallelism() -> int:
+    return max(1, int(getattr(settings, "AI_EXTRACT_PARALLELISM", 4) or 4))
 
 _MINIMUM_SLOT_RETRY_INSTRUCTION = """
 
@@ -110,18 +117,25 @@ class BOQExtractionService:
         ]
 
         extracted_by_id: dict[str, dict[str, Any]] = {}
-        batches = _iter_extract_batches(actionable_groups)
+        batches = list(_iter_extract_batches(actionable_groups))
         extract_total = max(len(actionable_groups), 1)
         done = 0
+        workers = min(_extract_parallelism(), max(len(batches), 1))
         logger.info(
-            "BOQ extract starting sections=%s batches=%s",
+            "BOQ extract starting sections=%s batches=%s parallelism=%s",
             extract_total,
             len(batches),
+            workers,
         )
         # Report 0/total immediately so the UI does not sit on a fake mid-band %.
         if progress_callback:
             progress_callback(0, extract_total)
-        for batch_index, batch in enumerate(batches, start=1):
+
+        extract_started = time.perf_counter()
+
+        def _run_one_batch(
+            batch_index: int, batch: list[dict[str, Any]]
+        ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
             row_ids = [str(group.get("row_id") or "") for group in batch]
             serials = [
                 str(group.get("serial") or group.get("ser_no") or group.get("row_id") or "")
@@ -134,7 +148,13 @@ class BOQExtractionService:
                 ",".join(row_ids) or "-",
                 ",".join(serials) or "-",
             )
-            for row in self._extract_batch(batch):
+            return batch, self._extract_batch(batch)
+
+        def _absorb_batch_result(
+            batch_groups: list[dict[str, Any]], rows: list[dict[str, Any]]
+        ) -> None:
+            nonlocal done
+            for row in rows:
                 row_id = row.get("row_id")
                 products = row.get("products") or []
                 logger.info(
@@ -145,7 +165,7 @@ class BOQExtractionService:
                 )
                 if row_id:
                     extracted_by_id[str(row_id)] = row
-            done += len(batch)
+            done += len(batch_groups)
             if progress_callback:
                 progress_callback(done, extract_total)
             logger.info(
@@ -153,6 +173,27 @@ class BOQExtractionService:
                 done,
                 extract_total,
             )
+
+        if workers <= 1 or len(batches) <= 1:
+            for batch_index, batch in enumerate(batches, start=1):
+                batch_groups, rows = _run_one_batch(batch_index, batch)
+                _absorb_batch_result(batch_groups, rows)
+        else:
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = [
+                    pool.submit(_run_one_batch, batch_index, batch)
+                    for batch_index, batch in enumerate(batches, start=1)
+                ]
+                for future in as_completed(futures):
+                    batch_groups, rows = future.result()
+                    _absorb_batch_result(batch_groups, rows)
+
+        logger.info(
+            "BOQ extract phase done sections=%s batches=%s elapsed_s=%.1f",
+            extract_total,
+            len(batches),
+            time.perf_counter() - extract_started,
+        )
 
         _consolidate_to_anchors(anchor_groups, extracted_by_id)
 

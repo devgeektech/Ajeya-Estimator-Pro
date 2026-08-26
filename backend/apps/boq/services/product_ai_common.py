@@ -69,7 +69,7 @@ _EXPERT_IDENTITY_FIELDS = (
 def _mapping_batch_size() -> int:
     from django.conf import settings
 
-    return max(1, int(getattr(settings, "AI_PRODUCT_MAPPING_BATCH_SIZE", 4) or 4))
+    return max(1, int(getattr(settings, "AI_PRODUCT_MAPPING_BATCH_SIZE", 8) or 8))
 
 
 def product_needs_match_refine(
@@ -77,10 +77,11 @@ def product_needs_match_refine(
     *,
     min_confidence: float = REFINE_MATCH_CONFIDENCE_TARGET,
 ) -> bool:
-    """True when a second mapping pass (like Re-analyse) may improve the match."""
-    status = str(product.get("db_match_status") or "").strip().lower()
-    if status != DB_MATCH_MATCHED:
-        return True
+    """True when a second mapping pass may improve a weak match.
+
+    Uses confidence only — provisional products already at/above the threshold
+    skip automatic refine (experts can still Re-analyse).
+    """
     try:
         confidence = float(product.get("db_match_confidence") or 0.0)
     except (TypeError, ValueError):
