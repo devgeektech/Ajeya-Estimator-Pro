@@ -33,7 +33,9 @@ def _format_decimal(value: Decimal | None) -> Any:
     return float(value)
 
 
-_UNMATCHED_STATUSES = frozenset({"unmatched", "pending", "not_searched", "no_match"})
+_UNMATCHED_STATUSES = frozenset(
+    {"unmatched", "pending", "not_searched", "no_match", "not_available"}
+)
 
 
 def _product_target_row_id(product: dict[str, Any], line: dict[str, Any]) -> str:

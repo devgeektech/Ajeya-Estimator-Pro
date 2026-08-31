@@ -13,11 +13,22 @@ class LoadedCatalogProductIdTests(SimpleTestCase):
             "catalog_product_id": "20",
             "db_product_id": 100,
             "db_match_status": "matched",
-            "db_match_confidence": 74.0,
+            "db_match_confidence": 55.0,
             "ai_mapping": {"selection_source": "ai"},
         }
         self.assertEqual(loaded_catalog_product_id(product), "")
-        self.assertLess(74.0, PRODUCT_ID_CONFIRM_CONFIDENCE)
+        self.assertLess(55.0, PRODUCT_ID_CONFIRM_CONFIDENCE)
+
+    def test_orange_match_shows_product_id(self):
+        product = {
+            "catalog_product_id": "20",
+            "db_product_id": 100,
+            "db_match_status": "matched",
+            "db_match_confidence": 74.0,
+            "ai_mapping": {"selection_source": "ai"},
+        }
+        self.assertEqual(loaded_catalog_product_id(product), "20")
+        self.assertGreaterEqual(74.0, PRODUCT_ID_CONFIRM_CONFIDENCE)
 
     def test_green_match_shows_product_id(self):
         product = {

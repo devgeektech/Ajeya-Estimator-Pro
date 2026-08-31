@@ -27,6 +27,8 @@ from apps.boq.services.boq_review_display_service import (
     BOQReviewDisplayService,
     review_output_values,
 )
+from apps.boq.services.make_vendor_common import NOT_AVAILABLE_LABEL
+from apps.boq.services.product_availability import is_product_not_available
 from apps.boq.services.boq_row_fields import (
     QTY_KEYS as _QTY_KEYS,
     UNIT_KEYS as _UNIT_KEYS,
@@ -50,7 +52,9 @@ _UNSAFE_FILENAME_CHARS = re.compile(r'[\\/:*?"<>|\r\n]+')
 
 _RATE_KEYS = ("rate", "unit_rate", "price")
 _AMOUNT_KEYS = ("amount", "total", "total_amount", "amt")
-_UNMATCHED_STATUSES = frozenset({"unmatched", "pending", "not_searched", "no_match"})
+_UNMATCHED_STATUSES = frozenset(
+    {"unmatched", "pending", "not_searched", "no_match", "not_available"}
+)
 
 _DARK_BORDER = Border(
     left=Side(style="thin", color="000000"),
@@ -542,7 +546,31 @@ def _highlight_row(
     paint = fill or _MISSING_PRODUCT_FILL
     last_col = max_column or sheet.max_column or 1
     for col_idx in range(1, last_col + 1):
-        sheet.cell(row=row_number, column=col_idx).fill = paint
+        cell = sheet.cell(row=row_number, column=col_idx)
+        cell.fill = paint
+        cell.border = _DARK_BORDER
+
+
+def _write_not_available_rate_amount(
+    sheet: Worksheet,
+    row_number: int,
+    *,
+    rate_col: int | None,
+    amount_col: int | None,
+) -> None:
+    """Literal Not available in Rate + Amount; restore table borders on BOQ tab."""
+    for col in (rate_col, amount_col):
+        if col is None:
+            continue
+        cell = sheet.cell(row=row_number, column=col, value=NOT_AVAILABLE_LABEL)
+        cell.border = _DARK_BORDER
+        if cell.alignment:
+            align = copy(cell.alignment)
+            align.wrap_text = True
+            align.vertical = "top"
+            cell.alignment = align
+        else:
+            cell.alignment = _CELL_ALIGNMENT
 
 
 def _style_cell(cell) -> None:
@@ -731,7 +759,7 @@ class BOQExportService:
                 workbook.create_sheet(_BOQ_SHEET_TITLE)
 
         review_sheet = _ensure_review_sheet(workbook)
-        review_rows, activity_only_ids = self._write_review_sheet(
+        review_rows, activity_only_ids, not_available_qty_ids = self._write_review_sheet(
             review_sheet,
             display,
             boq_data,
@@ -745,6 +773,7 @@ class BOQExportService:
             highlight_ids,
             orange_ids,
             activity_only_ids,
+            not_available_qty_ids,
             review_title=review_sheet.title,
             review_rows=review_rows,
         )
@@ -761,6 +790,7 @@ class BOQExportService:
         highlight_ids: set[str],
         orange_ids: set[str],
         activity_only_ids: set[str],
+        not_available_qty_ids: set[str],
         *,
         review_title: str,
         review_rows: dict[str, list[int]],
@@ -808,7 +838,14 @@ class BOQExportService:
 
             rate_formula = _review_rate_formula(review_title, mapped)
             amount_formula = _review_amount_formula(review_title, mapped)
-            if rate_col is not None and rate_formula:
+            if row_id in not_available_qty_ids:
+                _write_not_available_rate_amount(
+                    sheet,
+                    excel_row_number,
+                    rate_col=rate_col,
+                    amount_col=amount_col,
+                )
+            elif rate_col is not None and rate_formula:
                 sheet.cell(row=excel_row_number, column=rate_col, value=rate_formula)
             elif rate_col is not None and pricing.get(row_id, {}).get("rate") not in (None, ""):
                 sheet.cell(
@@ -816,7 +853,9 @@ class BOQExportService:
                     column=rate_col,
                     value=_excel_number_value(pricing[row_id].get("rate")),
                 )
-            if amount_col is not None and amount_formula:
+            if row_id in not_available_qty_ids:
+                pass  # Rate/Amount already written above.
+            elif amount_col is not None and amount_formula:
                 sheet.cell(row=excel_row_number, column=amount_col, value=amount_formula)
             elif amount_col is not None and pricing.get(row_id, {}).get("amount") not in (None, ""):
                 sheet.cell(
@@ -830,7 +869,7 @@ class BOQExportService:
                 fill = _ACTIVITY_ONLY_FILL
             elif row_id in orange_ids:
                 fill = _ZERO_OR_RATE_ONLY_FILL
-            elif row_id in highlight_ids:
+            elif row_id in not_available_qty_ids or row_id in highlight_ids:
                 fill = _MISSING_PRODUCT_FILL
             else:
                 fill = _FOUND_AMOUNT_FILL
@@ -855,6 +894,7 @@ class BOQExportService:
                 highlight_ids,
                 orange_ids,
                 activity_only_ids,
+                not_available_qty_ids=not_available_qty_ids,
                 review_title=review_title,
                 review_rows=review_rows,
             )
@@ -867,10 +907,12 @@ class BOQExportService:
         orange_ids: set[str],
         activity_only_ids: set[str],
         *,
+        not_available_qty_ids: set[str] | None = None,
         review_title: str,
         review_rows: dict[str, list[int]],
     ) -> None:
         """Rebuild a BOQ tab from parsed JSON when the upload cannot be filled."""
+        not_available_qty_ids = not_available_qty_ids or set()
         headers = boq_data.get("headers") or []
         rate_key, amount_key, qty_key, _unit_key = _header_keys(headers)
         slot_ids = _slot_row_ids(boq_data)
@@ -892,15 +934,30 @@ class BOQExportService:
                 if written_qty is not None:
                     row_values[qty_key] = written_qty
             mapped = list(review_rows.get(row_id) or []) if is_slot else []
-            if is_slot and rate_key:
+            if is_slot and row_id in not_available_qty_ids:
+                if rate_key:
+                    row_values[rate_key] = NOT_AVAILABLE_LABEL
+                if amount_key:
+                    row_values[amount_key] = NOT_AVAILABLE_LABEL
+            elif is_slot and rate_key:
                 row_values[rate_key] = _review_rate_formula(review_title, mapped)
-            if is_slot and amount_key:
+            if is_slot and amount_key and row_id not in not_available_qty_ids:
                 row_values[amount_key] = _review_amount_formula(review_title, mapped)
 
             sheet.append([row_values.get(header.get("key")) for header in headers])
             if not is_slot:
                 continue
-            if row_id in activity_only_ids:
+            if row_id in not_available_qty_ids:
+                rate_col = _header_excel_column(headers, rate_key)
+                amount_col = _header_excel_column(headers, amount_key)
+                _write_not_available_rate_amount(
+                    sheet,
+                    sheet.max_row,
+                    rate_col=rate_col,
+                    amount_col=amount_col,
+                )
+                highlight_sheet_rows.append((sheet.max_row, _MISSING_PRODUCT_FILL))
+            elif row_id in activity_only_ids:
                 highlight_sheet_rows.append((sheet.max_row, _ACTIVITY_ONLY_FILL))
             elif row_id in orange_ids:
                 highlight_sheet_rows.append((sheet.max_row, _ZERO_OR_RATE_ONLY_FILL))
@@ -1014,7 +1071,12 @@ class BOQExportService:
                 if marker in emitted_products:
                     continue
                 emitted_products.add(marker)
-                review_row = product.get("review_output") or {}
+                review_row = dict(product.get("review_output") or {})
+                unavailable = is_product_not_available(product) or bool(
+                    review_row.get("is_not_available")
+                )
+                if unavailable:
+                    review_row["amount"] = NOT_AVAILABLE_LABEL
                 sheet.append(review_output_values(review_row))
                 excel_row = sheet.max_row
                 target = str(
@@ -1024,7 +1086,28 @@ class BOQExportService:
                     or ""
                 ).strip()
                 _copy_orig_format(target, excel_row)
-                
+
+                if unavailable:
+                    # Literal Amount / Final Rate; skip formulas so Excel does not overwrite.
+                    sheet.cell(
+                        row=excel_row,
+                        column=_REVIEW_AMOUNT_COL,
+                        value=NOT_AVAILABLE_LABEL,
+                    ).border = _DARK_BORDER
+                    sheet.cell(
+                        row=excel_row,
+                        column=_REVIEW_FINAL_RATE_COL,
+                        value=NOT_AVAILABLE_LABEL,
+                    ).border = _DARK_BORDER
+                    qty_number = _excel_number_value(review_row.get("qty"))
+                    if isinstance(qty_number, (int, float)):
+                        sheet.cell(row=excel_row, column=_REVIEW_QTY_COL, value=qty_number)
+                    if target:
+                        review_rows.setdefault(target, []).append(excel_row)
+                        not_available_qty_ids.add(target)
+                    highlight_sheet_rows.append((excel_row, _MISSING_PRODUCT_FILL))
+                    continue
+
                 for col, key in (
                     (_REVIEW_BASE_COL, "base_purchase_rate"),
                     (_REVIEW_DISCOUNT_COL, "discount"),
@@ -1077,6 +1160,7 @@ class BOQExportService:
 
         highlight_sheet_rows: list[tuple[int, PatternFill]] = []
         activity_only_ids: set[str] = set()
+        not_available_qty_ids: set[str] = set()
         emitted_products: set[int] = set()
         review_rows: dict[str, list[int]] = {}
         ordered = _ordered_boq_rows(boq_data or {})
@@ -1150,4 +1234,4 @@ class BOQExportService:
             yellow_header=True,
         )
         _autosize_columns(sheet, max_width=36)
-        return review_rows, activity_only_ids
+        return review_rows, activity_only_ids, not_available_qty_ids

@@ -5,6 +5,9 @@
     Products are prefilled with lowest approved make/vendor. Adjust from the cascade below.
     Make &amp; Vendor shows <strong>product rate only</strong> — labour is set on the Labour tab.
     Same material rate with different make/vendor is highlighted for vendor confirmation.
+    {% if make_vendor_display.stats.not_available_count %}
+    <strong>{{ make_vendor_display.stats.not_available_count }}</strong> product(s) marked <strong>Not available</strong> (red) — no Product Id on Analysis; rates and labour are not looked up.
+    {% endif %}
 </p>
 
 {% if make_vendor_display.selection_catalog.categories %}
@@ -259,8 +262,9 @@
             <section
                 class="make-vendor-card"
                 :class="{
-                    'make-vendor-card--no-make': notFound,
-                    'make-vendor-card--no-match': status === 'unmatched' && !notFound,
+                    'make-vendor-card--not-available': notAvailable,
+                    'make-vendor-card--no-make': notFound && !notAvailable,
+                    'make-vendor-card--no-match': status === 'unmatched' && !notFound && !notAvailable,
                     'make-vendor-card--vendor-review': vendorRateReview,
                     'make-vendor-card--same-price': samePriceTie
                 }"
@@ -272,12 +276,14 @@
                     make: '{{ product.selected_make|default:''|escapejs }}',
                     vendor: '{{ product.selected_vendor|default:''|escapejs }}',
                     status: '{{ product.match_status|default:'not_searched'|escapejs }}',
+                    statusLabelServer: '{{ product.status_label|default:''|escapejs }}',
                     confidence: {{ product.confidence|default:'null' }},
                     techKey: '{{ product.tech_key|default:''|escapejs }}',
                     matchedSummary: '{{ product.matched_summary|default:''|escapejs }}',
                     notes: '{{ product.notes|default:''|escapejs }}',
                     materialRate: '{{ product.line_output.material_rate|default:''|escapejs }}',
                     notFound: {{ product.highlight_no_make|yesno:'true,false' }},
+                    notAvailable: {{ product.is_not_available|yesno:'true,false' }},
                     showManualApply: {{ product.show_manual_apply|yesno:'true,false' }},
                     allowTypedEntry: {{ product.allow_typed_make_vendor|yesno:'true,false' }},
                     vendorRateReview: {{ product.vendor_rate_review|yesno:'true,false' }},
@@ -292,6 +298,7 @@
             >
                 <div class="make-vendor-card__head">
                     <div class="make-vendor-card__heading">
+                        <p class="make-vendor-card__ai-label">AI Description</p>
                         <h4 class="make-vendor-card__title">{{ product.description_hint|default:product.summary }}</h4>
                         {% if product.vendor_rate_review %}
                         <p class="make-vendor-card__vendor-review-note">
@@ -303,10 +310,12 @@
                             Multiple product detected in same price — choose one vendor below.
                         </p>
                         {% endif %}
-                        {% if product.highlight_no_make %}
-                        <p class="make-vendor-card__no-make-note">No Approved Make Found in Make List — pick make/vendor from the dropdowns (rate loads automatically), then click <strong>Apply</strong>.</p>
+                        {% if product.is_not_available %}
+                        <p class="make-vendor-card__no-make-note">Not available — no Product Id on Analysis. Rates and labour are not looked up.</p>
+                        {% elif product.highlight_no_make %}
+                        <p class="make-vendor-card__no-make-note">Not listed in Make List — pick make/vendor from the dropdowns (rate loads automatically), then click <strong>Apply</strong>.</p>
                         {% elif product.is_no_match %}
-                        <p class="make-vendor-card__no-make-note">No Rate_Master_Output match — pick make/vendor from the dropdowns (rate loads automatically), then click <strong>Apply</strong>.</p>
+                        <p class="make-vendor-card__no-make-note">Not in Db — pick make/vendor from the dropdowns (rate loads automatically), then click <strong>Apply</strong>.</p>
                         {% endif %}
                     </div>
                     <span
@@ -323,20 +332,25 @@
                     >Vendor review</span>
                     <span
                         class="badge badge--red"
-                        x-show="notFound"
+                        x-show="notAvailable"
                         x-cloak
-                    >Not found</span>
+                    >Not available</span>
+                    <span
+                        class="badge badge--orange"
+                        x-show="notFound && !notAvailable"
+                        x-cloak
+                    >Not listed</span>
                     <span
                         class="badge"
-                        x-show="!notFound && !samePriceTie"
+                        x-show="!notAvailable && !notFound && !samePriceTie"
                         :class="{
                             'badge--yellow': vendorRateReview || status === 'pending',
                             'badge--green': !vendorRateReview && status === 'matched',
-                            'badge--red': status === 'unmatched',
+                            'badge--orange': status === 'unmatched',
                             'badge--gray': status === 'not_searched'
                         }"
                         x-text="statusLabel"
-                    >{{ product.match_status }}</span>
+                    >{{ product.status_label|default:product.match_status }}</span>
                 </div>
 
                 <dl class="make-vendor-readonly">
@@ -349,6 +363,17 @@
                 </dl>
 
                 <div class="make-vendor-fields">
+                    {% if product.is_not_available %}
+                    <p class="make-vendor-card__no-make-note">No make/vendor or rate search for this product.</p>
+                    <label class="extraction-field">
+                        <span class="extraction-field__label">Rate id</span>
+                        <input type="text" class="extraction-input extraction-input--readonly" value="—" readonly tabindex="-1" aria-readonly="true">
+                    </label>
+                    <label class="extraction-field">
+                        <span class="extraction-field__label">Product id</span>
+                        <input type="text" class="extraction-input extraction-input--readonly" value="—" readonly tabindex="-1" aria-readonly="true">
+                    </label>
+                    {% else %}
                     {% if product.allow_typed_make_vendor %}
                     <label class="extraction-field">
                         <span class="extraction-field__label">Make</span>
@@ -427,6 +452,28 @@
                             aria-readonly="true"
                         >
                     </label>
+                    <label class="extraction-field">
+                        <span class="extraction-field__label">Rate id</span>
+                        <input
+                            type="text"
+                            class="extraction-input extraction-input--readonly"
+                            value="{{ product.rate_id|default:'—' }}"
+                            readonly
+                            tabindex="-1"
+                            aria-readonly="true"
+                        >
+                    </label>
+                    <label class="extraction-field">
+                        <span class="extraction-field__label">Product id</span>
+                        <input
+                            type="text"
+                            class="extraction-input extraction-input--readonly"
+                            value="{{ product.catalog_product_id|default:'—' }}"
+                            readonly
+                            tabindex="-1"
+                            aria-readonly="true"
+                        >
+                    </label>
                     <div class="make-vendor-fields__actions">
                         <button
                             type="button"
@@ -456,6 +503,7 @@
                         >Loading rate…</span>
                         <span class="extraction-save-hint extraction-save-hint--error" x-show="error" x-text="error" x-cloak></span>
                     </div>
+                    {% endif %}
                 </div>
 
                 <div class="make-vendor-same-price" x-show="samePriceTie" x-cloak>
@@ -776,6 +824,8 @@ document.addEventListener('alpine:init', () => {
         notes: config.notes || '',
         materialRate: config.materialRate || '',
         notFound: Boolean(config.notFound),
+        notAvailable: Boolean(config.notAvailable),
+        statusLabelServer: config.statusLabelServer || '',
         showManualApply: Boolean(config.showManualApply),
         allowTypedEntry: Boolean(config.allowTypedEntry),
         vendorRateReview: Boolean(config.vendorRateReview),
@@ -914,11 +964,13 @@ document.addEventListener('alpine:init', () => {
             }, 300);
         },
         get statusLabel() {
+            if (this.notAvailable || this.status === 'not_available') return 'Not available';
             // Same-price uses its own badge; do not duplicate the label here.
             if (this.status === 'matched') return 'Matched';
             if (this.status === 'pending') return 'Review';
-            if (this.status === 'unmatched') return 'No match';
-            return 'Select make';
+            if (this.status === 'unmatched') return 'Not in Db';
+            if (this.notFound) return 'Not listed';
+            return this.statusLabelServer || 'Select make';
         },
         async resolveSamePrice() {
             if (this.isBusy || !this.chosenRateMasterId) return;

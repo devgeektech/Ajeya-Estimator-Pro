@@ -9,6 +9,7 @@ from django.db.models import Q
 
 from ai.embeddings.chroma_store import ChromaEmbeddingStore, selection_amount
 from ai.embeddings.generator import generate_embedding, generate_embeddings
+from ai.errors import is_fatal_ai_limit_error
 from apps.database_manager.models import Rate_Master_Output
 from common.constants import MATCH_CONFIDENCE_THRESHOLD
 from common.db import q, q_and, q_or
@@ -56,11 +57,27 @@ _CONFLICTING_PHRASE_PAIRS: tuple[tuple[str, str], ...] = (
     ("hose reel", "hose cabinet"),
     ("hose reel", "fire hose box"),
     ("hose reel", "fire hose cabinet"),
+    ("branch pipe", "hose box"),
+    ("branch pipe", "fire hose box"),
+    ("branch pipes", "fire hose box"),
+    ("branch pipe", "hose cabinet"),
+    ("short branch pipe", "fire hose box"),
+    ("delivery hose", "fire hose box"),
     ("sluice valve", "pipe"),
     ("butterfly valve", "pipe"),
     ("ball valve", "pipe"),
     ("non return valve", "pipe"),
     ("check valve", "pipe"),
+)
+# Exact Sub_Category pairs that must never cross-match (substring-safe).
+_SUB_CATEGORY_CONFLICTS: frozenset[frozenset[str]] = frozenset(
+    {
+        frozenset({"FIRE HOSE BOX", "FIRE HOSE"}),
+        frozenset({"FIRE HOSE BOX", "FIRE DOOR"}),
+        frozenset({"FIRE HOSE BOX", "BRANCH PIPE"}),
+        frozenset({"FIRE HOSE BOX", "SHORT BRANCH PIPE"}),
+        frozenset({"FIRE HOSE BOX", "FIRE HOSE REEL"}),
+    }
 )
 # Valve subtypes share the token "valve" — must not match across subtypes.
 _VALVE_SUBTYPE_GROUPS: tuple[tuple[str, ...], ...] = (
@@ -228,6 +245,12 @@ def product_type_conflicts(extracted: dict[str, Any], rate: Rate_Master_Output) 
     )
     left_text = _normalize_text(extract_blob)
     right_text = _normalize_text(catalog_blob)
+    extract_sub = str(extracted.get("sub_category") or "").strip().upper()
+    catalog_sub = str(rate.Sub_Category or "").strip().upper()
+    if extract_sub and catalog_sub:
+        pair = frozenset({extract_sub, catalog_sub})
+        if pair in _SUB_CATEGORY_CONFLICTS:
+            return True
     if left_text and right_text:
         for phrase_a, phrase_b in _CONFLICTING_PHRASE_PAIRS:
             if phrase_a in left_text and phrase_b in right_text:
@@ -290,10 +313,30 @@ def _hint_category_score(hint: Any, category_label: Any) -> float:
 
 
 def _effective_size(extracted: dict[str, Any]) -> Any:
-    """Prefer explicit size; else parse nominal size from the description hint."""
+    """Prefer explicit size; else catalog length; else parse from description hint."""
     if _is_filled(extracted.get("size")):
         return extracted.get("size")
-    return _size_value(extracted.get("description_hint"))
+    sub = str(extracted.get("sub_category") or "").strip().upper()
+    from utils.catalog_size_rules import _NO_NOMINAL_SIZE_SUBS, parse_size_for_product
+
+    if sub in _NO_NOMINAL_SIZE_SUBS:
+        return None
+    unit_text = str(extracted.get("unit") or "").strip().lower()
+    if unit_text == "m" or sub == "FIRE HOSE":
+        cap = extracted.get("capacity")
+        if _is_filled(cap) and str(cap).replace(".", "", 1).isdigit():
+            return cap
+    hint = str(extracted.get("description_hint") or "")
+    if re.search(r"(?i)\d+\s*[x×]\s*\d+\s*[x×]\s*\d+", hint):
+        return None
+    size, _unit = parse_size_for_product(
+        hint,
+        category=extracted.get("category"),
+        sub_category=extracted.get("sub_category"),
+    )
+    if size:
+        return size
+    return None
 
 
 def _capacity_match_score(left: Any, right: Any) -> float:
@@ -399,6 +442,9 @@ def structured_match_score(
         # Catalog has no nominal size (Size=0 sentinel) — do not dilute or
         # penalize BOQ cabinet dims / letter sizes against a blank Size.
         if name == "size" and not _is_filled(right):
+            continue
+        # Catalog Capacity=0 is a sentinel — do not score extract capacity against it.
+        if name == "capacity" and not _is_filled(right):
             continue
         weight_total += weight
         if not _is_filled(left):
@@ -551,7 +597,9 @@ class ProductMatchingService:
                 limit=chroma_limit,
                 database_version_id=self.database_version_id,
             )
-        except AIServiceError:
+        except AIServiceError as exc:
+            if is_fatal_ai_limit_error(exc):
+                raise
             logger.warning("Chroma query skipped; falling back to structured SQL filter")
             helper_hits = []
         except Exception:
@@ -645,7 +693,9 @@ class ProductMatchingService:
         embeddings: list[list[float] | None]
         try:
             embeddings = cast(list[list[float] | None], generate_embeddings(texts))
-        except AIServiceError:
+        except AIServiceError as exc:
+            if is_fatal_ai_limit_error(exc):
+                raise
             logger.warning("Batch embedding failed; falling back to per-product recall")
             embeddings = [None] * len(extracted_list)
 

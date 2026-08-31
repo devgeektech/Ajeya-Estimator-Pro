@@ -1,6 +1,13 @@
 You extract purchasable products from BOQ sections (fire protection / MEP).
 
-Return valid JSON only. Prefer null over guessing. No prices, vendors, or invented catalog rows.
+Return valid JSON only. Prefer null over guessing for every field. No prices, vendors, or invented catalog rows.
+
+GLOBAL RULE — null when uncertain:
+- For Category, Sub_Category, Class, Size, Unit, Capacity, make_hint, and every
+  attribute: extract only what the BOQ slot / owning sentence clearly states.
+- If the value is ambiguous, inferred from chapter titles, qty digits, IS year
+  suffixes, or unrelated boilerplate — set that field to **null**.
+- Never copy random numbers or words from the description into structured fields.
 
 STEP 1 — UNDERSTAND THE SECTION (read everything before extracting):
 - Read ``description`` / ``lineage_lines`` / ``slots[].product_context`` first.
@@ -16,6 +23,10 @@ STEP 1 — UNDERSTAND THE SECTION (read everything before extracting):
   - ``pipework for Sprinkler System`` + ``g) 65 mm dia pipe`` → PIPE (not SPRINKLER)
   - ``Cast Iron sluice valve`` + ``a) 250 mm dia`` → VALVE / SLUICE VALVE (not PIPE)
 - Size-only slots inherit the product from ``product_context``.
+- **Main product only:** when a line buys an enclosure/cabinet/box (fire hose box,
+  hose reel drum, panel), phrases like ``to accommodate branch pipes / delivery
+  hoses`` describe **contents**, not separate products. Extract the **cabinet/box**
+  as the product — never branch pipe or hose from interior mentions.
 - Spec-only lines (Speed, Head, PN, IS) are shared attributes within that family only.
 
 STEP 2 — CLASSIFY EACH SLOT (product vs. non-product):
@@ -35,7 +46,20 @@ Priority order for every product:
    PIPE + EXTERNAL HYDRANT (EXTERNAL HYDRANT belongs under HYDRANT only).
    System titles are not Sub_Category.
 2. **Class** (Heavy Class → listed Class such as ``C`` when present).
-3. **Size / Unit / Capacity** from that slot.
+3. **Size / Unit / Capacity** — MUST match ``size_unit_patterns`` in DATABASE_CONTEXT:
+   - Read ``size_unit_rules`` in DATABASE_CONTEXT for every sub-category's Unit,
+     sample sizes, and what Size means (diameter mm vs hose length m vs kg/liter).
+   - **PIPE / VALVE / branch pipe** → nominal bore mm (``63 mm dia`` → size 63, unit mm).
+   - **FIRE HOSE** → hose **length** (``15m`` / ``15 m length`` → size 15, unit m).
+     Coupling dia (``63mm dia``) is NOT Size — mention in description_hint only.
+   - **FIRE HOSE BOX** → product is the **cabinet**; outer dims (``30"x24"x10"``)
+     → **Capacity**; Size often **0** or null. Do NOT extract branch pipe / hose
+     from cabinet prose as separate Size. Never use **SWG** gauge (``18 SWG``) as Size.
+   - **PUMP** → flow lpm in **Capacity**; Size often 0.
+   - **EXTINGUISHER** → weight kg or volume liter per catalog Unit.
+   - **Never** use Indian Standard numbers as Size (``IS:636`` → attribute ``is``).
+   - **Never** use SWG sheet gauge, cabinet WxHxD, qty column, or unrelated digits as Size.
+   - If the measure type does not match the catalog Unit for that sub-category → **null**.
 4. **Attributes** only from ``attribute_keys``.
 
 Binding:
@@ -47,7 +71,8 @@ Binding:
   Capacity** (skip only truly unknown fields). This text is used to search the
   database — it must identify the product family clearly.
 - Good: ``class C MS pipe (PIPE), 65 mm dia``
-- Good: ``Cast Iron sluice valve (VALVE / SLUICE VALVE), 250 mm dia, as per IS:14846``
+- Good: ``SYNTHETIC (RRL) fire hose (HYDRANT / FIRE HOSE), 15 m length, 63 mm dia coupling``
+- Good: ``external fire hose box (HYDRANT / FIRE HOSE BOX), capacity 30X24X10 inch``
 - Bad: ``65mm dia SPRINKLER`` (system title, not the pipe being bought)
 - Bad: ``200mm`` or size-only / chapter-title-only text
 - Prefer purchasable naming from ``product_context`` over BOQ boilerplate
@@ -58,8 +83,9 @@ Taxonomy:
 - ``class`` = exact listed label (``0`` valid for valves).
 - Electrical / MCC panels are never ACCESSORIES / ROSETTEE PLATE.
 
-Fields: ``size``, ``unit`` (mm/NB — not qty UOM), ``capacity``, ``make_hint`` only
-if brand stated, ``attributes`` only from ``attribute_keys``.
+Fields: ``size``, ``unit`` (catalog measurement — mm/m/kg/liter/lpm/…, NOT qty UOM),
+``capacity``, ``make_hint`` only if brand stated, ``attributes`` only from ``attribute_keys``.
+See ``size_unit_rules`` in DATABASE_CONTEXT before filling Size.
 
 {{SYNONYM_RULES}}
 

@@ -7,6 +7,7 @@ from typing import Any, cast
 from django.conf import settings
 
 from ai.embeddings.chroma_store import ChromaEmbeddingStore, helper_document
+from ai.errors import format_ai_error_message, is_fatal_ai_limit_error
 from ai.instruction_log import log_instruction
 from ai.openai_client import get_client, is_configured
 from apps.database_manager.models import DatabaseVersion, Product_Helper
@@ -91,7 +92,7 @@ def generate_embeddings(texts: list[str]) -> list[list[float]]:
             metadata={"batch_size": len(texts)},
         )
         logger.exception("Embedding generation failed")
-        raise AIServiceError(f"Embedding request failed: {exc}") from exc
+        raise AIServiceError(format_ai_error_message(exc)) from exc
 
 
 def _is_discontinued(status: Any) -> bool:
@@ -111,7 +112,9 @@ def _index_helper_batch(
         vectors = generate_embeddings(texts)
         store.upsert_helpers(helpers, vectors)
         return len(helpers), 0
-    except AIServiceError:
+    except AIServiceError as exc:
+        if is_fatal_ai_limit_error(exc):
+            raise
         logger.exception(
             "Embedding batch failed for %s Product_Helper rows; retrying row-by-row",
             len(helpers),
@@ -123,7 +126,9 @@ def _index_helper_batch(
             vector = generate_embedding(text)
             store.upsert_helper(helper, vector)
             generated += 1
-        except AIServiceError:
+        except AIServiceError as exc:
+            if is_fatal_ai_limit_error(exc):
+                raise
             logger.exception("Embedding failed for Product_Helper row %s", helper.pk)
             errors += 1
         except Exception:
@@ -204,37 +209,42 @@ def generate_embeddings_for_version(
     pending_texts: list[str] = []
     batch_size = _embedding_batch_size()
 
-    for helper in helpers_qs.iterator(chunk_size=batch_size):
-        if _is_discontinued(helper.Status):
-            skipped += 1
-            continue
-        if not str(helper.Product_ID or "").strip():
-            skipped += 1
-            continue
-        text = helper_document(helper)
-        if not text.strip():
-            skipped += 1
-            continue
+    try:
+        for helper in helpers_qs.iterator(chunk_size=batch_size):
+            if _is_discontinued(helper.Status):
+                skipped += 1
+                continue
+            if not str(helper.Product_ID or "").strip():
+                skipped += 1
+                continue
+            text = helper_document(helper)
+            if not text.strip():
+                skipped += 1
+                continue
 
-        pending_helpers.append(helper)
-        pending_texts.append(text)
-        if len(pending_helpers) < batch_size:
-            continue
+            pending_helpers.append(helper)
+            pending_texts.append(text)
+            if len(pending_helpers) < batch_size:
+                continue
 
-        batch_generated, batch_errors = _index_helper_batch(
-            store, pending_helpers, pending_texts
-        )
-        generated += batch_generated
-        errors += batch_errors
-        pending_helpers = []
-        pending_texts = []
+            batch_generated, batch_errors = _index_helper_batch(
+                store, pending_helpers, pending_texts
+            )
+            generated += batch_generated
+            errors += batch_errors
+            pending_helpers = []
+            pending_texts = []
 
-    if pending_helpers:
-        batch_generated, batch_errors = _index_helper_batch(
-            store, pending_helpers, pending_texts
-        )
-        generated += batch_generated
-        errors += batch_errors
+        if pending_helpers:
+            batch_generated, batch_errors = _index_helper_batch(
+                store, pending_helpers, pending_texts
+            )
+            generated += batch_generated
+            errors += batch_errors
+    except AIServiceError:
+        # Credits / rate-limit (and any other abort) must not keep calling OpenAI.
+        store.reset_version(database_version_id)
+        raise
 
     summary = {
         "total": total,

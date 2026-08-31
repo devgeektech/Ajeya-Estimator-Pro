@@ -509,6 +509,7 @@ AI implements.
 | `docs/DATABASE.md` | Schema, import, versioning |
 | `docs/OPS.md` | Local setup, tests, systemd/Nginx templates |
 | `docs/DEPLOY.md` | Manual go-live and later `git pull` deploys (no CI/CD) |
+| `docs/OPENAI_CLIENT_CHECKLIST.md` | Client-facing OpenAI account verification checklist |
 | `docs/SESSION_STATE.md` | Active session memory |
 | `docs/CHANGELOG.md` | Change history (compact) |
 | `docs/MAKE_VENDOR_APPROACH.md` | Client approach for Make & Vendor (experimental) |

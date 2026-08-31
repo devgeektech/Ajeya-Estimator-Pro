@@ -18,6 +18,32 @@ _SUBCATEGORY_SEP = "::"
 
 SAME_PRICE_TIE_LABEL = "Multiple product detected in same price"
 
+# Analysis Next without Product Id — skip Make/Vendor/Labour lookups.
+NOT_AVAILABLE_STATUS = "not_available"
+NOT_AVAILABLE_SOURCE = "not_available"
+NOT_AVAILABLE_NOTES = (
+    "Not available — no Product Id on Analysis. Rates and labour are not looked up."
+)
+NOT_AVAILABLE_LABEL = "Not available"
+# Make-list has no approved make for this taxonomy (was "Not found").
+NOT_LISTED_LABEL = "Not listed"
+# Product Id present but no Rate_Master_Output row (was "No match").
+NOT_IN_DB_LABEL = "Not in Db"
+
+
+def is_product_not_available(product: dict[str, Any] | None) -> bool:
+    """True when Analysis left the product without a Product Id (skip pricing)."""
+    item = product or {}
+    selection = item.get("vendor_selection") or {}
+    if str(selection.get("status") or "").strip() == NOT_AVAILABLE_STATUS:
+        return True
+    if str(item.get("vendor_selection_source") or "").strip() == NOT_AVAILABLE_SOURCE:
+        return True
+    notes = str(selection.get("notes") or "")
+    if notes == NOT_AVAILABLE_NOTES or "No Analysis Product_ID" in notes:
+        return True
+    return False
+
 
 def _align_option_label(value: str | None, options: list[str] | None) -> str:
     """Map a stored make/vendor onto the Rate_Master spelling used in dropdowns.
@@ -60,7 +86,7 @@ def _catalog_product_id(product: dict[str, Any] | None) -> str:
 def loaded_catalog_product_id(product: dict[str, Any] | None) -> str:
     """Catalog Product_ID for a product that has been matched or selected.
 
-    Suggested-only IDs do not count. Red match tabs (<90%) also do not count
+    Suggested-only IDs do not count. Red match tabs (<70%) also do not count
     until the expert Selects or Confirms, or rematch reaches orange/green %.
     """
     from common.constants import PRODUCT_ID_CONFIRM_CONFIDENCE

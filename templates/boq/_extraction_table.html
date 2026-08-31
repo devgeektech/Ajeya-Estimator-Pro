@@ -1,5 +1,9 @@
 {% if not extraction_display.has_extraction %}
+{% if analysis_error %}
+<p class="panel__text">Fix the issue above, then click <strong>Analyse BOQ</strong> to try again.</p>
+{% else %}
 <p class="panel__text">No extracted products yet. Click <strong>Analyse</strong> to extract products from this BOQ.</p>
+{% endif %}
 {% else %}
 <div class="extraction-lines" id="extraction-lines">
     {% for line in extraction_display.lines %}

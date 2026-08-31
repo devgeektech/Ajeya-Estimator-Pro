@@ -86,15 +86,16 @@
                     {% if not forloop.first %}x-cloak{% endif %}
                     x-show="activeProduct === {{ product.product_index }}"
                 >
-                    <section class="make-vendor-card review-card" role="tabpanel">
+                    <section class="make-vendor-card review-card{% if product.is_not_available or product.status == 'not_available' %} make-vendor-card--not-available{% elif product.status == 'unmatched' %} make-vendor-card--no-match{% endif %}" role="tabpanel">
                         <div class="make-vendor-card__head">
                             <div class="make-vendor-card__heading">
+                                <p class="make-vendor-card__ai-label">AI Description</p>
                                 <h4 class="make-vendor-card__title">
                                     {{ row.ai_interpretation|default:product.summary|default:"Product" }}
                                 </h4>
                             </div>
-                            <span class="badge {% if product.status == 'matched' %}badge--green{% elif product.status == 'pending' %}badge--yellow{% else %}badge--red{% endif %}">
-                                {{ product.status|default:"—" }}
+                            <span class="badge {% if product.is_not_available or product.status == 'not_available' %}badge--red{% elif product.status == 'matched' %}badge--green{% elif product.status == 'pending' %}badge--yellow{% elif product.status == 'unmatched' %}badge--orange{% else %}badge--red{% endif %}">
+                                {{ product.status_label|default:product.status|default:"—" }}
                             </span>
                         </div>
 

@@ -18,9 +18,12 @@ Schema and import rules for PostgreSQL. Update when models or migrations change.
 
 - `version_number` — monotonic display sequence
 - `is_active` — only one row may be `True` (partial unique constraint)
-- Retention: keep the **last 10** uploads for view/download (metadata + workbook file)
+- Retention: keep the **newest 10** uploads for view/download (metadata +
+  workbook under `media/database/`). After a **successful** 11th import, the
+  oldest (1st) `DatabaseVersion` row and its file are deleted. PostgreSQL
+  master rows and Chroma stay active-only (purge + embeddings on each success).
 - Master sheet rows are stored in PostgreSQL **only for the active** upload;
-  inactive versions keep their workbook only
+  inactive versions keep their workbook only (until retention removes them)
 - Stored file is renamed with a datetime stamp
   (`{stem}_{YYYYMMDD_HHMMSS}.xlsx`); download still uses original
   `source_filename`
@@ -32,9 +35,8 @@ Schema and import rules for PostgreSQL. Update when models or migrations change.
 
 ## Master Workbook Sheets
 
-Uploaded workbooks may contain many sheets. **These three are ingested** into
-PostgreSQL (all required). Other sheets are counted for the database detail UI
-only.
+Uploaded workbooks may contain many sheets. **Only these three are imported**
+into PostgreSQL (all required). All other sheets are ignored.
 
 | Sheet (workbook) | Model / table | Required |
 | --- | --- | --- |
@@ -185,6 +187,9 @@ stay in PostgreSQL and are joined by Product_ID after search.
 If embedding generation reports errors or an incomplete count, import raises
 `ImportError_` and the new version stays inactive (previous active DB remains).
 OpenAI must be configured when there are embeddable Product_Helper rows.
+Empty OpenAI credits / quota (`insufficient_quota`, `credit_balance_exhausted`)
+or a rate limit stop further embedding requests immediately and surface the
+same user-facing credits/limit message on the upload UI.
 
 **Embedded text fields (Product_Helper):** Product_ID, Category, Sub Category,
 Class, Size, Unit, Capacity, Attribute, Status.

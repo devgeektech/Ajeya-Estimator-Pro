@@ -7,7 +7,6 @@ from apps.boq.services.boq_extraction_edit_service import BOQExtractionEditServi
 from apps.boq.services.boq_row_fields import resolve_activity_only
 from apps.boq.services.make_vendor_common import count_missing_loaded_product_ids
 from common.choices import BOQStatus
-from common.exceptions import ValidationError
 
 User = get_user_model()
 
@@ -150,11 +149,62 @@ class AnalysisNextProductIdGateTests(TestCase):
             },
         )
 
-    def test_next_requires_product_id(self):
+    def test_next_marks_weak_match_without_loaded_id_not_available(self):
+        from apps.boq.services.make_vendor_common import (
+            NOT_AVAILABLE_SOURCE,
+            NOT_AVAILABLE_STATUS,
+        )
+        from apps.boq.services.make_vendor_selection_service import MakeVendorSelectionService
+
+        self.boq.analysis_data = {
+            "rows": [
+                {
+                    "row_id": "r1",
+                    "products": [
+                        {
+                            "product_index": 0,
+                            "description_hint": "branch pipe",
+                            "category": "HYDRANT",
+                            "sub_category": "BRANCH PIPE",
+                            "db_match_status": "matched",
+                            "db_match_confidence": 42.0,
+                            "db_product_id": 2301,
+                            "suggested_catalog_product_id": "33",
+                            "catalog_product_id": "33",
+                        }
+                    ],
+                }
+            ]
+        }
+        self.boq.save(update_fields=["analysis_data"])
+
+        service = MakeVendorSelectionService(self.boq.pk, {})
+        result = service.apply_lowest_defaults_all(find_rates=False)
+        self.assertGreaterEqual(int(result.get("not_available_count") or 0), 1)
+
+        self.boq.refresh_from_db()
+        product = self.boq.analysis_data["rows"][0]["products"][0]
+        selection = product.get("vendor_selection") or {}
+        self.assertEqual(selection.get("status"), NOT_AVAILABLE_STATUS)
+        self.assertEqual(product.get("vendor_selection_source"), NOT_AVAILABLE_SOURCE)
+        self.assertFalse(selection.get("rate_detail"))
+        self.assertFalse(product.get("catalog_product_id"))
+
+    def test_next_marks_missing_product_id_not_available(self):
+        from apps.boq.services.make_vendor_common import (
+            NOT_AVAILABLE_SOURCE,
+            NOT_AVAILABLE_STATUS,
+        )
         from apps.boq.services.make_vendor_selection_service import MakeVendorSelectionService
 
         service = MakeVendorSelectionService(self.boq.pk, {})
-        with self.assertRaises(ValidationError) as ctx:
-            service.apply_lowest_defaults_all(find_rates=False)
-        self.assertIn("Product Id", str(ctx.exception))
-        self.assertIn("remove it from the Analysis section", str(ctx.exception))
+        result = service.apply_lowest_defaults_all(find_rates=False)
+        self.assertGreaterEqual(int(result.get("not_available_count") or 0), 1)
+
+        self.boq.refresh_from_db()
+        product = self.boq.analysis_data["rows"][0]["products"][0]
+        selection = product.get("vendor_selection") or {}
+        self.assertEqual(selection.get("status"), NOT_AVAILABLE_STATUS)
+        self.assertEqual(product.get("vendor_selection_source"), NOT_AVAILABLE_SOURCE)
+        self.assertFalse(selection.get("rate_detail"))
+        self.assertFalse(selection.get("labour_detail"))

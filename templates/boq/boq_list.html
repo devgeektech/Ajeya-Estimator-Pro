@@ -80,7 +80,7 @@
                         >Created <span class="table-sort__arrows" aria-hidden="true"><span class="table-sort__up">▲</span><span class="table-sort__down">▼</span></span></a>
                     </th>
                     {% endwith %}
-                    <th class="table__actions" style="text-align: right;">Actions</th>
+                    <th class="table__actions" style="text-align: left;">Actions</th>
                 </tr>
             </thead>
             {% include "boq/_boq_list_table_body.html" %}
@@ -188,11 +188,20 @@ document.addEventListener('alpine:init', () => {
         busy: !!cfg.initialBusy,
         timer: null,
         init() {
+            if (this.busy) this.startPolling();
             this.poll();
-            this.timer = setInterval(() => this.poll(), 2000);
         },
         destroy() {
-            if (this.timer) clearInterval(this.timer);
+            this.stopPolling();
+        },
+        startPolling() {
+            if (this.timer) return;
+            this.timer = setInterval(() => this.poll(), 2000);
+        },
+        stopPolling() {
+            if (!this.timer) return;
+            clearInterval(this.timer);
+            this.timer = null;
         },
         async poll() {
             try {
@@ -204,7 +213,12 @@ document.addEventListener('alpine:init', () => {
                 const data = await res.json();
                 const wasBusy = this.busy;
                 this.busy = !!data.busy || data.status === 'processing';
-                if (wasBusy && !this.busy) {
+                if (this.busy) {
+                    this.startPolling();
+                    return;
+                }
+                this.stopPolling();
+                if (wasBusy) {
                     window.location.reload();
                 }
             } catch (e) { /* keep last known */ }

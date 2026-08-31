@@ -272,17 +272,47 @@ def _candidate_snapshot(
     }
 
 
+def _catalog_display_part(value: Any) -> str:
+    """Identity token for summaries — show ``0`` and other sentinels explicitly."""
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "null"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        if value != value or value in (float("inf"), float("-inf")):
+            return "null"
+        if value.is_integer():
+            return str(int(value))
+        text = str(value).rstrip("0").rstrip(".") if "." in str(value) else str(value)
+        return text
+    text = str(value).strip()
+    return text if text else "null"
+
+
 def _product_summary(snapshot: dict[str, Any]) -> str:
     # Product_ID is the catalog identity shown on Analysis (not Rate_ID / make).
     parts = [
-        snapshot.get("product_id"),
-        snapshot.get("category"),
-        snapshot.get("sub_category"),
-        snapshot.get("class"),
-        snapshot.get("size"),
-        snapshot.get("unit"),
+        _catalog_display_part(snapshot.get("product_id")),
+        _catalog_display_part(snapshot.get("category")),
+        _catalog_display_part(snapshot.get("sub_category")),
+        _catalog_display_part(snapshot.get("class")),
+        _catalog_display_part(snapshot.get("size")),
+        _catalog_display_part(snapshot.get("unit")),
+        _catalog_display_part(snapshot.get("capacity")),
     ]
-    return " / ".join(str(part).strip() for part in parts if _is_filled(part)) or "Matched product"
+    label = " / ".join(parts)
+    attrs = snapshot.get("attributes")
+    if isinstance(attrs, dict) and attrs:
+        bits = [
+            f"{key}={_catalog_display_part(value)}"
+            for key, value in attrs.items()
+            if str(key).strip()
+        ]
+        if bits:
+            return f"{label}\t{', '.join(bits)}"
+    return label if label.replace("null", "").replace("/", "").strip() else "Matched product"
 
 
 def _compute_match_confidence(

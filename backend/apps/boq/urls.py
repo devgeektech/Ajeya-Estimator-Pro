@@ -11,6 +11,7 @@ urlpatterns = [
     path("upload/status/", views.BOQUploadStatusView.as_view(), name="upload_status"),
     path("upload/check-name/", views.BOQNameCheckView.as_view(), name="check_name"),
     path("<int:pk>/", views.BOQDetailView.as_view(), name="detail"),
+    path("<int:pk>/delete/", views.BOQDeleteView.as_view(), name="delete"),
     path("<int:pk>/extract/", views.BOQExtractView.as_view(), name="extract"),
     path("<int:pk>/rows/<str:row_id>/extract/", views.BOQRowExtractView.as_view(), name="row_extract"),
     path("<int:pk>/extraction/edit/", views.BOQExtractionEditView.as_view(), name="extraction_edit"),

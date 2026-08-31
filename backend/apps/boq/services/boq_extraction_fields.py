@@ -8,6 +8,8 @@ from ai.context import is_catalog_class
 from apps.boq.services.boq_row_fields import is_blank as _is_blank_value
 from apps.boq.services.boq_row_grouping_service import grouped_anchor_rows
 from utils.attribute_parser import coerce_attributes_dict
+from utils.nominal_size import parse_nominal_size_from_text, sanitize_product_size
+from utils.catalog_size_rules import normalize_catalog_size_capacity, pattern_for_product
 from utils.product_synonyms import display_material_label
 
 
@@ -179,12 +181,18 @@ def normalize_product_fields(
     preserve_class: bool = False,
 ) -> dict[str, Any]:
     """Normalize unit/qty UOM and optionally promote material into class."""
+    item = sanitize_product_size(product)
     item = _normalize_product_unit_fields(
-        _promote_material_to_class(product, preserve_class=preserve_class)
+        _promote_material_to_class(item, preserve_class=preserve_class)
     )
     # Extract-only: AI often dumps Class=0. Expert edit / rematch must keep ``0``.
     if not preserve_class and _is_placeholder_class(item.get("class")):
         item["class"] = None
+    item = normalize_catalog_size_capacity(
+        item,
+        pattern=pattern_for_product(item),
+        evidence_text=str(item.get("description_hint") or ""),
+    )
     return item
 
 

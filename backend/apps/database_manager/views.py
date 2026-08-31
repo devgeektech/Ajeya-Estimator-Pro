@@ -28,7 +28,6 @@ from .services.database_import_progress import (
     is_import_busy,
     read_import_status,
 )
-from .services.importer import count_workbook_sheet_rows
 
 logger = logging.getLogger("boq_ai")
 
@@ -47,7 +46,7 @@ class DatabaseVersionListView(LoginRequiredMixin, ListView):
 
     def get_queryset(self):
         retained_ids = list(
-            DatabaseVersion.objects.order_by("-uploaded_at", "-id").values_list(
+            DatabaseVersion.objects.order_by("-version_number", "-id").values_list(
                 "id", flat=True
             )[:DATABASE_UPLOADS_TO_RETAIN]
         )
@@ -186,14 +185,6 @@ class DatabaseDownloadView(LoginRequiredMixin, View):
 class DatabaseVersionDetailView(LoginRequiredMixin, View):
     def get(self, request, pk):
         version = get_object_or_404(DatabaseVersion, pk=pk)
-        sheet_stats: list[dict] = []
-        if version.file and version.file.name:
-            try:
-                sheet_stats = count_workbook_sheet_rows(version.file.path)
-            except Exception:  # noqa: BLE001
-                logger.exception(
-                    "Failed reading sheet stats for database version %s", version.pk
-                )
 
         rates_count = 0
         labour_count = 0
@@ -211,7 +202,6 @@ class DatabaseVersionDetailView(LoginRequiredMixin, View):
 
         context = {
             "version": version,
-            "sheet_stats": sheet_stats,
             "rates_count": rates_count,
             "labour_count": labour_count,
             "product_helper_count": product_helper_count,

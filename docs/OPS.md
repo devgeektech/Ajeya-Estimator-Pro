@@ -475,6 +475,12 @@ DEBUG=True
 CELERY_TASK_ALWAYS_EAGER=True
 ```
 
+Or keep `DEBUG=False` and set:
+
+```env
+CELERY_SYNC_FALLBACK=True
+```
+
 **Option B — async analysis (matches production):**
 
 Terminal 1 — Django:

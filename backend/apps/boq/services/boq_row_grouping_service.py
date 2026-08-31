@@ -20,6 +20,7 @@ from apps.boq.services.serial_normalizer import (
     is_section_roman,
     letter_from_serial,
 )
+from utils.nominal_size import parse_nominal_size_from_text
 
 _RATE_KEYS = ("rate", "unit_rate", "basic_rate")
 
@@ -42,10 +43,6 @@ _TOTAL_LABEL = re.compile(r"^\s*totals?\s*:?\s*$", re.IGNORECASE)
 _STRUCTURAL_SERIAL = re.compile(r"^(\d+(?:\.\d+)*)$")
 _DOTTED_STRUCTURAL = re.compile(r"^(\d+(?:\.\d+)+)$")
 # Letter/size row text → size_hint for AI + deterministic binding.
-_SIZE_HINT_FROM_TEXT = re.compile(
-    r"(?i)(?:^|[^0-9])(\d+(?:\.\d+)?)\s*(?:mm|nb|inch|in|cm)?\b"
-)
-# Size-only Unit/Qty lines need an owning supply sentence for product family.
 _SIZE_ONLY_SLOT_LINE = re.compile(
     r"(?i)^\s*(?:[a-z]\)?\s*)?\d+(?:\.\d+)?\s*(?:mm|nb|inch|in|cm)?\s*"
     r"(?:dia(?:meter)?)?\s*(?:\([^)]*\))?\s*$"
@@ -67,25 +64,7 @@ _PRODUCT_NOUN_HINT = re.compile(
 
 def _parse_size_hint_from_description(text: Any) -> tuple[str | None, str | None]:
     """Return (size_hint, unit) from a slot description like ``200mm dia``."""
-    blob = str(text or "").strip()
-    if not blob:
-        return None, None
-    match = _SIZE_HINT_FROM_TEXT.search(blob)
-    if not match:
-        return None, None
-    size = match.group(1)
-    try:
-        number = float(size)
-        if number.is_integer():
-            size = str(int(number))
-    except ValueError:
-        pass
-    unit = None
-    if re.search(r"(?i)\bmm\b", blob):
-        unit = "mm"
-    elif re.search(r"(?i)\bnb\b", blob):
-        unit = "NB"
-    return size, unit
+    return parse_nominal_size_from_text(text)
 
 
 def qty_cell_status(fields: dict[str, Any]) -> tuple[str, Any, Any]:

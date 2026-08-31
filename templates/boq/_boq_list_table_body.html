@@ -26,8 +26,8 @@
         </td>
         <td style="text-align: left;" class="muted">{% if item.database_label %}{{ item.database_label }}{% else %}—{% endif %}</td>
         <td style="text-align: left;">{{ item.boq.created_at|date:"M d, H:i" }}</td>
-        <td class="table__actions" style="text-align: right;">
-            <a href="{% url 'boq:detail' item.boq.pk %}?tab={{ item.detail_tab }}" class="btn btn--small btn--primary">View</a>
+        <td class="table__actions" style="text-align: left;">
+            {% include "boq/_boq_row_actions.html" with boq=item.boq detail_tab=item.detail_tab %}
         </td>
     </tr>
     {% empty %}

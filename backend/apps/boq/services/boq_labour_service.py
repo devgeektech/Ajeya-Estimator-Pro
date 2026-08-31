@@ -28,6 +28,10 @@ from apps.boq.services.boq_row_fields import (
     resolve_activity_only,
 )
 from apps.boq.services.labour_detail_retrieval_service import LabourDetailRetrievalService
+from apps.boq.services.make_vendor_common import (
+    NOT_AVAILABLE_LABEL,
+    is_product_not_available,
+)
 from apps.boq.services.serial_normalizer import analysis_fields
 from apps.database_manager.services.activation import get_active_database_version
 from common.choices import BOQStatus
@@ -132,6 +136,10 @@ class BOQLabourService:
 
     def unlock(self) -> dict[str, Any]:
         """Make & Vendor → Next: open Labour and load charges by Product_ID."""
+        from apps.boq.services.product_availability import (
+            promote_unresolved_for_labour,
+        )
+
         boq = self._get_boq()
         self._ensure_pipeline_editable(boq)
         if not (boq.analysis_data or {}).get("rows"):
@@ -146,6 +154,8 @@ class BOQLabourService:
         boq = self._get_boq()
 
         analysis = dict(boq.analysis_data or {})
+        # Not listed / Not in Db become Not available — no labour lookups for them.
+        promoted = promote_unresolved_for_labour(analysis)
         config = dict(analysis.get("labour_config") or {})
         config.setdefault("mode", "auto")
         config.setdefault("category_percentages", {})
@@ -161,15 +171,17 @@ class BOQLabourService:
         # Load Labour_master_Output amounts from PostgreSQL by Product_ID.
         applied = self.apply_auto(sync_product_ids=False)
         logger.info(
-            "Labour unlocked for BOQ id=%s product_ids=%s changed=%s",
+            "Labour unlocked for BOQ id=%s product_ids=%s changed=%s promoted_na=%s",
             boq.pk,
             sync.get("product_id_count"),
             sync.get("changed_count"),
+            promoted.get("promoted_count"),
         )
         return {
             "status": BOQStatus.LABOUR,
             "mode": "auto",
             "synced_product_ids": sync.get("product_ids") or [],
+            "promoted_not_available": int(promoted.get("promoted_count") or 0),
             **{k: v for k, v in applied.items() if k != "status"},
         }
 
@@ -209,6 +221,9 @@ class BOQLabourService:
             changed = False
             for index, product in enumerate(products):
                 selection = dict(product.get("vendor_selection") or {})
+                # Skip rate/labour computes for Analysis products left without Product Id.
+                if is_product_not_available(product):
+                    continue
                 rate_detail = selection.get("rate_detail")
                 # Product_ID from Analysis / Make & Vendor (Postgres join key).
                 product_id = _product_id_for_labour(
@@ -334,6 +349,8 @@ class BOQLabourService:
             qty = _field_from_map(analysis_fields(boq_by_id.get(row_id) or {}), _QTY_KEYS)
             changed = False
             for index, product in enumerate(products):
+                if is_product_not_available(product):
+                    continue
                 category = str(product.get("category") or "").strip()
                 percent = percents.get(category)
                 if percent is None:
@@ -468,15 +485,28 @@ class BOQLabourService:
     def complete(self) -> dict[str, Any]:
         """Labour → Next: aggregate row pricing and unlock Review / export."""
         from apps.boq.services.boq_price_calculation_service import BOQPriceCalculationService
+        from apps.boq.services.product_availability import (
+            promote_missing_labour_for_review,
+        )
 
         boq = self._get_boq()
         self._ensure_labour_editable(boq)
-        analysis = boq.analysis_data or {}
+        analysis = dict(boq.analysis_data or {})
         config = analysis.get("labour_config") or {}
         if not config.get("labour_ready"):
             raise ValidationError("Apply Auto or Manual labour before continuing.")
 
+        # Matched products with no labour charge become Not available on Review/export.
+        promoted = promote_missing_labour_for_review(analysis)
+        if promoted.get("promoted_count"):
+            with atomic():
+                safe = json_safe(analysis)
+                save_boq_analysis_json(boq.boq_name, safe)
+                boq.analysis_data = safe
+                boq.save(update_fields=["analysis_data"])
+
         result = BOQPriceCalculationService(boq.pk).run()
+        result["promoted_not_available"] = int(promoted.get("promoted_count") or 0)
         return result
 
     def build_display(self) -> dict[str, Any]:
@@ -506,6 +536,7 @@ class BOQLabourService:
         product_count = 0
         with_labour = 0
         missing_labour = 0
+        not_available_count = 0
 
         for analysis_row in analysis.get("rows") or []:
             row_id = str(analysis_row.get("row_id") or "")
@@ -580,10 +611,18 @@ class BOQLabourService:
                     or ""
                 ).strip()
                 has_labour = _has_positive_labour(labour_rate, labour_amount)
-                if has_labour:
+                is_not_available = is_product_not_available(
+                    {**product, "vendor_selection": selection}
+                )
+                if is_not_available:
+                    not_available_count += 1
+                    has_labour = False
+                elif has_labour:
                     with_labour += 1
                 else:
                     missing_labour += 1
+                # Prefer Not available over "No labour" for products skipped from Analysis.
+                status_value = selection.get("status") or "not_searched"
                 products_out.append(
                     {
                         "product_index": int(product.get("product_index") or 0),
@@ -605,7 +644,11 @@ class BOQLabourService:
                         or "",
                         "product_id": product_id,
                         "tech_key": tech_key,
-                        "status": selection.get("status") or "not_searched",
+                        "status": status_value,
+                        "status_label": (
+                            NOT_AVAILABLE_LABEL if is_not_available else ""
+                        ),
+                        "is_not_available": is_not_available,
                         "labour_mode": labour_mode,
                         "labour_percent": labour_percent,
                         "mode_label": mode_label,
@@ -620,11 +663,19 @@ class BOQLabourService:
                         "labour_components": line_output.get("labour_components") or {},
                         "notes": selection.get("notes") or "",
                         "has_labour": has_labour,
-                        "highlight_no_labour": not has_labour,
+                        "highlight_no_labour": (
+                            not is_not_available and not has_labour
+                        ),
                     }
                 )
-                if is_act_only:
-                    products_out = []
+                if is_not_available:
+                    line_status = "not_available"
+                elif not has_labour and line_status not in {"not_available"}:
+                    line_status = "no_labour"
+
+            if is_act_only:
+                products_out = []
+                line_status = "default"
 
             if products_out or is_act_only:
                 qty = group.get("qty")
@@ -708,6 +759,7 @@ class BOQLabourService:
                 "product_count": product_count,
                 "with_labour_count": with_labour,
                 "missing_labour_count": missing_labour,
+                "not_available_count": not_available_count,
                 "category_count": len(category_rows),
             },
         }

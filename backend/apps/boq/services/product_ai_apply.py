@@ -401,12 +401,11 @@ class ProductAIApplyMixin:
         # Selected / suggested product first so Analysis UI shows the best pick on top.
         slim_candidates = _prefer_candidate_first(slim_candidates, rate.pk)
 
-        # Confirm Product Id only when match % is orange/green (≥90). Red tabs
-        # stay provisional (candidates visible, no Product Id) until Select.
-        if confidence < MATCH_CONFIDENCE_THRESHOLD or (
-            not rematch
-            and float(confidence or 0.0) < float(PRODUCT_ID_CONFIRM_CONFIDENCE)
-        ):
+        # Confirm Product Id only when match % meets the orange band (≥70). Below
+        # that stay provisional (candidates visible, no Product Id) until Select.
+        if confidence < MATCH_CONFIDENCE_THRESHOLD or float(
+            confidence or 0.0
+        ) < float(PRODUCT_ID_CONFIRM_CONFIDENCE):
             provisional = self._provisional_schema_match(
                 enriched,
                 rate=rate,

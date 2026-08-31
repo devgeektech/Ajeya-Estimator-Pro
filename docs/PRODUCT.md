@@ -33,9 +33,14 @@ Upload → Analyse (extract + map) → Make & Vendor → Labour → Review → E
 
 | Role | Access |
 | --- | --- |
-| **Superadmin** | Full access; user management (including Admins); database upload; **all BOQs**; **full audit** |
-| **Admin** | Manage **Experts they created** only (not peer Admins); database upload; **own BOQs + their Experts' BOQs**; **audit for self + their Experts** |
-| **Expert** | Upload/process BOQs; **own BOQs only**; database **view/download** for awareness; database **upload** only when granted |
+| **Superadmin** | Full access; user management (including Admins); database upload; **all BOQs**; **full audit**; **Django `/admin/`** |
+| **Admin** | Manage **Experts they created** only (not peer Admins); database upload; **own BOQs + their Experts' BOQs**; **audit for self + their Experts**; **no Django `/admin/`** |
+| **Expert** | Upload/process BOQs; **own BOQs only**; database **view/download** for awareness; database **upload** only when granted; **no Django `/admin/`** |
+
+**Django `/admin/`:** locked to platform Superadmin (`role=SUPERADMIN` +
+`is_staff` + `is_superuser`). Anonymous users are redirected to the app login;
+Admin / Expert (and any other signed-in non-Superadmin) get **404**. Wired in
+`common/admin_site.py` from `config/urls.py`.
 
 BOQ ownership stays with the uploader. Superadmin sees every BOQ. An Admin sees
 only their own uploads and BOQs from Experts where ``created_by`` is that Admin
@@ -65,7 +70,8 @@ Generate embeddings (must succeed) → Activate → Purge previous master data
   (Superadmin / Admin / Expert with ``allow_db_access``). Concurrent uploads are
   refused; the UI shows **Uploading…** and polls status across tab switches.
 - `Product_Helper`, `Rate_Master_Output`, and `Labour_master_Output` are **required**.
-- Other workbook sheets may exist; they are **not ingested** (UI counts only).
+- Other workbook sheets may exist in the file; they are **ignored** (not imported
+  and not shown on the Database detail page).
 - **Discontinued products:** Product_Helper rows whose ``Status`` (column I) is
   ``Discontinued`` are not imported. Rate and Labour rows for those
   ``Product_ID`` values are skipped too, so they never get Chroma embeddings and
@@ -78,17 +84,23 @@ Generate embeddings (must succeed) → Activate → Purge previous master data
   are always loaded from PostgreSQL (`Rate_Master_Output` /
   `Labour_master_Output`) by that Product_ID — never from the vector store.
 - Stored upload file is datetime-stamped; download uses original filename.
-- Last **10** upload records remain visible for view/download (metadata + workbook).
+- **Retention (last 10):** after a **successful** import (embeddings + activate +
+  purge), only the newest **10** `DatabaseVersion` rows are kept. When the 11th
+  succeeds, the oldest (1st) record is deleted and its workbook is removed from
+  ``media/database/``. Failed imports do **not** run retention.
 - Master sheet rows are stored in PostgreSQL only for the **active** upload;
   on successful import, previous master rows are **purged** (first upload has
-  nothing to purge).
+  nothing to purge). Active-DB replace + embeddings behaviour is unchanged.
 - A **failed** embedding/import does **not** activate the new version — the
   previous active database and Chroma stay live.
 - Catalog identity: **`Product_Helper.Product_ID`**. Pricing amount:
   **`Final_Material_Amount`**. Labour: **`Labour_With_State_Multiplier`** by
   Product_ID (model `Total_Labour_per_unit_with_labour_Multipler`).
 - **Embeddings are required for import success** when there are embeddable
-  Product_Helper rows (OpenAI must be configured).
+  Product_Helper rows (OpenAI must be configured). Empty OpenAI credits / quota
+  or a rate limit abort embedding generation immediately (no row-by-row retry);
+  the upload UI shows the same credits/limit message and the new version stays
+  inactive.
 
 Entry point: `DatabaseImportService` in `apps/database_manager/services/importer.py`.
 Views call the service directly (thin views).
@@ -189,6 +201,26 @@ Upload BOQ (+ optional make list) → parse to JSON → store files + hierarchy
   “understand BOQ requirement; do not match by shared words alone”).
 
 Entry point: `BOQCreationService` in `apps/boq/services/boq_service.py`.
+
+### BOQ delete
+
+BOQ list and Dashboard **Recent BOQs** **Actions**: solid blue View (eye) and
+solid red **Delete** (same trash icon as the former detail topbar). Posts to
+`POST /boqs/<id>/delete/` for any user who can open that BOQ. Confirm modal
+required. `BOQDeletionService` removes:
+
+- DB row (`boq_data` / `make_list_data` / `analysis_data` included)
+- `media/boq/` workbook and optional `media/make_lists/` file
+- `media/extract_json/{boq_name}/` (`boq_data.json`, `make_list_data.json`,
+  `boq_analysis.json`)
+- `media/job_progress/{id}.json` (+ cache key + any `{id}.*.tmp`)
+- Per-BOQ session keys (`boq_exported_*`, `boq_detail_tab_*`)
+
+**Kept on purpose:** Audit Log always records who deleted which BOQ
+(`Deleted BOQ 'name'` on the actor; owner email added when Admin deletes an
+Expert's BOQ). Older BOQ audit/notification text is not scrubbed. Chroma /
+master DB media, Celery heartbeat, and Redis task results are not per-BOQ
+(results expire naturally). In-flight Analyse no-ops if the row is already gone.
 
 ### BOQ analysis — pipeline
 
@@ -301,9 +333,11 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
      row embeddings; discontinued Status excluded at embed time), take Product_ID,
      then load Rate_Master_Output rows for that Product_ID (AI validates up to
      **5** neighbors; UI shows top **3**). Synonym-aware SQL remains a fallback.
-     Initial Analyse also uses BOQ section text in recall and runs one weak
-     product rematch pass only for products below the match floor (&lt;30%).
-     Wrong nominal sizes are penalized when extract
+     Initial Analyse uses the same hint-led recall as product Re-analyse
+     (AI Description leads; Category/Sub dropped when the hint names the product;
+     section text is secondary evidence; Chroma pool depth matches rematch) and
+     then rematches **all** products once so candidates and confidence align
+     with a manual Re-analyse. Wrong nominal sizes are penalized when extract
      size is filled; candidates are deduped by Product_ID; Class ``0`` is a real
      score token. Description-vs-catalog type checks use **Category + Sub_Category
      + Class** (not Sub alone) and apply a soft penalty — they must not hard-floor
@@ -410,14 +444,16 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
 
 **Step 2 — Make & Vendor** (BOQ detail → **Make & Vendor** tab, after Analyse):
 
-- From Analysis, toolbar **Next** (blue) requires every product to have a loaded
-  or selected **Product Id**. If any are missing, Next shows a warning to
-  **Confirm Manually** / Select a candidate, or remove the product from Analysis.
-  When all Product Ids are present, Next sends each ``catalog_product_id`` into
-  Make & Vendor, queries PostgreSQL Rate_Master_Output by that Product_ID, and
-  prefills the **lowest-price** row among **approved makes** when a make list
-  exists (or among all makes for that Product_ID when none was uploaded / no
-  approved make), then opens **Make & Vendor** and sets status `MAKE_VENDOR`.
+- From Analysis, toolbar **Next** (blue) allows continuing when some products
+  lack a **Product Id**. A confirm explains that those products become
+  **Not available** on Make & Vendor / Labour / Review (red) with **no**
+  Rate_Master or labour lookups. Experts may still Select / Confirm Manually /
+  remove products on Analysis first. Products with a Product Id are sent as
+  ``catalog_product_id`` into Make & Vendor, which queries PostgreSQL
+  Rate_Master_Output by that Product_ID and prefills the **lowest-price** row
+  among **approved makes** when a make list exists (or among all makes for that
+  Product_ID when none was uploaded / no approved make), then opens
+  **Make & Vendor** and sets status `MAKE_VENDOR`.
 - Analysis shows a view-only **Product Id** column before Category for the
   matched or selected catalog id.
 - After full Analyse completes, the page **stays on Analysis** (review first;
@@ -429,14 +465,24 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
 - Make and Vendor ``<select>`` dropdowns list Rate_Master_Output combinations for
   that Product_ID. The Make list always shows every available make. Selecting a
   Make scopes Vendor to that make's vendors; clearing Make shows all vendors.
-  Product rate = **`Final_Material_Amount`**.
+  Product rate = **`Final_Material_Amount`**. Cards show an **AI Description**
+  heading plus view-only **Rate id** and **Product id**.
 - Line headers show a soft badge **Auto** (lowest-price default) or **filtered**
   (any product has an expert make-list pick), after “N lines grouped” when present.
-- **Not found** / **No match** keep the same Make/Vendor dropdowns (options from
+- Status labels: **Not available** (red) = no Product Id — no searches/computes;
+  **Not listed** (orange, was Not found) = no approved make in Make List;
+  **Not in Db** (orange, was No match) = Product Id present but no Rate_Master row.
+  **Not listed** / **Not in Db** keep Make/Vendor dropdowns (options from
   Product_ID → Rate_Master on page load). Selecting a pair **previews** the product
-  rate only; the card stays red until **Apply**, which commits the match (green)
-  and reloads in place on that card. Free-text Make/Vendor is only used when no
-  dropdown options exist.
+  rate only; the card stays warning-colored until **Apply**, which commits the match
+  (green) and reloads in place on that card. Free-text Make/Vendor is only used when
+  no dropdown options exist.
+- Make & Vendor **Next** confirms how many products will be **Not available** on
+  Labour (Analysis Not available + remaining Not listed / Not in Db). Unlock
+  promotes those to Not available (no labour lookup). Matched products with no
+  labour charge show **No labour** (orange) on Labour; Labour **Next** promotes
+  them to Not available for Review/Export. Export Amount = ``Not available`` with
+  red row highlight.
 - **Sub-category makes:** top panel lists **category → sub-category → make → vendor**
   (only categories/sub-categories present in Analysis extraction). **Apply to sub-category**
   sets make/vendor on every product in that sub-category and loads rates. When a
@@ -727,6 +773,7 @@ BOQ_AI/
 | `apps/database_manager/services/activation.py` | Single active upload |
 | `apps/database_manager/views.py` | DB upload UI |
 | `apps/boq/services/boq_service.py` | BOQ file persistence |
+| `apps/boq/services/boq_deletion_service.py` | Delete BOQ row + media residuals |
 | `apps/boq/services/boq_visibility_service.py` | Role-based BOQ list/detail visibility |
 | `apps/boq/services/xls_upload_conversion_service.py` | Convert legacy `.xls` → `.xlsx` on upload |
 | `utils/xls_convert.py` | xlrd → openpyxl workbook conversion |
@@ -755,6 +802,7 @@ BOQ_AI/
 | `ai/openai_client.py` | OpenAI client + API key check |
 | `ai/embeddings/` | Chroma product index |
 | `config/settings.py` | Single settings module |
+| `common/admin_site.py` | Django `/admin/` Superadmin-only lock |
 
 ---
 

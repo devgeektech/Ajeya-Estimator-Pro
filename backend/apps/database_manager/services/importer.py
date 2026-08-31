@@ -3,9 +3,10 @@
 Validate -> Backup -> Import -> Activate -> Generate Embeddings
 
 Only ``Product_Helper``, ``Rate_Master_Output``, and ``Labour_Master_Output``
-are ingested. Other workbook sheets may exist and are counted for the database
-detail UI only. Older workbooks that still use ``Labour_master_Output`` are
-accepted via alias; ``Product_Master`` is accepted as ``Product_Helper``.
+are ingested. All other workbook sheets are ignored (not read into PostgreSQL
+and not shown on the Database detail page). Older workbooks that still use
+``Labour_master_Output`` are accepted via alias; ``Product_Master`` is accepted
+as ``Product_Helper``.
 
 Product_Helper rows with Status ``Discontinued`` (sheet column I) are not
 loaded. Matching Rate_Master_Output / Labour rows for those Product_IDs are
@@ -22,7 +23,7 @@ from common.db import atomic
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from common.constants import MASTER_SHEET_ALIASES, REQUIRED_MASTER_SHEETS
+from common.constants import REQUIRED_MASTER_SHEETS
 from common.exceptions import ImportError_
 from utils.excel import list_sheet_names, read_rows
 
@@ -272,35 +273,6 @@ def _skip_reason(model, sheet_name: str, built_rows: list[dict]) -> str:
     )
 
 
-def _ingested_sheet_titles() -> set[str]:
-    titles: set[str] = set()
-    for preferred in REQUIRED_MASTER_SHEETS:
-        titles.update(MASTER_SHEET_ALIASES.get(preferred, (preferred,)))
-    return titles
-
-
-def count_workbook_sheet_rows(file_path: str) -> list[dict]:
-    """Return [{name, rows, ingested}] for every sheet (UI statistics)."""
-    ingested = _ingested_sheet_titles()
-    ingested_lower = {name.lower() for name in ingested}
-    stats: list[dict] = []
-    for sheet_name in list_sheet_names(file_path):
-        try:
-            rows = read_rows(file_path, sheet_name)
-            row_count = len(rows)
-        except Exception:  # noqa: BLE001
-            logger.exception("Failed counting rows for sheet %s", sheet_name)
-            row_count = 0
-        stats.append(
-            {
-                "name": sheet_name,
-                "rows": row_count,
-                "ingested": sheet_name in ingested or sheet_name.lower() in ingested_lower,
-            }
-        )
-    return stats
-
-
 class DatabaseImportService:
     """Orchestrates importing a master workbook into a new DatabaseVersion."""
 
@@ -484,6 +456,10 @@ class DatabaseImportService:
                 version.pk, require_success=True
             )
         except AIServiceError as exc:
+            from ai.errors import format_ai_error_message, is_fatal_ai_limit_error
+
+            if is_fatal_ai_limit_error(exc):
+                raise ImportError_(format_ai_error_message(exc)) from exc
             raise ImportError_(
                 f"Database import failed during embedding generation: {exc}"
             ) from exc

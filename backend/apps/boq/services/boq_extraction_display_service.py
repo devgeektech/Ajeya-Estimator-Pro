@@ -888,13 +888,15 @@ class BOQExtractionDisplayService:
             )
 
         stats = analysis.get("stats") or {}
+        missing_product_id_count = count_missing_loaded_product_ids(analysis)
         return {
             "has_extraction": bool(analysis.get("rows")),
             "phase": analysis.get("phase"),
             "stats": stats,
             "product_count": product_count,
             "missing_field_count": missing_field_count,
-            "missing_product_id_count": count_missing_loaded_product_ids(analysis),
+            "missing_product_id_count": missing_product_id_count,
+            "matched_product_id_count": max(0, product_count - missing_product_id_count),
             "multiproduct_review_count": multiproduct_review_count,
             "has_make_list": self.has_make_list_file and self.make_list_service.has_constraints,
             "lines": lines,

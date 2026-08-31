@@ -109,3 +109,30 @@ class BOQExportTestCase(TestCase):
         # Verify status transitioned
         self.boq.refresh_from_db()
         self.assertEqual(self.boq.status, BOQStatus.EXPORTED)
+
+
+class BOQExportNotAvailableBorderTests(TestCase):
+    def test_not_available_rate_amount_cells_have_borders(self):
+        from openpyxl import Workbook
+
+        from apps.boq.services.boq_export_service import (
+            NOT_AVAILABLE_LABEL,
+            _highlight_row,
+            _write_not_available_rate_amount,
+        )
+
+        workbook = Workbook()
+        sheet = workbook.active
+        _write_not_available_rate_amount(sheet, 2, rate_col=5, amount_col=6)
+        _highlight_row(sheet, 2, max_column=6)
+
+        rate_cell = sheet.cell(row=2, column=5)
+        amount_cell = sheet.cell(row=2, column=6)
+        self.assertEqual(rate_cell.value, NOT_AVAILABLE_LABEL)
+        self.assertEqual(amount_cell.value, NOT_AVAILABLE_LABEL)
+        self.assertEqual(rate_cell.border.left.style, "thin")
+        self.assertEqual(rate_cell.border.right.style, "thin")
+        self.assertEqual(amount_cell.border.left.style, "thin")
+        self.assertEqual(amount_cell.border.right.style, "thin")
+        self.assertIsNotNone(rate_cell.fill)
+        self.assertIsNotNone(amount_cell.fill)

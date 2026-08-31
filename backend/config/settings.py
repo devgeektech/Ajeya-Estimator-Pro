@@ -204,6 +204,8 @@ if not DEBUG and CELERY_TASK_ALWAYS_EAGER:
     )
 # Shared heartbeat file max age — Analyse refuses to queue when stale/missing.
 CELERY_WORKER_HEARTBEAT_MAX_AGE = env.float("CELERY_WORKER_HEARTBEAT_MAX_AGE", default=45.0)
+# When True, run Analyse inline if Redis/worker are down (local dev without Celery).
+CELERY_SYNC_FALLBACK = env.bool("CELERY_SYNC_FALLBACK", default=DEBUG)
 # Skip liveness checks only for controlled tests.
 CELERY_SKIP_WORKER_CHECK = env.bool("CELERY_SKIP_WORKER_CHECK", default=False)
 

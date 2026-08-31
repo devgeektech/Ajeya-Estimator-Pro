@@ -9,6 +9,7 @@ from typing import Any
 from apps.database_manager.models import Rate_Master_Output
 from apps.database_manager.services.activation import get_active_database_version
 from utils.attribute_parser import learn_aliases_from_attributes, parse_attributes
+from utils.catalog_size_rules import format_size_rules_for_ai, load_size_unit_patterns
 
 logger = logging.getLogger("boq_ai.ai.context")
 
@@ -340,6 +341,8 @@ def _correct_misfiled_class(
 def snap_product_taxonomy(
     product: dict[str, Any],
     taxonomy: dict[str, Any] | None = None,
+    *,
+    infer_defaults: bool = True,
 ) -> dict[str, Any]:
     """Snap product category/sub_category/class onto Rate_Master_Output labels.
 
@@ -357,6 +360,8 @@ def snap_product_taxonomy(
         resolved = resolve_category_label(str(raw_category), categories)
         if resolved:
             item["category"] = resolved
+        elif categories:
+            item["category"] = None
 
     category = str(item.get("category") or "").strip() or None
     raw_sub = item.get("sub_category")
@@ -382,7 +387,7 @@ def snap_product_taxonomy(
         # else: keep raw only when taxonomy is empty (no active DB yet)
 
     # Recover Sub from description / material words within the Category.
-    if category and not str(item.get("sub_category") or "").strip():
+    if infer_defaults and category and not str(item.get("sub_category") or "").strip():
         evidence = " ".join(
             part
             for part in (
@@ -425,7 +430,7 @@ def snap_product_taxonomy(
             sub_category=sub_category,
             classes_by_category_sub_category=classes_by,
         )
-        if len(catalog_classes) == 1:
+        if infer_defaults and len(catalog_classes) == 1:
             item["class"] = catalog_classes[0]
     return item
 
@@ -570,6 +575,8 @@ def build_database_context() -> str:
         else:
             valid_pairs.append({"category": cat, "sub_category": None})
 
+    size_patterns = load_size_unit_patterns(version.pk)
+
     payload = {
         "valid_category_and_subcategory_pairs": valid_pairs,
         "categories": taxonomy.get("categories") or [],
@@ -580,6 +587,8 @@ def build_database_context() -> str:
         or {},
         "classes": list(taxonomy.get("classes") or []),
         "attribute_keys": filtered_keys,
+        "size_unit_patterns": size_patterns,
+        "size_unit_rules": format_size_rules_for_ai(size_patterns),
     }
     payload_json = json.dumps(payload, ensure_ascii=False)
     logger.info(

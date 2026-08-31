@@ -18,6 +18,12 @@ from apps.boq.services.boq_row_fields import (
     resolve_activity_only,
 )
 from apps.boq.services.boq_row_grouping_service import grouped_anchor_rows
+from apps.boq.services.make_vendor_common import (
+    NOT_AVAILABLE_LABEL,
+    NOT_IN_DB_LABEL,
+    NOT_LISTED_LABEL,
+    is_product_not_available,
+)
 from apps.boq.services.serial_normalizer import (
     analysis_fields,
     detect_serial_key,
@@ -224,6 +230,8 @@ def build_review_output_row(
         or rd.get("selection_amount")
     )
     labour_unit = line_output.get("labour_rate")
+    unavailable = is_product_not_available(product)
+    amount = NOT_AVAILABLE_LABEL if unavailable else line_output.get("total_amount")
     return {
         "serial": serial,
         "boq_description": description,
@@ -241,14 +249,15 @@ def build_review_output_row(
         "wastage_value": rd.get("wastage_value"),
         "sub_total": rd.get("sub_total"),
         "profit_value": rd.get("profit_value"),
-        "final_material_amount": material_unit,
-        "labour": labour_unit,
+        "final_material_amount": None if unavailable else material_unit,
+        "labour": None if unavailable else labour_unit,
         # Final Rate is calculated in Excel (not here) to keep rollups as formulas.
         "final_rate": None,
         "qty": qty if qty not in (None, "") else line_output.get("quantity"),
-        "total_material": line_output.get("material_amount"),
-        "total_labour": line_output.get("labour_amount"),
-        "amount": line_output.get("total_amount"),
+        "total_material": None if unavailable else line_output.get("material_amount"),
+        "total_labour": None if unavailable else line_output.get("labour_amount"),
+        "amount": amount,
+        "is_not_available": unavailable,
     }
 
 
@@ -451,7 +460,12 @@ class BOQReviewDisplayService:
                 )
                 if display.get("status") == "matched":
                     matched_count += 1
-                elif display.get("status") in {"pending", "unmatched", "not_searched"}:
+                elif display.get("status") in {
+                    "pending",
+                    "unmatched",
+                    "not_searched",
+                    "not_available",
+                }:
                     pending_count += 1
                 products.append(display)
 
@@ -474,7 +488,9 @@ class BOQReviewDisplayService:
                 product_statuses = [
                     str(product.get("status") or "") for product in products
                 ]
-                if any(
+                if any(status == "not_available" for status in product_statuses):
+                    line_status = "not_available"
+                elif any(
                     status in {"unmatched", "pending", "not_searched"}
                     for status in product_statuses
                 ):
@@ -550,6 +566,21 @@ class BOQReviewDisplayService:
         status = str(selection.get("status") or "not_searched")
         confidence = float(selection.get("confidence") or 0)
 
+        is_not_available = is_product_not_available(product)
+        source = str(product.get("vendor_selection_source") or selection.get("source") or "")
+        if is_not_available:
+            status_label = NOT_AVAILABLE_LABEL
+        elif source == "not_found" or status == "not_found":
+            status_label = NOT_LISTED_LABEL
+        elif status == "unmatched":
+            status_label = NOT_IN_DB_LABEL
+        elif status == "matched":
+            status_label = "Matched"
+        elif status == "pending":
+            status_label = "Review"
+        else:
+            status_label = status or "—"
+
         selected = {
             "rate_master_id": selection.get("rate_master_id")
             or (rate_detail or {}).get("rate_master_id"),
@@ -580,6 +611,8 @@ class BOQReviewDisplayService:
         return {
             "product_index": int(product.get("product_index") or 0),
             "status": status,
+            "status_label": status_label,
+            "is_not_available": is_not_available,
             "confidence": confidence,
             "extracted_category": product.get("category"),
             "extracted_sub_category": product.get("sub_category"),

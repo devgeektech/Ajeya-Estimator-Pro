@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -71,3 +72,32 @@ def save_extract_json_for_boq(
         path = save_make_list_extract_json(boq_name, make_list_data)
         written["make_list_data"] = str(path.relative_to(media_root)).replace("\\", "/")
     return written
+
+
+def delete_extract_json_dir(boq_name: str) -> bool:
+    """Remove ``media/extract_json/{boq_name}/`` (boq/make-list/analysis JSON)."""
+    folder = boq_extract_dir(boq_name)
+    root = extract_json_root().resolve()
+    try:
+        resolved = folder.resolve()
+    except OSError:
+        logger.exception("Could not resolve extract_json path for '%s'", boq_name)
+        return False
+    # Refuse to delete anything outside the extract_json root.
+    if root not in resolved.parents and resolved != root:
+        logger.error(
+            "Refusing to delete extract_json path outside root: %s", resolved
+        )
+        return False
+    if resolved == root:
+        logger.error("Refusing to delete extract_json root itself")
+        return False
+    if not resolved.is_dir():
+        return False
+    try:
+        shutil.rmtree(resolved)
+        logger.info("Deleted extract_json folder for '%s' at %s", boq_name, resolved)
+        return True
+    except OSError:
+        logger.exception("Failed deleting extract_json folder for '%s'", boq_name)
+        return False

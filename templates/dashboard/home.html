@@ -294,8 +294,8 @@
 
     .dash-table col.dash-col-name { width: 34%; }
     .dash-table col.dash-col-status { width: 22%; }
-    .dash-table col.dash-col-uploaded { width: 26%; }
-    .dash-table col.dash-col-action { width: 18%; }
+    .dash-table col.dash-col-uploaded { width: 22%; }
+    .dash-table col.dash-col-action { width: 22%; }
 
     .dash-table thead th {
         text-align: left;
@@ -354,27 +354,6 @@
         font-weight: 600;
     }
 
-    .dash-table .btn--open {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        padding: 4px 12px;
-        font-size: 0.82rem;
-        font-weight: 600;
-        color: #1d4ed8;
-        background: rgba(37, 99, 235, 0.12);
-        border: 1px solid rgba(37, 99, 235, 0.28);
-        border-radius: 8px;
-        text-decoration: none;
-        white-space: nowrap;
-    }
-
-    .dash-table .btn--open:hover {
-        background: rgba(37, 99, 235, 0.2);
-        border-color: rgba(37, 99, 235, 0.4);
-        color: #1e40af;
-    }
-
     .dash-table__empty {
         grid-column: 1 / -1;
         justify-content: center;
@@ -386,17 +365,6 @@
 
     .dark-mode .dash-section--recent .dash-section__title {
         color: var(--text);
-    }
-
-    .dark-mode .dash-table .btn--open {
-        background: rgba(37, 99, 235, 0.22);
-        border-color: rgba(96, 165, 250, 0.35);
-        color: #93c5fd;
-    }
-    .dark-mode .dash-table .btn--open:hover {
-        background: rgba(37, 99, 235, 0.32);
-        border-color: rgba(96, 165, 250, 0.5);
-        color: #bfdbfe;
     }
 
     .dark-mode .dash-table thead th {
@@ -643,7 +611,7 @@
                             <th>Name</th>
                             <th>Status</th>
                             <th>Uploaded</th>
-                            <th>Action</th>
+                            <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -652,8 +620,8 @@
                             <td class="dash-table__name" title="{{ item.boq.boq_name }}">{{ item.boq.boq_name }}</td>
                             <td><span class="badge {{ item.status_display.badge }}">{{ item.status_display.label }}</span></td>
                             <td class="dash-table__meta">{{ item.boq.created_at|date:"M d, H:i" }}</td>
-                            <td>
-                                <a href="{% url 'boq:detail' item.boq.pk %}" class="btn--open">Open</a>
+                            <td class="table__actions">
+                                {% include "boq/_boq_row_actions.html" with boq=item.boq %}
                             </td>
                         </tr>
                         {% empty %}

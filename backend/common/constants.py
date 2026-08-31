@@ -22,7 +22,7 @@ MASTER_SHEET_ALIASES: dict[str, tuple[str, ...]] = {
     ),
 }
 
-# Optional sheets are no longer ingested; other workbook sheets are counted for UI only.
+# Optional sheets are no longer ingested; any other workbook sheets are ignored.
 OPTIONAL_MASTER_SHEETS: list[str] = []
 
 MASTER_SHEETS = REQUIRED_MASTER_SHEETS + OPTIONAL_MASTER_SHEETS
@@ -38,9 +38,9 @@ MATCH_CONFIDENCE_THRESHOLD = 30
 # provisional rules still use MATCH_CONFIDENCE_THRESHOLD.
 ANALYSIS_INPUT_FILL_CONFIDENCE = 50
 
-# Product Id auto-fills only when match % is orange/green (≥90). Red tabs (<90)
-# stay without Product Id until expert Select or a high-confidence rematch.
-PRODUCT_ID_CONFIRM_CONFIDENCE = 90
+# Product Id auto-fills when match % reaches orange band (≥70). Experts can still
+# Select manually below this; red tabs (<70) stay without Product Id.
+PRODUCT_ID_CONFIRM_CONFIDENCE = 70
 
 # After first DB mapping, rematch weak products until this confidence (or unmatched).
 # Mirrors expert Re-analyse gains from taxonomy/schema alignment.

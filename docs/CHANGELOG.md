@@ -5,10 +5,200 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
+## 2026-08-31 — IS standard no longer used as Size
+
+- After clearing invalid sizes (e.g. ``884`` from ``IS:884``), evidence sanitization
+  re-parses nominal bore/dia from BOQ text (``20 mm bore`` → Size 20).
+
+## 2026-08-31 — Re-analyse recall for fire hose box
+
+- Re-analyse keeps Sub_Category when AI Description agrees (fire hose box);
+  full BOQ section no longer pollutes Chroma recall with branch pipes / hose lengths.
+- Exact Sub_Category conflicts (FIRE HOSE BOX vs FIRE HOSE / BRANCH PIPE) block
+  wrong-family neighbors without substring false positives.
+
+## 2026-08-31 — Export Not available borders
+
+- BOQ result rows marked Not available keep Rate/Amount table borders; both
+  columns show the literal label with dark cell borders.
+
+## 2026-08-31 — Make & Vendor respects Analysis Product Id gate
+
+- Products without confirmed Product Id (red match on Analysis) no longer fetch
+  rates on Make & Vendor; marked Not available instead of using suggested/low
+  confidence db_product_id.
+
+## 2026-08-31 — Analysis Next confirm copy
+
+- Clearer Next prompt when products lack Product Id (count, Not available outcome,
+  Stay on Analysis / Continue anyway). Make & Vendor hint lists Not available count.
+
+## 2026-08-31 — Extraction sanitize bug + Product Id at 70%
+
+- Fixed missing import that broke ``_apply_slot_evidence_fields`` (fire hose box
+  sanitize never ran during Analyse).
+- Pre-map pass re-applies BOQ evidence before every match/refine.
+- Product Id auto-fills at ≥70% match (was ≥90%); refine pass no longer confirms
+  wrong low-confidence picks.
+
+## 2026-08-31 — Re-analyse applies main-product evidence fix
+
+- Product **Re-analyse with AI** re-reads BOQ supply text and corrects enclosure
+  vs contents (fire hose box not branch pipe) before rematch.
+- AI Description no longer kept when it conflicts with mapped Sub-category.
+
+## 2026-08-31 — Main product vs contents (fire hose box)
+
+- Enclosure/cabinet lines (fire hose box) no longer mis-extract as branch pipe
+  when description mentions hoses/pipes inside; matches Product_Helper FIRE HOSE BOX.
+- Fixed match scoring: WxHxD capacity no longer parsed as Size; removed false
+  fire-hose vs hose-box conflict cap.
+
+## 2026-08-31 — FIRE HOSE size/capacity + match display
+
+- Length (15m) moves from Capacity → Size for FIRE HOSE; matched summary now
+  shows Capacity explicitly (including catalog ``0``).
+- Match scoring skips Capacity when catalog Capacity is sentinel ``0``; size
+  inference uses length from capacity/hint for m-unit products.
+
+## 2026-08-31 — Catalog Size/Unit patterns from Product_Helper
+
+- DATABASE_CONTEXT now includes ``size_unit_patterns`` + ``size_unit_rules`` built
+  from active Product_Helper (FIRE HOSE → m length, branch pipe → mm bore, etc.).
+- Rejects SWG gauge (18 SWG) as Size; FIRE HOSE BOX gets capacity dims not mm Size.
+
+## 2026-08-31 — Null-when-uncertain for all extracted fields
+
+- Evidence-based sanitization for Category, Class, Capacity, make_hint, attributes,
+  and Size: validate against BOQ slot / product_context; clear guesses to null.
+- Extraction no longer recovers Sub from AI description_hint or auto-fills single
+  catalog Class; wrong PN capacity is cleared not overwritten.
+
+## 2026-08-31 — Uncertain nominal size → null
+
+- Wrong or IS-confused Size is cleared to null instead of substituting another
+  parsed value; slot binding fills Size only when blank and qty line has
+  explicit mm/dia/NB.
+
+## 2026-08-31 — Nominal size: ignore IS standard numbers
+
+- Size parsing prefers ``mm`` / ``dia`` / ``NB`` and rejects Indian Standard
+  codes (e.g. IS:636-1979 → attribute ``is``, not size 636). Repairs apply on
+  extract normalize and slot evidence binding.
+
+## 2026-08-31 — Fix Analyse “Request failed” when Celery/Redis unavailable
+
+- Extract JSON responses kept the dispatch error message (status payload no
+  longer overwrote it with an empty string).
+- Celery worker writes a heartbeat every 15s on Windows threads pool.
+- `CELERY_SYNC_FALLBACK` (defaults to `DEBUG`) runs Analyse inline when Redis
+  or the worker is down.
+
+## 2026-08-26 — Solid blue View / red Delete BOQ actions
+
+- Restored the solid red trash button (former detail topbar style) and a
+  matching solid blue eye button; shared partial used on BOQ list and Dashboard.
+
+## 2026-08-26 — BOQ action icons: blue View, red Delete
+
+- View icon is blue and Delete is red on BOQ list Actions; the same icons
+  replace Dashboard Recent BOQs “Open”.
+
+## 2026-08-26 — Delete BOQ on list Actions
+
+- Moved Delete BOQ from the detail topbar to the BOQ list Actions column
+  (after the View icon), matching Users/Database list action patterns.
+
+## 2026-08-26 — Stop idle BOQ/DB status polling
+
+- BOQ upload and Database import status polls run only while a job is
+  processing, then stop when it finishes (no continuous idle `/status/` traffic).
+
+## 2026-08-26 — Database detail shows only imported sheets
+
+- Database version detail keeps Version Summary + Ingested Tables only
+  (`Product_Helper`, `Rate_Master_Output`, `Labour_Master_Output`). Other
+  workbook sheets are ignored on import and no longer listed in the UI.
+
+## 2026-08-26 — Database detail open no longer hangs on sheet counts
+
+- Database version detail uses a fast read-only sheet row count instead of
+  fully re-parsing every workbook sheet (large masters looked like they would
+  not open).
+- Upload / list UI show live import phase text (sheets → embeddings → active).
+
+## 2026-08-26 — OpenAI client verification checklist
+
+- Added `docs/OPENAI_CLIENT_CHECKLIST.md` for client-side OpenAI account checks
+  (billing, key, `gpt-4o-mini`, `text-embedding-3-small`, limits, smoke tests).
+
+## 2026-08-26 — Stop OpenAI calls when credits/quota are empty
+
+- Database embedding generation (and matching/mapping fallbacks) abort on empty
+  OpenAI credits or rate limit instead of retrying every remaining row/chunk.
+- The upload UI shows the same credits/limit message; the new database is not
+  activated.
+
+## 2026-08-26 — Database retention: 11th success drops oldest media
+
+- Confirmed keep-newest-10 retention after successful import; oldest
+  `DatabaseVersion` + `media/database/` workbook removed. List ordering matches
+  retention (`version_number`). Postgres purge + embeddings path unchanged.
+
+## 2026-08-26 — BOQ delete appears clearly in Audit Log
+
+- Delete writes Audit Log on the **actor** as `Deleted BOQ 'name'` (adds
+  `owner: email` when Admin deletes an Expert’s BOQ). Admins see Expert deletes
+  under that Expert’s audit entries.
+
+## 2026-08-26 — BOQ delete (detail topbar)
+
+- Detail page top-right Delete icon removes the BOQ row plus workbook, make list,
+  `extract_json/{name}/`, and job progress. Audit keeps a “Deleted BOQ” entry;
+  notifications / older audit text are not scrubbed.
+
+## 2026-08-26 — Django /admin/ Superadmin-only
+
+- `/admin/` is locked to platform Superadmin only (`common/admin_site.py`).
+  Anonymous users go to the app login; Admin / Expert get 404 (no Django admin
+  login page).
+
+## 2026-08-26 — UI message when OpenAI credits are empty
+
+- Analyse failures from empty OpenAI credits / quota show a clear in-app notice
+  and Analysis banner (“OpenAI API credits are empty…”) instead of a generic
+  “Analysis failed”.
+
+## 2026-08-26 — Make & Vendor AI Description / ids + Not available cascade
+
+- Make & Vendor cards show **AI Description** heading, plus view-only **Rate id**
+  and **Product id** fields.
+- Make & Vendor **Next** confirms products that will be **Not available** on Labour
+  (Analysis NA + Not listed + Not in Db). Labour unlock promotes unresolved rows;
+  missing labour stays orange, then Review/Export mark them **Not available**
+  (Amount = “Not available”, red).
+- Shared rules live in `product_availability.py`.
+
+## 2026-08-26 — Analysis Next: Not available + relabel Not listed / Not in Db
+
+- Analysis **Next** no longer blocks on missing Product Ids. Confirm explains
+  Continue marks those products **Not available** (red) with no rate/labour
+  lookups on Make & Vendor, Labour, and Review.
+- Renamed badges: **Not found** → **Not listed** (orange); **No match** →
+  **Not in Db** (orange). **Not available** stays red.
+
 ## 2026-08-25 — In-app alert for Analysis Next blockers
 
 - Replaced browser `alert()` for Analysis → Make & Vendor (and related BOQ
   tab notices) with the shared confirm modal via `BOQConfirm.alert` (OK only).
+
+## 2026-08-26 — Align Analyse recall with Re-analyse (rematch all)
+
+- First Analyse uses Re-analyse-style recall: AI Description leads, Category/Sub
+  dropped when the hint has product identity, section text appended, Chroma
+  pool = rematch depth (80).
+- Second mapping pass rematches **every** product (not only &lt;30%) so candidates
+  and confidence match a manual product Re-analyse.
 
 ## 2026-08-26 — Speed up Analyse (batches + parallel extract + narrow refine)
 

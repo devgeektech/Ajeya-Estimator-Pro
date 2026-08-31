@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Ajeya Estimator Pro{% endblock %}</title>
     <meta name="csrf-token" content="{{ csrf_token }}">
-<link rel="stylesheet" href="{% static 'css/app.css' %}?v=108">
+<link rel="stylesheet" href="{% static 'css/app.css' %}?v=109">
     <style>
         /* Override stale collected CSS (DEBUG=False keeps old hashed files until server restart). */
         :root { --card-stripe: #e2e8f0; }
@@ -90,6 +90,45 @@
         }
         .topbar-back svg { display: block; }
         .topbar__title { text-decoration: none !important; }
+
+        .topbar-view,
+        .topbar-delete {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 36px;
+            height: 36px;
+            flex-shrink: 0;
+            padding: 0;
+            border: none;
+            border-radius: 10px;
+            color: #fff;
+            cursor: pointer;
+            text-decoration: none;
+            transition: background .15s, box-shadow .15s, transform .15s;
+        }
+        .topbar-view svg,
+        .topbar-delete svg { display: block; }
+        .topbar-view {
+            background: #2563eb;
+            box-shadow: 0 1px 2px rgba(37, 99, 235, .35);
+        }
+        .topbar-view:hover {
+            background: #1d4ed8;
+            box-shadow: 0 4px 10px rgba(37, 99, 235, .4);
+            transform: translateY(-1px);
+            color: #fff;
+        }
+        .topbar-delete {
+            background: #dc2626;
+            box-shadow: 0 1px 2px rgba(220, 38, 38, .35);
+        }
+        .topbar-delete:hover {
+            background: #b91c1c;
+            box-shadow: 0 4px 10px rgba(220, 38, 38, .4);
+            transform: translateY(-1px);
+            color: #fff;
+        }
 
         .boq-detail-header {
             display: flex;
@@ -1456,7 +1495,8 @@
         .make-vendor-summary__default { color: #854d0e; font-weight: 600; }
         .make-vendor-summary__filtered { color: #1d4ed8; font-weight: 600; }
         .make-vendor-summary__not-found { color: #c2410c; font-weight: 600; }
-        .make-vendor-summary__no-match { color: #b91c1c; font-weight: 600; }
+        .make-vendor-summary__no-match { color: #c2410c; font-weight: 600; }
+        .make-vendor-summary__not-available { color: #b91c1c; font-weight: 600; }
         .make-vendor-summary__vendor-review { color: #a16207; font-weight: 600; }
         .make-vendor-summary__same-price { color: #a16207; font-weight: 600; }
         .make-vendor-summary__muted {
@@ -1772,7 +1812,14 @@
             box-shadow: inset 3px 0 0 #eab308;
         }
 
+        /* Not in Db — orange (was red). */
         .make-vendor-line--no_match {
+            border-color: #fdba74;
+            box-shadow: inset 3px 0 0 #f59e0b;
+        }
+
+        /* Not available — no Product Id (red). */
+        .make-vendor-line--not_available {
             border-color: rgba(239, 68, 68, 0.35);
             box-shadow: inset 3px 0 0 #ef4444;
         }
@@ -1902,13 +1949,22 @@
             border-bottom: 0;
         }
 
+        /* Not listed / Not in Db — orange tint. */
         .make-vendor-card--no-make,
         .make-vendor-card--no-match {
-            background: #fef2f2;
+            background: #fff7ed;
             border-radius: 6px;
             padding-left: 10px;
             padding-right: 10px;
             /* Outer card already shows the status line; keep inner clean. */
+            box-shadow: none;
+        }
+        /* Not available — red tint; no lookups. */
+        .make-vendor-card--not-available {
+            background: #fef2f2;
+            border-radius: 6px;
+            padding-left: 10px;
+            padding-right: 10px;
             box-shadow: none;
         }
         .make-vendor-card--vendor-review {
@@ -2056,6 +2112,15 @@
             font-size: .95rem;
             color: var(--text);
             font-weight: 700;
+        }
+
+        .make-vendor-card__ai-label {
+            margin: 0 0 2px;
+            font-size: .72rem;
+            font-weight: 600;
+            letter-spacing: .02em;
+            text-transform: uppercase;
+            color: var(--muted, #64748b);
         }
 
         .make-vendor-readonly {
@@ -2644,6 +2709,18 @@
             font-weight: 600;
         }
 
+        .extraction-missing-summary--error {
+            color: #b91c1c;
+            display: block;
+            margin-bottom: 4px;
+        }
+
+        .panel__text--error {
+            color: #b91c1c;
+            font-weight: 600;
+            max-width: 42rem;
+        }
+
         .extraction-line__title {
             display: flex;
             flex-wrap: wrap;
@@ -3051,6 +3128,10 @@
             box-shadow: inset 3px 0 0 #eab308;
         }
         .dark-mode .make-vendor-line--no_match {
+            border-color: #fdba74;
+            box-shadow: inset 3px 0 0 #f59e0b;
+        }
+        .dark-mode .make-vendor-line--not_available {
             border-color: rgba(239, 68, 68, 0.35);
             box-shadow: inset 3px 0 0 #ef4444;
         }
@@ -3065,8 +3146,12 @@
 
         .dark-mode .make-vendor-card--no-make,
         .dark-mode .make-vendor-card--no-match {
-            background: rgba(239, 68, 68, 0.14);
+            background: rgba(245, 158, 11, 0.16);
             /* Outer card already shows the status line; keep inner clean. */
+            box-shadow: none;
+        }
+        .dark-mode .make-vendor-card--not-available {
+            background: rgba(239, 68, 68, 0.14);
             box-shadow: none;
         }
         .dark-mode .make-vendor-card--vendor-review {
@@ -3169,7 +3254,8 @@
         .dark-mode .make-vendor-summary__default { color: #fbbf24; }
         .dark-mode .make-vendor-summary__filtered { color: #93c5fd; }
         .dark-mode .make-vendor-summary__not-found { color: #fdba74; }
-        .dark-mode .make-vendor-summary__no-match { color: #fca5a5; }
+        .dark-mode .make-vendor-summary__no-match { color: #fdba74; }
+        .dark-mode .make-vendor-summary__not-available { color: #fca5a5; }
         .dark-mode .make-vendor-summary__vendor-review,
         .dark-mode .make-vendor-summary__same-price { color: #fcd34d; }
         .dark-mode .make-vendor-summary__muted,
@@ -3396,6 +3482,10 @@
 
         .dark-mode .extraction-missing-summary {
             color: #fbbf24;
+        }
+
+        .dark-mode .extraction-missing-summary--error {
+            color: #fca5a5;
         }
 
         .dark-mode .extraction-save-hint--ok {
@@ -3782,10 +3872,11 @@
         const inputEl = document.getElementById("confirm-modal-input");
         const errorEl = document.getElementById("confirm-modal-error");
         const confirmButton = modal.querySelector("[data-confirm-submit]");
+        const cancelActionButton = modal.querySelector(".confirm-modal__actions [data-confirm-cancel]");
         const cancelButtons = modal.querySelectorAll("[data-confirm-cancel]");
         let pendingForm = null;
         let pendingResolve = null;
-        let mode = "form"; // form | confirm | prompt
+        let mode = "form"; // form | confirm | prompt | alert
 
         const resetUi = () => {
             fieldWrap.hidden = true;
@@ -3794,6 +3885,7 @@
             inputEl.value = "";
             titleEl.textContent = "Confirm action";
             confirmButton.textContent = "Confirm";
+            if (cancelActionButton) cancelActionButton.hidden = false;
         };
 
         const closeModal = (result) => {
@@ -3808,11 +3900,15 @@
             resetUi();
         };
 
-        const openModal = ({ title, messageText, confirmLabel, showInput, inputLabel, inputValue }) => {
+        const openModal = ({ title, messageText, confirmLabel, cancelLabel, showInput, inputLabel, inputValue, hideCancel }) => {
             resetUi();
             titleEl.textContent = title || "Confirm action";
             message.textContent = messageText || "Are you sure?";
             confirmButton.textContent = confirmLabel || "Confirm";
+            if (cancelActionButton) {
+                cancelActionButton.textContent = cancelLabel || "Cancel";
+            }
+            if (hideCancel && cancelActionButton) cancelActionButton.hidden = true;
             if (showInput) {
                 fieldWrap.hidden = false;
                 fieldLabel.textContent = inputLabel || "Value";
@@ -3873,6 +3969,19 @@
                         title: options.title || "Confirm action",
                         messageText: messageText || "Are you sure?",
                         confirmLabel: options.confirmLabel || "Confirm",
+                        cancelLabel: options.cancelLabel || "Cancel",
+                    });
+                });
+            },
+            alert(messageText, options = {}) {
+                return new Promise((resolve) => {
+                    pendingResolve = resolve;
+                    mode = "alert";
+                    openModal({
+                        title: options.title || "Notice",
+                        messageText: messageText || "",
+                        confirmLabel: options.confirmLabel || "OK",
+                        hideCancel: true,
                     });
                 });
             },
@@ -3914,6 +4023,10 @@
         });
 
         cancelButtons.forEach((button) => button.addEventListener("click", () => {
+            if (mode === "alert") {
+                closeModal(true);
+                return;
+            }
             if (mode === "confirm" || mode === "prompt") {
                 closeModal(mode === "prompt" ? null : false);
             } else {
@@ -3922,6 +4035,10 @@
         }));
         document.addEventListener("keydown", (event) => {
             if (event.key === "Escape" && !modal.hidden) {
+                if (mode === "alert") {
+                    closeModal(true);
+                    return;
+                }
                 if (mode === "confirm" || mode === "prompt") {
                     closeModal(mode === "prompt" ? null : false);
                 } else {

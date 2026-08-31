@@ -93,6 +93,17 @@ class ProductTypeConflictTests(SimpleTestCase):
         rate = _rate(Category="VALVE", Sub_Category="SLUICE VALVE", Class="0")
         self.assertTrue(product_type_conflicts(extracted, rate))
 
+    def test_fire_hose_box_conflicts_with_fire_hose_row(self):
+        extracted = {
+            "description_hint": "class MS fire hose box (hydrant), capacity 30X24X10",
+            "category": "HYDRANT",
+            "sub_category": "FIRE HOSE BOX",
+        }
+        hose = _rate(Category="HYDRANT", Sub_Category="FIRE HOSE", Class="SYNTHETIC (RRL)")
+        box = _rate(Category="HYDRANT", Sub_Category="FIRE HOSE BOX", Class="MS")
+        self.assertTrue(product_type_conflicts(extracted, hose))
+        self.assertFalse(product_type_conflicts(extracted, box))
+
     def test_conflict_score_capped_below_match_threshold(self):
         extracted = {
             "description_hint": "sluice valve, 250 mm dia",

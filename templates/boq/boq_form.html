@@ -112,8 +112,10 @@
             const wasBusy = uploading;
             if (busy) {
                 setBusyUi(true, data.message || '');
+                startPolling();
                 return;
             }
+            stopPolling();
             if (wasBusy && data.status === 'succeeded') {
                 setStatus('Upload complete. Opening BOQs…');
                 window.location.replace(listUrl);
@@ -128,15 +130,24 @@
         } catch (_err) { /* keep last known */ }
     }
 
+    function startPolling() {
+        if (pollTimer) return;
+        pollTimer = setInterval(pollUploadStatus, 2000);
+    }
+
+    function stopPolling() {
+        if (!pollTimer) return;
+        clearInterval(pollTimer);
+        pollTimer = null;
+    }
+
     if (uploading) {
         setBusyUi(true);
+        startPolling();
     }
     if (statusUrl) {
         pollUploadStatus();
-        pollTimer = setInterval(pollUploadStatus, 2000);
-        window.addEventListener('pagehide', () => {
-            if (pollTimer) clearInterval(pollTimer);
-        });
+        window.addEventListener('pagehide', stopPolling);
     }
 
     function clearErrors() {
@@ -239,6 +250,7 @@
         }
 
         setBusyUi(true);
+        startPolling();
 
         let navigated = false;
         try {

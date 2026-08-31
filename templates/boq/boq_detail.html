@@ -327,6 +327,7 @@
         analysisProgress: {{ analysis_progress_percent|default:0 }},
         analysisTargetPercent: {{ analysis_progress_percent|default:0 }},
         analysisProgressLabel: '{{ analysis_progress_label|default:""|escapejs }}',
+        analysisError: '{{ analysis_error|default:""|escapejs }}',
         matchProgress: {{ is_matching|yesno:'3,0' }},
         matchProgressLabel: '',
         statusLabel: '{{ status_display.label|escapejs }}',
@@ -353,6 +354,12 @@
         progressStorageKey: 'boq-analysis-progress-{{ boq.pk }}',
         analysisStartedAt: {{ is_extracting|yesno:'Date.now(),null' }},
         prefillingMakeVendor: false,
+        missingProductIdCount: {{ extraction_display.missing_product_id_count|default:0 }},
+        totalProductCount: {{ extraction_display.product_count|default:0 }},
+        matchedProductIdCount: {{ extraction_display.matched_product_id_count|default:0 }},
+        mvNotAvailableCount: {{ make_vendor_display.stats.not_available_count|default:0 }},
+        mvNotListedCount: {{ make_vendor_display.stats.not_found_count|default:0 }},
+        mvNotInDbCount: {{ make_vendor_display.stats.no_match_count|default:0 }},
         scrollPositions: {},
         _pollInFlight: false,
         _lastPollAt: 0,
@@ -590,6 +597,37 @@
         },
         async goToMakeVendor() {
             if (this.analysing || this.matching || this.prefillingMakeVendor) return;
+            const missingIds = Number(this.missingProductIdCount || 0);
+            if (missingIds > 0) {
+                const total = Number(this.totalProductCount || 0);
+                const matched = Math.max(0, Number(this.matchedProductIdCount || 0) || (total - missingIds));
+                const missingLabel = missingIds === 1 ? 'product' : 'products';
+                const hasLabel = missingIds === 1 ? 'has' : 'have';
+                const thoseLabel = missingIds === 1 ? 'This product' : 'These ' + missingIds + ' products';
+                const msg = (
+                    missingIds + ' of ' + (total || missingIds) + ' ' + missingLabel + ' ' + hasLabel
+                    + ' no Product Id yet.\n\n'
+                    + thoseLabel + ' will be marked Not available (red) on Make & Vendor, Labour, and Review. '
+                    + 'No make, vendor, rate, or labour will be looked up for them.\n\n'
+                    + (matched > 0
+                        ? ('The other ' + matched + (matched === 1 ? ' product' : ' products')
+                            + ' will continue with normal rate lookup.\n\n')
+                        : '')
+                    + 'To match them first, stay on Analysis and use Select from top candidates, '
+                    + 'Confirm Manually, or Re-analyse with AI.'
+                );
+                let ok = true;
+                if (window.BOQConfirm && typeof window.BOQConfirm.ask === 'function') {
+                    ok = await window.BOQConfirm.ask(msg, {
+                        title: 'Continue to Make & Vendor?',
+                        confirmLabel: 'Continue anyway',
+                        cancelLabel: 'Stay on Analysis',
+                    });
+                } else {
+                    ok = window.confirm(msg);
+                }
+                if (!ok) return;
+            }
             this.prefillingMakeVendor = true;
             try {
                 const body = new FormData();
@@ -617,7 +655,9 @@
                 this.reloadWithCacheBust(this.detailMakeVendorUrl);
             } catch (error) {
                 this.prefillingMakeVendor = false;
-                alert(error.message || 'Failed to open Make & Vendor.');
+                await this.showNotice(error.message || 'Failed to open Make & Vendor.', {
+                    title: 'Cannot continue',
+                });
             }
         },
         async openMakeVendorTab() {
@@ -661,11 +701,24 @@
                 this.reloadWithCacheBust(this.detailMakeVendorUrl);
             } catch (error) {
                 this.prefillingMakeVendor = false;
-                alert(error.message || 'Failed to open Make & Vendor.');
+                await this.showNotice(error.message || 'Failed to open Make & Vendor.', {
+                    title: 'Cannot continue',
+                });
             }
         },
         csrfToken() {
             return document.querySelector('meta[name=csrf-token]')?.getAttribute('content') || '';
+        },
+        async showNotice(messageText, options = {}) {
+            const text = messageText || 'Something went wrong.';
+            if (window.BOQConfirm && typeof window.BOQConfirm.alert === 'function') {
+                await window.BOQConfirm.alert(text, {
+                    title: options.title || 'Notice',
+                    confirmLabel: options.confirmLabel || 'OK',
+                });
+                return;
+            }
+            window.alert(text);
         },
         selectTab(name) {
             if (name === 'analysis' && !this.analysisEnabled) return;
@@ -799,7 +852,7 @@
                     if (!response.ok) throw new Error('status ' + response.status);
                     return response.json();
                 })
-                .then((data) => {
+                .then(async (data) => {
                     if (abortTimer) clearTimeout(abortTimer);
                     this._pollInFlight = false;
                     this._lastPollAt = Date.now();
@@ -808,6 +861,14 @@
                         this.stopPollWatchdog();
                         this.finishAnalysisProgress();
                         this.persistScroll(this.activeTabPage || this.tab || 'analysis');
+                        if (data.failed) {
+                            this.analysing = false;
+                            const err = data.error || data.message || data.progress_label
+                                || 'Analysis failed. Click Retry Analyse.';
+                            this.analysisError = err;
+                            this.analysisProgressLabel = err;
+                            await this.showNotice(err, { title: 'Analysis failed' });
+                        }
                         // Full navigation so Analysis HTML reloads with results.
                         // replace() avoids bfcache restore of the loading spinner.
                         const target = this.detailAnalysisUrl;
@@ -955,6 +1016,7 @@
             this.analysisProgress = 1;
             this.analysisTargetPercent = 1;
             this.analysisProgressLabel = 'Starting analysis...';
+            this.analysisError = '';
             this.analysisStartedAt = Date.now();
             this.writeStoredProgress();
             this.startProgressTicker();
@@ -970,6 +1032,13 @@
                     this.stopPollWatchdog();
                     this.finishAnalysisProgress();
                     this.persistScroll(this.activeTabPage || this.tab);
+                    if (data.failed || data.ok === false) {
+                        this.analysing = false;
+                        const err = data.error || data.message || data.progress_label
+                            || 'Analysis failed. Click Retry Analyse.';
+                        this.analysisError = err;
+                        await this.showNotice(err, { title: 'Analysis failed' });
+                    }
                     const target = this.detailAnalysisUrl;
                     const sep = target.includes('?') ? '&' : '?';
                     window.location.replace(target + sep + '_t=' + Date.now());
@@ -993,11 +1062,43 @@
                 this.stopPollWatchdog();
                 this.analysisStartedAt = null;
                 this.clearStoredProgress();
-                alert(error.message || 'Failed to start analysis.');
+                await this.showNotice(error.message || 'Failed to start analysis.', {
+                    title: 'Analysis',
+                });
             }
         },
         async goToLabour() {
             if (this.analysing || this.matching || this.unlockingLabour) return;
+            const alreadyNa = Number(this.mvNotAvailableCount || 0);
+            const notListed = Number(this.mvNotListedCount || 0);
+            const notInDb = Number(this.mvNotInDbCount || 0);
+            const willMark = alreadyNa + notListed + notInDb;
+            if (willMark > 0) {
+                const parts = [];
+                if (alreadyNa) {
+                    parts.push(alreadyNa + ' already Not available from Analysis');
+                }
+                if (notListed) {
+                    parts.push(notListed + ' Not listed');
+                }
+                if (notInDb) {
+                    parts.push(notInDb + ' Not in Db');
+                }
+                const msg = parts.join(', ')
+                    + ' will be marked Not available on Labour (red) with no rate/labour lookup. '
+                    + 'Products with rates but no labour charge stay orange on Labour, '
+                    + 'then become Not available on Review / Export. Continue?';
+                let ok = true;
+                if (window.BOQConfirm && typeof window.BOQConfirm.ask === 'function') {
+                    ok = await window.BOQConfirm.ask(msg, {
+                        title: 'Continue to Labour?',
+                        confirmLabel: 'Continue',
+                    });
+                } else {
+                    ok = window.confirm(msg);
+                }
+                if (!ok) return;
+            }
             this.unlockingLabour = true;
             try {
                 const body = new FormData();
@@ -1021,7 +1122,9 @@
                 this.reloadWithCacheBust(this.detailLabourUrl);
             } catch (error) {
                 this.unlockingLabour = false;
-                alert(error.message || 'Failed to open Labour.');
+                await this.showNotice(error.message || 'Failed to open Labour.', {
+                    title: 'Cannot continue',
+                });
             }
         },
         async completeLabour() {
@@ -1055,7 +1158,9 @@
                 this.reloadWithCacheBust(data.redirect || this.detailReviewUrl);
             } catch (error) {
                 this.completingLabour = false;
-                alert(error.message || 'Failed to complete labour.');
+                await this.showNotice(error.message || 'Failed to complete labour.', {
+                    title: 'Cannot continue',
+                });
             }
         },
         async startCalculatePrice() {
@@ -1174,8 +1279,14 @@
 
         <div class="boq-tab-context" :class="{ 'boq-tab-context--compact': tab === 'make_list' || tab === 'make_vendor' || tab === 'labour' }">
             <div class="boq-tab-context__summary" x-show="tab !== 'make_list' && tab !== 'make_vendor'" x-cloak>
+                <span
+                    class="extraction-missing-summary extraction-missing-summary--error"
+                    x-show="tab === 'analysis' && !analysing && analysisError"
+                    x-cloak
+                    x-text="analysisError"
+                >{% if analysis_error %}{{ analysis_error }}{% endif %}</span>
                 {% if extraction_display.has_extraction %}
-                <span x-show="tab === 'analysis' && !analysing" x-cloak>
+                <span x-show="tab === 'analysis' && !analysing && !analysisError" x-cloak>
                     <strong>{{ extraction_display.product_count }}</strong> product(s) extracted.
                     {% if extraction_display.multiproduct_review_count %}
                         <span class="extraction-missing-summary">{{ extraction_display.multiproduct_review_count }} multi-product review.</span>
@@ -1184,7 +1295,7 @@
                         <span class="extraction-missing-summary">{{ extraction_display.missing_field_count }} field(s) need review.</span>
                     {% endif %}
                     {% if extraction_display.missing_product_id_count %}
-                        <span class="extraction-missing-summary">{{ extraction_display.missing_product_id_count }} product(s) need a Product Id (Select or Confirm Manually) before Next.</span>
+                        <span class="extraction-missing-summary">{{ extraction_display.missing_product_id_count }} product(s) without a Product Id — match them here (Select / Confirm Manually / Re-analyse), or click <strong>Next</strong> to send them to <strong>Not available</strong> on Make &amp; Vendor (no rate or labour lookup).</span>
                     {% endif %}
                     {% if can_edit_extraction %}
                         Confirm products, then <strong>Next</strong> → Make &amp; Vendor.
@@ -1292,8 +1403,11 @@
                 <strong>{{ make_vendor_display.stats.product_count|default:0 }}</strong> products
                 · <span class="make-vendor-summary__default">{{ make_vendor_display.stats.default_count|default:0 }} default</span>
                 · <span class="make-vendor-summary__filtered">{{ make_vendor_display.stats.filtered_count|default:0 }} filtered</span>
-                · <span class="make-vendor-summary__not-found">{{ make_vendor_display.stats.not_found_count|default:0 }} not found</span>
-                · <span class="make-vendor-summary__no-match">{{ make_vendor_display.stats.no_match_count|default:0 }} no match</span>
+                · <span class="make-vendor-summary__not-found">{{ make_vendor_display.stats.not_found_count|default:0 }} not listed</span>
+                · <span class="make-vendor-summary__no-match">{{ make_vendor_display.stats.no_match_count|default:0 }} not in Db</span>
+                {% if make_vendor_display.stats.not_available_count %}
+                · <span class="make-vendor-summary__not-available">{{ make_vendor_display.stats.not_available_count }} not available</span>
+                {% endif %}
                 {% if make_vendor_display.stats.vendor_review_count %}
                 · <span class="make-vendor-summary__vendor-review">{{ make_vendor_display.stats.vendor_review_count }} vendor review</span>
                 {% endif %}
@@ -1386,7 +1500,7 @@
                 >{% if analysis_progress_label %}{{ analysis_progress_label }}{% else %}Analysing BOQ And Extracting Products{% endif %}</p>
             </div>
             <div x-show="!analysing" {% if is_extracting %}style="display:none"{% endif %}>
-                {% include "boq/_extraction_table.html" with extraction_display=extraction_display can_edit_extraction=can_edit_extraction boq=boq %}
+                {% include "boq/_extraction_table.html" with extraction_display=extraction_display can_edit_extraction=can_edit_extraction boq=boq analysis_error=analysis_error %}
             </div>
         </div>
         {% elif default_tab == 'make_vendor' %}

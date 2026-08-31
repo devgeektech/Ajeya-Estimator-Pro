@@ -31,6 +31,7 @@ from .services.boq_extraction_display_service import (
     build_product_save_feedback,
 )
 from .services.make_vendor_selection_service import MakeVendorSelectionService
+from .services.boq_deletion_service import BOQDeletionService
 from .services.boq_service import BOQCreationService
 from .services.boq_upload_progress import (
     begin_upload,
@@ -42,6 +43,7 @@ from .services.boq_upload_progress import (
 from .services.boq_status_display_service import (
     build_boq_status_display,
     build_boq_tab_access,
+    clear_boq_session_keys,
     clear_exported_in_session,
     default_detail_tab_for_boq,
     heal_make_vendor_unlock,
@@ -213,11 +215,20 @@ def _status_payload(boq: BOQ, session, *, expect: str = "extract") -> dict:
     elif boq.status in {BOQStatus.PROCESSING, BOQStatus.MATCHING} and percent <= 0:
         percent = 1
     progress_label = progress.get("label") or display["label"]
+    analysis_error = ""
+    if boq.status == BOQStatus.ANALYSIS_FAILED:
+        from ai.errors import resolve_analysis_error_message
+
+        analysis_error = resolve_analysis_error_message(
+            last_error=(boq.analysis_data or {}).get("last_error"),
+            progress_label=progress_label,
+        )
     _echo_analyse_progress_to_server(boq, percent=percent, label=progress_label)
     return {
         "status": boq.status,
         "ready": ready,
         "failed": boq.status == BOQStatus.ANALYSIS_FAILED,
+        "error": analysis_error,
         "expect": expect_key,
         "label": display["label"],
         "badge": display["badge"],
@@ -540,7 +551,14 @@ class BOQDetailView(LoginRequiredMixin, DetailView):
             if context["is_extracting"]
             else ""
         )
+        context["analysis_error"] = ""
+        if boq.status == BOQStatus.ANALYSIS_FAILED:
+            from ai.errors import resolve_analysis_error_message
 
+            context["analysis_error"] = resolve_analysis_error_message(
+                last_error=(boq.analysis_data or {}).get("last_error"),
+                progress_label=job_progress.get("label"),
+            )
         empty_extraction = {
             "has_extraction": False,
             "lines": [],
@@ -610,9 +628,9 @@ class BOQExtractView(LoginRequiredMixin, View):
                 return JsonResponse(
                     {
                         "ok": True,
-                        "message": message,
                         "mode": "async",
                         **_status_payload(boq, request.session, expect="extract"),
+                        "message": message,
                     }
                 )
             messages.info(request, message)
@@ -629,9 +647,9 @@ class BOQExtractView(LoginRequiredMixin, View):
                     return JsonResponse(
                         {
                             "ok": False,
-                            "message": message,
                             "mode": result.mode,
                             **_status_payload(boq, request.session, expect="extract"),
+                            "message": message,
                         },
                         status=400,
                     )
@@ -642,9 +660,9 @@ class BOQExtractView(LoginRequiredMixin, View):
                     return JsonResponse(
                         {
                             "ok": True,
-                            "message": message,
                             "mode": result.mode,
                             **_status_payload(boq, request.session, expect="extract"),
+                            "message": message,
                         }
                     )
                 messages.success(request, message)
@@ -657,9 +675,9 @@ class BOQExtractView(LoginRequiredMixin, View):
                     return JsonResponse(
                         {
                             "ok": True,
-                            "message": message,
                             "mode": result.mode,
                             **_status_payload(boq, request.session, expect="extract"),
+                            "message": message,
                         }
                     )
                 messages.info(request, message)
@@ -1355,6 +1373,24 @@ class BOQAnalysisStatusView(LoginRequiredMixin, View):
         response["Pragma"] = "no-cache"
         response["Expires"] = "0"
         return response
+
+
+class BOQDeleteView(LoginRequiredMixin, View):
+    """Delete a visible BOQ and its media / extract_json / job-progress residuals."""
+
+    def post(self, request, pk: int):
+        user = cast(User, request.user)
+        boq = get_object_or_404(_boq_queryset_for_user(user), pk=pk)
+        boq_name = boq.boq_name
+        try:
+            BOQDeletionService(actor=user).delete(boq)
+            clear_boq_session_keys(pk, request.session)
+            messages.success(request, f"BOQ '{boq_name}' deleted.")
+        except Exception:
+            logger.exception("BOQ delete failed for id=%s", pk)
+            messages.error(request, "Could not delete this BOQ. Try again.")
+            return HttpResponseRedirect(reverse("boq:detail", kwargs={"pk": pk}))
+        return HttpResponseRedirect(reverse("boq:list"))
 
 
 class BOQExportView(LoginRequiredMixin, View):

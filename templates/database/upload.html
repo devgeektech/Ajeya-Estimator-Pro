@@ -12,10 +12,21 @@
     })"
 >
     <p class="panel__text" style="margin-bottom:20px;">
-        Upload one master database file at a time. The new database replaces the
-        current one only after the upload finishes successfully. If anything goes
-        wrong, the current database stays in place.
+        Upload one master database file at a time. Sheets import first, then
+        <strong>embeddings</strong> run (this can take several minutes). The new
+        database becomes <strong>Active</strong> only after embeddings finish
+        successfully. Until then the previous Active database stays in place.
+        If anything goes wrong, the current database is unchanged.
     </p>
+
+    <div
+        class="alert alert--info"
+        x-show="busy"
+        x-cloak
+        style="margin-bottom:16px;"
+    >
+        <span x-text="message || 'Import and embeddings are running…'"></span>
+    </div>
 
     <form
         method="post"
@@ -36,7 +47,7 @@
                 <span x-show="!busy">Upload</span>
                 <span x-show="busy" x-cloak style="display:inline-flex; align-items:center; justify-content:center; gap:8px;">
                     <svg class="spinner" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="animation: spin 1s linear infinite;"><line x1="12" y1="2" x2="12" y2="6"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="18" y1="12" x2="22" y2="12"></line><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line></svg>
-                    Uploading…
+                    <span x-text="phaseLabel">Uploading…</span>
                 </span>
             </button>
             <a href="{% url 'database:list' %}" class="btn btn--ghost">Back</a>
@@ -45,6 +56,18 @@
 </div>
 <style>
 @keyframes spin { 100% { transform: rotate(360deg); } }
+.alert--info {
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    color: #1e3a8a;
+    border-radius: 10px;
+    padding: 12px 14px;
+}
+.dark-mode .alert--info {
+    background: #1e3a5f;
+    border-color: #1e40af;
+    color: #dbeafe;
+}
 </style>
 <script>
 function databaseImportUpload(cfg) {
@@ -52,13 +75,31 @@ function databaseImportUpload(cfg) {
         statusUrl: cfg.statusUrl,
         listUrl: cfg.listUrl,
         busy: !!cfg.initialBusy,
+        message: '',
+        phase: '',
         timer: null,
+        get phaseLabel() {
+            const phase = String(this.phase || '').toLowerCase();
+            if (phase === 'embeddings') return 'Generating embeddings…';
+            if (phase === 'activating' || phase === 'purging') return 'Activating…';
+            if (phase === 'importing' || phase === 'validating') return 'Importing sheets…';
+            return 'Uploading…';
+        },
         init() {
+            if (this.busy) this.startPolling();
             this.poll();
-            this.timer = setInterval(() => this.poll(), 2000);
         },
         destroy() {
-            if (this.timer) clearInterval(this.timer);
+            this.stopPolling();
+        },
+        startPolling() {
+            if (this.timer) return;
+            this.timer = setInterval(() => this.poll(), 2000);
+        },
+        stopPolling() {
+            if (!this.timer) return;
+            clearInterval(this.timer);
+            this.timer = null;
         },
         async poll() {
             try {
@@ -70,7 +111,14 @@ function databaseImportUpload(cfg) {
                 const data = await res.json();
                 const wasBusy = this.busy;
                 this.busy = !!data.busy || data.status === 'processing';
-                if (wasBusy && !this.busy && data.status === 'succeeded') {
+                this.message = String(data.message || '');
+                this.phase = String(data.phase || '');
+                if (this.busy) {
+                    this.startPolling();
+                    return;
+                }
+                this.stopPolling();
+                if (wasBusy && data.status === 'succeeded') {
                     window.location.href = this.listUrl;
                 }
             } catch (e) { /* keep last known state */ }
@@ -81,6 +129,9 @@ function databaseImportUpload(cfg) {
                 return false;
             }
             this.busy = true;
+            this.phase = 'importing';
+            this.message = 'Import and embeddings are running…';
+            this.startPolling();
             return true;
         },
     };

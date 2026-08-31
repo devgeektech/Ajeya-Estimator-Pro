@@ -98,3 +98,61 @@ class EmbeddingGatedImportTests(TestCase):
         self.assertTrue(version.is_active)
         mock_embed.assert_called_once_with(version.pk, require_success=True)
         mock_replace.assert_called_once_with(version.pk)
+
+    def test_importer_surfaces_credits_message_without_wrapping(self):
+        from ai.errors import AI_CREDITS_EMPTY_MESSAGE
+
+        service = DatabaseImportService(
+            file_path="unused.xlsx",
+            uploaded_by=self.admin,
+            source_filename="unused.xlsx",
+            version_name="FailQuota",
+            stored_name="",
+        )
+        version = self._seed_inactive_version_with_helper()
+
+        with patch(
+            "ai.embeddings.generator.generate_embeddings_for_version",
+            side_effect=AIServiceError(AI_CREDITS_EMPTY_MESSAGE),
+        ):
+            with self.assertRaises(ImportError_) as ctx:
+                service._generate_embeddings(version)
+
+        self.assertEqual(str(ctx.exception), AI_CREDITS_EMPTY_MESSAGE)
+
+    @override_settings(
+        OPENAI_API_KEY="sk-test-quota-abort-key",
+        OPENAI_EMBEDDING_BATCH_SIZE=1,
+    )
+    @patch("ai.embeddings.generator.ChromaEmbeddingStore")
+    @patch("ai.embeddings.generator.generate_embeddings")
+    def test_quota_stops_remaining_helper_batches(self, mock_embed, mock_store_cls):
+        from ai.embeddings.generator import generate_embeddings_for_version
+        from ai.errors import AI_CREDITS_EMPTY_MESSAGE
+
+        mock_embed.side_effect = AIServiceError(AI_CREDITS_EMPTY_MESSAGE)
+        store = mock_store_cls.return_value
+        version = self._seed_inactive_version_with_helper()
+        Product_Helper.objects.create(
+            database_version=version,
+            Product_ID="P2",
+            Category="Cat",
+            Sub_Category="Sub",
+            Class="1",
+            Status="Active",
+        )
+        Product_Helper.objects.create(
+            database_version=version,
+            Product_ID="P3",
+            Category="Cat",
+            Sub_Category="Sub",
+            Class="1",
+            Status="Active",
+        )
+
+        with self.assertRaises(AIServiceError) as ctx:
+            generate_embeddings_for_version(version.pk, require_success=True)
+
+        self.assertEqual(str(ctx.exception), AI_CREDITS_EMPTY_MESSAGE)
+        self.assertEqual(mock_embed.call_count, 1)
+        self.assertGreaterEqual(store.reset_version.call_count, 1)

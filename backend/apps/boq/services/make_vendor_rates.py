@@ -376,13 +376,18 @@ class MakeVendorRatesMixin:
     ) -> tuple[dict[str, Any], str]:
         """Persist the Analysis-selected catalog Product_ID on the product.
 
-        Order: Analysis Rate_Master row (``db_product_id`` / Select) → existing
-        catalog id → Product_Helper structured fallback.
-
-        Analysis selection always wins so going back and changing the product
-        replaces a stale Make & Vendor / Labour Product_ID.
+        Only products with a confirmed Analysis Product Id (orange/green match or
+        expert Select) are captured. Weak/red matches keep blank Product Id and
+        become Not available on Make & Vendor — same rules as the Analysis tab.
         """
+        from apps.boq.services.make_vendor_common import loaded_catalog_product_id
+
         updated = dict(product)
+        loaded_id = loaded_catalog_product_id(updated)
+        if not loaded_id:
+            updated.pop("catalog_product_id", None)
+            return updated, ""
+
         previous = str(updated.get("catalog_product_id") or "").strip()
         if not previous:
             selection = updated.get("vendor_selection") or {}
@@ -410,22 +415,9 @@ class MakeVendorRatesMixin:
                     updated.pop("catalog_product_id_changed", None)
                 return updated, product_id
 
-        existing = _catalog_product_id(updated)
-        if existing:
-            updated["catalog_product_id"] = existing
-            updated.pop("catalog_product_id_changed", None)
-            return updated, existing
-
-        updated = self._ensure_catalog_product_id(
-            updated,
-            database_version_id=database_version_id,
-        )
-        product_id = _catalog_product_id(updated)
-        if previous and product_id and previous != product_id:
-            updated["catalog_product_id_changed"] = True
-        else:
-            updated.pop("catalog_product_id_changed", None)
-        return updated, product_id
+        updated["catalog_product_id"] = loaded_id
+        updated.pop("catalog_product_id_changed", None)
+        return updated, loaded_id
 
     def _ensure_catalog_product_id(
         self,

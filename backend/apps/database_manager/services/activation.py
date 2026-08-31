@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
-from common.db import atomic
+from django.conf import settings
 
 from common.constants import DATABASE_UPLOADS_TO_RETAIN
+from common.db import atomic
 
 from ..models import MASTER_DATA_MODELS, DatabaseVersion
 
@@ -16,8 +18,9 @@ logger = logging.getLogger("boq_ai")
 def purge_inactive_master_data(active: DatabaseVersion) -> int:
     """Remove PostgreSQL master rows for every version except the active one.
 
-    ``DatabaseVersion`` records and stored workbooks are kept so users can still
-    view upload history and download archived sheets.
+    ``DatabaseVersion`` records and stored workbooks are kept (until retention
+    drops them) so users can still view upload history and download archived
+    sheets. Chroma vectors for inactive versions are cleared here.
     """
     from ai.embeddings.chroma_store import ChromaEmbeddingStore
 
@@ -43,9 +46,63 @@ def purge_inactive_master_data(active: DatabaseVersion) -> int:
     return rows_removed
 
 
+def _delete_version_workbook(version: DatabaseVersion) -> None:
+    """Remove the workbook under ``media/database/`` for one upload record."""
+    file_field = version.file
+    if not file_field or not file_field.name:
+        return
+    relative = str(file_field.name).replace("\\", "/")
+    try:
+        if file_field.storage.exists(file_field.name):
+            file_field.delete(save=False)
+            logger.info(
+                "Retention: deleted workbook %s for database v%s",
+                relative,
+                version.version_number,
+            )
+            return
+    except Exception:
+        logger.exception(
+            "Retention: storage delete failed for database v%s (%s)",
+            version.version_number,
+            relative,
+        )
+
+    # Fallback: unlink under MEDIA_ROOT/database only (never outside).
+    media_root = Path(settings.MEDIA_ROOT).resolve()
+    candidate = (media_root / relative).resolve()
+    database_root = (media_root / "database").resolve()
+    try:
+        if database_root not in candidate.parents and candidate.parent != database_root:
+            logger.error(
+                "Retention: refusing to delete path outside media/database: %s",
+                candidate,
+            )
+            return
+        if candidate.is_file():
+            candidate.unlink()
+            logger.info(
+                "Retention: unlinked workbook %s for database v%s",
+                candidate,
+                version.version_number,
+            )
+    except OSError:
+        logger.warning(
+            "Retention: could not unlink workbook for database v%s (%s)",
+            version.version_number,
+            candidate,
+        )
+
+
 def enforce_version_retention() -> int:
-    """Drop oldest upload records (and workbooks) beyond the retention limit."""
-    versions = list(DatabaseVersion.objects.order_by("-version_number"))
+    """Keep only the newest ``DATABASE_UPLOADS_TO_RETAIN`` uploads.
+
+    Called after a **successful** import (activate + purge). When the 11th
+    version succeeds, the oldest (1st) ``DatabaseVersion`` row and its
+    ``media/database/`` workbook are removed. PostgreSQL master rows for that
+    oldest version were already purged when it stopped being active.
+    """
+    versions = list(DatabaseVersion.objects.order_by("-version_number", "-id"))
     if len(versions) <= DATABASE_UPLOADS_TO_RETAIN:
         return 0
 
@@ -53,18 +110,14 @@ def enforce_version_retention() -> int:
     stale_ids = [version.pk for version in stale]
 
     for version in stale:
-        file_field = version.file
-        if file_field and file_field.name:
-            try:
-                file_field.delete(save=False)
-            except OSError:
-                logger.warning(
-                    "Could not delete workbook file for database v%s",
-                    version.version_number,
-                )
+        _delete_version_workbook(version)
 
     DatabaseVersion.objects.filter(pk__in=stale_ids).delete()
-    logger.info("Retention: removed %s old database upload record(s)", len(stale_ids))
+    logger.info(
+        "Retention: removed %s old database upload(s); kept newest %s",
+        len(stale_ids),
+        DATABASE_UPLOADS_TO_RETAIN,
+    )
     return len(stale_ids)
 
 

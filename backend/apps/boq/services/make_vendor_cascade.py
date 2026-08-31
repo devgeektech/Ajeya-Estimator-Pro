@@ -20,12 +20,20 @@ from apps.boq.services.make_list_constraint_service import (
     MakeListConstraintService,
 )
 from apps.boq.services.make_vendor_common import (
+    NOT_AVAILABLE_NOTES,
+    NOT_AVAILABLE_SOURCE,
+    NOT_AVAILABLE_STATUS,
     _SUBCATEGORY_SEP,
     _catalog_product_id,
     _is_lowest_make,
     _product_matches_subcategory,
     _subcategory_storage_key,
     count_missing_loaded_product_ids,
+    loaded_catalog_product_id,
+)
+from apps.boq.services.product_availability import (
+    REASON_NO_PRODUCT_ID,
+    mark_product_not_available,
 )
 from apps.boq.services.serial_normalizer import analysis_fields
 from common.choices import BOQStatus
@@ -631,7 +639,7 @@ class MakeVendorCascadeMixin:
             qty = _field_from_map(analysis_fields(boq_by_id.get(row_id) or {}), _QTY_KEYS)
             row_changed = False
             for index, product in enumerate(products):
-                previous_id = _catalog_product_id(product)
+                previous_id = loaded_catalog_product_id(product)
                 updated, product_id = self._capture_analysis_product_id(
                     product,
                     database_version_id=database_version_id,
@@ -707,6 +715,17 @@ class MakeVendorCascadeMixin:
                     selection["product_id"] = product_id
                     selection["catalog_product_id"] = product_id
                     updated["vendor_selection"] = selection
+                else:
+                    updated = mark_product_not_available(
+                        updated,
+                        reason=REASON_NO_PRODUCT_ID,
+                        quantity=(
+                            updated.get("quantity")
+                            if updated.get("quantity") not in (None, "")
+                            else qty
+                        ),
+                    )
+                    updated.pop("catalog_product_id", None)
 
                 if id_changed:
                     changed_count += 1
@@ -760,11 +779,8 @@ class MakeVendorCascadeMixin:
 
         analysis = dict(boq.analysis_data or {})
         missing_ids = count_missing_loaded_product_ids(analysis)
-        if missing_ids:
-            raise ValidationError(
-                f"{missing_ids} product(s) are missing a Product Id. "
-                "Confirm the product or remove it from the Analysis section before continuing."
-            )
+        # Missing Product Ids are allowed: those products are marked Not available
+        # and skip Rate_Master / labour lookups (no block on Next).
         rows = list(analysis.get("rows") or [])
         boq_by_id = {
             str(row.get("row_id")): row
@@ -774,6 +790,7 @@ class MakeVendorCascadeMixin:
 
         # Phase 1 — capture updated products + Product_IDs from Analysis selection.
         captured_ids: list[str] = []
+        not_available_count = 0
         for row in rows:
             products = list(row.get("products") or [])
             if not products:
@@ -787,9 +804,14 @@ class MakeVendorCascadeMixin:
                 if product_id:
                     updated["catalog_product_id"] = product_id
                     captured_ids.append(product_id)
+                else:
+                    not_available_count += 1
                 captured.append(updated)
             row["products"] = captured
 
+        # Prefer the pre-capture missing count when capture cleared stale ids.
+        if missing_ids and not not_available_count:
+            not_available_count = int(missing_ids)
         updated_count = 0
         matched_count = 0
         selections = dict(analysis.get("subcategory_make_selections") or {})
@@ -806,34 +828,23 @@ class MakeVendorCascadeMixin:
             changed = False
             for index, product in enumerate(products):
                 updated = dict(product)
-                catalog_id = _catalog_product_id(updated)
+                catalog_id = loaded_catalog_product_id(updated)
                 category_text = str(updated.get("category") or "").strip()
                 sub_category_text = str(updated.get("sub_category") or "").strip() or "—"
                 if not catalog_id:
-                    match_payload = {
-                        "status": "unmatched",
-                        "confidence": 0.0,
-                        "notes": (
-                            "No Analysis Product_ID — select a database product "
-                            "on Analysis, then click Next again."
+                    # No confirmed Analysis Product Id — Not available; no rate lookup.
+                    updated = mark_product_not_available(
+                        updated,
+                        reason=REASON_NO_PRODUCT_ID,
+                        quantity=(
+                            updated.get("quantity")
+                            if updated.get("quantity") not in (None, "")
+                            else qty
                         ),
-                        "make": "",
-                        "vendor": "",
-                        "rate_master_id": None,
-                        "tech_key": "",
-                        "summary": "",
-                        "rate_detail": None,
-                        "labour_detail": None,
-                        "line_output": BOQLineOutputService.build(
-                            quantity=qty,
-                            rate_detail=None,
-                            labour_detail=None,
-                            is_pending=True,
-                        ),
-                        "prefer_lowest_price": True,
-                        "matched_at": now_local_iso(),
-                    }
-                    source = "not_found"
+                    )
+                    updated.pop("catalog_product_id", None)
+                    match_payload = dict(updated.get("vendor_selection") or {})
+                    source = NOT_AVAILABLE_SOURCE
                     approved_found = False
                 else:
                     approved_makes = self._approved_makes_for_subcategory(
@@ -1000,6 +1011,7 @@ class MakeVendorCascadeMixin:
             "matched_count": matched_count,
             "pair_count": len(pair_stats),
             "product_id_count": len(set(captured_ids)),
+            "not_available_count": int(not_available_count),
             "selections": list(pair_stats.values()),
             "make_vendor_defaults_applied": True,
             "status": boq.status,

@@ -5,7 +5,9 @@ import logging
 from typing import Any
 
 from ai.context import align_product_taxonomy_from_rate
+from ai.errors import is_fatal_ai_limit_error
 from ai.service import AIService
+from apps.boq.services.boq_extraction_slots import refresh_product_from_boq_context
 from apps.boq.services.product_ai_apply import ProductAIApplyMixin
 from apps.boq.services.product_ai_candidates import ProductAICandidatesMixin
 from apps.boq.services.product_ai_common import (
@@ -211,8 +213,8 @@ class ProductAIMappingService(
         if not products:
             return []
 
-        # Rematch / refine: wider Chroma pool so expert edits can surface new neighbors.
-        chroma_limit = _REMATCH_CHROMA_LIMIT if refine else _RECALL_CHROMA_LIMIT
+        # Same Chroma depth as Re-analyse so first Analyse neighbors align.
+        chroma_limit = _REMATCH_CHROMA_LIMIT
         recall_inputs = [
             self._product_for_recall(product, refine=refine) for product in products
         ]
@@ -290,16 +292,25 @@ class ProductAIMappingService(
                 ):
                     continue
                 work = dict(product)
-                # Initial Analyse often lacks rematch's BOQ context — attach section
-                # text when present so AI sees full meaning (Chroma still uses product
-                # fields + slot line only via _product_for_recall).
+                # Re-apply BOQ evidence before every map/refine pass so enclosure
+                # lines (fire hose box) are not matched as contents (branch pipe).
+                if row_desc:
+                    work = refresh_product_from_boq_context(
+                        work,
+                        boq_row={
+                            "row_id": row.get("row_id"),
+                            "description": row_desc,
+                            "slot_description": row_desc,
+                            "serial": row.get("serial") or row.get("ser_no") or "",
+                        },
+                        database_version_id=self.database_version_id,
+                    )
+                # Attach section text for AI mapping payload (Chroma uses product fields).
                 if "_boq_row" not in work and row_desc:
                     work["_boq_row"] = {
                         "row_id": row.get("row_id"),
                         "description": row_desc,
-                        "slot_description": str(
-                            product.get("description_hint") or ""
-                        ).strip(),
+                        "slot_description": row_desc,
                         "serial": row.get("serial") or row.get("ser_no") or "",
                     }
                 pending.append((row_index, product_index, work))
@@ -339,7 +350,9 @@ class ProductAIMappingService(
                         blank_weak_inputs=blank_weak_inputs,
                     )
                 )
-            except Exception:
+            except Exception as exc:
+                if is_fatal_ai_limit_error(exc):
+                    raise
                 # Keep this chunk unmapped rather than discarding the whole BOQ's mapping.
                 logger.exception(
                     "Product mapping chunk %s-%s failed; leaving those products unmapped",
@@ -458,8 +471,9 @@ class ProductAIMappingService(
             "summary": product.get("db_product_summary"),
             "confidence": product.get("db_match_confidence"),
         }
+        boq_context = None
         if boq_row:
-            work["_boq_row"] = {
+            boq_context = {
                 "row_id": boq_row.get("row_id"),
                 "description": boq_row.get("description")
                 or boq_row.get("full_description")
@@ -467,6 +481,12 @@ class ProductAIMappingService(
                 "slot_description": boq_row.get("slot_description") or "",
                 "serial": boq_row.get("serial") or boq_row.get("ser_no") or "",
             }
+            work = refresh_product_from_boq_context(
+                work,
+                boq_row=boq_context,
+                database_version_id=self.database_version_id,
+            )
+            work["_boq_row"] = boq_context
         # Drop locked match identity so rematch is driven by filled fields + fresh
         # recall. Prior candidates remain on ``db_candidates`` for leftover slots.
         for key in (

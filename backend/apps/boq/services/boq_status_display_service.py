@@ -46,6 +46,13 @@ def clear_exported_in_session(boq_id: int, session) -> None:
     session.modified = True
 
 
+def clear_boq_session_keys(boq_id: int, session) -> None:
+    """Drop per-BOQ session flags after the BOQ row is deleted."""
+    session.pop(export_session_key(boq_id), None)
+    session.pop(detail_tab_session_key(boq_id), None)
+    session.modified = True
+
+
 def remember_detail_tab(boq_id: int, session, tab: str) -> None:
     """Remember last opened detail tab so hard refresh stays on it."""
     if not tab:

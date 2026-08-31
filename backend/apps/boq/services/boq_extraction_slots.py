@@ -16,7 +16,11 @@ from apps.boq.services.boq_extraction_fields import (
     normalize_product_fields,
 )
 from apps.boq.services.boq_row_fields import is_blank as _is_blank_value
+from apps.boq.services.boq_row_grouping_service import _is_size_only_slot_line
 from utils.attribute_parser import coerce_attributes_dict
+from utils.catalog_size_rules import load_size_unit_patterns, parse_size_for_product, pattern_for_product
+from utils.nominal_size import parse_nominal_size_from_text, sanitize_product_size
+from utils.product_extraction_sanitize import sanitize_product_against_evidence
 from apps.boq.services.extraction_attribute_fields import COMMON_ATTRIBUTE_LABELS
 from apps.boq.services.product_attribute_enrichment_service import (
     humanize_attribute_key,
@@ -45,11 +49,6 @@ _DESCRIPTION_ATTR_PRIORITY: tuple[str, ...] = (
     "spindle_type",
     "rating",
 )
-
-_SIZE_FROM_TEXT = re.compile(
-    r"(?i)(?:^|[^0-9])(\d+(?:\.\d+)?)\s*(mm|nb|inch|in|cm)?\b"
-)
-
 
 _PN_RATING_FROM_TEXT = re.compile(r"(?i)\bPN\s*[- ]?\s*(\d+)\b")
 
@@ -191,39 +190,25 @@ def _filter_spec_products(
         for key in ("category", "sub_category", "class", "size", "unit", "capacity", "make_hint"):
             if key in product and product.get(key) is not None and str(product.get(key)).strip() == "":
                 product[key] = None
-        product = snap_product_taxonomy(product, taxonomy)
+        product = snap_product_taxonomy(product, taxonomy, infer_defaults=False)
         cleaned.append(normalize_product_fields(product, preserve_class=True))
     return cleaned
 
 
-def _parse_size_from_text(text: Any) -> tuple[str | None, str | None]:
+def _parse_size_from_text(
+    text: Any,
+    *,
+    require_explicit_unit: bool = False,
+) -> tuple[str | None, str | None]:
     """
     Return (size, measurement_unit) from BOQ letter/size text.
 
-    Prefers the first clear nominal size (e.g. ``200`` from ``200mm dia``).
+    Prefers nominal dia/mm sizes and ignores Indian Standard numbers (IS:636).
     """
-    blob = str(text or "").strip()
-    if not blob:
-        return None, None
-    match = _SIZE_FROM_TEXT.search(blob)
-    if not match:
-        return None, None
-    size = match.group(1)
-    try:
-        number = float(size)
-        if number.is_integer():
-            size = str(int(number))
-    except ValueError:
-        pass
-    unit_token = (match.group(2) or "").strip().lower()
-    unit = None
-    if unit_token in {"mm", "cm", "nb"}:
-        unit = "NB" if unit_token == "nb" else unit_token
-    elif unit_token in {"inch", "in"}:
-        unit = "inch"
-    elif re.search(r"(?i)\bmm\b", blob):
-        unit = "mm"
-    return size, unit
+    return parse_nominal_size_from_text(
+        text,
+        require_explicit_unit=require_explicit_unit,
+    )
 
 
 def _parse_pn_capacity(text: Any) -> str | None:
@@ -407,6 +392,29 @@ _CHAPTER_OR_SIZE_ONLY_HINT = re.compile(
 )
 
 
+def _hint_conflicts_with_taxonomy(hint: str, product: dict[str, Any]) -> bool:
+    """True when AI Description names a different product family than mapped Sub."""
+    from utils.catalog_size_rules import resolve_main_product_from_evidence
+
+    sub = str(product.get("sub_category") or "").strip().upper()
+    if not sub:
+        return False
+    text = str(hint or "").strip()
+    lowered = text.lower()
+    if sub.replace("_", " ").lower() in lowered or sub.lower() in lowered:
+        return False
+    _, resolved_sub = resolve_main_product_from_evidence(text)
+    if resolved_sub and resolved_sub.upper() != sub:
+        return True
+    if sub == "FIRE HOSE BOX" and "branch pipe" in lowered:
+        return True
+    if sub == "BRANCH PIPE" and any(
+        token in lowered for token in ("fire hose box", "hose box", "hose cabinet")
+    ):
+        return True
+    return False
+
+
 def _hint_lacks_product_identity(
     hint: str,
     product: dict[str, Any],
@@ -414,6 +422,8 @@ def _hint_lacks_product_identity(
     """True when AI Description cannot drive DB search (size-only / chapter title)."""
     text = str(hint or "").strip()
     if not text:
+        return True
+    if _hint_conflicts_with_taxonomy(text, product):
         return True
     if _SIZE_ONLY_HINT.match(text):
         return True
@@ -641,6 +651,10 @@ def _hint_category_sub_from_text(
         ("check valve", "VALVE"),
         ("non return", "VALVE"),
         ("reflux", "VALVE"),
+        ("fire hose box", "HYDRANT"),
+        ("external fire hose box", "HYDRANT"),
+        ("hose box", "HYDRANT"),
+        ("hose cabinet", "HYDRANT"),
     )
     category_hint = None
     for phrase, cat in _PRODUCT_FIRST_CAT:
@@ -667,6 +681,10 @@ def _hint_category_sub_from_text(
         ("check valve", "non return valve"),
         ("non return", "non return valve"),
         ("reflux", "non return valve"),
+        ("fire hose box", "fire hose box"),
+        ("external fire hose box", "fire hose box"),
+        ("hose box", "fire hose box"),
+        ("hose cabinet", "fire hose box"),
     )
     sub_hint = None
     for phrase, sub in _PRODUCT_FIRST_SUB:
@@ -675,6 +693,18 @@ def _hint_category_sub_from_text(
             break
     if not sub_hint:
         for phrase, sub in MAKE_LIST_SUB_CATEGORY_HINTS:
+            # Enclosure lines mention branch pipes / hoses as contents — not the buy.
+            if phrase in {"branch pipe", "short branch pipe", "fire hose", "fire hose reel"}:
+                if any(
+                    token in blob
+                    for token in (
+                        "fire hose box",
+                        "external fire hose box",
+                        "hose box",
+                        "hose cabinet",
+                    )
+                ):
+                    continue
             # Skip hydrant system titles when the section is clearly pipework.
             if category_hint == "PIPE" and "hydrant" in phrase:
                 continue
@@ -749,15 +779,19 @@ def _snap_identity_from_product_context(
     Size-only slots under ``Providing and fixing Cast Iron sluice valve`` must
     stay VALVE / SLUICE VALVE even if the model returned PIPE from chapter noise.
     """
-    item = dict(product)
-    blob = " ".join(
-        part
-        for part in (
-            str(product_context or "").strip(),
-            str(item.get("description_hint") or "").strip(),
-        )
-        if part
+    from utils.catalog_size_rules import (
+        normalize_main_product_identity,
+        resolve_main_product_from_evidence,
     )
+
+    item = dict(product)
+    blob = str(product_context or "").strip()
+    main_cat, main_sub = resolve_main_product_from_evidence(blob)
+    if main_cat and main_sub:
+        item = normalize_main_product_identity(item, evidence_text=blob)
+        item = _snap_class_from_text(item, blob)
+        return snap_product_taxonomy(item, taxonomy, infer_defaults=False)
+
     category, sub_category = _hint_category_sub_from_text(blob, taxonomy=taxonomy)
     current_cat = str(item.get("category") or "").strip().upper()
     current_sub = str(item.get("sub_category") or "").strip().upper()
@@ -772,7 +806,7 @@ def _snap_identity_from_product_context(
     ):
         item["sub_category"] = sub_category
     item = _snap_class_from_text(item, blob)
-    return snap_product_taxonomy(item, taxonomy)
+    return snap_product_taxonomy(item, taxonomy, infer_defaults=False)
 
 
 def _slot_size_hint(slot: dict[str, Any]) -> str | None:
@@ -784,6 +818,66 @@ def _slot_size_hint(slot: dict[str, Any]) -> str | None:
         slot.get("description") or slot.get("evidence_text") or ""
     )
     return size
+
+
+def refresh_product_from_boq_context(
+    product: dict[str, Any],
+    *,
+    boq_row: dict[str, Any] | None = None,
+    taxonomy: dict[str, Any] | None = None,
+    database_version_id: int | None = None,
+    size_patterns: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """
+    Re-apply BOQ evidence sanitization before rematch.
+
+    Re-analyse uses stored Analysis fields; this pass re-reads the BOQ supply
+    sentence so enclosure lines (fire hose box) are not rematched as contents
+    (branch pipe / hose length inside the cabinet).
+    """
+    if not boq_row:
+        return product
+
+    from ai.context import load_rate_master_taxonomy
+
+    section_text = str(
+        boq_row.get("description") or boq_row.get("full_description") or ""
+    ).strip()
+    slot_desc = str(boq_row.get("slot_description") or "").strip()
+    if slot_desc and _is_size_only_slot_line(slot_desc):
+        product_context = section_text
+    elif slot_desc:
+        product_context = slot_desc
+    else:
+        product_context = section_text
+    evidence_text = " ".join(
+        part for part in (product_context, slot_desc, section_text) if part
+    ).strip()
+
+    tax = taxonomy
+    if tax is None:
+        tax = load_rate_master_taxonomy(database_version_id)
+
+    if size_patterns is None and database_version_id is not None:
+        size_patterns = load_size_unit_patterns(database_version_id)
+    elif size_patterns is None:
+        size_patterns = []
+    item = sanitize_product_against_evidence(
+        dict(product),
+        product_context=product_context,
+        slot_desc=slot_desc or product_context,
+        evidence_text=evidence_text,
+        section_text=section_text,
+        taxonomy=tax,
+        size_patterns=size_patterns,
+    )
+    item["description_hint"] = _enrich_description_hint(
+        item,
+        section_text=section_text,
+        slot_desc=slot_desc,
+        product_context=product_context or section_text,
+    )
+    return normalize_product_fields(item, preserve_class=True)
 
 
 def _apply_slot_evidence_fields(
@@ -814,6 +908,7 @@ def _apply_slot_evidence_fields(
         or group.get("description")
         or ""
     )
+    size_patterns = load_size_unit_patterns()
 
     filled: list[dict[str, Any]] = []
     for index, product in enumerate(products):
@@ -825,46 +920,51 @@ def _apply_slot_evidence_fields(
             slot = rows[index]
 
         product_context = str((slot or {}).get("product_context") or "").strip()
+        slot_desc = str((slot or {}).get("description") or "").strip()
+        evidence = str(
+            (slot or {}).get("evidence_text") or product_context or slot_desc or section_text
+        ).strip()
+        size_hint = None
         if slot:
-            slot_desc = str(slot.get("description") or "").strip()
-            evidence = str(
-                slot.get("evidence_text") or product_context or slot_desc or section_text
-            ).strip()
             size_hint = _slot_size_hint(slot)
-            size_from_slot, unit_from_slot = _parse_size_from_text(
-                slot_desc or evidence
-            )
-            if size_hint and not size_from_slot:
-                size_from_slot = size_hint
-            if size_from_slot:
-                current_size = str(item.get("size") or "").strip()
-                current_digits = re.sub(r"[^0-9.]", "", current_size)
-                hint_digits = re.sub(r"[^0-9.]", "", str(size_from_slot))
-                if _is_blank_value(item.get("size")) or (
-                    hint_digits and current_digits and hint_digits != current_digits
-                ):
-                    item["size"] = size_from_slot
-                if unit_from_slot and (
-                    _is_blank_value(item.get("unit")) or _is_qty_uom(item.get("unit"))
-                ):
-                    item["unit"] = unit_from_slot
 
         # PN / capacity from owning sentence first (not whole chapter dump).
         context_pn = _parse_pn_capacity(product_context) or _parse_pn_capacity(
             str((slot or {}).get("evidence_text") or "")
         )
-        if context_pn:
-            current_cap = str(item.get("capacity") or "").strip()
-            current_pn = _parse_pn_capacity(current_cap)
-            if _is_blank_value(item.get("capacity")) or (
-                current_pn and current_pn != context_pn
-            ):
-                item["capacity"] = context_pn
+        if context_pn and _is_blank_value(item.get("capacity")):
+            item["capacity"] = context_pn
 
         item = _snap_identity_from_product_context(
             item,
             product_context=product_context,
             taxonomy=taxonomy,
+        )
+
+        pattern = pattern_for_product(item, size_patterns)
+        parse_text = slot_desc or evidence or product_context
+        size_from_slot, unit_from_slot = parse_size_for_product(
+            parse_text,
+            category=item.get("category"),
+            sub_category=item.get("sub_category"),
+            pattern=pattern,
+            require_explicit_unit=True,
+        )
+        if size_hint and not size_from_slot:
+            size_from_slot = str(size_hint).strip()
+        if size_from_slot and _is_blank_value(item.get("size")):
+            item["size"] = size_from_slot
+            if unit_from_slot:
+                item["unit"] = unit_from_slot
+
+        item = sanitize_product_against_evidence(
+            item,
+            product_context=product_context,
+            slot_desc=slot_desc,
+            evidence_text=evidence,
+            section_text=section_text,
+            taxonomy=taxonomy,
+            size_patterns=size_patterns,
         )
         filled.append(normalize_product_fields(item, preserve_class=True))
 

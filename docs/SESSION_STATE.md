@@ -17,8 +17,10 @@ History: `docs/CHANGELOG.md` (do not duplicate session diaries here).
 **Database:** upload (global lock) → validate → import sheets (inactive) →
 **embeddings must succeed** → activate → purge previous master data (synchronous
 in the request). UI shows **Uploading…** across tab switches via
-`/database/import-status/`. Other sheets counted for UI. Stored file stamped
-`_{YYYYMMDD_HHMMSS}`. Last 10 upload records retained.
+`/database/import-status/`. Only Product_Helper / Rate_Master_Output /
+Labour_Master_Output imported; other sheets ignored. Stored file stamped
+`_{YYYYMMDD_HHMMSS}`. Newest **10** upload records retained; on successful 11th,
+oldest row + `media/database/` workbook deleted.
 
 **BOQ tabs:** BOQ → Make list → Analysis → Make & Vendor → Labour → Review → Export
 
@@ -41,8 +43,9 @@ in the request). UI shows **Uploading…** across tab switches via
 | Confirm | Sets match to **100%** when product is correct but % is lower (hidden at 100%) |
 | Select candidate | Prefills Rate_Master core fields + Attribute values into Analysis inputs; keeps that candidate's listed match % |
 | Make list map | **AI-first** multi-target (v11): understands free text; compound lines can map multiple category/sub pairs (e.g. sprinkler + rosette); null sub = category-wide makes; heuristics soft-only; auto remap on stale mapping version |
-| Make & Vendor | Product_ID → Rate_Master Make/Vendor/amounts from Postgres; not found/no match → dropdowns + Apply (green); cascade; Chroma not used for rates |
-| Labour | Product_ID → Labour_master_Output; amount from **Labour_With_State_Multiplier** (fallback Total_Labour_Per_Unit); auto on Make & Vendor Next |
+| Make & Vendor | Product_ID → Rate_Master; AI Description + Rate/Product id; **Not available** / **Not listed** / **Not in Db**; Next confirms Labour promotion |
+| Labour | Unlock promotes Not listed/Not in Db → **Not available** (red); missing labour = orange **No labour**; complete → Review NA |
+| Review / Export | Not available (red); Amount = “Not available”; other columns unchanged |
 | Review | Same per-product slot qty + lineage UI; Export is one workbook (Review + BOQ). Review Base/Discount/Labour/Qty are inputs; Net, Sub_Total, Final material, Final Rate, totals are Excel formulas. BOQ Rate → Review Final Rate; Amount → Review Amount |
 | Detail open | Default tab follows `BOQ.status`; renders stored data only — no AI in the GET |
 | Jobs | Stuck analysis heal/fail; progress reset; Celery concurrency 8; Analyse completion uses `location.replace` auto-reload |
@@ -69,12 +72,15 @@ in the request). UI shows **Uploading…** across tab switches via
 
 Keep only the latest entry below. Older work is in `docs/CHANGELOG.md`.
 
-### 2026-08-26 — Speed up Analyse
+### 2026-08-31 — Re-analyse fire hose box recall
 
-Completed: Batch defaults 8/8; parallel extract (4); refine only &lt;30% confidence; timing logs; docs; live `.env` knobs + Celery restart (`c08c916`).
-Pending: UAT wall time on ~100-product BOQ.
-Issues: None.
-Next: Run Analyse on a large BOQ and confirm finish time / match quality.
+Completed: Re-analyse recall keeps agreeing Sub_Category; enclosure lines no
+longer append full section text; Sub_Category conflict pairs for FIRE HOSE BOX;
+rematch on BOQ 131 r5 → Product 102 ~79%. IS:884 no longer lands in Size —
+sanitize refills ``20 mm bore`` for fire hose reel (~100% → Product 34).
+Pending: User Re-analyse affected rows (hose box, hose reel, landing valve).
+Issues: Stored analysis JSON still has pre-fix values until rematch/re-Analyse.
+Next: Restart Celery worker if not done; UAT hose reel + landing valve lines.
 
 
 

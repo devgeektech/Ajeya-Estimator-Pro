@@ -9,6 +9,7 @@ from typing import Any
 from django.conf import settings
 
 from ai.instruction_log import log_instruction
+from ai.errors import format_ai_error_message
 from ai.openai_client import get_client, is_configured
 from common.exceptions import AIServiceError
 
@@ -91,7 +92,7 @@ class AIService:
                 error=str(exc),
             )
             logger.exception("AI completion failed")
-            raise AIServiceError(f"AI request failed: {exc}") from exc
+            raise AIServiceError(format_ai_error_message(exc)) from exc
 
     @staticmethod
     def load_prompt(name: str) -> str:

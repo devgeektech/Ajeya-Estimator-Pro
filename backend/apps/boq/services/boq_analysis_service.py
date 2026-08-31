@@ -29,7 +29,6 @@ from apps.boq.services.product_attribute_enrichment_service import product_needs
 from apps.boq.services.serial_normalizer import structure_for_analysis
 from apps.database_manager.services.activation import get_active_database_version
 from common.choices import BOQStatus
-from common.constants import MATCH_CONFIDENCE_THRESHOLD
 from common.exceptions import AIServiceError, BOQAIError, ValidationError
 from utils.json_safe import json_safe
 
@@ -139,6 +138,16 @@ class BOQAnalysisService:
         self._set_status(boq, BOQStatus.PROCESSING)
         # Start at 1% — do not jump ahead until extract/match units complete.
         set_boq_job_progress(boq.pk, percent=1, label="Starting analysis...", phase="extract")
+        # Clear prior failure banner when Analyse is retried.
+        if (boq.analysis_data or {}).get("last_error"):
+            data = dict(boq.analysis_data or {})
+            data.pop("last_error", None)
+            data.pop("last_error_at", None)
+            from utils.json_safe import json_safe
+
+            safe = json_safe(data)
+            BOQ.objects.filter(pk=boq.pk).update(analysis_data=safe)
+            boq.analysis_data = safe
 
         # Pin active DB for this job so concurrent analyses stay on one version.
         active_version = get_active_database_version()
@@ -313,19 +322,37 @@ class BOQAnalysisService:
             )
             return analysis_payload
         except Exception as exc:
+            from ai.errors import format_ai_error_message
+
             logger.exception("BOQ extraction failed for id=%s", boq.pk)
             # Status first so polls never see PROCESSING + terminal 100%.
+            message = format_ai_error_message(exc)
             self._set_status(boq, BOQStatus.ANALYSIS_FAILED)
-            set_boq_job_progress(boq.pk, percent=100, label="Analysis failed", phase="extract")
+            self._store_analysis_error(boq, message)
+            set_boq_job_progress(boq.pk, percent=100, label=message, phase="extract")
             self._audit(boq, "Analysis failed")
             self._notify_user(
                 boq,
                 "BOQ analysis failed",
-                f"BOQ '{boq.boq_name}' analysis failed. Open the BOQ to retry.",
+                f"BOQ '{boq.boq_name}': {message}",
             )
             if isinstance(exc, (AIServiceError, BOQAIError)):
                 raise
-            raise BOQAIError(f"BOQ extraction failed: {exc}") from exc
+            raise BOQAIError(message) from exc
+
+    @staticmethod
+    def _store_analysis_error(boq: BOQ, message: str) -> None:
+        """Persist last Analyse failure for the UI banner after reload."""
+        from utils.json_safe import json_safe
+        from utils.timestamps import now_local_iso
+
+        data = dict(boq.analysis_data or {})
+        data["last_error"] = message
+        data["last_error_at"] = now_local_iso()
+        safe = json_safe(data)
+        updated = BOQ.objects.filter(pk=boq.pk).update(analysis_data=safe)
+        if updated:
+            boq.analysis_data = safe
 
     @staticmethod
     def _status_after_row_work(previous_status: str) -> str:
@@ -626,9 +653,9 @@ class BOQAnalysisService:
     ) -> list[dict[str, Any]]:
         """Map BOQ-extracted products to top Rate_Master neighbors.
 
-        First pass maps every product. A second pass rematches only weak
-        products (&lt;30% confidence) so initial Analyse stays fast while hard
-        misses still get the wider-recall refine path.
+        First pass maps every product. Second pass rematches **all** products with
+        refine=True (same recall path as expert Re-analyse) so candidates and
+        confidence scores align with a manual rematch.
         """
         version_id = int(database_version_id or 0)
         if not version_id:
@@ -673,18 +700,19 @@ class BOQAnalysisService:
                 )
 
             refine_started = time.perf_counter()
-            refined = mapper.refine_rows(
+            # Rematch every product (not only weak) so confidence/candidates match
+            # the Re-analyse recall path.
+            refined = mapper.map_rows(
                 mapped,
-                passes=1,
-                min_confidence=MATCH_CONFIDENCE_THRESHOLD,
+                refine=True,
+                blank_weak_inputs=False,
                 progress_callback=_on_refine,
             )
             logger.info(
-                "BOQ product refine pass products=%s elapsed_s=%.1f",
+                "BOQ product rematch-all pass products=%s elapsed_s=%.1f",
                 product_count,
                 time.perf_counter() - refine_started,
             )
-            # Blank weak inputs only after refine so rematch still has identity fields.
             return mapper.apply_weak_match_blanking(refined)
         except Exception:
             logger.exception("AI product mapping failed; keeping AI-extracted attributes")

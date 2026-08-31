@@ -27,6 +27,8 @@ def _fail_boq_job(boq_id: int, *, reason: str) -> None:
     try:
         from apps.boq.models import BOQ
         from apps.boq.services.boq_job_progress import fail_stale_or_orphaned_boq_job
+        from utils.json_safe import json_safe
+        from utils.timestamps import now_local_iso
 
         boq = BOQ.objects.filter(pk=boq_id).only(
             "pk", "status", "analysis_data", "boq_name", "user_id"
@@ -34,6 +36,21 @@ def _fail_boq_job(boq_id: int, *, reason: str) -> None:
         if boq is None:
             return
         fail_stale_or_orphaned_boq_job(boq, reason=reason, force=True)
+        # Keep a durable copy for the Analysis banner after reload.
+        from common.choices import BOQStatus
+
+        boq.refresh_from_db(fields=["status", "analysis_data"])
+        if boq.status == BOQStatus.ANALYSIS_FAILED:
+            data = dict(boq.analysis_data or {})
+            # Prefer an existing specific message from the service path.
+            if not str(data.get("last_error") or "").strip():
+                data["last_error"] = reason
+                data["last_error_at"] = now_local_iso()
+                BOQ.objects.filter(pk=boq.pk).update(analysis_data=json_safe(data))
+            elif reason and "credits" in reason.casefold():
+                data["last_error"] = reason
+                data["last_error_at"] = now_local_iso()
+                BOQ.objects.filter(pk=boq.pk).update(analysis_data=json_safe(data))
     except Exception:
         logger.exception("Failed to mark BOQ job failed for id=%s", boq_id)
 
@@ -55,11 +72,13 @@ def process_boq_extraction_task(boq_id: int) -> dict:
             reason="Analysis timed out - click Analyse BOQ to retry",
         )
         raise
-    except Exception:
+    except Exception as exc:
+        from ai.errors import format_ai_error_message
+
         logger.exception("BOQ extraction task crashed for id=%s", boq_id)
         _fail_boq_job(
             boq_id,
-            reason="Analysis failed - click Analyse BOQ to retry",
+            reason=format_ai_error_message(exc),
         )
         raise
 
@@ -82,10 +101,12 @@ def process_boq_analysis_task(boq_id: int) -> dict:
             reason="Analysis timed out - click Analyse BOQ to retry",
         )
         raise
-    except Exception:
+    except Exception as exc:
+        from ai.errors import format_ai_error_message
+
         logger.exception("BOQ analysis task crashed for id=%s", boq_id)
         _fail_boq_job(
             boq_id,
-            reason="Analysis failed - click Analyse BOQ to retry",
+            reason=format_ai_error_message(exc),
         )
         raise

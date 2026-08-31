@@ -31,6 +31,19 @@
 {% endif %}
 
 <div
+    class="alert alert--info"
+    x-data="databaseImportBanner({
+        statusUrl: '{% url 'database:import_status' %}',
+        initialBusy: {{ import_busy|yesno:'true,false' }}
+    })"
+    x-show="busy"
+    x-cloak
+    style="margin: 0 0 16px;"
+>
+    <span x-text="message || 'Import and embeddings are running… Please wait — the new database is Active only after embeddings finish.'"></span>
+</div>
+
+<div
     x-data="dbListFilter({ initialQuery: '{{ search_q|escapejs }}' })"
 >
     <div class="list-search">
@@ -187,16 +200,64 @@ document.addEventListener('alpine:init', () => {
 });
 
 document.addEventListener('alpine:init', () => {
+    Alpine.data('databaseImportBanner', (cfg) => ({
+        statusUrl: cfg.statusUrl,
+        busy: !!cfg.initialBusy,
+        message: '',
+        timer: null,
+        init() {
+            if (this.busy) this.startPolling();
+            this.poll();
+        },
+        destroy() {
+            this.stopPolling();
+        },
+        startPolling() {
+            if (this.timer) return;
+            this.timer = setInterval(() => this.poll(), 2000);
+        },
+        stopPolling() {
+            if (!this.timer) return;
+            clearInterval(this.timer);
+            this.timer = null;
+        },
+        async poll() {
+            try {
+                const res = await fetch(this.statusUrl, {
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                    credentials: 'same-origin',
+                });
+                if (!res.ok) return;
+                const data = await res.json();
+                this.busy = !!data.busy || data.status === 'processing';
+                this.message = String(data.message || '');
+                if (this.busy) {
+                    this.startPolling();
+                } else {
+                    this.stopPolling();
+                }
+            } catch (e) { /* keep last known */ }
+        },
+    }));
     Alpine.data('databaseImportNav', (cfg) => ({
         statusUrl: cfg.statusUrl,
         busy: !!cfg.initialBusy,
         timer: null,
         init() {
+            if (this.busy) this.startPolling();
             this.poll();
-            this.timer = setInterval(() => this.poll(), 2000);
         },
         destroy() {
-            if (this.timer) clearInterval(this.timer);
+            this.stopPolling();
+        },
+        startPolling() {
+            if (this.timer) return;
+            this.timer = setInterval(() => this.poll(), 2000);
+        },
+        stopPolling() {
+            if (!this.timer) return;
+            clearInterval(this.timer);
+            this.timer = null;
         },
         async poll() {
             try {
@@ -208,7 +269,12 @@ document.addEventListener('alpine:init', () => {
                 const data = await res.json();
                 const wasBusy = this.busy;
                 this.busy = !!data.busy || data.status === 'processing';
-                if (wasBusy && !this.busy) {
+                if (this.busy) {
+                    this.startPolling();
+                    return;
+                }
+                this.stopPolling();
+                if (wasBusy) {
                     window.location.reload();
                 }
             } catch (e) { /* keep last known */ }
@@ -222,6 +288,18 @@ document.addEventListener('alpine:init', () => {
     opacity: 0.6;
     pointer-events: none;
     cursor: not-allowed;
+}
+.alert--info {
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    color: #1e3a8a;
+    border-radius: 10px;
+    padding: 12px 14px;
+}
+.dark-mode .alert--info {
+    background: #1e3a5f;
+    border-color: #1e40af;
+    color: #dbeafe;
 }
 </style>
 {% endblock %}

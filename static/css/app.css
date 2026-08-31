@@ -651,6 +651,44 @@ body:has(.auth) {
     border-color: #fecaca !important;
     color: var(--red) !important;
 }
+.topbar-view,
+.topbar-delete {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+    padding: 0;
+    border: none;
+    border-radius: 10px;
+    color: #fff;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background .15s, box-shadow .15s, transform .15s;
+}
+.topbar-view svg,
+.topbar-delete svg { display: block; }
+.topbar-view {
+    background: #2563eb;
+    box-shadow: 0 1px 2px rgba(37, 99, 235, .35);
+}
+.topbar-view:hover {
+    background: #1d4ed8;
+    box-shadow: 0 4px 10px rgba(37, 99, 235, .4);
+    transform: translateY(-1px);
+    color: #fff;
+}
+.topbar-delete {
+    background: #dc2626;
+    box-shadow: 0 1px 2px rgba(220, 38, 38, .35);
+}
+.topbar-delete:hover {
+    background: #b91c1c;
+    box-shadow: 0 4px 10px rgba(220, 38, 38, .4);
+    transform: translateY(-1px);
+    color: #fff;
+}
 .dark-mode .list-actions .btn--ghost {
     background: var(--surface) !important;
     border-color: var(--border) !important;
@@ -659,6 +697,24 @@ body:has(.auth) {
 }
 .dark-mode .list-actions .btn--ghost:hover {
     background: var(--surface-alt) !important;
+}
+.dark-mode .topbar-view,
+.dark-mode .topbar-delete {
+    color: #fff;
+}
+.dark-mode .topbar-view {
+    background: #2563eb;
+}
+.dark-mode .topbar-view:hover {
+    background: #1d4ed8;
+    color: #fff;
+}
+.dark-mode .topbar-delete {
+    background: #dc2626;
+}
+.dark-mode .topbar-delete:hover {
+    background: #b91c1c;
+    color: #fff;
 }
 .list-row.is-filtered-out,
 .boq-list-row.is-filtered-out,
@@ -1786,7 +1842,7 @@ body:has(.auth) {
     padding: 22px;
 }
 .confirm-modal__title { margin: 0 0 8px; color: var(--text); font-size: 1.1rem; }
-.confirm-modal__message { margin: 0; color: var(--text-muted); }
+.confirm-modal__message { margin: 0; color: var(--text-muted); white-space: pre-line; }
 .confirm-modal__field {
     display: grid;
     gap: 6px;

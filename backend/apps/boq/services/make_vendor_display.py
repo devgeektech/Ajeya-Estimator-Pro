@@ -19,6 +19,11 @@ from apps.boq.services.boq_row_fields import (
 )
 from apps.boq.services.make_list_constraint_service import NO_APPROVED_MAKE_LABEL
 from apps.boq.services.make_vendor_common import (
+    NOT_AVAILABLE_LABEL,
+    NOT_AVAILABLE_SOURCE,
+    NOT_AVAILABLE_STATUS,
+    NOT_IN_DB_LABEL,
+    NOT_LISTED_LABEL,
     SAME_PRICE_TIE_LABEL,
     _align_option_label,
     _catalog_product_id,
@@ -26,6 +31,8 @@ from apps.boq.services.make_vendor_common import (
     _is_lowest_make,
     _product_summary,
     _taxonomy_label,
+    is_product_not_available,
+    loaded_catalog_product_id,
 )
 from apps.boq.services.serial_normalizer import analysis_fields
 
@@ -95,6 +102,7 @@ class MakeVendorDisplayMixin:
         filtered_count = 0
         not_found_count = 0
         no_match_count = 0
+        not_available_count = 0
         same_price_tie_count = 0
 
         for boq_row in _ordered_boq_rows(boq.boq_data or {}):
@@ -167,7 +175,9 @@ class MakeVendorDisplayMixin:
                 if match_status == "matched":
                     matched_count += 1
                 make_status = shaped.get("make_status") or "default"
-                if make_status == "not_found":
+                if shaped.get("is_not_available"):
+                    not_available_count += 1
+                elif make_status == "not_found":
                     not_found_count += 1
                 elif match_status == "unmatched":
                     no_match_count += 1
@@ -180,7 +190,9 @@ class MakeVendorDisplayMixin:
                 shaped_products.append(shaped)
 
             # Determine line-level status for border coloring.
-            if any(p.get("highlight_no_make") for p in shaped_products):
+            if any(p.get("is_not_available") for p in shaped_products):
+                line_status = "not_available"
+            elif any(p.get("highlight_no_make") for p in shaped_products):
                 line_status = "not_found"
             elif any(p.get("same_price_tie") for p in shaped_products):
                 line_status = "same_price"
@@ -255,6 +267,7 @@ class MakeVendorDisplayMixin:
                 "filtered_count": filtered_count,
                 "not_found_count": not_found_count,
                 "no_match_count": no_match_count,
+                "not_available_count": not_available_count,
                 "vendor_review_count": vendor_review_count,
                 "same_price_tie_count": same_price_tie_count,
             },
@@ -383,7 +396,15 @@ class MakeVendorDisplayMixin:
             approved_make_found = bool(stored_approved)
 
         # Manual typed make/vendor (not-found override) counts as filtered, not not_found.
-        if source == "manual" and (selected_make or selected_vendor or match_status != "not_searched"):
+        is_not_available = is_product_not_available(product) or (
+            match_status == NOT_AVAILABLE_STATUS
+            or source == NOT_AVAILABLE_SOURCE
+            or not loaded_catalog_product_id(product)
+        )
+        if is_not_available:
+            make_status = "not_available"
+            approved_make_found = False
+        elif source == "manual" and (selected_make or selected_vendor or match_status != "not_searched"):
             make_status = "filtered"
             approved_make_found = True
         elif (
@@ -404,11 +425,16 @@ class MakeVendorDisplayMixin:
         else:
             make_status = "default"
 
-        # True when approved make exists but Rate_Master_Output row was not found.
-        is_no_match = make_status != "not_found" and match_status == "unmatched"
+        # True when Product Id exists but Rate_Master_Output row was not found.
+        is_no_match = (
+            not is_not_available
+            and make_status != "not_found"
+            and match_status == "unmatched"
+        )
         # Use the same Make/Vendor <select> format as matched (green) cards whenever
         # options exist. Free-text only when there is nothing to select from.
-        allow_typed_make_vendor = not bool(make_options)
+        # Not available: no dropdowns / Apply — no searches or computes.
+        allow_typed_make_vendor = False if is_not_available else (not bool(make_options))
 
         same_price_choices = list(selection.get("same_price_choices") or [])
         same_price_tie = bool(selection.get("same_price_tie")) and bool(same_price_choices)
@@ -427,6 +453,19 @@ class MakeVendorDisplayMixin:
             }
         )
 
+        if is_not_available:
+            status_label = NOT_AVAILABLE_LABEL
+        elif make_status == "not_found":
+            status_label = NOT_LISTED_LABEL
+        elif is_no_match:
+            status_label = NOT_IN_DB_LABEL
+        elif match_status == "matched":
+            status_label = "Matched"
+        elif match_status == "pending":
+            status_label = "Review"
+        else:
+            status_label = "Select make"
+
         return {
             "row_id": row_id,
             "product_index": int(product.get("product_index") or 0),
@@ -441,41 +480,57 @@ class MakeVendorDisplayMixin:
             "capacity": product.get("capacity") or "",
             "qty": qty_fields["quantity"],
             **qty_fields,
-            "make_options": make_options,
-            "make_options_json": json.dumps(make_options),
-            "vendor_options": vendor_options,
+            "make_options": [] if is_not_available else make_options,
+            "make_options_json": json.dumps([] if is_not_available else make_options),
+            "vendor_options": [] if is_not_available else vendor_options,
             # Full Product_ID vendor list — Alpine uses this plus vendors_by_make.
-            "vendor_options_json": json.dumps(all_vendor_options),
-            "vendors_by_make": vendors_by_make,
-            "vendors_by_make_json": json.dumps(vendors_by_make),
-            "makes_by_vendor": makes_by_vendor,
-            "makes_by_vendor_json": json.dumps(makes_by_vendor),
-            "selected_make": selected_make,
-            "selected_vendor": selected_vendor,
+            "vendor_options_json": json.dumps([] if is_not_available else all_vendor_options),
+            "vendors_by_make": {} if is_not_available else vendors_by_make,
+            "vendors_by_make_json": json.dumps({} if is_not_available else vendors_by_make),
+            "makes_by_vendor": {} if is_not_available else makes_by_vendor,
+            "makes_by_vendor_json": json.dumps({} if is_not_available else makes_by_vendor),
+            "selected_make": selected_make if not is_not_available else "",
+            "selected_vendor": selected_vendor if not is_not_available else "",
             "match_status": match_status,
+            "status_label": status_label,
             "confidence": selection.get("confidence"),
             "tech_key": selection.get("tech_key") or "",
             "rate_master_id": selection.get("rate_master_id"),
             "catalog_product_id": _catalog_product_id({**product, "vendor_selection": selection}),
+            "rate_id": (
+                ""
+                if is_not_available
+                else str(
+                    selection.get("rate_id")
+                    or (rate_detail or {}).get("rate_id")
+                    or ""
+                ).strip()
+            ),
             "matched_summary": selection.get("summary") or "",
-            "rate_detail": rate_detail,
-            "labour_detail": labour_detail,
+            "rate_detail": None if is_not_available else rate_detail,
+            "labour_detail": None if is_not_available else labour_detail,
             "line_output": line_output,
             "notes": notes,
             "make_status": make_status,
             "approved_make_found": approved_make_found,
             "highlight_no_make": make_status == "not_found",
+            "is_not_available": is_not_available,
             "is_no_match": is_no_match,
             "show_manual_apply": (
-                make_status == "not_found"
-                or is_no_match
-                or same_price_tie
-                or bool(same_price_choices)
+                not is_not_available
+                and (
+                    make_status == "not_found"
+                    or is_no_match
+                    or same_price_tie
+                    or bool(same_price_choices)
+                )
             ),
             "allow_typed_make_vendor": allow_typed_make_vendor,
             "vendor_rate_review": False,
-            "same_price_tie": same_price_tie,
-            "same_price_choices": same_price_choices,
-            "same_price_choices_json": json.dumps(same_price_choices),
+            "same_price_tie": same_price_tie if not is_not_available else False,
+            "same_price_choices": same_price_choices if not is_not_available else [],
+            "same_price_choices_json": json.dumps(
+                same_price_choices if not is_not_available else []
+            ),
         }
 

@@ -27,11 +27,43 @@ _WORKER_REQUIRED_MESSAGE = (
     "(Linux) and click Analyse again."
 )
 
+_REDIS_REQUIRED_MESSAGE = (
+    "Redis is not running. Start Redis, then start the Celery worker "
+    "(see docs/OPS.md or run .\\scripts\\run_redis.ps1 on Windows)."
+)
+
 
 @dataclass(frozen=True)
 class AnalysisDispatchResult:
     mode: str  # sync | async | failed
     message: str | None = None
+
+
+def _sync_fallback_enabled() -> bool:
+    if settings.CELERY_TASK_ALWAYS_EAGER:
+        return True
+    if settings.DEBUG:
+        return True
+    return bool(getattr(settings, "CELERY_SYNC_FALLBACK", False))
+
+
+def _run_sync_fallback(
+    boq_id: int,
+    *,
+    runner: Callable[[int], dict],
+    job_label: str,
+    reason: str,
+) -> AnalysisDispatchResult | None:
+    if not _sync_fallback_enabled():
+        return None
+    logger.warning(
+        "%s Running BOQ %s synchronously for id=%s (sync fallback).",
+        reason,
+        job_label,
+        boq_id,
+    )
+    runner(boq_id)
+    return AnalysisDispatchResult(mode="sync")
 
 
 def dispatch_boq_extraction(boq_id: int) -> AnalysisDispatchResult:
@@ -58,17 +90,15 @@ def _dispatch_boq_job(
         return AnalysisDispatchResult(mode="sync")
 
     if not broker_is_available():
-        if settings.DEBUG:
-            logger.warning("Redis unavailable in DEBUG; running BOQ %s synchronously", job_label)
-            runner(boq_id)
-            return AnalysisDispatchResult(mode="sync")
-        return AnalysisDispatchResult(
-            mode="failed",
-            message=(
-                "Redis is not running. Start Redis, then start the Celery worker "
-                "(see README / docs/OPS.md)."
-            ),
+        fallback = _run_sync_fallback(
+            boq_id,
+            runner=runner,
+            job_label=job_label,
+            reason="Redis broker unavailable;",
         )
+        if fallback is not None:
+            return fallback
+        return AnalysisDispatchResult(mode="failed", message=_REDIS_REQUIRED_MESSAGE)
 
     # Heartbeat is authoritative on Windows (threads pool breaks control inspect).
     # Never queue into Redis when no worker will consume — that freezes Analyse UI.
@@ -78,6 +108,14 @@ def _dispatch_boq_job(
             job_label,
             boq_id,
         )
+        fallback = _run_sync_fallback(
+            boq_id,
+            runner=runner,
+            job_label=job_label,
+            reason="Celery worker unavailable;",
+        )
+        if fallback is not None:
+            return fallback
         return AnalysisDispatchResult(mode="failed", message=_WORKER_REQUIRED_MESSAGE)
 
     # Reset progress BEFORE flipping status so a concurrent status poll cannot

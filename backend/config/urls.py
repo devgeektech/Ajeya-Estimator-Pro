@@ -5,20 +5,9 @@ from django.contrib import admin
 from django.urls import include, path
 from django.views.generic import RedirectView
 
-from common.choices import UserRole
+from common.admin_site import lock_django_admin_to_superadmin
 
-
-def superadmin_site_permission(request):
-    user = request.user
-    return (
-        user.is_active
-        and user.is_staff
-        and user.is_superuser
-        and user.role == UserRole.SUPERADMIN
-    )
-
-
-admin.site.has_permission = superadmin_site_permission
+lock_django_admin_to_superadmin()
 
 urlpatterns = [
     path("admin/", admin.site.urls),

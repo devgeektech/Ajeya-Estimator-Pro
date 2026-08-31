@@ -187,19 +187,24 @@
                     x-cloak
                 >
                     <section
-                        class="make-vendor-card{% if product.highlight_no_labour %} make-vendor-card--no-labour{% endif %}"
+                        class="make-vendor-card{% if product.is_not_available %} make-vendor-card--not-available{% elif product.highlight_no_labour %} make-vendor-card--no-labour{% endif %}"
                         role="tabpanel"
                     >
                         <div class="make-vendor-card__head">
                             <div class="make-vendor-card__heading">
+                                <p class="make-vendor-card__ai-label">AI Description</p>
                                 <h4 class="make-vendor-card__title">{{ product.description_hint|default:product.summary }}</h4>
-                                {% if product.highlight_no_labour %}
+                                {% if product.is_not_available %}
+                                <p class="make-vendor-card__no-make-note">Not available — no rate/labour lookup for this product.</p>
+                                {% elif product.highlight_no_labour %}
                                 <p class="make-vendor-card__no-make-note" x-show="mode === 'manual'" x-cloak>No Manual Charge percentage is applied</p>
                                 <p class="make-vendor-card__no-make-note" x-show="mode === 'auto'">No labour charge found for this product</p>
                                 {% endif %}
                             </div>
-                            {% if product.highlight_no_labour %}
-                            <span class="badge badge--red">No labour</span>
+                            {% if product.is_not_available %}
+                            <span class="badge badge--red">Not available</span>
+                            {% elif product.highlight_no_labour %}
+                            <span class="badge badge--orange">No labour</span>
                             {% else %}
                             <span class="badge badge--green">Labour set</span>
                             {% endif %}

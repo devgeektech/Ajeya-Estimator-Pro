@@ -28,6 +28,40 @@ _RECALL_CORE_KEYS = (
 )
 
 
+def _hint_agrees_with_sub(hint: str, sub_category: Any) -> bool:
+    """True when AI Description names the same Sub_Category as structured fields."""
+    if not _is_filled(sub_category):
+        return False
+    from utils.product_synonyms import labels_equivalent
+
+    if labels_equivalent(hint, sub_category):
+        return True
+    sub_text = str(sub_category).strip().lower().replace("_", " ")
+    hint_text = hint.lower()
+    if sub_text and sub_text in hint_text:
+        return True
+    from apps.boq.services.product_matching_service import _hint_field_score
+
+    return _hint_field_score(hint, sub_category) >= 0.9
+
+
+def _append_section_to_recall_hint(
+    *,
+    hint: str,
+    section_text: str,
+    sub_category: Any,
+) -> str:
+    """Append BOQ section as supporting context unless it would pollute recall."""
+    from utils.catalog_size_rules import _NO_NOMINAL_SIZE_SUBS
+
+    sub = str(sub_category or "").strip().upper()
+    if sub in _NO_NOMINAL_SIZE_SUBS:
+        return hint
+    if section_text and section_text.lower() not in hint.lower():
+        return f"{hint}\n{section_text[:400]}".strip()
+    return hint
+
+
 def _recall_identity_blank(product: dict[str, Any]) -> bool:
     """True when Analysis inputs have no usable product identity for recall."""
     for key in _RECALL_CORE_KEYS:
@@ -54,18 +88,12 @@ class ProductAICandidatesMixin:
         *,
         refine: bool = False,
     ) -> dict[str, Any]:
-        """Build Chroma/SQL query input from UI product fields (+ slot line).
+        """Build Chroma/SQL query input aligned with product Re-analyse.
 
-        Normally full section text stays on ``_boq_row`` for the AI picker only —
-        dumping titles (e.g. ``Yard Hydrant System``) into recall drowned the
-        purchasable slot (pipe / valve).
-
-        Exception — empty-input Re-analyse: when core fields are blank, fold the
-        full section into ``description_hint`` so Chroma/SQL can surface nearest
-        neighbors (initial Analyse often left these blank after weak blanking).
-
-        On Re-analyse (``refine=True``), an expert-edited ``description_hint``
-        leads recall so stale Category/Sub from a prior weak match do not win.
+        AI Description leads recall. Category/Sub are dropped when the hint has
+        product identity so a wrong extract taxonomy (e.g. PIPE for a valve) does
+        not steer Chroma/SQL. Full section text is secondary evidence (capped),
+        same as Re-analyse — not a replacement for the purchasable product line.
         """
         product_for_recall = dict(product)
         product_for_recall["make_hint"] = None
@@ -94,22 +122,24 @@ class ProductAICandidatesMixin:
             product_for_recall.pop("sub_category", None)
             return product_for_recall
 
-        # Expert understanding leads rematch recall; section stays secondary evidence.
-        if refine and hint:
-            product_for_recall["_hint_first_recall"] = True
-            product_for_recall.pop("category", None)
-            product_for_recall.pop("sub_category", None)
-            if section_text and section_text.lower() not in hint.lower():
-                product_for_recall["description_hint"] = (
-                    f"{hint}\n{section_text[:400]}".strip()
-                )
-            return product_for_recall
-
-        # AI Description leads recall for Analyse and Re-analyse (DB search key).
         from apps.boq.services.product_matching_service import _significant_type_tokens
 
-        if hint and _significant_type_tokens(hint):
+        # Same as Re-analyse when AI Description names the product: hint leads.
+        # Drop wrong extract taxonomy (PIPE + valve hint) but keep Sub when it
+        # agrees with the hint (fire hose box after evidence sanitize).
+        hint_led = bool(hint) and (refine or bool(_significant_type_tokens(hint)))
+        if hint_led:
             product_for_recall["_hint_first_recall"] = True
+            kept_sub = product_for_recall.get("sub_category")
+            if not _hint_agrees_with_sub(hint, kept_sub):
+                product_for_recall.pop("category", None)
+                product_for_recall.pop("sub_category", None)
+                kept_sub = None
+            product_for_recall["description_hint"] = _append_section_to_recall_hint(
+                hint=hint,
+                section_text=section_text,
+                sub_category=kept_sub,
+            )
             return product_for_recall
 
         if slot_line and slot_line.lower() not in hint.lower():
