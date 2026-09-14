@@ -8,6 +8,7 @@ from django.conf import settings
 
 from ai.embeddings.chroma_store import ChromaEmbeddingStore, helper_document
 from ai.errors import format_ai_error_message, is_fatal_ai_limit_error
+from ai.retry import call_with_openai_backoff
 from ai.instruction_log import log_instruction
 from ai.openai_client import get_client, is_configured
 from apps.database_manager.models import DatabaseVersion, Product_Helper
@@ -49,15 +50,20 @@ def generate_embeddings(texts: list[str]) -> list[list[float]]:
     client = get_client()
     model = str(settings.OPENAI_EMBEDDING_MODEL)
     dimensions = int(getattr(settings, "OPENAI_EMBEDDING_DIMENSIONS", 1536) or 0)
-    try:
+    def _call():
         if dimensions:
-            response = client.embeddings.create(
+            return client.embeddings.create(
                 model=model,
                 input=texts,
                 dimensions=dimensions,
             )
-        else:
-            response = client.embeddings.create(model=model, input=texts)
+        return client.embeddings.create(model=model, input=texts)
+
+    try:
+        response = call_with_openai_backoff(
+            _call,
+            operation_name="Embedding batch",
+        )
         ordered: list[list[float] | None] = [None] * len(texts)
         for item in response.data:
             ordered[item.index] = list(item.embedding)

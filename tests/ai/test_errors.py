@@ -42,10 +42,15 @@ class FormatAiErrorMessageTests(SimpleTestCase):
         )
         self.assertEqual(format_ai_error_message(wrapped), AI_CREDITS_EMPTY_MESSAGE)
 
-    def test_fatal_limit_detects_quota_and_rate_limit(self):
+    def test_fatal_limit_detects_quota_only(self):
         self.assertTrue(is_fatal_ai_limit_error(AI_CREDITS_EMPTY_MESSAGE))
         self.assertTrue(is_fatal_ai_limit_error("insufficient_quota 429"))
-        self.assertTrue(is_fatal_ai_limit_error(AI_RATE_LIMIT_MESSAGE))
+        self.assertFalse(is_fatal_ai_limit_error(AI_RATE_LIMIT_MESSAGE))
+        tpm = (
+            "Rate limit reached on tokens per min (TPM): "
+            "Please try again in 374ms."
+        )
+        self.assertFalse(is_fatal_ai_limit_error(tpm))
         self.assertFalse(is_fatal_ai_limit_error("OPENAI_API_KEY is not configured."))
 
     def test_generic_rate_limit(self):

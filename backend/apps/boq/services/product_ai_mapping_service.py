@@ -7,7 +7,10 @@ from typing import Any
 from ai.context import align_product_taxonomy_from_rate
 from ai.errors import is_fatal_ai_limit_error
 from ai.service import AIService
-from apps.boq.services.boq_extraction_slots import refresh_product_from_boq_context
+from apps.boq.services.boq_extraction_slots import (
+    build_product_boq_context,
+    refresh_product_from_boq_context,
+)
 from apps.boq.services.product_ai_apply import ProductAIApplyMixin
 from apps.boq.services.product_ai_candidates import ProductAICandidatesMixin
 from apps.boq.services.product_ai_common import (
@@ -276,6 +279,7 @@ class ProductAIMappingService(
         min_confidence: float = REFINE_MATCH_CONFIDENCE_TARGET,
         blank_weak_inputs: bool = True,
         progress_callback=None,
+        boq_data: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         from .product_attribute_enrichment_service import product_needs_attribute_enrichment
 
@@ -294,25 +298,18 @@ class ProductAIMappingService(
                 work = dict(product)
                 # Re-apply BOQ evidence before every map/refine pass so enclosure
                 # lines (fire hose box) are not matched as contents (branch pipe).
-                if row_desc:
+                boq_context = build_product_boq_context(
+                    work,
+                    section_row=row,
+                    boq_data=boq_data,
+                )
+                if boq_context:
                     work = refresh_product_from_boq_context(
                         work,
-                        boq_row={
-                            "row_id": row.get("row_id"),
-                            "description": row_desc,
-                            "slot_description": row_desc,
-                            "serial": row.get("serial") or row.get("ser_no") or "",
-                        },
+                        boq_row=boq_context,
                         database_version_id=self.database_version_id,
                     )
-                # Attach section text for AI mapping payload (Chroma uses product fields).
-                if "_boq_row" not in work and row_desc:
-                    work["_boq_row"] = {
-                        "row_id": row.get("row_id"),
-                        "description": row_desc,
-                        "slot_description": row_desc,
-                        "serial": row.get("serial") or row.get("ser_no") or "",
-                    }
+                    work["_boq_row"] = boq_context
                 pending.append((row_index, product_index, work))
 
         if not pending:
@@ -437,14 +434,24 @@ class ProductAIMappingService(
         return updated
 
 
-    def rematch_rows(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def rematch_rows(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        boq_data: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         """Re-run DB candidate recall + AI mapping using current product fields/attrs.
 
         Used after expert edits on Analysis Re-analyse. Seeds prior Product_IDs /
         candidates into recall and weights filled blank attributes — does not
         re-extract from the BOQ workbook.
         """
-        return self.map_rows(rows, only_missing=False, refine=True)
+        return self.map_rows(
+            rows,
+            only_missing=False,
+            refine=True,
+            boq_data=boq_data,
+        )
 
 
     def rematch_product(

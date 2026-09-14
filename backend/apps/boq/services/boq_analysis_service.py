@@ -22,7 +22,11 @@ from apps.boq.services.boq_job_progress import (
     set_boq_job_progress,
 )
 from apps.boq.services.boq_row_fields import DESCRIPTION_KEYS
-from apps.boq.services.boq_row_grouping_service import full_description_for_row, resolve_anchor_row_id
+from apps.boq.services.boq_row_grouping_service import (
+    full_description_for_row,
+    resolve_anchor_row_id,
+    single_row_description,
+)
 from apps.boq.services.make_list_constraint_service import walk_rows_tree
 from apps.boq.services.product_ai_mapping_service import ProductAIMappingService
 from apps.boq.services.product_attribute_enrichment_service import product_needs_attribute_enrichment
@@ -264,7 +268,8 @@ class BOQAnalysisService:
                     ).strip()
                     slot_text = ""
                     if slot_id and slot_id != row_id:
-                        slot_text = _row_description(boq_data, slot_id)
+                        # Letter line only — full lineage mixes sibling sizes.
+                        slot_text = single_row_description(boq_data, slot_id)
                     elif slot_id and slot_id == row_id:
                         # Single-line section: description_hint / product owns identity.
                         slot_text = str(product.get("description_hint") or "").strip()
@@ -280,6 +285,7 @@ class BOQAnalysisService:
                 extracted_rows,
                 database_version_id=db_snap.get("database_version_id"),
                 progress_callback=_on_enrich_progress,
+                boq_data=boq_data,
             )
             logger.info(
                 "BOQ analysis match+refine phase id=%s elapsed_s=%.1f",
@@ -493,7 +499,7 @@ class BOQAnalysisService:
                 ).strip()
                 slot_text = ""
                 if slot_id and slot_id != str(row_id):
-                    slot_text = _row_description(boq_payload, slot_id)
+                    slot_text = single_row_description(boq_payload, slot_id)
                 elif not slot_text:
                     slot_text = str(source_product.get("description_hint") or "").strip()
                 # Full section for AI meaning; expert UI fields + slot line for recall.
@@ -513,7 +519,10 @@ class BOQAnalysisService:
                 rematched_product = updated_product
             else:
                 stub = {**target, "products": stub_products}
-                rematched = mapper.rematch_rows([stub])
+                rematched = mapper.rematch_rows(
+                    [stub],
+                    boq_data=boq_obj.boq_data or {},
+                )
                 rematched_rows = rematched
                 rematched_product = None
 
@@ -617,6 +626,7 @@ class BOQAnalysisService:
             replacements = self._enrich_extracted_attributes(
                 replacements,
                 database_version_id=int(existing.get("database_version_id") or 0) or None,
+                boq_data=boq_data,
             )
             replacements = rehydrate_analysis_rows_quantity(boq_data, replacements)
             updated_rows = _replace_rows(list(existing.get("rows") or []), replacements)
@@ -650,6 +660,7 @@ class BOQAnalysisService:
         rows: list[dict[str, Any]],
         database_version_id: int | None = None,
         progress_callback=None,
+        boq_data: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """Map BOQ-extracted products to top Rate_Master neighbors.
 
@@ -682,6 +693,7 @@ class BOQAnalysisService:
                 rows,
                 progress_callback=_on_first,
                 blank_weak_inputs=False,
+                boq_data=boq_data,
             )
             logger.info(
                 "BOQ product map first pass products=%s elapsed_s=%.1f",
@@ -707,6 +719,7 @@ class BOQAnalysisService:
                 refine=True,
                 blank_weak_inputs=False,
                 progress_callback=_on_refine,
+                boq_data=boq_data,
             )
             logger.info(
                 "BOQ product rematch-all pass products=%s elapsed_s=%.1f",
@@ -743,7 +756,11 @@ class BOQAnalysisService:
 
         try:
             mapper = ProductAIMappingService(active_version.pk)
-            updated_rows = mapper.map_rows(rows, only_missing=True)
+            updated_rows = mapper.map_rows(
+                rows,
+                only_missing=True,
+                boq_data=boq.boq_data or {},
+            )
         except Exception:
             logger.exception("AI product mapping backfill failed for BOQ id=%s", boq.pk)
             return False

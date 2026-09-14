@@ -180,6 +180,45 @@ def expected_units(pattern: dict[str, Any] | None) -> set[str]:
     }
 
 
+# Nominal bore aliases — BOQ writes ``mm dia`` while Product_Helper often stores ``nb``.
+_NOMINAL_BORE_UNITS = frozenset({"mm", "nb", "cm"})
+
+
+def units_compatible(left: Any, right: Any) -> bool:
+    """True when measure units are the same or equivalent (mm ↔ nb)."""
+    left_text = str(left or "").strip().lower()
+    right_text = str(right or "").strip().lower()
+    if not left_text or not right_text:
+        return True
+    if left_text == right_text:
+        return True
+    return left_text in _NOMINAL_BORE_UNITS and right_text in _NOMINAL_BORE_UNITS
+
+
+def snap_unit_to_pattern(
+    unit: Any,
+    pattern: dict[str, Any] | None,
+) -> str | None:
+    """Keep BOQ unit when compatible; prefer catalog label (nb over mm) when listed."""
+    unit_text = str(unit or "").strip()
+    if not unit_text:
+        return None
+    allowed = expected_units(pattern)
+    if not allowed:
+        return unit_text
+    lowered = unit_text.lower()
+    if lowered in allowed:
+        return next(
+            (str(item) for item in (pattern.get("units") or []) if str(item).lower() == lowered),
+            unit_text,
+        )
+    if lowered in _NOMINAL_BORE_UNITS and (_NOMINAL_BORE_UNITS & allowed):
+        for candidate in (pattern.get("units") or []):
+            if str(candidate).strip().lower() in _NOMINAL_BORE_UNITS:
+                return str(candidate).strip()
+    return unit_text
+
+
 def is_swg_gauge_number(number: str, text: str) -> bool:
     """True when ``number`` is a sheet-gauge token (18 SWG), not nominal size."""
     digits = str(number or "").strip()
@@ -467,10 +506,16 @@ def validate_size_unit_for_pattern(
     allowed = expected_units(pattern)
     unit_text = str(unit or "").strip().lower()
     if unit_text and allowed and unit_text not in allowed:
-        # Wrong measure type (e.g. mm on FIRE HOSE which uses m).
-        item["size"] = None
-        item["unit"] = None
-        return item
+        # mm dia from BOQ vs catalog nb — same nominal bore, snap unit label.
+        if units_compatible(unit_text, next(iter(allowed), "")):
+            snapped = snap_unit_to_pattern(unit_text, pattern)
+            if snapped:
+                item["unit"] = snapped
+        else:
+            # Wrong measure type (e.g. mm on FIRE HOSE which uses m).
+            item["size"] = None
+            item["unit"] = None
+            return item
 
     cat, sub = _normalize_key(item.get("category"), item.get("sub_category"))
     if sub == "FIRE HOSE" and size_text and blob:

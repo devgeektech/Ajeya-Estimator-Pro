@@ -9,8 +9,9 @@ from typing import Any
 from django.conf import settings
 
 from ai.instruction_log import log_instruction
-from ai.errors import format_ai_error_message
+from ai.errors import format_ai_error_message, is_fatal_ai_limit_error
 from ai.openai_client import get_client, is_configured
+from ai.retry import call_with_openai_backoff
 from common.exceptions import AIServiceError
 
 logger = logging.getLogger("boq_ai")
@@ -66,9 +67,15 @@ class AIService:
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
 
-        try:
+        def _call() -> str:
             response = client.chat.completions.create(**kwargs)
-            content = response.choices[0].message.content or ""
+            return response.choices[0].message.content or ""
+
+        try:
+            content = call_with_openai_backoff(
+                _call,
+                operation_name=f"AI completion ({template_name or 'chat'})",
+            )
             log_instruction(
                 template_name=template_name,
                 model=str(self.model),
@@ -82,17 +89,18 @@ class AIService:
                 len(content),
             )
             return content
-        except AIServiceError:
-            raise
-        except Exception as exc:  # noqa: BLE001
+        except AIServiceError as exc:
             log_instruction(
                 template_name=template_name,
                 model=str(self.model),
                 prompt=prompt,
                 error=str(exc),
             )
-            logger.exception("AI completion failed")
-            raise AIServiceError(format_ai_error_message(exc)) from exc
+            if is_fatal_ai_limit_error(exc) or "rate limit" in str(exc).casefold():
+                logger.error("AI completion failed: %s", exc)
+            else:
+                logger.exception("AI completion failed")
+            raise
 
     @staticmethod
     def load_prompt(name: str) -> str:

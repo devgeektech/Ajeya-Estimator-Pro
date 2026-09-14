@@ -80,11 +80,12 @@ def format_ai_error_message(exc: BaseException | str | None) -> str:
 
 
 def is_fatal_ai_limit_error(exc: BaseException | str | None) -> bool:
-    """True when remaining OpenAI calls must stop (empty credits or rate limit)."""
-    return format_ai_error_message(exc) in {
-        AI_CREDITS_EMPTY_MESSAGE,
-        AI_RATE_LIMIT_MESSAGE,
-    }
+    """True when remaining OpenAI calls must stop (empty credits / hard quota only).
+
+    Transient TPM/RPM throttling (429 with a short retry hint) is **not** fatal —
+    callers should backoff and retry instead of aborting the whole Analyse job.
+    """
+    return format_ai_error_message(exc) == AI_CREDITS_EMPTY_MESSAGE
 
 
 def _strip_error_wrappers(text: str) -> str:

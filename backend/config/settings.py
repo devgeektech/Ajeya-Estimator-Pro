@@ -217,14 +217,19 @@ OPENAI_EMBEDDING_MODEL = env.str("OPENAI_EMBEDDING_MODEL", default="text-embeddi
 OPENAI_EMBEDDING_DIMENSIONS = env.int("OPENAI_EMBEDDING_DIMENSIONS", default=1536)
 OPENAI_EMBEDDING_BATCH_SIZE = env.int("OPENAI_EMBEDDING_BATCH_SIZE", default=500)
 OPENAI_TIMEOUT_SECONDS = env.int("OPENAI_TIMEOUT_SECONDS", default=120)
-OPENAI_MAX_RETRIES = env.int("OPENAI_MAX_RETRIES", default=1)
+# SDK quick retries; longer TPM backoff is handled in ai/retry.py.
+OPENAI_MAX_RETRIES = env.int("OPENAI_MAX_RETRIES", default=2)
+OPENAI_RETRY_MAX_ATTEMPTS = env.int("OPENAI_RETRY_MAX_ATTEMPTS", default=8)
 AI_INSTRUCTION_LOGGING = env.bool("AI_INSTRUCTION_LOGGING", default=DEBUG)
 # How many BOQ sections to send per extract_products AI call.
-AI_ROW_EXTRACTION_BATCH_SIZE = env.int("AI_ROW_EXTRACTION_BATCH_SIZE", default=8)
+# Keep modest to stay under OpenAI TPM on Tier-1 orgs.
+AI_ROW_EXTRACTION_BATCH_SIZE = env.int("AI_ROW_EXTRACTION_BATCH_SIZE", default=4)
 # How many products to map per map_product_match AI call.
-AI_PRODUCT_MAPPING_BATCH_SIZE = env.int("AI_PRODUCT_MAPPING_BATCH_SIZE", default=8)
+AI_PRODUCT_MAPPING_BATCH_SIZE = env.int("AI_PRODUCT_MAPPING_BATCH_SIZE", default=4)
 # Max concurrent OpenAI extract batches within one Analyse job.
-AI_EXTRACT_PARALLELISM = env.int("AI_EXTRACT_PARALLELISM", default=4)
+AI_EXTRACT_PARALLELISM = env.int("AI_EXTRACT_PARALLELISM", default=1)
+# Pause between sequential extract batches to stay under Tier-1 TPM (200k/min).
+AI_EXTRACT_PACING_SECONDS = env.float("AI_EXTRACT_PACING_SECONDS", default=2.5)
 
 # --- Chroma -----------------------------------------------------------------
 

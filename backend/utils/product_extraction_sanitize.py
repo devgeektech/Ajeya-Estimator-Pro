@@ -15,6 +15,7 @@ from utils.catalog_size_rules import (
     pattern_for_product,
     validate_size_unit_for_pattern,
 )
+from utils.nominal_size import nominal_sizes_compatible
 
 _PN_RATING = re.compile(r"(?i)\bPN\s*(\d+)\b")
 _IS_STANDARD_NUMBER = re.compile(
@@ -214,6 +215,41 @@ def _sanitize_size_and_capacity_for_catalog(
     return item
 
 
+def _reconcile_size_from_slot_evidence(
+    product: dict[str, Any],
+    *,
+    slot_desc: str,
+    product_context: str,
+    category: Any = None,
+    sub_category: Any = None,
+    pattern: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Prefer size parsed from the Unit/Qty slot line over wrong AI copies."""
+    item = dict(product)
+    for text in (slot_desc, product_context):
+        blob = str(text or "").strip()
+        if not blob:
+            continue
+        size, unit = parse_size_for_product(
+            blob,
+            category=category or item.get("category"),
+            sub_category=sub_category or item.get("sub_category"),
+            pattern=pattern,
+            require_explicit_unit=True,
+        )
+        if not size:
+            continue
+        current = item.get("size")
+        if _is_blank_value(current) or not nominal_sizes_compatible(current, size):
+            item["size"] = size
+            if unit:
+                from utils.catalog_size_rules import snap_unit_to_pattern
+
+                item["unit"] = snap_unit_to_pattern(unit, pattern) or unit
+        break
+    return item
+
+
 def sanitize_product_against_evidence(
     product: dict[str, Any],
     *,
@@ -265,7 +301,22 @@ def sanitize_product_against_evidence(
             evidence_text=evidence_text,
             size_patterns=patterns,
         )
+    # Slot letter line wins after catalog unit checks (mm↔nb must not wipe Size).
+    item = _reconcile_size_from_slot_evidence(
+        item,
+        slot_desc=slot_desc,
+        product_context=product_context,
+        category=item.get("category"),
+        sub_category=item.get("sub_category"),
+        pattern=pattern,
+    )
+    from utils.catalog_size_rules import snap_unit_to_pattern
     from utils.nominal_size import sanitize_product_size
+
+    if not _is_blank_value(item.get("size")) and pattern:
+        snapped = snap_unit_to_pattern(item.get("unit"), pattern)
+        if snapped:
+            item["unit"] = snapped
 
     item = sanitize_product_size(
         item,
@@ -273,7 +324,10 @@ def sanitize_product_against_evidence(
         use_description_hint=False,
     )
     if _is_blank_value(item.get("size")):
-        refill_blob = _evidence_blob(product_context, slot_desc, evidence_text)
+        # Prefer the Unit/Qty letter line — never re-parse sibling diameters.
+        refill_blob = str(slot_desc or "").strip() or _evidence_blob(
+            product_context, evidence_text
+        )
         refill_pattern = pattern_for_product(item, patterns) if patterns else pattern_for_product(item)
         size, unit = parse_size_for_product(
             refill_blob,
@@ -285,5 +339,5 @@ def sanitize_product_against_evidence(
         if size:
             item["size"] = size
             if unit:
-                item["unit"] = unit
+                item["unit"] = snap_unit_to_pattern(unit, refill_pattern) or unit
     return item

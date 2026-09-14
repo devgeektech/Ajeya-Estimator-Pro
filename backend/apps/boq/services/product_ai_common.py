@@ -69,7 +69,7 @@ _EXPERT_IDENTITY_FIELDS = (
 def _mapping_batch_size() -> int:
     from django.conf import settings
 
-    return max(1, int(getattr(settings, "AI_PRODUCT_MAPPING_BATCH_SIZE", 8) or 8))
+    return max(1, int(getattr(settings, "AI_PRODUCT_MAPPING_BATCH_SIZE", 4) or 4))
 
 
 def product_needs_match_refine(

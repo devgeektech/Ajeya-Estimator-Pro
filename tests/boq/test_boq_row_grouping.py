@@ -1,11 +1,17 @@
+from unittest.mock import patch
+
 from django.test import SimpleTestCase
 
 from apps.boq.services.boq_extraction_groups import _compact_anchor_payload, _iter_extract_batches
 from apps.boq.services.boq_extraction_slots import (
+    _apply_slot_evidence_fields,
     _enrich_description_hint,
     _share_section_attributes,
     _snap_identity_from_product_context,
+    build_product_boq_context,
+    refresh_product_from_boq_context,
 )
+from utils.product_extraction_sanitize import sanitize_product_against_evidence
 from apps.boq.services.boq_row_grouping_service import grouped_anchor_rows
 
 
@@ -284,6 +290,208 @@ class ExtractIdentityRepairTests(SimpleTestCase):
         self.assertEqual(shared[0]["attributes"].get("is"), "1239")
         self.assertEqual(shared[2]["attributes"].get("is"), "1239")
         self.assertFalse(shared[1]["attributes"].get("is"))
+
+    def test_slot_evidence_overrides_wrong_ai_size_on_later_letter(self):
+        """Butterfly a) 150 mm must not keep AI-copied 80 mm from another slot."""
+        group = {
+            "row_id": "r38",
+            "description": (
+                "Providing and fixing Cast Iron butterfly valve as per IS: 13095 "
+                "of Class PN 16"
+            ),
+            "slots": [
+                {
+                    "row_id": "r40",
+                    "qty_row_id": "r40",
+                    "serial": "a)",
+                    "description": "a) 150 mm dia with  lever",
+                    "product_context": (
+                        "Providing and fixing Cast Iron butterfly valve as per IS: 13095 "
+                        "of Class PN 16"
+                    ),
+                },
+                {
+                    "row_id": "r42",
+                    "qty_row_id": "r42",
+                    "serial": "c)",
+                    "description": "c)   80 mm dia  with lever",
+                    "product_context": (
+                        "Providing and fixing Cast Iron butterfly valve as per IS: 13095 "
+                        "of Class PN 16"
+                    ),
+                },
+            ],
+        }
+        products = [
+            {
+                "qty_row_id": "r40",
+                "source_row_id": "r40",
+                "category": "VALVE",
+                "sub_category": "BUTTERFLY",
+                "size": "80",
+                "unit": "mm",
+                "description_hint": "class C Cast Iron butterfly valve (VALVE), 150 mm dia",
+            },
+            {
+                "qty_row_id": "r42",
+                "source_row_id": "r42",
+                "category": "VALVE",
+                "sub_category": "BUTTERFLY",
+                "size": "80",
+                "unit": "mm",
+                "description_hint": "class C Cast Iron butterfly valve (VALVE), 80 mm dia",
+            },
+        ]
+        taxonomy = {
+            "categories": ["VALVE"],
+            "sub_categories_by_category": {"VALVE": ["BUTTERFLY", "SLUICE VALVE"]},
+            "classes_by_category_sub_category": {"VALVE": {"BUTTERFLY": ["0"]}},
+            "classes": ["0"],
+        }
+        with patch(
+            "apps.boq.services.boq_extraction_slots.load_size_unit_patterns",
+            return_value=[],
+        ):
+            repaired = _apply_slot_evidence_fields(
+                products, group=group, taxonomy=taxonomy
+            )
+        self.assertEqual(repaired[0]["size"], "150")
+        self.assertEqual(repaired[1]["size"], "80")
+
+    def test_build_product_boq_context_uses_slot_line_not_section(self):
+        boq_data = {
+            "rows": [
+                _row(
+                    "r38",
+                    "1",
+                    None,
+                    "Providing and fixing Cast Iron butterfly valve as per IS: 13095",
+                ),
+                _row("r40", "a)", "r38", "a) 150 mm dia with lever"),
+                _row("r41", "b)", "r38", "b) 100 mm dia with lever"),
+            ]
+        }
+        product = {"qty_row_id": "r40", "size": "80", "unit": "mm"}
+        section_row = {
+            "row_id": "r38",
+            "description": (
+                "Providing and fixing Cast Iron butterfly valve as per IS: 13095 "
+                "a) 150 mm dia with lever b) 100 mm dia with lever"
+            ),
+        }
+        # Stale _boq_row used full lineage (all letter sizes) — must repair.
+        product["_boq_row"] = {
+            "row_id": "r38",
+            "description": section_row["description"],
+            "slot_description": section_row["description"],
+        }
+        ctx = build_product_boq_context(
+            product,
+            section_row=section_row,
+            boq_data=boq_data,
+        )
+        self.assertEqual(ctx["row_id"], "r38")
+        self.assertIn("150", ctx["slot_description"])
+        self.assertNotIn("100", ctx["slot_description"])
+
+    def test_refresh_keeps_slot_size_when_catalog_unit_is_nb(self):
+        """BOQ ``mm dia`` must not be wiped when Product_Helper Unit is ``nb``."""
+        product = {
+            "category": "VALVE",
+            "sub_category": "SLUICE VALVE",
+            "size": "80",
+            "unit": "mm",
+            "qty_row_id": "r32",
+            "description_hint": "sluice valve, 80 mm dia",
+        }
+        boq_row = {
+            "row_id": "r31",
+            "description": (
+                "Providing and fixing Cast Iron sluice valve (as per IS:14846) "
+                "a) 250 mm dia b) 200 mm dia c) 150 mm dia d) 100 mm dia e) 80 mm dia"
+            ),
+            "slot_description": "a) 250 mm dia",
+        }
+        taxonomy = {
+            "categories": ["VALVE"],
+            "sub_categories_by_category": {"VALVE": ["SLUICE VALVE"]},
+            "classes_by_category_sub_category": {"VALVE": {"SLUICE VALVE": ["0"]}},
+            "classes": ["0"],
+        }
+        patterns = [
+            {
+                "category": "VALVE",
+                "sub_category": "SLUICE VALVE",
+                "units": ["nb"],
+                "sample_sizes": ["50.00", "65.00", "80.00", "150.00", "200.00"],
+                "sample_capacities": ["PN16", "PN20"],
+            }
+        ]
+        with patch(
+            "apps.boq.services.boq_extraction_slots.load_size_unit_patterns",
+            return_value=patterns,
+        ):
+            refreshed = refresh_product_from_boq_context(
+                product,
+                boq_row=boq_row,
+                taxonomy=taxonomy,
+                size_patterns=patterns,
+            )
+        self.assertEqual(refreshed["size"], "250")
+        self.assertEqual(str(refreshed.get("unit") or "").lower(), "nb")
+
+    def test_refresh_repair_size_from_per_slot_context(self):
+        product = {
+            "category": "VALVE",
+            "sub_category": "BUTTERFLY",
+            "size": "80",
+            "unit": "mm",
+            "description_hint": "butterfly valve, 150 mm dia",
+        }
+        boq_row = {
+            "row_id": "r38",
+            "description": "Providing and fixing Cast Iron butterfly valve",
+            "slot_description": "a) 150 mm dia with lever",
+        }
+        taxonomy = {
+            "categories": ["VALVE"],
+            "sub_categories_by_category": {"VALVE": ["BUTTERFLY"]},
+            "classes_by_category_sub_category": {"VALVE": {"BUTTERFLY": ["0"]}},
+            "classes": ["0"],
+        }
+        with patch(
+            "apps.boq.services.boq_extraction_slots.load_size_unit_patterns",
+            return_value=[],
+        ):
+            refreshed = refresh_product_from_boq_context(
+                product,
+                boq_row=boq_row,
+                taxonomy=taxonomy,
+                size_patterns=[],
+            )
+        self.assertEqual(refreshed["size"], "150")
+
+    def test_sanitize_overrides_wrong_size_from_slot_line(self):
+        product = {
+            "category": "VALVE",
+            "sub_category": "BUTTERFLY",
+            "size": "80",
+            "unit": "mm",
+        }
+        taxonomy = {
+            "categories": ["VALVE"],
+            "sub_categories_by_category": {"VALVE": ["BUTTERFLY"]},
+            "classes_by_category_sub_category": {"VALVE": {"BUTTERFLY": ["0"]}},
+            "classes": ["0"],
+        }
+        sanitized = sanitize_product_against_evidence(
+            product,
+            product_context="Providing and fixing butterfly valve",
+            slot_desc="a) 150 mm dia with lever",
+            evidence_text="a) 150 mm dia with lever",
+            taxonomy=taxonomy,
+        )
+        self.assertEqual(sanitized["size"], "150")
 
 
 class MultiSlotBatchTests(SimpleTestCase):

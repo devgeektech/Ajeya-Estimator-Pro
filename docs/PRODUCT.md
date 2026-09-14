@@ -312,10 +312,12 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
 - Celery task: `boq.process_extraction` (full BOQ only)
 - Concurrent analyses: Celery worker `--concurrency` (default **8** via
   `scripts/run_celery_worker.*`; override with `CELERY_WORKER_CONCURRENCY`)
-- Analyse throughput knobs (`.env`): `AI_ROW_EXTRACTION_BATCH_SIZE` (default **8**,
+- Analyse throughput knobs (`.env`): `AI_ROW_EXTRACTION_BATCH_SIZE` (default **4**,
   single-slot sections only; multi-slot stays one call each),
-  `AI_PRODUCT_MAPPING_BATCH_SIZE` (default **8**), `AI_EXTRACT_PARALLELISM`
-  (default **4** concurrent extract batches within one job)
+  `AI_PRODUCT_MAPPING_BATCH_SIZE` (default **4**), `AI_EXTRACT_PARALLELISM`
+  (default **1** concurrent extract batch — raise only if OpenAI tier allows),
+  `AI_EXTRACT_PACING_SECONDS` (default **2.5**, pause between sequential batches),
+  `OPENAI_RETRY_MAX_ATTEMPTS` (default **8**, TPM-aware backoff in `ai/retry.py`)
 - Stuck jobs: if progress stops for **5 minutes**, or shows 100% complete/failed
   while status is still `PROCESSING`/`MATCHING`, the BOQ is marked
   `ANALYSIS_FAILED` (or `EXTRACTED` if matching stalled with rows) so **Analyse**

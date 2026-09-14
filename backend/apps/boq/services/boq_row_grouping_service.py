@@ -598,6 +598,35 @@ def full_description_for_row(boq_data: dict[str, Any], row_id: str) -> str:
     return combine_row_descriptions(index, lineage_ids)
 
 
+def single_row_description(boq_data: dict[str, Any], row_id: str) -> str:
+    """Return only this workbook row's description (not parent + sibling letters).
+
+    Letter slots must keep ``a) 150 mm dia`` alone — combining sibling sizes
+    makes size parsers pick the wrong diameter (often the shortest, e.g. 80).
+    """
+    wanted = str(row_id or "").strip()
+    if not wanted:
+        return ""
+    for row in boq_data.get("rows") or []:
+        if str(row.get("row_id") or "") != wanted:
+            continue
+        fields = analysis_fields(row)
+        value = _field_from_map(fields, DESCRIPTION_KEYS)
+        if value not in (None, ""):
+            return str(value).strip()
+        for key in ("description", "item_description", "particulars", "item"):
+            raw = row.get(key)
+            if raw not in (None, ""):
+                return str(raw).strip()
+        values = row.get("values") or row.get("display_values") or {}
+        if isinstance(values, dict):
+            value = _field_from_map(values, DESCRIPTION_KEYS)
+            if value not in (None, ""):
+                return str(value).strip()
+        return ""
+    return ""
+
+
 def _emit_lineage_section(
     *,
     root: dict[str, Any],

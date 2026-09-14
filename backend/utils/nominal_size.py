@@ -187,5 +187,17 @@ def sanitize_product_size(
     return item
 
 
+def nominal_sizes_compatible(left: Any, right: Any) -> bool:
+    """True when two nominal sizes are the same (within 1 mm)."""
+    left_text = str(left or "").strip()
+    right_text = str(right or "").strip()
+    if not left_text or not right_text:
+        return True
+    try:
+        return abs(float(left_text) - float(right_text)) <= 1.0
+    except ValueError:
+        return left_text.casefold() == right_text.casefold()
+
+
 # Backward-compatible alias.
 repair_product_size = sanitize_product_size

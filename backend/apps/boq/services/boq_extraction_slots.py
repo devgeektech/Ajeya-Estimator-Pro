@@ -18,8 +18,12 @@ from apps.boq.services.boq_extraction_fields import (
 from apps.boq.services.boq_row_fields import is_blank as _is_blank_value
 from apps.boq.services.boq_row_grouping_service import _is_size_only_slot_line
 from utils.attribute_parser import coerce_attributes_dict
-from utils.catalog_size_rules import load_size_unit_patterns, parse_size_for_product, pattern_for_product
-from utils.nominal_size import parse_nominal_size_from_text, sanitize_product_size
+from utils.catalog_size_rules import load_size_unit_patterns, parse_size_for_product, pattern_for_product, snap_unit_to_pattern
+from utils.nominal_size import (
+    nominal_sizes_compatible,
+    parse_nominal_size_from_text,
+    sanitize_product_size,
+)
 from utils.product_extraction_sanitize import sanitize_product_against_evidence
 from apps.boq.services.extraction_attribute_fields import COMMON_ATTRIBUTE_LABELS
 from apps.boq.services.product_attribute_enrichment_service import (
@@ -820,6 +824,98 @@ def _slot_size_hint(slot: dict[str, Any]) -> str | None:
     return size
 
 
+def _slot_sizes_compatible(left: Any, right: Any) -> bool:
+    """True when two nominal sizes are the same (within 1 mm)."""
+    return nominal_sizes_compatible(left, right)
+
+
+def build_product_boq_context(
+    product: dict[str, Any],
+    *,
+    section_row: dict[str, Any] | None = None,
+    boq_data: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Resolve section + per-slot BOQ text for one extracted product."""
+    from apps.boq.services.boq_row_grouping_service import (
+        full_description_for_row,
+        single_row_description,
+    )
+
+    section_row = section_row or {}
+    row_id = str(section_row.get("row_id") or "").strip()
+    section_text = str(
+        section_row.get("description")
+        or section_row.get("full_description")
+        or ""
+    ).strip()
+    if not section_text and boq_data and row_id:
+        section_text = full_description_for_row(boq_data, row_id)
+
+    slot_id = str(
+        product.get("qty_row_id") or product.get("source_row_id") or ""
+    ).strip()
+
+    def _slot_line_only() -> str:
+        """Unit/Qty letter line only — never sibling sizes from full lineage."""
+        if not slot_id or not boq_data:
+            return ""
+        if slot_id == row_id:
+            return str(product.get("description_hint") or "").strip()
+        return single_row_description(boq_data, slot_id)
+
+    existing = product.get("_boq_row")
+    if isinstance(existing, dict):
+        ctx = dict(existing)
+        if not str(ctx.get("description") or "").strip() and section_text:
+            ctx["description"] = section_text
+        if not str(ctx.get("row_id") or "").strip() and row_id:
+            ctx["row_id"] = row_id
+        # Always prefer the single letter line when boq_data is available.
+        repaired = _slot_line_only()
+        if repaired:
+            ctx["slot_description"] = repaired
+        slot_desc = str(ctx.get("slot_description") or "").strip()
+        return ctx if slot_desc or section_text else None
+
+    slot_text = _slot_line_only()
+    if not section_text and not slot_text:
+        return None
+
+    return {
+        "row_id": row_id,
+        "description": section_text,
+        "slot_description": slot_text,
+        "serial": str(section_row.get("serial") or section_row.get("ser_no") or ""),
+    }
+
+
+def _authoritative_slot_size(
+    slot: dict[str, Any] | None,
+    *,
+    category: Any = None,
+    sub_category: Any = None,
+    pattern: dict[str, Any] | None = None,
+) -> tuple[str | None, str | None]:
+    """Size from the Unit/Qty row — overrides AI when letter sizes differ in one section."""
+    if not slot:
+        return None, None
+    slot_desc = str(slot.get("description") or "").strip()
+    parse_text = slot_desc or str(
+        slot.get("evidence_text") or slot.get("product_context") or ""
+    ).strip()
+    size, unit = parse_size_for_product(
+        parse_text,
+        category=category,
+        sub_category=sub_category,
+        pattern=pattern,
+        require_explicit_unit=True,
+    )
+    size_hint = _slot_size_hint(slot)
+    if size_hint and not size:
+        size = str(size_hint).strip()
+    return size, unit
+
+
 def refresh_product_from_boq_context(
     product: dict[str, Any],
     *,
@@ -862,8 +958,31 @@ def refresh_product_from_boq_context(
         size_patterns = load_size_unit_patterns(database_version_id)
     elif size_patterns is None:
         size_patterns = []
+
+    work = dict(product)
+    if slot_desc:
+        pattern = pattern_for_product(work, size_patterns)
+        auth_size, auth_unit = _authoritative_slot_size(
+            {"description": slot_desc},
+            category=work.get("category"),
+            sub_category=work.get("sub_category"),
+            pattern=pattern,
+        )
+        if auth_size:
+            current_size = work.get("size")
+            if _is_blank_value(current_size) or not _slot_sizes_compatible(
+                current_size, auth_size
+            ):
+                work["size"] = auth_size
+                if auth_unit:
+                    work["unit"] = snap_unit_to_pattern(auth_unit, pattern) or auth_unit
+                elif pattern:
+                    snapped = snap_unit_to_pattern(work.get("unit"), pattern)
+                    if snapped:
+                        work["unit"] = snapped
+
     item = sanitize_product_against_evidence(
-        dict(product),
+        work,
         product_context=product_context,
         slot_desc=slot_desc or product_context,
         evidence_text=evidence_text,
@@ -924,9 +1043,6 @@ def _apply_slot_evidence_fields(
         evidence = str(
             (slot or {}).get("evidence_text") or product_context or slot_desc or section_text
         ).strip()
-        size_hint = None
-        if slot:
-            size_hint = _slot_size_hint(slot)
 
         # PN / capacity from owning sentence first (not whole chapter dump).
         context_pn = _parse_pn_capacity(product_context) or _parse_pn_capacity(
@@ -942,20 +1058,25 @@ def _apply_slot_evidence_fields(
         )
 
         pattern = pattern_for_product(item, size_patterns)
-        parse_text = slot_desc or evidence or product_context
-        size_from_slot, unit_from_slot = parse_size_for_product(
-            parse_text,
+        size_from_slot, unit_from_slot = _authoritative_slot_size(
+            slot,
             category=item.get("category"),
             sub_category=item.get("sub_category"),
             pattern=pattern,
-            require_explicit_unit=True,
         )
-        if size_hint and not size_from_slot:
-            size_from_slot = str(size_hint).strip()
-        if size_from_slot and _is_blank_value(item.get("size")):
-            item["size"] = size_from_slot
-            if unit_from_slot:
-                item["unit"] = unit_from_slot
+        if size_from_slot:
+            current_size = item.get("size")
+            # AI often copies the first letter size (e.g. 80) onto later slots (150).
+            if _is_blank_value(current_size) or not _slot_sizes_compatible(
+                current_size, size_from_slot
+            ):
+                item["size"] = size_from_slot
+                if unit_from_slot:
+                    item["unit"] = snap_unit_to_pattern(unit_from_slot, pattern) or unit_from_slot
+                elif pattern:
+                    snapped = snap_unit_to_pattern(item.get("unit"), pattern)
+                    if snapped:
+                        item["unit"] = snapped
 
         item = sanitize_product_against_evidence(
             item,

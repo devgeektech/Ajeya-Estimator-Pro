@@ -39,5 +39,5 @@ def get_client():
             if getattr(settings, "OPENAI_TIMEOUT_SECONDS", None)
             else None
         ),
-        max_retries=int(getattr(settings, "OPENAI_MAX_RETRIES", 1)),
+        max_retries=int(getattr(settings, "OPENAI_MAX_RETRIES", 4)),
     )

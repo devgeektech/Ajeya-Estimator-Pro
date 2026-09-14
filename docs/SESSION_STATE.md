@@ -72,15 +72,19 @@ oldest row + `media/database/` workbook deleted.
 
 Keep only the latest entry below. Older work is in `docs/CHANGELOG.md`.
 
-### 2026-08-31 — Re-analyse fire hose box recall
+### 2026-09-14 — Slot size binding + TPM backoff
 
-Completed: Re-analyse recall keeps agreeing Sub_Category; enclosure lines no
-longer append full section text; Sub_Category conflict pairs for FIRE HOSE BOX;
-rematch on BOQ 131 r5 → Product 102 ~79%. IS:884 no longer lands in Size —
-sanitize refills ``20 mm bore`` for fire hose reel (~100% → Product 34).
-Pending: User Re-analyse affected rows (hose box, hose reel, landing valve).
-Issues: Stored analysis JSON still has pre-fix values until rematch/re-Analyse.
-Next: Restart Celery worker if not done; UAT hose reel + landing valve lines.
+Completed: TPM backoff (`ai/retry.py`), batch pacing, transient 429 retry. Slot
+evidence now overrides AI size when letter row disagrees (test14 butterfly
+150 mm was stuck at 80 mm → Product 48).
+### 2026-09-14 — Section 1.3 same product (mm vs nb)
+
+Completed: Root cause for sluice 1.3 — catalog ``nb`` wiped BOQ ``mm`` sizes,
+then refill from full section set every product to 80 mm / Product 43.
+``mm``↔``nb`` compatible; slot line refill; tests for 250 mm slot + nb pattern.
+Pending: Restart Celery; Re-Analyse BOQ w (id=135) section 1.3.
+Issues: Celery worker from 14:07 had not loaded prior slot-line fix either.
+Next: Restart worker, re-analyse, confirm 250/200/150/100/80 distinct matches.
 
 
 

@@ -5,6 +5,44 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
+## 2026-09-14 — Section 1.3 same-product: mm vs nb unit wipe
+
+- Catalog Unit ``nb`` was clearing BOQ ``mm dia`` sizes during sanitize; refill
+  then parsed the full section and set every sluice/butterfly Size to 80.
+- ``mm``/``nb`` treated as equivalent; slot letter line preferred for refill;
+  Size snaps to catalog unit label after reconcile.
+
+## 2026-09-14 — Slot line only for Size (not full section lineage)
+
+- Matching refresh used ``full_description_for_row`` for letter slots, which
+  concatenates sibling sizes (150/100/80/65). Size parsers then picked 80 for
+  every product and filled Analysis inputs with the same wrong Size/DB match.
+- Slot context now uses ``single_row_description`` (e.g. ``a) 150 mm dia`` only).
+
+## 2026-09-14 — Per-slot size + matching context (multi-size sections)
+
+- Lettered Unit/Qty rows (a) 150 mm, c) 80 mm) bind Size from the slot line
+  even when AI copied an earlier slot’s size; sanitization and rematch refresh
+  reconcile Size from `slot_description`, not the whole section.
+- `map_rows` / Re-analyse now resolve each product’s slot line from `qty_row_id`
+  + `boq_data` instead of passing the full section as slot context (which made
+  every product match the same 80 mm butterfly valve).
+
+## 2026-09-14 — Slot size overrides wrong AI copy in multi-size sections
+
+- Lettered Unit/Qty rows (a) 150 mm, c) 80 mm) now bind Size from the slot
+  line even when AI already filled a different size copied from an earlier slot.
+- Fixes butterfly/sluice valve sections matching every product at 80 mm.
+
+## 2026-09-14 — Analyse TPM backoff (not just smaller batches)
+
+- Defaults: extract/map batch **4**, parallelism **1**, pacing **2.5s** between
+  sequential extract batches, `OPENAI_RETRY_MAX_ATTEMPTS=8`.
+- Transient TPM 429s (OpenAI “try again in …ms/s”) now **back off and retry**
+  instead of failing the whole Analyse job; only empty credits/quota stay fatal.
+- EC2 `/srv/boq_ai/.env` throttle knobs applied; **restart Celery** after `.env`
+  changes so workers pick up new settings.
+
 ## 2026-08-31 — IS standard no longer used as Size
 
 - After clearing invalid sizes (e.g. ``884`` from ``IS:884``), evidence sanitization

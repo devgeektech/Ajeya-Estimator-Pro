@@ -42,7 +42,14 @@ logger = logging.getLogger("boq_ai")
 
 
 def _extract_parallelism() -> int:
-    return max(1, int(getattr(settings, "AI_EXTRACT_PARALLELISM", 4) or 4))
+    return max(1, int(getattr(settings, "AI_EXTRACT_PARALLELISM", 1) or 1))
+
+
+def _extract_pacing_seconds() -> float:
+    return max(
+        0.0,
+        float(getattr(settings, "AI_EXTRACT_PACING_SECONDS", 2.5) or 0.0),
+    )
 
 _MINIMUM_SLOT_RETRY_INSTRUCTION = """
 
@@ -174,10 +181,13 @@ class BOQExtractionService:
                 extract_total,
             )
 
+        pacing = _extract_pacing_seconds() if workers <= 1 else 0.0
         if workers <= 1 or len(batches) <= 1:
             for batch_index, batch in enumerate(batches, start=1):
                 batch_groups, rows = _run_one_batch(batch_index, batch)
                 _absorb_batch_result(batch_groups, rows)
+                if pacing and batch_index < len(batches):
+                    time.sleep(pacing)
         else:
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 futures = [
