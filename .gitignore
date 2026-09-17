@@ -24,6 +24,8 @@ db.sqlite3-journal
 
 # Environment — keep .env.example tracked, ignore the real secrets file
 .env
+# SSH / TLS private keys — never commit
+*.pem
 
 # Media / generated files
 /media/
