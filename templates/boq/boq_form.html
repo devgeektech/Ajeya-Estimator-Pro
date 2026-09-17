@@ -82,6 +82,9 @@
     const nameInput = form.querySelector('[name="boq_name"]');
     let uploading = form.dataset.initialBusy === '1';
     let pollTimer = null;
+    // Ignore leftover succeeded/failed from a prior upload (must be this session).
+    let uploadSessionStartedAt = uploading ? (Date.now() / 1000) : 0;
+    let sawProcessingThisSession = uploading;
 
     function setBusyUi(busy, message) {
         uploading = !!busy;
@@ -99,6 +102,14 @@
         }
     }
 
+    function isStatusForThisSession(data) {
+        const finished = Number(data.finished_at || data.updated_at || 0);
+        if (sawProcessingThisSession) return true;
+        if (!uploadSessionStartedAt) return false;
+        // Allow 2s clock skew between browser and server.
+        return finished >= (uploadSessionStartedAt - 2);
+    }
+
     async function pollUploadStatus() {
         if (!statusUrl) return;
         try {
@@ -111,21 +122,27 @@
             const busy = !!data.busy || data.status === 'processing';
             const wasBusy = uploading;
             if (busy) {
+                sawProcessingThisSession = true;
                 setBusyUi(true, data.message || '');
                 startPolling();
                 return;
             }
             stopPolling();
-            if (wasBusy && data.status === 'succeeded') {
+            if (wasBusy && data.status === 'succeeded' && isStatusForThisSession(data)) {
                 setStatus('Upload complete. Opening BOQs…');
                 window.location.replace(listUrl);
                 return;
             }
-            if (wasBusy) {
+            if (wasBusy && data.status === 'failed' && isStatusForThisSession(data)) {
                 setBusyUi(false);
                 if (data.message) {
                     showErrors({ __all__: [data.message] }, data.message);
                 }
+                return;
+            }
+            // Stale terminal status from a previous upload — keep waiting on fetch().
+            if (wasBusy && (data.status === 'succeeded' || data.status === 'failed')) {
+                startPolling();
             }
         } catch (_err) { /* keep last known */ }
     }
@@ -249,6 +266,8 @@
             return;
         }
 
+        uploadSessionStartedAt = Date.now() / 1000;
+        sawProcessingThisSession = false;
         setBusyUi(true);
         startPolling();
 

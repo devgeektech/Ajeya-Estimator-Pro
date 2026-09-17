@@ -68,6 +68,12 @@ _CONFLICTING_PHRASE_PAIRS: tuple[tuple[str, str], ...] = (
     ("ball valve", "pipe"),
     ("non return valve", "pipe"),
     ("check valve", "pipe"),
+    ("sprinkler", "pipe"),
+    ("hydrant", "gi pipe"),
+    ("hydrant", "ms pipe"),
+    ("hose box", "pipe"),
+    ("hose reel", "pipe"),
+    ("extinguisher", "pipe"),
 )
 # Exact Sub_Category pairs that must never cross-match (substring-safe).
 _SUB_CATEGORY_CONFLICTS: frozenset[frozenset[str]] = frozenset(
@@ -391,10 +397,10 @@ def structured_match_score(
 ) -> tuple[float, dict[str, Any]]:
     """Return 0-100 structured score using product fields only (never make/vendor).
 
-    Core field weights stay in the denominator even when the extract leaves a
-    field blank. Otherwise size+unit alone normalize to 100% for every same-size
-    neighbor (including unrelated categories). Blank category/sub still get
-    partial credit when ``description_hint`` clearly names the catalog label.
+    Only **filled extract fields** (and attributes the AI/expert found) count in
+    the denominator — blank inputs are not treated as mismatches. Thin identity
+    (only size/unit, no category/sub/hint) is capped so same-size unrelated
+    neighbors cannot reach 100%.
     """
     extracted_attrs = {
         str(key): str(value)
@@ -433,6 +439,7 @@ def structured_match_score(
     weighted_score = 0.0
     weight_total = 0.0
     hint = extracted.get("description_hint")
+    filled_core_names: set[str] = set()
 
     for name, left, right, scorer in field_checks:
         weight = _TEXT_WEIGHTS[name]
@@ -446,20 +453,30 @@ def structured_match_score(
         # Catalog Capacity=0 is a sentinel — do not score extract capacity against it.
         if name == "capacity" and not _is_filled(right):
             continue
-        weight_total += weight
         if not _is_filled(left):
-            # Sparse extracts (slot fallback): let description vouch for cat/sub.
+            # Unfound extract field: do not count as a miss. Optional hint credit
+            # for category/sub when the AI Description names the catalog label.
             if name == "category":
-                hint_points = _hint_category_score(hint, right) * weight
-                breakdown[name] = hint_points
-                weighted_score += hint_points
+                hint_ratio = _hint_category_score(hint, right)
+                if hint_ratio > 0:
+                    weight_total += weight
+                    hint_points = hint_ratio * weight
+                    breakdown[name] = hint_points
+                    weighted_score += hint_points
+                    filled_core_names.add(name)
             elif name == "sub_category":
-                hint_points = _hint_field_score(hint, right) * weight
-                breakdown[name] = hint_points
-                weighted_score += hint_points
+                hint_ratio = _hint_field_score(hint, right)
+                if hint_ratio > 0:
+                    weight_total += weight
+                    hint_points = hint_ratio * weight
+                    breakdown[name] = hint_points
+                    weighted_score += hint_points
+                    filled_core_names.add(name)
             else:
-                breakdown[name] = 0.0
+                breakdown[name] = None  # omitted — not found in BOQ/extract
             continue
+        weight_total += weight
+        filled_core_names.add(name)
         points = scorer(left, right) * weight
         breakdown[name] = points
         weighted_score += points
@@ -476,6 +493,15 @@ def structured_match_score(
         return 0.0, breakdown
 
     total = (weighted_score / weight_total) * 100.0
+
+    # Thin identity: only size/unit (no family) must not look like a full match.
+    identity_keys = {"category", "sub_category"}
+    has_family = bool(identity_keys & filled_core_names) or bool(
+        _significant_type_tokens(hint)
+    )
+    if not has_family and filled_core_names and filled_core_names <= {"size", "unit", "capacity"}:
+        total = min(total, 55.0)
+        breakdown["thin_identity_cap"] = 55.0
 
     # Hard size gate: only when both sides have a real nominal size.
     if (

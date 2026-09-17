@@ -34,13 +34,25 @@ def touch_celery_worker_heartbeat(*, hostname: str = "") -> None:
         "hostname": str(hostname or "").strip(),
         "pid": os.getpid(),
     }
+    text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(f".{os.getpid()}.tmp")
     try:
-        tmp.write_text(
-            json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
-            encoding="utf-8",
-        )
+        tmp.write_text(text, encoding="utf-8")
         os.replace(tmp, path)
+    except FileNotFoundError:
+        # job_progress can disappear briefly under concurrent cleanups — recreate.
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            tmp.write_text(text, encoding="utf-8")
+            os.replace(tmp, path)
+        except Exception:
+            logger.exception("Failed writing Celery worker heartbeat")
+            try:
+                if tmp.is_file():
+                    tmp.unlink()
+            except OSError:
+                pass
     except Exception:
         logger.exception("Failed writing Celery worker heartbeat")
         try:

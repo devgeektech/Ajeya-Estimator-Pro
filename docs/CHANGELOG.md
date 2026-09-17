@@ -5,6 +5,28 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
+## 2026-09-17 — Rematch: fair % + empty unfound inputs + slot-led recall
+
+- Match confidence scores **filled** extract/expert fields only (blank inputs
+  no longer dilute to ~40–50%); size+unit-only identity capped at 55%.
+- Analyse / Re-analyse leave Class/Size/Unit/Capacity/Attributes **empty** when
+  AI did not find them; expert **Select** still loads Rate_Master into the UI.
+- Rematch Chroma recall prefers AI Description + filled inputs + qty **slot**
+  line; full section text is used only when identity is empty (stops PIPE
+  chapter pollution). Rematch auto-accept floor = 30%; 100% freeze only on Confirm.
+
+## 2026-09-17 — BOQ upload: ignore stale succeeded status
+
+- Leftover `media/job_progress/boq_upload_status_*.json` with ``succeeded``
+  could make the upload page redirect to the BOQs list as if the new upload
+  finished, without a POST (seen on EC2 after deletes left an empty list).
+- Upload/list GET clears terminal succeeded/failed; form poll only treats
+  succeeded/failed as done for the current click session.
+- Self-heal (no manual file cleanup): terminal status expires to idle after
+  90s; stuck ``processing`` fails after 5 minutes; job_progress JSON writes
+  recreate the directory and retry on ``FileNotFoundError``; database import
+  status uses the same terminal TTL.
+
 ## 2026-09-14 — Section 1.3 same-product: mm vs nb unit wipe
 
 - Catalog Unit ``nb`` was clearing BOQ ``mm dia`` sizes during sanitize; refill

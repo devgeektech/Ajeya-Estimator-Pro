@@ -7,7 +7,6 @@ import re
 from typing import Any
 
 from ai.context import (
-    align_product_taxonomy_from_db_labels,
     align_product_taxonomy_from_rate,
 )
 from ai.service import AIService
@@ -293,8 +292,8 @@ class ProductAIApplyMixin:
                 top_structured = float(top.get("confidence") or 0.0)
             except (TypeError, ValueError):
                 top_structured = 0.0
-            # Rematch: accept nearest filled-field match more readily (≥20).
-            auto_floor = 20.0 if rematch else float(MATCH_CONFIDENCE_THRESHOLD)
+            # Rematch: same floor as Analyse — weak neighbors must not auto-win.
+            auto_floor = float(MATCH_CONFIDENCE_THRESHOLD)
             if top_structured >= auto_floor:
                 selected_id = int(top["id"])
             else:
@@ -372,13 +371,15 @@ class ProductAIApplyMixin:
             for key, value in mapped_attributes.items()
             if normalize_attribute_key(str(key)) in schema_set and _is_filled(value)
         }
-        # Rematch keeps expert-filled values; only fill blanks from Rate_Master.
+        # Rematch / Analyse: keep expert/extract attribute values only — leave
+        # unfound schema keys empty for the expert to fill before rematch.
         # Candidate Select still prefers DB values via apply_selected_candidate.
         attributes = _schema_attributes_from_rate(
             schema_keys=schema_keys,
             rate_attrs=parse_attributes(rate.Attribute),
             existing_attrs=attributes,
             prefer_rate=False,
+            fill_blanks_from_rate=False,
         )
         confidence = _compute_match_confidence(
             enriched,
@@ -463,12 +464,13 @@ class ProductAIApplyMixin:
             "selection_source": "rematch" if rematch else "ai",
         }
         # Analysis UI keeps BOQ-extracted identity (Category/Sub/Class/Size/…).
-        # Match % compares extract vs Rate_Master — never overwrite core fields
-        # from the matched row on Analyse (expert Select candidate still can).
+        # Match % compares extract vs Rate_Master — never fill blanks from catalog
+        # on Analyse (expert Select candidate still overwrites).
         aligned = align_product_taxonomy_from_rate(
             enriched,
             rate,
             overwrite_core_fields=False,
+            fill_blanks=False,
         )
         if rematch:
             aligned = _restore_expert_identity(aligned, product)
@@ -542,7 +544,12 @@ class ProductAIApplyMixin:
             )
         }
         product_only = dict(score_against or product)
-        product_only["description_hint"] = product.get("description_hint")
+        # Prefer the expert/extract hint used for scoring — not a section-polluted
+        # description rewritten during rematch recall.
+        if isinstance(score_against, dict) and _is_filled(score_against.get("description_hint")):
+            product_only["description_hint"] = score_against.get("description_hint")
+        else:
+            product_only["description_hint"] = product.get("description_hint")
         product_only["make_hint"] = None
         selected_id = product.get("db_product_id") or product.get("suggested_db_product_id")
         refreshed: list[dict[str, Any]] = []
@@ -608,8 +615,12 @@ class ProductAIApplyMixin:
                 prior = float(product.get("db_match_confidence") or 0.0)
             except (TypeError, ValueError):
                 prior = 0.0
-            # Do not drag a just-filled Analyse / Confirm score back down.
-            if prior >= 99.5 and confidence < prior:
+            # Only expert Confirm may freeze 100% — never lock a polluted rematch.
+            if (
+                selection_source == "expert_confirm"
+                and prior >= 99.5
+                and confidence < prior
+            ):
                 confidence = prior
             try:
                 selected_pk = int(selected_id)
@@ -688,7 +699,7 @@ class ProductAIApplyMixin:
             "match_status": DB_MATCH_PROVISIONAL,
         }
         aligned = align_product_taxonomy_from_rate(
-            enriched, rate, overwrite_core_fields=False
+            enriched, rate, overwrite_core_fields=False, fill_blanks=False
         )
         if blank_weak_inputs and _should_blank_weak_match_inputs(
             aligned, confidence=confidence, rematch=False
@@ -773,7 +784,7 @@ class ProductAIApplyMixin:
         rematch: bool,
     ) -> int | None:
         """Keep the first Rate row that does not fight AI Description identity."""
-        auto_floor = 20.0 if rematch else float(MATCH_CONFIDENCE_THRESHOLD)
+        auto_floor = float(MATCH_CONFIDENCE_THRESHOLD)
 
         def _acceptable(rate_id: int | None) -> int | None:
             if rate_id is None:
@@ -914,13 +925,8 @@ class ProductAIApplyMixin:
             "candidate_ids": [item.get("id") for item in candidates],
             "match_status": DB_MATCH_PROVISIONAL,
         }
-        top = candidates[0] if candidates else {}
-        return align_product_taxonomy_from_db_labels(
-            enriched,
-            category=top.get("category"),
-            sub_category=top.get("sub_category"),
-            fill_blanks_only=True,
-        )
+        # Keep extract identity; do not invent Category/Sub from a weak neighbor.
+        return enriched
 
 
     def _attach_catalog_product_id(self, product: dict[str, Any]) -> dict[str, Any]:

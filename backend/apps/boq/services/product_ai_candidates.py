@@ -50,16 +50,28 @@ def _append_section_to_recall_hint(
     hint: str,
     section_text: str,
     sub_category: Any,
+    prefer_slot: bool = False,
 ) -> str:
-    """Append BOQ section as supporting context unless it would pollute recall."""
+    """Append BOQ evidence as supporting context unless it would pollute recall.
+
+    Full section text often names chapter pipework and can steer Chroma to PIPE
+    when rematching a valve/hydrant product. Prefer the qty/unit slot line when
+    ``prefer_slot`` is set (Re-analyse with filled identity).
+    """
     from utils.catalog_size_rules import _NO_NOMINAL_SIZE_SUBS
 
     sub = str(sub_category or "").strip().upper()
     if sub in _NO_NOMINAL_SIZE_SUBS:
         return hint
-    if section_text and section_text.lower() not in hint.lower():
-        return f"{hint}\n{section_text[:400]}".strip()
-    return hint
+    support = (section_text or "").strip()
+    if not support:
+        return hint
+    # Cap supporting context tightly so chapter titles do not dominate.
+    max_len = 180 if prefer_slot else 280
+    support = support[:max_len]
+    if support.lower() in hint.lower():
+        return hint
+    return f"{hint}\n{support}".strip()
 
 
 def _recall_identity_blank(product: dict[str, Any]) -> bool:
@@ -90,10 +102,15 @@ class ProductAICandidatesMixin:
     ) -> dict[str, Any]:
         """Build Chroma/SQL query input aligned with product Re-analyse.
 
-        AI Description leads recall. Category/Sub are dropped when the hint has
-        product identity so a wrong extract taxonomy (e.g. PIPE for a valve) does
-        not steer Chroma/SQL. Full section text is secondary evidence (capped),
-        same as Re-analyse — not a replacement for the purchasable product line.
+        Recall order (most specific first):
+        1. AI Description (``description_hint``)
+        2. Expert-filled Category / Sub / Class / Size / Unit / Capacity / attrs
+        3. Qty/unit slot line (preferred over full section on rematch)
+        4. Full BOQ section only when identity is empty (section-first rematch)
+
+        Category/Sub are dropped when the hint has product identity that
+        disagrees with them so a wrong extract taxonomy (e.g. PIPE for a valve)
+        does not steer Chroma/SQL.
         """
         product_for_recall = dict(product)
         product_for_recall["make_hint"] = None
@@ -112,6 +129,10 @@ class ProductAICandidatesMixin:
         section_text = str(boq_row.get("description") or "").strip()
         slot_line = str(boq_row.get("slot_description") or "").strip()
         hint = str(product_for_recall.get("description_hint") or "").strip()
+        has_structured_identity = any(
+            _is_filled(product_for_recall.get(key))
+            for key in ("category", "sub_category", "class", "size", "capacity")
+        )
 
         # Empty Re-analyse: section is the only identity — send it into recall.
         if refine and _recall_identity_blank(product_for_recall) and section_text:
@@ -135,10 +156,19 @@ class ProductAICandidatesMixin:
                 product_for_recall.pop("category", None)
                 product_for_recall.pop("sub_category", None)
                 kept_sub = None
+            # Rematch with filled inputs: slot line only — full section pollutes
+            # (pipe chapter text → PIPE neighbors at high %).
+            if refine and (has_structured_identity or hint):
+                support = slot_line or ""
+                prefer_slot = True
+            else:
+                support = slot_line or section_text
+                prefer_slot = bool(slot_line)
             product_for_recall["description_hint"] = _append_section_to_recall_hint(
                 hint=hint,
-                section_text=section_text,
+                section_text=support,
                 sub_category=kept_sub,
+                prefer_slot=prefer_slot,
             )
             return product_for_recall
 

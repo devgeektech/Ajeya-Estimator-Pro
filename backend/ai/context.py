@@ -467,14 +467,15 @@ def fill_product_core_fields_from_rate(
     rate: Rate_Master_Output,
     *,
     overwrite: bool = False,
+    fill_blanks: bool = True,
 ) -> dict[str, Any]:
     """
     Copy core Rate_Master_Output identity fields onto the extracted product.
 
-    Analysis owns product identity (not make). Blank fields are always filled.
-    When ``overwrite`` is True (confirmed DB match), replace AI values that
-    disagree with the matched Rate_Master_Output row so experts need not Re-analyse
-    only to pick up DB class/size/unit/capacity.
+    ``overwrite=True`` (expert Select): replace AI values with the matched row.
+    ``fill_blanks=True``: fill empty Class/Size/Unit/Capacity from the rate row.
+    Analyse / Re-analyse pass ``fill_blanks=False`` so unfound extract fields stay
+    empty for the expert to complete before rematch.
     """
     item = dict(product)
 
@@ -502,7 +503,9 @@ def fill_product_core_fields_from_rate(
         value = _as_text(raw)
         if not value:
             continue
-        if overwrite or _is_blank(item.get(field)):
+        if overwrite:
+            item[field] = value
+        elif fill_blanks and _is_blank(item.get(field)):
             item[field] = value
     # Make selection belongs to Make & Vendor — clear analysis make hints.
     item["make_hint"] = None
@@ -515,24 +518,52 @@ def align_product_taxonomy_from_rate(
     *,
     taxonomy: dict[str, Any] | None = None,
     overwrite_core_fields: bool = False,
+    fill_blanks: bool | None = None,
 ) -> dict[str, Any]:
     """Set product taxonomy and core fields from a Rate_Master_Output row.
 
-    When ``overwrite_core_fields`` is False (Analyse default), only blank
-    Category/Sub/Class/Size/Unit/Capacity are filled — BOQ extract identity stays.
+    Analyse / Re-analyse: ``overwrite_core_fields=False`` and ``fill_blanks=False``
+    — keep BOQ-extracted values; leave unfound inputs empty.
+    Expert Select: ``overwrite_core_fields=True`` — show the chosen catalog row.
     """
-    item = align_product_taxonomy_from_db_labels(
-        product,
-        category=rate.Category,
-        sub_category=rate.Sub_Category,
-        taxonomy=taxonomy,
-        fill_blanks_only=not overwrite_core_fields,
-    )
-    return fill_product_core_fields_from_rate(
-        item,
-        rate,
-        overwrite=overwrite_core_fields,
-    )
+    if fill_blanks is None:
+        # Back-compat: overwrite implies fill; Analyse default fills blanks unless
+        # callers opt out (product AI apply always passes fill_blanks=False now).
+        fill_blanks = True
+    if overwrite_core_fields:
+        item = align_product_taxonomy_from_db_labels(
+            product,
+            category=rate.Category,
+            sub_category=rate.Sub_Category,
+            taxonomy=taxonomy,
+            fill_blanks_only=False,
+        )
+        return fill_product_core_fields_from_rate(
+            item,
+            rate,
+            overwrite=True,
+            fill_blanks=True,
+        )
+    if fill_blanks:
+        item = align_product_taxonomy_from_db_labels(
+            product,
+            category=rate.Category,
+            sub_category=rate.Sub_Category,
+            taxonomy=taxonomy,
+            fill_blanks_only=True,
+        )
+        return fill_product_core_fields_from_rate(
+            item,
+            rate,
+            overwrite=False,
+            fill_blanks=True,
+        )
+    # Keep extract identity as-is (snap only when caller supplies taxonomy).
+    item = dict(product)
+    if taxonomy is not None:
+        item = snap_product_taxonomy(item, taxonomy)
+    item["make_hint"] = None
+    return item
 
 
 def build_database_context() -> str:

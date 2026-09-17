@@ -38,10 +38,11 @@ oldest row + `media/database/` workbook deleted.
 | Sections | Serial-lineage groups with qty **slots**; empty slots show Add + Re-analyse |
 | Analysis | Product tabs in **BOQ slot order**; match %; multi-product review **only** when product count ≠ Unit/Qty slot count |
 | Matching | Chroma = Product_Helper only (AI validates top **5**; UI shows top **3**); Product_ID → Rate_Master / Labour from Postgres |
-| Candidates UI | Summary = **Product ID** / Category / Sub / Class / Size / Unit / Capacity; open on unmatched; weak banner only when effective % below 50; Category/Sub/Size/**Attributes** stay prefilled from extract when found |
-| Re-analyse | Saves expert UI inputs + **AI Description**; empty inputs use full section; edited description leads recall + section; real match % (not forced 100%) |
+| Candidates UI | Summary = **Product ID** / Category / Sub / Class / Size / Unit / Capacity; open on unmatched; weak banner only when effective % below 50; Category/Sub/Size/**Attributes** stay from extract when found (else empty) |
+| Re-analyse | Saves expert UI inputs + **AI Description**; recall = hint + filled inputs + slot line (full section only if identity empty); real match % (not forced 100%); unfound inputs stay empty |
 | Confirm | Sets match to **100%** when product is correct but % is lower (hidden at 100%) |
 | Select candidate | Prefills Rate_Master core fields + Attribute values into Analysis inputs; keeps that candidate's listed match % |
+| Matching score | Weighted filled extract fields vs catalog (Sub 30 / Cat 24 / Size 18 / …); blank inputs omitted; thin size+unit identity capped |
 | Make list map | **AI-first** multi-target (v11): understands free text; compound lines can map multiple category/sub pairs (e.g. sprinkler + rosette); null sub = category-wide makes; heuristics soft-only; auto remap on stale mapping version |
 | Make & Vendor | Product_ID → Rate_Master; AI Description + Rate/Product id; **Not available** / **Not listed** / **Not in Db**; Next confirms Labour promotion |
 | Labour | Unlock promotes Not listed/Not in Db → **Not available** (red); missing labour = orange **No labour**; complete → Review NA |
@@ -72,19 +73,18 @@ oldest row + `media/database/` workbook deleted.
 
 Keep only the latest entry below. Older work is in `docs/CHANGELOG.md`.
 
-### 2026-09-14 — Slot size binding + TPM backoff
+### 2026-09-17 — Rematch confidence + empty inputs
 
-Completed: TPM backoff (`ai/retry.py`), batch pacing, transient 429 retry. Slot
-evidence now overrides AI size when letter row disagrees (test14 butterfly
-150 mm was stuck at 80 mm → Product 48).
-### 2026-09-14 — Section 1.3 same product (mm vs nb)
+Completed: Match % uses filled extract fields only (blank inputs omitted;
+size+unit-only capped). Analyse/Rematch no longer fill empty Class/Size/Unit/
+Capacity/Attributes from Rate_Master — Select still does. Rematch recall =
+AI Description + expert inputs + slot line (not full pipe chapter section);
+auto-accept floor back to 30%; stop freezing 100% except Confirm. Tests added.
+Pending: Restart Celery; Re-analyse section 4.10 on a BOQ to verify. Commit/push
+when asked (includes prior upload self-heal hot-patch).
+Issues: None.
+Next: User validates 4.10 initial Analyse % and Re-analyse keeps correct product.
 
-Completed: Root cause for sluice 1.3 — catalog ``nb`` wiped BOQ ``mm`` sizes,
-then refill from full section set every product to 80 mm / Product 43.
-``mm``↔``nb`` compatible; slot line refill; tests for 250 mm slot + nb pattern.
-Pending: Restart Celery; Re-Analyse BOQ w (id=135) section 1.3.
-Issues: Celery worker from 14:07 had not loaded prior slot-line fix either.
-Next: Restart worker, re-analyse, confirm 250/200/150/100/80 distinct matches.
 
 
 

@@ -156,13 +156,15 @@ def _schema_attributes_from_rate(
     rate_attrs: dict[str, Any],
     existing_attrs: dict[str, Any] | None = None,
     prefer_rate: bool = False,
+    fill_blanks_from_rate: bool = True,
 ) -> dict[str, str]:
     """
     Build Analysis attribute inputs for a Rate_Master Attribute schema.
 
     ``prefer_rate=True`` (expert candidate select): show the selected DB product's
-    values first so Category/attrs match the chosen row. Otherwise keep filled BOQ
-    values and only fill blanks from Rate_Master.
+    values first so Category/attrs match the chosen row.
+    Analyse / Re-analyse keep filled BOQ values and leave unfound keys empty
+    (``fill_blanks_from_rate=False``) so experts can type missing evidence then rematch.
     """
     rate_on_schema = merge_attributes_onto_schema(
         schema_keys=schema_keys,
@@ -183,7 +185,7 @@ def _schema_attributes_from_rate(
                 attributes[key] = str(existing_value).strip()
         elif _is_filled(existing_value):
             attributes[key] = str(existing_value).strip()
-        elif _is_filled(rate_value):
+        elif fill_blanks_from_rate and _is_filled(rate_value):
             attributes[key] = str(rate_value).strip()
     return attributes
 
