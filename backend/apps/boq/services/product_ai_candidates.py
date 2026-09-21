@@ -152,7 +152,7 @@ class ProductAICandidatesMixin:
         if hint_led:
             product_for_recall["_hint_first_recall"] = True
             kept_sub = product_for_recall.get("sub_category")
-            if not _hint_agrees_with_sub(hint, kept_sub):
+            if not refine and kept_sub and not _hint_agrees_with_sub(hint, kept_sub):
                 product_for_recall.pop("category", None)
                 product_for_recall.pop("sub_category", None)
                 kept_sub = None
@@ -277,8 +277,22 @@ class ProductAICandidatesMixin:
             score, _breakdown = structured_match_score(product_only, rate)
             _append(_candidate_snapshot(rate, confidence=round(float(score), 2)))
 
+        from apps.boq.services.product_matching_service import product_type_conflicts
+
+        def _is_mismatch(item: dict[str, Any]) -> int:
+            raw_id = item.get("id")
+            if raw_id is not None:
+                try:
+                    rid = int(raw_id)
+                    if rid in rate_map:
+                        return 1 if product_type_conflicts(product_only, rate_map[rid]) else 0
+                except (TypeError, ValueError):
+                    pass
+            return 1 if item.get("type_mismatch") else 0
+
         merged.sort(
             key=lambda item: (
+                _is_mismatch(item),
                 -_confidence_value(item.get("confidence")),
                 int(item.get("id") or 0),
             ),

@@ -9,6 +9,35 @@ GLOBAL RULE — null when uncertain:
   suffixes, or unrelated boilerplate — set that field to **null**.
 - Never copy random numbers or words from the description into structured fields.
 
+CRITICAL TAXONOMY TABLE (highest priority — always check this before classifying):
+DATABASE_CONTEXT contains ``product_noun_taxonomy_hints``. Each entry maps BOQ nouns
+to an exact Category/Sub_Category pair. When the BOQ product noun matches any entry,
+use that Category/Sub_Category **exactly** — material keywords (stainless steel,
+cast iron, MS, GI) describe the Class or material attribute, NOT the product type.
+
+Key mappings to memorize:
+- ``landing valve`` / ``hydrant landing valve`` / ``stainless steel landing valve``
+  → HYDRANT / LANDING VALVE  (NEVER PIPE — stainless steel is the material, not category)
+- ``external hydrant`` / ``pillar hydrant`` → HYDRANT / EXTERNAL HYDRANT
+- ``branch pipe`` / ``fire branch pipe`` → HYDRANT / BRANCH PIPE
+- ``fire hose reel`` / ``hose reel`` → HYDRANT / FIRE HOSE REEL
+- ``fire hose`` / ``delivery hose`` / ``rrl hose`` → HYDRANT / FIRE HOSE
+- ``fire hose box`` / ``hose box`` / ``hose cabinet`` → HYDRANT / FIRE HOSE BOX
+- ``sluice valve`` / ``gate valve`` → VALVE / SLUICE VALVE
+- ``butterfly valve`` / ``bfv`` → VALVE / BUTTERFLY
+- ``non return valve`` / ``nrv`` / ``reflux valve`` / ``reflux type check valve``
+  / ``flanged end reflux type check valve`` → VALVE / NON RETURN VALVE
+- ``ball valve`` → VALVE / BALL VALVE
+- ``air release valve`` / ``arv`` → VALVE / AIR RELEASE VALVE
+- ``y strainer`` → VALVE / Y STRAINER
+- ``ms pipe`` / ``m.s. pipe`` → PIPE / MS  (only actual pipe, not valves connected to a pipeline)
+- ``gi pipe`` / ``g.i. pipe`` → PIPE / GI
+- ``pendant sprinkler`` / ``pendent sprinkler`` → SPRINKLER / PENDANT
+- ``upright sprinkler`` → SPRINKLER / UPRIGHT
+- ``pressure gauge`` → INSTRUMENT / PRESSURE GAUGE
+- ``jockey pump`` → PUMP / JOCKEY PUMP
+- ``air cushion tank`` / ``air vessel`` / ``plain air vessel`` → TANK / AIR CUSHION TANK
+
 STEP 1 — UNDERSTAND THE SECTION (read everything before extracting):
 - Read ``description`` / ``lineage_lines`` / ``slots[].product_context`` first.
   Decide WHAT is being purchased (pipe, valve, sprinkler head, pump, …).
@@ -22,6 +51,15 @@ STEP 1 — UNDERSTAND THE SECTION (read everything before extracting):
     → PIPE / GI (never PIPE / EXTERNAL HYDRANT — that pair is invalid)
   - ``pipework for Sprinkler System`` + ``g) 65 mm dia pipe`` → PIPE (not SPRINKLER)
   - ``Cast Iron sluice valve`` + ``a) 250 mm dia`` → VALVE / SLUICE VALVE (not PIPE)
+  - ``Stainless Steel landing valve`` + ``a) 80 mm dia`` → HYDRANT / LANDING VALVE
+    (stainless steel = Class/material; landing valve = product type = HYDRANT sub)
+  - ``Cast iron butterfly valve as per IS:13095`` + ``65 mm dia``
+    → VALVE / BUTTERFLY  (not PIPE — butterfly is a valve subtype)
+  - ``flanged end reflux type check valve`` + ``65 mm dia``
+    → VALVE / NON RETURN VALVE  (reflux/check/reflex valve = non return valve)
+  - ``fire hose reel`` → HYDRANT / FIRE HOSE REEL  (not PIPE — hose reel is HYDRANT equipment)
+  - ``branch pipe with nozzle`` → HYDRANT / BRANCH PIPE  (not PIPE/MS — branch pipe is HYDRANT)
+  - ``sand bucket set`` → HYDRANT / SAND BUCKET SET
 - Size-only slots inherit the product from ``product_context``.
 - **Main product only:** when a line buys an enclosure/cabinet/box (fire hose box,
   hose reel drum, panel), phrases like ``to accommodate branch pipes / delivery
@@ -39,9 +77,10 @@ Job/LS/testing/commissioning/documentation lines.
 STEP 3 — EXTRACT (identity first, then specs):
 
 Priority order for every product:
-1. **Category + Sub_Category** (highest weight) — map BOQ meaning onto exact
-   ``valid_category_and_subcategory_pairs`` in DATABASE_CONTEXT. Sub_Category is
-   nearest to the product name (MS, GI, SLUICE VALVE, PENDANT, …).
+1. **Category + Sub_Category** (highest weight) — check ``product_noun_taxonomy_hints``
+   in DATABASE_CONTEXT first. If the product noun matches, use that pair EXACTLY.
+   Then cross-check against ``valid_category_and_subcategory_pairs``.
+   Sub_Category is nearest to the product name (MS, GI, SLUICE VALVE, PENDANT, …).
    ONLY use pairs listed in DATABASE_CONTEXT. Never invent cross pairs such as
    PIPE + EXTERNAL HYDRANT (EXTERNAL HYDRANT belongs under HYDRANT only).
    System titles are not Sub_Category.
@@ -79,6 +118,9 @@ Binding:
 - Good: ``class C MS pipe (PIPE), 65 mm dia``
 - Good: ``SYNTHETIC (RRL) fire hose (HYDRANT / FIRE HOSE), 15 m length, 63 mm dia coupling``
 - Good: ``external fire hose box (HYDRANT / FIRE HOSE BOX), capacity 30X24X10 inch``
+- Good: ``stainless steel landing valve (HYDRANT / LANDING VALVE), 80 mm dia``
+- Good: ``cast iron butterfly valve (VALVE / BUTTERFLY), 65 mm dia, PN16``
+- Good: ``flanged end reflux type check valve (VALVE / NON RETURN VALVE), 65 mm dia``
 - Bad: ``65mm dia SPRINKLER`` (system title, not the pipe being bought)
 - Bad: ``200mm`` or size-only / chapter-title-only text
 - Prefer purchasable naming from ``product_context`` over BOQ boilerplate

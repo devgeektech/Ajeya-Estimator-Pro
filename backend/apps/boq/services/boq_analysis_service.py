@@ -420,7 +420,7 @@ class BOQAnalysisService:
                 raise ValidationError("Wait for the current job to finish.")
 
             target = next(
-                (row for row in rows if str(row.get("row_id")) == str(row_id)),
+                (row for row in rows if str(row.get("row_id")) == row_id),
                 None,
             )
             if target is None:
@@ -689,7 +689,7 @@ class BOQAnalysisService:
         try:
             mapper = ProductAIMappingService(version_id)
             product_count = sum(len(row.get("products") or []) for row in rows)
-            product_count = max(int(product_count or 0), 1)
+            product_count = max(product_count, 1)
 
             def _on_first(done: int, total: int) -> None:
                 if not progress_callback:

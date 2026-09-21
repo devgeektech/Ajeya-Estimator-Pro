@@ -157,7 +157,7 @@ def nearest_structural_serial(
     When ``start_at_parent`` is True (default), skip the starting row itself so a
     lettered qty row like ``a)`` resolves to its section parent (``5.1``), not ``a)``.
     """
-    current_id = str(row_id or "").strip()
+    current_id = (row_id or "").strip()
     if not current_id:
         return ""
     start = rows_by_id.get(current_id)
@@ -178,10 +178,10 @@ def nearest_structural_serial(
 
 def export_serial_with_suffix(base_serial: str, occurrence_index: int, total_for_base: int) -> str:
     """Keep original serial; suffix (A)/(B)/(C) only when multiple products share it."""
-    base = str(base_serial or "").strip() or "—"
+    base = (base_serial or "").strip() or "—"
     if total_for_base <= 1:
         return base
-    letter = chr(ord("A") + max(0, int(occurrence_index)))
+    letter = chr(ord("A") + max(0, occurrence_index))
     return f"{base}({letter})"
 
 
@@ -405,7 +405,7 @@ def structure_for_make_list_display(structure: dict) -> dict:
     )
     if material_key in {"description", "desc", "particulars", "item_description"}:
         material_label = "Description"
-    elif "material" in str(material_key).lower():
+    elif "material" in material_key.lower():
         material_label = "Material"
     display_headers.append({"key": material_key, "label": material_label})
     display_headers.append({"key": "_mapped_category", "label": "Category"})
@@ -654,7 +654,7 @@ def _is_structural_serial(serial_key: str) -> bool:
 
 def letter_from_serial(serial: str) -> str | None:
     """Return the single letter for ``a``, ``(A)``, ``a)`` forms; else None."""
-    text = str(serial or "").strip()
+    text = (serial or "").strip()
     if not text:
         return None
     if _ALPHA_SERIAL.match(text):
@@ -674,7 +674,7 @@ def _is_product_alpha(serial: str) -> bool:
 
 def _is_section_roman(serial: str) -> bool:
     """True for standalone section markers ``I`` / ``II`` / ``III`` / ``IV``…"""
-    return bool(_SECTION_ROMAN.match(str(serial or "").strip()))
+    return bool(_SECTION_ROMAN.match((serial or "").strip()))
 
 
 is_section_roman = _is_section_roman
@@ -683,7 +683,7 @@ is_section_roman = _is_section_roman
 def _is_spec_continuation_row(serial: str, description: str) -> bool:
     """True for Operating Temp / roman-numeral lines that belong under a lettered product."""
     text = (description or "").strip()
-    serial_text = str(serial or "").strip()
+    serial_text = (serial or "").strip()
     # Section headers like ``III SPRINKLER SYSTEM`` are top-level, not continuations.
     if serial_text and _is_section_roman(serial_text) and not _SPEC_CONTINUATION.search(text):
         return False

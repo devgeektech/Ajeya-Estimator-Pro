@@ -416,12 +416,12 @@ def _qty_rows_in_lineage(
 
 
 def _is_size_only_slot_line(text: str) -> bool:
-    return bool(_SIZE_ONLY_SLOT_LINE.match(str(text or "").strip()))
+    return bool(_SIZE_ONLY_SLOT_LINE.match((text or "").strip()))
 
 
 def _is_supply_sentence(text: str) -> bool:
     """True for a BOQ line that names the purchasable product (not size-only)."""
-    blob = str(text or "").strip()
+    blob = (text or "").strip()
     if not blob or len(blob) < 12:
         return False
     if _is_size_only_slot_line(blob):
@@ -435,7 +435,7 @@ def _is_supply_sentence(text: str) -> bool:
 
 
 def _is_material_or_spec_line(text: str) -> bool:
-    blob = str(text or "").strip()
+    blob = (text or "").strip()
     if not blob or _is_size_only_slot_line(blob):
         return False
     return bool(_MATERIAL_OR_SPEC_LINE.search(blob))

@@ -5,6 +5,33 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
+## 2026-09-21 — Fix Top DB Candidates Taxonomy Focus & AI Extraction Misclassification
+
+- **Adaptive size mismatch penalty**: When extracted `sub_category` matches the catalog row (`taxonomy_confirmed`), size mismatch penalty drops from −45 to −20. SLUICE VALVE at 200mm now scores ~57% vs PIPE/MS at exact 250mm (23%). Correct product family always wins.
+- **`_guarantee_taxonomy_hits`** pass in `ProductMatchingService.match_product`: If no Chroma hit belongs to the extracted `category + sub_category`, a targeted SQL query injects up to 20 matching rows before ranking. Prevents Chroma wrong-family bias from blocking correct candidates entirely.
+- **Taxonomy-aware sort key** in `_rank_candidates`: Valid candidates sort by `_taxonomy_score` (sub_category=1.0, category=0.5) as primary, then blended confidence. Correct product family always surfaces first.
+- **`product_noun_taxonomy_hints`** (36 entries) added to `build_database_context` in `ai/context.py`: explicit BOQ noun → Category/Sub_Category table for landing valve, external hydrant, branch pipe, reflux/NRV valve, hose reel, etc.
+- **Extraction prompt** updated (`ai/prompts/extract_products.txt`): Added CRITICAL TAXONOMY TABLE at top, HYDRANT/VALVE/reflux valve examples in STEP 1. Clarified that material keywords (SS, CI, MS) describe material/class — they do not change product type to PIPE.
+
+## 2026-09-21 — Fix Inflated Confidence Score When AI Extracts Nothing
+
+- Root cause: `structured_match_score` could return 81% for a product where the AI extracted no structured fields at all. The raw BOQ text (used as `description_hint` fallback) contained words like "M.S.pipeline", which satisfied `labels_equivalent(hint, "MS") = True` (0.9 hint score) and `"pipe" in "pipeline"` for category credit — driving a false high score.
+- Added `real_filled_names` tracking inside `structured_match_score` in `product_matching_service.py`. Only fields that were actually extracted by AI/expert (not hint-credit fallback) are counted in this set.
+- When `real_filled_names` is empty (nothing actually extracted), a `_HINT_ONLY_SCORE_CAP = 25.0` is applied so speculative hint-only matches cannot surface as high-confidence results. Items with no extraction now correctly appear as uncertain/pending.
+- Verified: empty-extraction case drops from 81.1 → 25.0; real AI extractions (category + sub_category present) still reach 100%.
+
+## 2026-09-21 — Top Database Candidate Taxonomy & Family Prioritization
+
+- Fixed an issue where non-matching sizes for a product caused unrelated products (e.g. PIPE or TANK or mismatched valve subtypes) sharing the same numeric size to crowd out true matching Sub_Category / Category candidates in Top Database Candidates.
+- In `product_matching_service.py`, separated candidate ranking into valid (non-conflicting taxonomy) vs conflicting (mismatched family). Valid Sub_Category / Category candidates are always prioritized over type-mismatched rows.
+- Enhanced SQL fallback search passes to recall all rows belonging to the extracted Sub_Category / Category even when the exact nominal size is missing from the database.
+- In `product_ai_candidates.py`, prevented type-mismatched prior seeds from outranking fresh valid candidates and preserved user-refined category/sub-category inputs during Re-analyse.
+
+## 2026-09-21 — Type Hinting and Redundant Type Coercion Cleanup
+
+- Generalized `get_dynamic_taxonomy_hints` parameter type from `dict[str, set[str] | list[str]]` to `Mapping[str, Collection[str]]` to resolve invariance type errors when passing `dict[str, list[str]]`.
+- Removed redundant `str()` and `int()` calls across `boq_analysis_service.py`, `boq_extraction_display_service.py`, `boq_extraction_slots.py`, `boq_row_grouping_service.py`, and `serial_normalizer.py`.
+
 ## 2026-09-21 — Dynamic Sub-Category fetching from BOQ
 
 - Expanded `_MAIN_PRODUCT_PHRASES` in `catalog_size_rules.py` dynamically using `_AI_SYNONYM_CATALOG` to prioritize explicitly-mentioned multi-word sub-categories (e.g. "sand bucket set", "upright sprinkler") from BOQ text over AI extractions.
@@ -2022,4 +2049,10 @@ Product behaviour truth: `docs/PRODUCT.md`. Session memory: `docs/SESSION_STATE.
 ## 2026-09-21 — Fix make list mapping ImportError
 
 - Updated make list category mapping service to use dynamic taxonomy hints instead of deleted hardcoded constants.
+
+
+## 2026-09-21 — Matching and editing bugfixes
+
+- Fixed a scoring bug where empty extraction sub-categories erroneously matched Rate_Master products without penalty.
+- Fixed an AttributeError in extraction edit API when dealing with numeric size inputs.
 

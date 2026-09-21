@@ -289,7 +289,7 @@ def _format_description_attributes(
             ordered_keys.append(key)
             seen.add(key)
     for key in sorted(attrs.keys(), key=lambda item: item.lower()):
-        norm = str(key).strip().lower()
+        norm = key.strip().lower()
         if norm and norm not in seen:
             ordered_keys.append(norm)
             seen.add(norm)
@@ -310,7 +310,7 @@ def _format_description_attributes(
     return ", ".join(parts)
 
 
-def _trim_number(value: str) -> str:
+def _trim_number(value: Any) -> str:
     """``1.00`` → ``1`` so sizes read naturally."""
     text = str(value or "").strip()
     if re.fullmatch(r"\d+\.0+", text):
@@ -1108,7 +1108,7 @@ def _share_section_attributes(
         for index in indexes:
             attrs = coerce_attributes_dict(updated[index].get("attributes"))
             for key, value in attrs.items():
-                key_norm = str(key).strip().lower()
+                key_norm = key.strip().lower()
                 if key_norm not in _SHARED_SECTION_ATTR_KEYS:
                     continue
                 if _is_blank_value(value):
@@ -1125,7 +1125,7 @@ def _share_section_attributes(
                     (
                         candidate
                         for candidate in attrs
-                        if str(candidate).strip().lower() == key
+                        if candidate.strip().lower() == key
                     ),
                     key,
                 )

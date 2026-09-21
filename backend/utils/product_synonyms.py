@@ -6,6 +6,7 @@ and make-list category/sub-category phrase hints.
 from __future__ import annotations
 
 import re
+from collections.abc import Collection, Mapping
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -127,7 +128,7 @@ def get_standard_abbreviations() -> dict[str, tuple[str, ...]]:
             
     return bidirectional
 
-def get_dynamic_taxonomy_hints(by_category: dict[str, set[str] | list[str]]) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+def get_dynamic_taxonomy_hints(by_category: Mapping[str, Collection[str]]) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
     """
     Build category and subcategory extraction phrases from the active taxonomy,
     falling back to standard abbreviations where necessary.

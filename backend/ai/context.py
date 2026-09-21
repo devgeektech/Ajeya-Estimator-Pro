@@ -608,6 +608,56 @@ def build_database_context() -> str:
 
     size_patterns = load_size_unit_patterns(version.pk)
 
+    # Explicit BOQ noun -> Category/Sub_Category mapping so the AI never guesses
+    # PIPE for HYDRANT items or VALVE for SPRINKLER items.
+    # CRITICAL: When the BOQ product noun matches an entry below, use that
+    # Category/Sub_Category pair EXACTLY - do not override it with material keywords.
+    product_noun_taxonomy_hints = [
+        # HYDRANT items - these are NOT pipes even when made of SS/CI/MS
+        {"nouns": ["landing valve", "hydrant valve", "hydrant landing valve", "fire landing valve", "stainless steel landing valve", "ss landing valve"], "category": "HYDRANT", "sub_category": "LANDING VALVE"},
+        {"nouns": ["external hydrant", "pillar hydrant", "yard hydrant", "fire hydrant pillar", "external fire hydrant"], "category": "HYDRANT", "sub_category": "EXTERNAL HYDRANT"},
+        {"nouns": ["branch pipe", "fire branch pipe", "hydrant branch pipe", "fire nozzle", "branch pipe nozzle"], "category": "HYDRANT", "sub_category": "BRANCH PIPE"},
+        {"nouns": ["short branch pipe", "short branch nozzle", "short branch pipe nozzle"], "category": "HYDRANT", "sub_category": "SHORT BRANCH PIPE"},
+        {"nouns": ["fire hose reel", "hose reel", "hose reel drum", "swinging hose reel"], "category": "HYDRANT", "sub_category": "FIRE HOSE REEL"},
+        {"nouns": ["fire hose", "delivery hose", "hydrant hose", "rrl hose", "fire fighting hose", "synthetic fire hose"], "category": "HYDRANT", "sub_category": "FIRE HOSE"},
+        {"nouns": ["fire hose box", "hose box", "fire hose cabinet", "hose cabinet", "hydrant hose box"], "category": "HYDRANT", "sub_category": "FIRE HOSE BOX"},
+        {"nouns": ["fire brigade inlet", "breeching inlet", "fbc inlet", "fire brigade breeching inlet"], "category": "HYDRANT", "sub_category": "FIRE BRIGADE INLET CONNECTION"},
+        {"nouns": ["fire brigade delivery head", "delivery head", "fire brigade outlet"], "category": "HYDRANT", "sub_category": "FIRE BRIGADE DELIVERY HEAD"},
+        {"nouns": ["suction hose coupling", "fire suction coupling", "fire brigade suction hose coupling"], "category": "HYDRANT", "sub_category": "FIRE BRIGADE SUCTION HOSE COUPLING"},
+        {"nouns": ["sand bucket", "sand buckets", "fire sand bucket", "fire buckets", "sand bucket set"], "category": "HYDRANT", "sub_category": "SAND BUCKET SET"},
+        {"nouns": ["fire door", "fire rated door", "fire resistant door", "fire check door"], "category": "HYDRANT", "sub_category": "FIRE DOOR"},
+        {"nouns": ["fire man axe", "fire axe", "fireman axe"], "category": "HYDRANT", "sub_category": "FIRE MAN AXE"},
+        # VALVE items
+        {"nouns": ["sluice valve", "gate valve", "gate isolation valve", "sluice"], "category": "VALVE", "sub_category": "SLUICE VALVE"},
+        {"nouns": ["butterfly valve", "bfv", "bf valve", "gear butterfly valve"], "category": "VALVE", "sub_category": "BUTTERFLY"},
+        {"nouns": ["ball valve", "ball isolation valve"], "category": "VALVE", "sub_category": "BALL VALVE"},
+        {"nouns": ["non return valve", "nrv", "nr valve", "check valve", "non-return valve", "reflux valve", "reflux type check valve", "reflex valve", "flanged end reflux check valve", "reflux type check valve"], "category": "VALVE", "sub_category": "NON RETURN VALVE"},
+        {"nouns": ["air release valve", "air relief valve", "arv", "air valve"], "category": "VALVE", "sub_category": "AIR RELEASE VALVE"},
+        {"nouns": ["y strainer", "y-strainer", "y type strainer", "y filter"], "category": "VALVE", "sub_category": "Y STRAINER"},
+        # PIPE items - only actual pipe (not valves or hydrant equipment connected to pipes)
+        {"nouns": ["gi pipe", "galvanized iron pipe", "galvanised iron pipe", "g.i. pipe", "g.i pipe"], "category": "PIPE", "sub_category": "GI"},
+        {"nouns": ["ms pipe", "mild steel pipe", "m.s. pipe", "m.s pipe"], "category": "PIPE", "sub_category": "MS"},
+        {"nouns": ["sprinkler flexible pipe", "flex drop", "flexible drop", "flexible sprinkler pipe"], "category": "PIPE", "sub_category": "SPRINKLER FLEXIBLE PIPE"},
+        # SPRINKLER items
+        {"nouns": ["pendant sprinkler", "pendent sprinkler", "pendant sprinkler head"], "category": "SPRINKLER", "sub_category": "PENDANT"},
+        {"nouns": ["upright sprinkler", "upright sprinkler head"], "category": "SPRINKLER", "sub_category": "UPRIGHT"},
+        {"nouns": ["sidewall sprinkler", "side wall sprinkler"], "category": "SPRINKLER", "sub_category": "SIDE WALL"},
+        {"nouns": ["flow switch", "water flow switch", "flow indicator switch", "vane type flow switch"], "category": "SPRINKLER", "sub_category": "FLOW INDICATOR SWITCH"},
+        {"nouns": ["alarm valve", "installation control valve", "icv", "sprinkler control valve", "zone control valve"], "category": "SPRINKLER", "sub_category": "INSTALLATION CONTROL VALVE"},
+        {"nouns": ["inspector test", "inspection and testing assembly", "ita", "test and drain"], "category": "SPRINKLER", "sub_category": "INSPECTING AND TESTING ASSEMBLY"},
+        # INSTRUMENT
+        {"nouns": ["pressure gauge", "pressure indicator", "pressure meter", "pg"], "category": "INSTRUMENT", "sub_category": "PRESSURE GAUGE"},
+        # PUMP
+        {"nouns": ["jockey pump", "jockey fire pump", "pressure maintenance pump"], "category": "PUMP", "sub_category": "JOCKEY PUMP"},
+        {"nouns": ["diesel pump", "diesel fire pump", "diesel driven pump", "diesel engine driven pump"], "category": "PUMP", "sub_category": "DIESEL PUMP"},
+        {"nouns": ["hydrant pump", "fire hydrant pump", "hydrant duty pump", "hydrant fire pump"], "category": "PUMP", "sub_category": "HYDRANT PUMP"},
+        {"nouns": ["sprinkler pump", "sprinkler fire pump", "automatic sprinkler pump"], "category": "PUMP", "sub_category": "SPRINKLER PUMP"},
+        # TANK
+        {"nouns": ["air cushion tank", "air cushion", "air vessel", "plain air vessel"], "category": "TANK", "sub_category": "AIR CUSHION TANK"},
+        {"nouns": ["pressure vessel", "pressure maintenance vessel", "pressure tank"], "category": "TANK", "sub_category": "PRESSURE VESSEL"},
+        {"nouns": ["grp water tank", "grp tank", "frp water tank", "frp tank", "fiberglass tank"], "category": "TANK", "sub_category": "GRP WATER TANK"},
+    ]
+
     payload = {
         "valid_category_and_subcategory_pairs": valid_pairs,
         "categories": taxonomy.get("categories") or [],
@@ -620,6 +670,7 @@ def build_database_context() -> str:
         "attribute_keys": filtered_keys,
         "size_unit_patterns": size_patterns,
         "size_unit_rules": format_size_rules_for_ai(size_patterns),
+        "product_noun_taxonomy_hints": product_noun_taxonomy_hints,
     }
     payload_json = json.dumps(payload, ensure_ascii=False)
     logger.info(
