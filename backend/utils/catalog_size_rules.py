@@ -48,17 +48,7 @@ _NO_NOMINAL_SIZE_SUBS = frozenset(
     }
 )
 # Longest phrase first — main purchasable product beats contents (branch pipe / hose inside).
-_MAIN_PRODUCT_PHRASES: tuple[tuple[str, str, str], ...] = (
-    ("external fire hose box", "HYDRANT", "FIRE HOSE BOX"),
-    ("fire hose box", "HYDRANT", "FIRE HOSE BOX"),
-    ("fire hose cabinet", "HYDRANT", "FIRE HOSE BOX"),
-    ("hose cabinet", "HYDRANT", "FIRE HOSE BOX"),
-    ("hose box", "HYDRANT", "FIRE HOSE BOX"),
-    ("fire hose reel", "HYDRANT", "FIRE HOSE REEL"),
-    ("hose reel", "HYDRANT", "FIRE HOSE REEL"),
-    ("short branch pipe", "HYDRANT", "SHORT BRANCH PIPE"),
-    ("branch pipe", "HYDRANT", "BRANCH PIPE"),
-)
+
 _CONTENT_CONTEXT = re.compile(
     r"(?i)\b(?:to accommodate|for accommodating|to house|to store|"
     r"capable of accommodating|hold(?:ing)?|designed to accommodate)\b"
@@ -103,14 +93,14 @@ def load_size_unit_patterns(
         if not cat or not sub:
             continue
         bucket = grouped[(cat, sub)]
-        unit = str(helper.Unit or "").strip()
+        unit = (helper.Unit or "").strip()
         if unit:
             bucket["units"].add(unit)
         if helper.Size is not None:
             size_text = str(helper.Size).strip()
             if size_text:
                 bucket["sizes"].add(size_text)
-        capacity = str(helper.Capacity or "").strip()
+        capacity = (helper.Capacity or "").strip()
         if capacity and capacity not in {"0", "0.0"}:
             bucket["capacities"].add(capacity)
 
@@ -209,11 +199,11 @@ def snap_unit_to_pattern(
     lowered = unit_text.lower()
     if lowered in allowed:
         return next(
-            (str(item) for item in (pattern.get("units") or []) if str(item).lower() == lowered),
+            (str(item) for item in ((pattern or {}).get("units") or []) if str(item).lower() == lowered),
             unit_text,
         )
     if lowered in _NOMINAL_BORE_UNITS and (_NOMINAL_BORE_UNITS & allowed):
-        for candidate in (pattern.get("units") or []):
+        for candidate in ((pattern or {}).get("units") or []):
             if str(candidate).strip().lower() in _NOMINAL_BORE_UNITS:
                 return str(candidate).strip()
     return unit_text
@@ -221,7 +211,7 @@ def snap_unit_to_pattern(
 
 def is_swg_gauge_number(number: str, text: str) -> bool:
     """True when ``number`` is a sheet-gauge token (18 SWG), not nominal size."""
-    digits = str(number or "").strip()
+    digits = (number or "").strip()
     if not digits or not text:
         return False
     return bool(re.search(rf"(?i)(?<![0-9]){re.escape(digits)}\s*swg\b", text))
@@ -351,16 +341,47 @@ def format_size_rules_for_ai(patterns: list[dict[str, Any]] | None = None) -> st
     return "\n".join(lines)
 
 
-def resolve_main_product_from_evidence(text: str) -> tuple[str | None, str | None]:
+def resolve_main_product_from_evidence(text: str, *, taxonomy: dict[str, Any] | None = None) -> tuple[str | None, str | None]:
     """
     Return the primary purchasable product from BOQ prose.
 
     ``fire hose box … to accommodate branch pipes`` → FIRE HOSE BOX, not branch pipe.
     """
-    blob = str(text or "").strip().lower()
+    blob = (text or "").strip().lower()
     if not blob:
         return None, None
-    for phrase, category, sub_category in _MAIN_PRODUCT_PHRASES:
+        
+    from utils.product_synonyms import get_dynamic_taxonomy_hints
+    
+    # We only need the sub_hints for resolving main product since we return category, sub_category
+    taxonomy = taxonomy or {}
+    by_category = dict(taxonomy.get("sub_categories_by_category") or {})
+    cat_hints, sub_hints = get_dynamic_taxonomy_hints(by_category)
+    
+    # We must find the category for the sub_hint. We can construct a map or use the returned tuple.
+    # Wait, sub_hints is a list of (phrase, sub_category). 
+    # But get_dynamic_taxonomy_hints appended it as (phrase, sub_category_string).
+    # To return (category, sub_category), we need the category.
+    # Let's map it.
+    sub_to_cat = {}
+    for c, subs in by_category.items():
+        for s in subs:
+            sub_to_cat[str(s).strip().upper()] = str(c).strip().upper()
+            
+    # Add manual fallbacks if missing
+    sub_to_cat.setdefault("FIRE HOSE BOX", "HYDRANT")
+    sub_to_cat.setdefault("FIRE HOSE REEL", "HYDRANT")
+    sub_to_cat.setdefault("SHORT BRANCH PIPE", "HYDRANT")
+    sub_to_cat.setdefault("BRANCH PIPE", "HYDRANT")
+    sub_to_cat.setdefault("SAND BUCKET SET", "HYDRANT")
+
+    # We only want to snap the identity if it's a known 'container' or composite product.
+    # Otherwise we risk aggressively overriding base products like PIPE.
+    composite_subs = {"FIRE HOSE BOX", "FIRE HOSE REEL", "SHORT BRANCH PIPE", "BRANCH PIPE"}
+
+    for phrase, sub in sub_hints:
+        if sub not in composite_subs:
+            continue
         if phrase not in blob:
             continue
         # Contents mentioned after "accommodate/hold" must not beat the enclosure.
@@ -373,7 +394,9 @@ def resolve_main_product_from_evidence(text: str) -> tuple[str | None, str | Non
             branch_pos = blob.find(phrase)
             if box_pos >= 0 and branch_pos > box_pos and _CONTENT_CONTEXT.search(blob):
                 continue
-        return category, sub_category
+                
+        category = sub_to_cat.get(sub)
+        return category, sub
     return None, None
 
 
@@ -381,18 +404,19 @@ def normalize_main_product_identity(
     product: dict[str, Any],
     *,
     evidence_text: str = "",
+    taxonomy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Snap Category/Sub/Class onto the main product; drop child-product fields."""
     from apps.boq.services.boq_row_fields import is_blank as _is_blank_value
 
     item = dict(product)
-    blob = str(evidence_text or "").strip()
-    category, sub_category = resolve_main_product_from_evidence(blob)
+    blob = (evidence_text or "").strip()
+    category, sub_category = resolve_main_product_from_evidence(blob, taxonomy=taxonomy)
     if not category or not sub_category:
         return item
 
     current_sub = str(item.get("sub_category") or "").strip().upper()
-    target_sub = str(sub_category).strip().upper()
+    target_sub = sub_category.strip().upper()
     if current_sub != target_sub:
         item["category"] = category
         item["sub_category"] = sub_category
@@ -494,7 +518,7 @@ def validate_size_unit_for_pattern(
     if size in (None, "") and unit in (None, ""):
         return item
 
-    blob = str(evidence_text or "")
+    blob = (evidence_text or "")
     size_text = str(size or "").strip()
     if size_text and blob and is_swg_gauge_number(size_text, blob):
         item["size"] = None

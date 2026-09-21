@@ -73,18 +73,12 @@ oldest row + `media/database/` workbook deleted.
 
 Keep only the latest entry below. Older work is in `docs/CHANGELOG.md`.
 
-### 2026-09-21 — Analysis placeholders + temp≠size + rematch stability
+### 2026-09-21 — Dynamic Sub-Category fetching from BOQ
 
-Completed: Empty Analysis inputs use **Not found** placeholder. Operating Temp
-(68 deg.C) no longer becomes Size — Size stays parent orifice (15 mm) and temp
-goes to attributes; Unit recovered from evidence when Size is known. Re-analyse
-match % uses structured fields only (no AI confidence jitter). Tests + PRODUCT /
-CHANGELOG updated.
-Pending: Restart Celery so workers load the new sanitize/prompt code; re-run
-Analyse or Re-analyse on section 3.1 sprinkler temp slots to verify Size=15 /
-temp=68. Commit/push when asked.
-Issues: Existing stored extracts still show old Size until Re-analyse / re-Analyse.
-Next: User validates sprinkler Operating Temp products and rematch % stability.
+Completed: Expanded `_MAIN_PRODUCT_PHRASES` dynamically using `_AI_SYNONYM_CATALOG` to ensure multi-word sub-categories (like "sand bucket set", "upright sprinkler", etc.) are extracted accurately from BOQ text over AI guesses. Excluded generic terms ("ms", "pipe", etc.) to prevent false overrides.
+Pending: Restart Celery so workers load the new extraction logic. Re-run Analyse on section 4.10 to verify "sand bucket set" extraction. Commit and push when asked.
+Issues: None.
+Next: User validates extraction accuracy for "sand bucket set" and other multi-word subcategories.
 
 
 
@@ -92,3 +86,11 @@ Next: User validates sprinkler Operating Temp products and rematch % stability.
 
 
 
+
+
+### 2026-09-21 — Dynamic BOQ Taxonomy Migration
+
+Completed: Migrated hardcoded BOQ product extraction rules (_MAIN_PRODUCT_PHRASES, _PRODUCT_FIRST_CAT, etc.) to a dynamic taxonomy loaded from the Rate_Master database. Updated product_synonyms.py, catalog_size_rules.py, and boq_extraction_slots.py. Fixed failing tests by maintaining category priority rules in the dynamic logic.
+Pending: None
+Issues: None
+Next: Monitor system for extraction accuracy on diverse BOQs.

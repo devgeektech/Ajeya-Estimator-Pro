@@ -37,7 +37,7 @@ def _parse_pn_capacity(text: Any) -> str | None:
 def _is_standard_numbers_in_text(text: str) -> set[str]:
     """Primary IS standard numbers only (exclude publication year suffix)."""
     numbers: set[str] = set()
-    for match in _IS_STANDARD_NUMBER.finditer(str(text or "")):
+    for match in _IS_STANDARD_NUMBER.finditer(text or ""):
         numbers.add(match.group(1))
     return numbers
 
@@ -158,20 +158,20 @@ def _sanitize_attributes(
     for key, value in list(attrs.items()):
         if _is_blank_value(value):
             continue
-        key_norm = str(key).strip().lower()
+        key_norm = key.strip().lower()
         if key_norm in {"is", "is_standard"}:
-            digits = re.sub(r"[^0-9]", "", str(value))
+            digits = re.sub(r"[^0-9]", "", value)
             if not digits or digits not in is_numbers:
-                attrs[key] = None
+                del attrs[key]
                 changed = True
             continue
         if key_norm in _TEMP_ATTR_KEYS:
             if not _value_in_evidence(value, blob):
-                attrs[key] = None
+                del attrs[key]
                 changed = True
             continue
         if not _value_in_evidence(value, blob):
-            attrs[key] = None
+            del attrs[key]
             changed = True
 
     if changed:
@@ -266,7 +266,7 @@ def _reconcile_size_from_slot_evidence(
     from utils.nominal_size import is_performance_spec_number, parse_operating_temp_from_text
 
     item = dict(product)
-    slot_blob = str(slot_desc or "").strip()
+    slot_blob = (slot_desc or "").strip()
     prefer_context_first = bool(
         slot_blob
         and parse_operating_temp_from_text(slot_blob)
@@ -278,7 +278,7 @@ def _reconcile_size_from_slot_evidence(
         else (slot_desc, product_context)
     )
     for text in texts:
-        blob = str(text or "").strip()
+        blob = (text or "").strip()
         if not blob:
             continue
         size, unit = parse_size_for_product(
@@ -314,7 +314,7 @@ def _fill_unit_from_size_evidence(
     if _is_blank_value(item.get("size")) or not _is_blank_value(item.get("unit")):
         return item
     size_text = str(item.get("size") or "").strip()
-    blob = str(evidence_text or "")
+    blob = (evidence_text or "")
     if not size_text or not blob:
         return item
     match = re.search(
@@ -352,7 +352,7 @@ def sanitize_product_against_evidence(
     item = dict(product)
     item = snap_product_taxonomy(item, taxonomy, infer_defaults=False)
     blob = _evidence_blob(product_context, slot_desc, evidence_text)
-    item = normalize_main_product_identity(item, evidence_text=blob)
+    item = normalize_main_product_identity(item, evidence_text=blob, taxonomy=taxonomy)
     item = _sanitize_capacity(
         item,
         product_context=product_context,
@@ -413,7 +413,7 @@ def sanitize_product_against_evidence(
     )
     if _is_blank_value(item.get("size")):
         # Prefer nominal size from owning context when the qty line is temp-only.
-        slot_blob = str(slot_desc or "").strip()
+        slot_blob = (slot_desc or "").strip()
         temp_only_slot = bool(
             slot_blob
             and parse_operating_temp_from_text(slot_blob)

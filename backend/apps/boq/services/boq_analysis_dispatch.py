@@ -168,8 +168,8 @@ def broker_is_available() -> bool:
     if parsed.scheme not in {"redis", "rediss"}:
         return True
 
-    host = str(parsed.hostname or "localhost")
-    port = int(parsed.port or 6379)
+    host = parsed.hostname or "localhost"
+    port = parsed.port or 6379
     try:
         with socket.create_connection((host, port), timeout=1):
             return True

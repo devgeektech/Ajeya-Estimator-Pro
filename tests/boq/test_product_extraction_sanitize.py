@@ -96,7 +96,7 @@ class ProductExtractionSanitizeTests(SimpleTestCase):
             evidence_text=context,
             taxonomy=_TEST_TAXONOMY,
         )
-        self.assertIsNone(sanitized["attributes"]["is"])
+        self.assertIsNone(sanitized["attributes"].get("is"))
 
     def test_keeps_is_attribute_when_in_evidence(self):
         product = {

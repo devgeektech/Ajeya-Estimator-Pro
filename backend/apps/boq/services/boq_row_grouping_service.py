@@ -601,7 +601,7 @@ def slot_context_for_qty_row(
     index: dict[str, dict[str, str]] | None = None,
 ) -> dict[str, str]:
     """Return ``product_context`` / ``evidence_text`` for one Unit/Qty slot id."""
-    slot_id = str(qty_row_id or "").strip()
+    slot_id = (qty_row_id or "").strip()
     empty = {"product_context": "", "evidence_text": ""}
     if not boq_data or not slot_id:
         return empty
@@ -644,7 +644,7 @@ def single_row_description(boq_data: dict[str, Any], row_id: str) -> str:
     Letter slots must keep ``a) 150 mm dia`` alone — combining sibling sizes
     makes size parsers pick the wrong diameter (often the shortest, e.g. 80).
     """
-    wanted = str(row_id or "").strip()
+    wanted = (row_id or "").strip()
     if not wanted:
         return ""
     for row in boq_data.get("rows") or []:

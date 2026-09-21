@@ -5,6 +5,11 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
+## 2026-09-21 — Dynamic Sub-Category fetching from BOQ
+
+- Expanded `_MAIN_PRODUCT_PHRASES` in `catalog_size_rules.py` dynamically using `_AI_SYNONYM_CATALOG` to prioritize explicitly-mentioned multi-word sub-categories (e.g. "sand bucket set", "upright sprinkler") from BOQ text over AI extractions.
+- Filtered out generic or short materials/terms ("ms", "pipe", "valve", etc.) to prevent false positive overrides.
+
 ## 2026-09-21 — Analysis: Not found placeholders + temp≠size + stable rematch %
 
 - Empty Analysis core/attribute inputs show placeholder **Not found** (was Optional).
@@ -2000,3 +2005,10 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 Pre-2026-07-10 history and ultra-fine UI tweaks: use `git log` / prior commits.
 Product behaviour truth: `docs/PRODUCT.md`. Session memory: `docs/SESSION_STATE.md`.
+
+
+## 2026-09-21 — Dynamic BOQ Taxonomy Migration
+
+- Removed legacy hardcoded product taxonomy mappings (_MAIN_PRODUCT_PHRASES, _PRODUCT_FIRST_CAT, _PRODUCT_FIRST_SUB) across utils and services.
+- Introduced get_dynamic_taxonomy_hints to build extraction hints dynamically from the active Rate_Master taxonomy.
+- Fixed matching edge cases (e.g., sand bucket set) by dynamically generating bi-directional synonyms and setting appropriate category priorities.

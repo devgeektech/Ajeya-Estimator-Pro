@@ -243,7 +243,7 @@ def product_type_conflicts(extracted: dict[str, Any], rate: Rate_Master_Output) 
     """
     hint = extracted.get("description_hint")
     catalog_blob = " ".join(
-        str(value or "") for value in (rate.Category, rate.Sub_Category, rate.Class)
+        (value or "") for value in (rate.Category, rate.Sub_Category, rate.Class)
     )
     extract_blob = " ".join(
         str(value or "")
@@ -252,7 +252,7 @@ def product_type_conflicts(extracted: dict[str, Any], rate: Rate_Master_Output) 
     left_text = _normalize_text(extract_blob)
     right_text = _normalize_text(catalog_blob)
     extract_sub = str(extracted.get("sub_category") or "").strip().upper()
-    catalog_sub = str(rate.Sub_Category or "").strip().upper()
+    catalog_sub = (rate.Sub_Category or "").strip().upper()
     if extract_sub and catalog_sub:
         pair = frozenset({extract_sub, catalog_sub})
         if pair in _SUB_CATEGORY_CONFLICTS:
@@ -303,8 +303,6 @@ def _hint_field_score(hint: Any, label: Any) -> float:
 
 def _hint_category_score(hint: Any, category_label: Any) -> float:
     """Credit Category from description phrases (e.g. sand buckets → HYDRANT)."""
-    from utils.product_synonyms import MAKE_LIST_DESCRIPTION_HINTS
-
     direct = _hint_field_score(hint, category_label)
     if direct > 0:
         return direct
@@ -312,7 +310,15 @@ def _hint_category_score(hint: Any, category_label: Any) -> float:
     cat_text = _normalize_text(category_label)
     if not hint_text or not cat_text:
         return 0.0
-    for phrase, mapped_category in MAKE_LIST_DESCRIPTION_HINTS:
+
+    from ai.context import load_rate_master_taxonomy
+    from utils.product_synonyms import get_dynamic_taxonomy_hints
+    
+    taxonomy = load_rate_master_taxonomy()
+    by_category = dict(taxonomy.get("sub_categories_by_category") or {})
+    cat_hints, _ = get_dynamic_taxonomy_hints(by_category)
+    
+    for phrase, mapped_category in cat_hints:
         if phrase in hint_text and _normalize_text(mapped_category) == cat_text:
             return 0.85
     return 0.0
@@ -572,7 +578,7 @@ def build_match_query_text(extracted: dict[str, Any]) -> str:
         if key_norm in {"material", "body_material", "construction", "moc", "type", "valve_type"}:
             for term in expand_query_terms(value):
                 parts.append(f"{key}={term}")
-    return " ".join(str(part).strip() for part in parts if _is_filled(part))
+    return " ".join(part.strip() for part in parts if _is_filled(part))
 
 
 def _dedupe_candidates_by_product_id(
@@ -678,7 +684,7 @@ class ProductMatchingService:
         # One representative rate per Product_ID (lowest Final_Material_Amount wins ties).
         best_by_pid: dict[str, Rate_Master_Output] = {}
         for rate in rates:
-            pid = str(rate.Product_ID or "").strip()
+            pid = (rate.Product_ID or "").strip()
             if not pid:
                 continue
             current = best_by_pid.get(pid)
@@ -778,7 +784,7 @@ class ProductMatchingService:
         prefer_lowest_price: bool = False,
         result_limit: int | None = None,
     ) -> dict[str, Any]:
-        keep = max(int(result_limit or CANDIDATE_LIMIT), CANDIDATE_LIMIT)
+        keep = max(result_limit or CANDIDATE_LIMIT, CANDIDATE_LIMIT)
         candidates: list[dict[str, Any]] = []
         rate_map = self._load_rates([hit["rate_master_id"] for hit in hits])
         for hit in hits:
@@ -979,7 +985,7 @@ class ProductMatchingService:
                 continue
             for term in expand_query_terms(raw):
                 # Skip full-sentence dump terms — they never icontain-match labels.
-                if len(str(term).strip()) > 48:
+                if len(term.strip()) > 48:
                     continue
                 material_blob = q_or(material_blob, q(Class__icontains=term))
                 material_blob = q_or(material_blob, q(Sub_Category__icontains=term))
@@ -1038,7 +1044,7 @@ class ProductMatchingService:
 
         Used by Analysis display for unmatched products so tab GET stays read-only.
         """
-        keep = max(1, int(limit or 3))
+        keep = max(1, limit or 3)
         candidates = self._sql_fallback_candidates(extracted)
         candidates = _dedupe_candidates_by_product_id(candidates)
         candidates.sort(key=lambda item: float(item.get("confidence") or 0.0), reverse=True)
