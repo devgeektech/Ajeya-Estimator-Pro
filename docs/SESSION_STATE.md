@@ -38,11 +38,11 @@ oldest row + `media/database/` workbook deleted.
 | Sections | Serial-lineage groups with qty **slots**; empty slots show Add + Re-analyse |
 | Analysis | Product tabs in **BOQ slot order**; match %; multi-product review **only** when product count ≠ Unit/Qty slot count |
 | Matching | Chroma = Product_Helper only (AI validates top **5**; UI shows top **3**); Product_ID → Rate_Master / Labour from Postgres |
-| Candidates UI | Summary = **Product ID** / Category / Sub / Class / Size / Unit / Capacity; open on unmatched; weak banner only when effective % below 50; Category/Sub/Size/**Attributes** stay from extract when found (else empty) |
-| Re-analyse | Saves expert UI inputs + **AI Description**; recall = hint + filled inputs + slot line (full section only if identity empty); real match % (not forced 100%); unfound inputs stay empty |
+| Candidates UI | Summary = **Product ID** / Category / Sub / Class / Size / Unit / Capacity; open on unmatched; weak banner only when effective % below 50; Category/Sub/Size/**Attributes** stay from extract when found (else empty; placeholder **Not found**) |
+| Re-analyse | Saves expert UI inputs + **AI Description**; recall = hint + filled inputs + slot line (full section only if identity empty); real match % from structured fields only (not AI jitter; not forced 100%); unfound inputs stay empty |
 | Confirm | Sets match to **100%** when product is correct but % is lower (hidden at 100%) |
 | Select candidate | Prefills Rate_Master core fields + Attribute values into Analysis inputs; keeps that candidate's listed match % |
-| Matching score | Weighted filled extract fields vs catalog (Sub 30 / Cat 24 / Size 18 / …); blank inputs omitted; thin size+unit identity capped |
+| Matching score | Weighted filled extract fields vs catalog (Sub 30 / Cat 24 / Size 18 / …); blank inputs omitted; thin size+unit identity capped; operating temp ≠ Size |
 | Make list map | **AI-first** multi-target (v11): understands free text; compound lines can map multiple category/sub pairs (e.g. sprinkler + rosette); null sub = category-wide makes; heuristics soft-only; auto remap on stale mapping version |
 | Make & Vendor | Product_ID → Rate_Master; AI Description + Rate/Product id; **Not available** / **Not listed** / **Not in Db**; Next confirms Labour promotion |
 | Labour | Unlock promotes Not listed/Not in Db → **Not available** (red); missing labour = orange **No labour**; complete → Review NA |
@@ -73,17 +73,19 @@ oldest row + `media/database/` workbook deleted.
 
 Keep only the latest entry below. Older work is in `docs/CHANGELOG.md`.
 
-### 2026-09-17 — Rematch confidence + empty inputs
+### 2026-09-21 — Analysis placeholders + temp≠size + rematch stability
 
-Completed: Match % uses filled extract fields only (blank inputs omitted;
-size+unit-only capped). Analyse/Rematch no longer fill empty Class/Size/Unit/
-Capacity/Attributes from Rate_Master — Select still does. Rematch recall =
-AI Description + expert inputs + slot line (not full pipe chapter section);
-auto-accept floor back to 30%; stop freezing 100% except Confirm. Tests added.
-Pending: Restart Celery; Re-analyse section 4.10 on a BOQ to verify. Commit/push
-when asked (includes prior upload self-heal hot-patch).
-Issues: None.
-Next: User validates 4.10 initial Analyse % and Re-analyse keeps correct product.
+Completed: Empty Analysis inputs use **Not found** placeholder. Operating Temp
+(68 deg.C) no longer becomes Size — Size stays parent orifice (15 mm) and temp
+goes to attributes; Unit recovered from evidence when Size is known. Re-analyse
+match % uses structured fields only (no AI confidence jitter). Tests + PRODUCT /
+CHANGELOG updated.
+Pending: Restart Celery so workers load the new sanitize/prompt code; re-run
+Analyse or Re-analyse on section 3.1 sprinkler temp slots to verify Size=15 /
+temp=68. Commit/push when asked.
+Issues: Existing stored extracts still show old Size until Re-analyse / re-Analyse.
+Next: User validates sprinkler Operating Temp products and rematch % stability.
+
 
 
 

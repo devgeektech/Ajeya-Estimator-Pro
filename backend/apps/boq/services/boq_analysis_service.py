@@ -26,6 +26,8 @@ from apps.boq.services.boq_row_grouping_service import (
     full_description_for_row,
     resolve_anchor_row_id,
     single_row_description,
+    slot_context_for_qty_row,
+    slot_context_index,
 )
 from apps.boq.services.make_list_constraint_service import walk_rows_tree
 from apps.boq.services.product_ai_mapping_service import ProductAIMappingService
@@ -255,6 +257,7 @@ class BOQAnalysisService:
             # Attach full section as AI context; slot line drives product identity.
             # Do not fold the whole section into Chroma query text (hydrant titles
             # were drowning pipe/valve slots).
+            slot_lookup = slot_context_index(boq_data)
             for row in extracted_rows:
                 row_id = str(row.get("row_id") or "")
                 section_text = _row_description(boq_data, row_id) if row_id else ""
@@ -274,10 +277,15 @@ class BOQAnalysisService:
                         # Single-line section: description_hint / product owns identity.
                         slot_text = str(product.get("description_hint") or "").strip()
                     if section_text or slot_text:
+                        slot_meta = slot_context_for_qty_row(
+                            boq_data, slot_id, index=slot_lookup
+                        )
                         product["_boq_row"] = {
                             "row_id": row_id,
                             "description": section_text,
                             "slot_description": slot_text,
+                            "product_context": slot_meta.get("product_context") or "",
+                            "evidence_text": slot_meta.get("evidence_text") or "",
                             "serial": str(row.get("serial") or row.get("ser_no") or ""),
                         }
 
@@ -503,10 +511,13 @@ class BOQAnalysisService:
                 elif not slot_text:
                     slot_text = str(source_product.get("description_hint") or "").strip()
                 # Full section for AI meaning; expert UI fields + slot line for recall.
+                slot_meta = slot_context_for_qty_row(boq_payload, slot_id)
                 boq_context = {
                     "row_id": str(row_id),
                     "description": section_text,
                     "slot_description": slot_text,
+                    "product_context": slot_meta.get("product_context") or "",
+                    "evidence_text": slot_meta.get("evidence_text") or "",
                     "serial": str(target.get("serial") or target.get("ser_no") or ""),
                 }
                 updated_product = mapper.rematch_product(

@@ -181,3 +181,48 @@ class ProductExtractionSanitizeTests(SimpleTestCase):
         )
         self.assertEqual(sanitized["size"], "20")
         self.assertEqual(sanitized["unit"], "mm")
+
+    def test_operating_temp_slot_keeps_parent_size_and_temp_attr(self):
+        product = {
+            "category": "SPRINKLER",
+            "sub_category": "PENDENT",
+            "size": "68",
+            "unit": "mm",
+            "attributes": {},
+        }
+        sanitized = sanitize_product_against_evidence(
+            product,
+            product_context="a) Pendent sprinklers 15 mm",
+            slot_desc="i) Operating Temp. : 68 deg.C.",
+            evidence_text="a) Pendent sprinklers 15 mm i) Operating Temp. : 68 deg.C.",
+            taxonomy={
+                "categories": ["SPRINKLER"],
+                "sub_categories_by_category": {"SPRINKLER": ["PENDENT", "UPRIGHT"]},
+                "classes_by_category_sub_category": {},
+            },
+        )
+        self.assertEqual(sanitized["size"], "15")
+        self.assertEqual(sanitized["unit"], "mm")
+        attrs = sanitized.get("attributes") or {}
+        self.assertEqual(str(attrs.get("temp") or ""), "68")
+
+    def test_fills_missing_unit_from_size_evidence(self):
+        product = {
+            "category": "PIPE",
+            "sub_category": "MS",
+            "size": "65",
+            "unit": None,
+        }
+        sanitized = sanitize_product_against_evidence(
+            product,
+            product_context="Providing MS pipework",
+            slot_desc="g) 65 mm dia pipe",
+            evidence_text="g) 65 mm dia pipe",
+            taxonomy={
+                "categories": ["PIPE"],
+                "sub_categories_by_category": {"PIPE": ["MS"]},
+                "classes_by_category_sub_category": {},
+            },
+        )
+        self.assertEqual(sanitized["size"], "65")
+        self.assertEqual(str(sanitized.get("unit") or "").lower(), "mm")

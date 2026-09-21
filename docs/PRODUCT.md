@@ -353,10 +353,15 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
      **Attribute** values stay as **BOQ-extracted** whenever AI found them —
      including low-confidence / provisional matches — so experts do not retype
      extract evidence. Fields the AI did **not** find stay **empty** (Analyse /
-     Re-analyse do **not** fill blanks from Rate_Master). Match confidence
+     Re-analyse do **not** fill blanks from Rate_Master); empty Analysis inputs
+     show placeholder **Not found**. Operating temperature / deg.C values are
+     attributes (``temp``), never Size — Size stays orifice/bore (e.g. ``15 mm``)
+     from the owning product line. Match confidence
      compares those extract fields to the selected Rate_Master row using the
      fixed field weights (blank inputs are omitted from the score, not counted
-     as misses). When confidence is **below 50%**, a warning points to the top
+     as misses). Re-analyse match % is driven by structured field overlap only
+     (AI ``match_confidence`` is not blended, so identical inputs stay stable).
+     When confidence is **below 50%**, a warning points to the top
      **3** selectable database candidates. **Select candidate** still loads
      Rate_Master details into the UI when the expert confirms a row.
   5. Attribute UI uses the selected candidate’s Attribute schema; values are filled

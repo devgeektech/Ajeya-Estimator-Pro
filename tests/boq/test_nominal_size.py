@@ -75,3 +75,38 @@ class NominalSizeParseTests(SimpleTestCase):
         }
         normalized = normalize_product_fields(product)
         self.assertEqual(normalized["size"], "63")
+
+    def test_operating_temp_not_parsed_as_size(self):
+        size, unit = parse_nominal_size_from_text(
+            "i) Operating Temp. : 68 deg.C."
+        )
+        self.assertIsNone(size)
+        self.assertIsNone(unit)
+
+    def test_prefers_orifice_mm_over_operating_temp(self):
+        text = "Pendent sprinklers 15 mm. i) Operating Temp. : 68 deg.C."
+        size, unit = parse_nominal_size_from_text(text, require_explicit_unit=True)
+        self.assertEqual(size, "15")
+        self.assertEqual(unit, "mm")
+
+    def test_detects_temp_as_invalid_size(self):
+        self.assertTrue(
+            is_invalid_extracted_size(
+                "68",
+                context_text="i) Operating Temp. : 68 deg.C.",
+                attributes={"temp": "68"},
+            )
+        )
+
+    def test_sanitize_clears_temp_confused_as_size(self):
+        product = {
+            "size": "68",
+            "unit": "mm",
+            "description_hint": "pendent sprinkler 68 deg",
+            "attributes": {"temp": "68"},
+        }
+        sanitized = sanitize_product_size(
+            product,
+            extra_texts=["i) Operating Temp. : 68 deg.C.", "Pendent sprinklers 15 mm"],
+        )
+        self.assertIsNone(sanitized["size"])

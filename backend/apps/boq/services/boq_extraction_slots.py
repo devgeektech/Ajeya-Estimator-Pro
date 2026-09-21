@@ -839,6 +839,7 @@ def build_product_boq_context(
     from apps.boq.services.boq_row_grouping_service import (
         full_description_for_row,
         single_row_description,
+        slot_context_for_qty_row,
     )
 
     section_row = section_row or {}
@@ -854,6 +855,10 @@ def build_product_boq_context(
     slot_id = str(
         product.get("qty_row_id") or product.get("source_row_id") or ""
     ).strip()
+    slot_meta = slot_context_for_qty_row(boq_data, slot_id) if boq_data else {
+        "product_context": "",
+        "evidence_text": "",
+    }
 
     def _slot_line_only() -> str:
         """Unit/Qty letter line only — never sibling sizes from full lineage."""
@@ -874,6 +879,10 @@ def build_product_boq_context(
         repaired = _slot_line_only()
         if repaired:
             ctx["slot_description"] = repaired
+        if not str(ctx.get("product_context") or "").strip():
+            ctx["product_context"] = slot_meta.get("product_context") or ""
+        if not str(ctx.get("evidence_text") or "").strip():
+            ctx["evidence_text"] = slot_meta.get("evidence_text") or ""
         slot_desc = str(ctx.get("slot_description") or "").strip()
         return ctx if slot_desc or section_text else None
 
@@ -885,6 +894,8 @@ def build_product_boq_context(
         "row_id": row_id,
         "description": section_text,
         "slot_description": slot_text,
+        "product_context": slot_meta.get("product_context") or "",
+        "evidence_text": slot_meta.get("evidence_text") or "",
         "serial": str(section_row.get("serial") or section_row.get("ser_no") or ""),
     }
 
@@ -896,24 +907,50 @@ def _authoritative_slot_size(
     sub_category: Any = None,
     pattern: dict[str, Any] | None = None,
 ) -> tuple[str | None, str | None]:
-    """Size from the Unit/Qty row — overrides AI when letter sizes differ in one section."""
+    """Size from the Unit/Qty row — overrides AI when letter sizes differ in one section.
+
+    Operating-temp qty lines have no nominal size; fall back to product_context
+    (e.g. parent ``Pendent sprinklers 15 mm``).
+    """
+    from utils.nominal_size import is_performance_spec_number, parse_operating_temp_from_text
+
     if not slot:
         return None, None
     slot_desc = str(slot.get("description") or "").strip()
-    parse_text = slot_desc or str(
-        slot.get("evidence_text") or slot.get("product_context") or ""
-    ).strip()
-    size, unit = parse_size_for_product(
-        parse_text,
-        category=category,
-        sub_category=sub_category,
-        pattern=pattern,
-        require_explicit_unit=True,
+    product_context = str(slot.get("product_context") or "").strip()
+    evidence = str(slot.get("evidence_text") or "").strip()
+
+    temp_only = bool(
+        slot_desc
+        and parse_operating_temp_from_text(slot_desc)
+        and not re.search(r"(?i)\d+(?:\.\d+)?\s*(?:mm|nb|dia(?:meter)?)\b", slot_desc)
     )
-    size_hint = _slot_size_hint(slot)
-    if size_hint and not size:
-        size = str(size_hint).strip()
-    return size, unit
+    parse_texts = (
+        [product_context, evidence]
+        if temp_only
+        else [slot_desc, product_context, evidence]
+    )
+    for parse_text in parse_texts:
+        blob = str(parse_text or "").strip()
+        if not blob:
+            continue
+        size, unit = parse_size_for_product(
+            blob,
+            category=category,
+            sub_category=sub_category,
+            pattern=pattern,
+            require_explicit_unit=True,
+        )
+        if size and not is_performance_spec_number(blob, size):
+            return size, unit
+
+    if not temp_only:
+        size_hint = _slot_size_hint(slot)
+        if size_hint and not is_performance_spec_number(
+            slot_desc or product_context or evidence, str(size_hint)
+        ):
+            return str(size_hint).strip(), None
+    return None, None
 
 
 def refresh_product_from_boq_context(
@@ -940,12 +977,15 @@ def refresh_product_from_boq_context(
         boq_row.get("description") or boq_row.get("full_description") or ""
     ).strip()
     slot_desc = str(boq_row.get("slot_description") or "").strip()
-    if slot_desc and _is_size_only_slot_line(slot_desc):
-        product_context = section_text
-    elif slot_desc:
-        product_context = slot_desc
-    else:
-        product_context = section_text
+    # Prefer the owning supply sentence when present (sprinkler parent for temp slots).
+    product_context = str(boq_row.get("product_context") or "").strip()
+    if not product_context:
+        if slot_desc and _is_size_only_slot_line(slot_desc):
+            product_context = section_text
+        elif slot_desc:
+            product_context = slot_desc
+        else:
+            product_context = section_text
     evidence_text = " ".join(
         part for part in (product_context, slot_desc, section_text) if part
     ).strip()

@@ -344,6 +344,7 @@ def format_size_rules_for_ai(patterns: list[dict[str, Any]] | None = None) -> st
             "- BRANCH PIPE / SHORT BRANCH PIPE: outlet/coupling mm (e.g. 20mm outlet → 20 mm).",
             "- FIRE HOSE BOX: product is the cabinet; capacity=outer dims; size often 0.",
             "- PUMP: flow (lpm) → Capacity; size often 0.",
+            "- SPRINKLER: orifice/bore mm is Size; Operating Temp deg.C → attribute temp.",
             "- VALVE PN rating → Capacity; nominal bore → Size.",
         ]
     )

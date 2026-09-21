@@ -59,8 +59,14 @@ Priority order for every product:
    - **EXTINGUISHER** → weight kg or volume liter per catalog Unit.
    - **Never** use Indian Standard numbers as Size (``IS:636`` → attribute ``is``).
    - **Never** use SWG sheet gauge, cabinet WxHxD, qty column, or unrelated digits as Size.
+   - **Never** use operating temperature / deg.C / °C as Size
+     (``i) Operating Temp. : 68 deg.C.`` → attribute ``temp`` = 68; Size stays the
+     parent orifice/bore e.g. ``15 mm`` from ``a) Pendent sprinklers 15 mm``).
+   - Always extract Unit when Size is known from BOQ (``15 mm`` → size 15, unit mm).
    - If the measure type does not match the catalog Unit for that sub-category → **null**.
 4. **Attributes** only from ``attribute_keys``.
+   - Map ``Operating Temp. : 68 deg.C.`` → ``temp`` (or schema key for temperature).
+   - Map ``k_factor`` / ``response`` when the BOQ states them.
 
 Binding:
 - Exactly one product per Unit/Qty slot (rare exception: one slot mandates two buys).

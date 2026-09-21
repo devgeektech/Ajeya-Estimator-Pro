@@ -110,6 +110,32 @@ def _sanitize_make_hint(
     return item
 
 
+_TEMP_ATTR_KEYS = ("temp", "operating_temp", "temperature", "operating_temperature")
+
+
+def _fill_operating_temp_attribute(
+    attrs: dict[str, Any],
+    *,
+    blob: str,
+) -> bool:
+    """Promote ``Operating Temp. : 68 deg.C.`` into a temp attribute when blank."""
+    from utils.nominal_size import parse_operating_temp_from_text
+
+    temp = parse_operating_temp_from_text(blob)
+    if not temp:
+        return False
+    for key in _TEMP_ATTR_KEYS:
+        if key in attrs and not _is_blank_value(attrs.get(key)):
+            return False
+    target = "temp"
+    for key in _TEMP_ATTR_KEYS:
+        if key in attrs:
+            target = key
+            break
+    attrs[target] = temp
+    return True
+
+
 def _sanitize_attributes(
     product: dict[str, Any],
     *,
@@ -121,11 +147,14 @@ def _sanitize_attributes(
     item = dict(product)
     attrs = coerce_attributes_dict(item.get("attributes"))
     blob = _evidence_blob(product_context, slot_desc, evidence_text)
+    changed = _fill_operating_temp_attribute(attrs, blob=blob)
+
     if not attrs:
+        if changed:
+            item["attributes"] = attrs
         return item
 
     is_numbers = _is_standard_numbers_in_text(blob)
-    changed = False
     for key, value in list(attrs.items()):
         if _is_blank_value(value):
             continue
@@ -133,6 +162,11 @@ def _sanitize_attributes(
         if key_norm in {"is", "is_standard"}:
             digits = re.sub(r"[^0-9]", "", str(value))
             if not digits or digits not in is_numbers:
+                attrs[key] = None
+                changed = True
+            continue
+        if key_norm in _TEMP_ATTR_KEYS:
+            if not _value_in_evidence(value, blob):
                 attrs[key] = None
                 changed = True
             continue
@@ -224,9 +258,26 @@ def _reconcile_size_from_slot_evidence(
     sub_category: Any = None,
     pattern: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Prefer size parsed from the Unit/Qty slot line over wrong AI copies."""
+    """Prefer size parsed from the Unit/Qty slot line over wrong AI copies.
+
+    Operating-temp slots (``i) Operating Temp. : 68 deg.C.``) have no nominal
+    size on the qty line — fall through to ``product_context`` (``15 mm``).
+    """
+    from utils.nominal_size import is_performance_spec_number, parse_operating_temp_from_text
+
     item = dict(product)
-    for text in (slot_desc, product_context):
+    slot_blob = str(slot_desc or "").strip()
+    prefer_context_first = bool(
+        slot_blob
+        and parse_operating_temp_from_text(slot_blob)
+        and not re.search(r"(?i)\d+(?:\.\d+)?\s*(?:mm|nb|dia(?:meter)?)\b", slot_blob)
+    )
+    texts = (
+        (product_context, slot_desc)
+        if prefer_context_first
+        else (slot_desc, product_context)
+    )
+    for text in texts:
         blob = str(text or "").strip()
         if not blob:
             continue
@@ -239,6 +290,8 @@ def _reconcile_size_from_slot_evidence(
         )
         if not size:
             continue
+        if is_performance_spec_number(blob, size):
+            continue
         current = item.get("size")
         if _is_blank_value(current) or not nominal_sizes_compatible(current, size):
             item["size"] = size
@@ -247,6 +300,36 @@ def _reconcile_size_from_slot_evidence(
 
                 item["unit"] = snap_unit_to_pattern(unit, pattern) or unit
         break
+    return item
+
+
+def _fill_unit_from_size_evidence(
+    product: dict[str, Any],
+    *,
+    evidence_text: str,
+    pattern: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """When Size is known but Unit was missed, recover mm/NB/m from evidence."""
+    item = dict(product)
+    if _is_blank_value(item.get("size")) or not _is_blank_value(item.get("unit")):
+        return item
+    size_text = str(item.get("size") or "").strip()
+    blob = str(evidence_text or "")
+    if not size_text or not blob:
+        return item
+    match = re.search(
+        rf"(?i)(?<![0-9]){re.escape(size_text)}\s*(mm|nb|inch|in|cm|m)\b",
+        blob,
+    )
+    if not match:
+        match = re.search(r"(?i)(?<![0-9])\d+(?:\.\d+)?\s*(mm|nb|inch|in|cm)\b", blob)
+    if not match:
+        return item
+    unit_token = match.group(1).lower()
+    unit = {"nb": "NB", "in": "inch"}.get(unit_token, unit_token)
+    from utils.catalog_size_rules import snap_unit_to_pattern
+
+    item["unit"] = snap_unit_to_pattern(unit, pattern) or unit
     return item
 
 
@@ -302,6 +385,7 @@ def sanitize_product_against_evidence(
             size_patterns=patterns,
         )
     # Slot letter line wins after catalog unit checks (mm↔nb must not wipe Size).
+    # Temp-only slots prefer product_context (parent ``15 mm``) over ``68 deg``.
     item = _reconcile_size_from_slot_evidence(
         item,
         slot_desc=slot_desc,
@@ -311,7 +395,11 @@ def sanitize_product_against_evidence(
         pattern=pattern,
     )
     from utils.catalog_size_rules import snap_unit_to_pattern
-    from utils.nominal_size import sanitize_product_size
+    from utils.nominal_size import (
+        is_performance_spec_number,
+        parse_operating_temp_from_text,
+        sanitize_product_size,
+    )
 
     if not _is_blank_value(item.get("size")) and pattern:
         snapped = snap_unit_to_pattern(item.get("unit"), pattern)
@@ -324,9 +412,17 @@ def sanitize_product_against_evidence(
         use_description_hint=False,
     )
     if _is_blank_value(item.get("size")):
-        # Prefer the Unit/Qty letter line — never re-parse sibling diameters.
-        refill_blob = str(slot_desc or "").strip() or _evidence_blob(
-            product_context, evidence_text
+        # Prefer nominal size from owning context when the qty line is temp-only.
+        slot_blob = str(slot_desc or "").strip()
+        temp_only_slot = bool(
+            slot_blob
+            and parse_operating_temp_from_text(slot_blob)
+            and not re.search(r"(?i)\d+(?:\.\d+)?\s*(?:mm|nb|dia(?:meter)?)\b", slot_blob)
+        )
+        refill_blob = (
+            _evidence_blob(product_context, evidence_text)
+            if temp_only_slot
+            else (slot_blob or _evidence_blob(product_context, evidence_text))
         )
         refill_pattern = pattern_for_product(item, patterns) if patterns else pattern_for_product(item)
         size, unit = parse_size_for_product(
@@ -336,8 +432,14 @@ def sanitize_product_against_evidence(
             pattern=refill_pattern,
             require_explicit_unit=True,
         )
-        if size:
+        if size and not is_performance_spec_number(refill_blob, size):
             item["size"] = size
             if unit:
                 item["unit"] = snap_unit_to_pattern(unit, refill_pattern) or unit
+
+    item = _fill_unit_from_size_evidence(
+        item,
+        evidence_text=_evidence_blob(product_context, slot_desc, evidence_text),
+        pattern=pattern,
+    )
     return item

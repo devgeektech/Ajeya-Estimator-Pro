@@ -1,4 +1,4 @@
-"""Parse nominal product sizes from BOQ text (exclude IS standard numbers)."""
+"""Parse nominal product sizes from BOQ text (exclude IS / temp / spec numbers)."""
 from __future__ import annotations
 
 import re
@@ -20,6 +20,21 @@ _GENERIC_NUMBER = re.compile(
 )
 _INVALID_SIZE_LITERAL = re.compile(r"(?i)^is(?:\s+standard)?$")
 
+# Operating temp / k-factor / response / RPM etc. must never become Size.
+_SPEC_MEASURE_LABEL = re.compile(
+    r"(?i)\b(?:"
+    r"operating\s*temp(?:erature)?|"
+    r"temp(?:erature)?|"
+    r"k[\s_-]?factor|"
+    r"response(?:\s*type)?|"
+    r"(?:min|max)?\.?\s*working\s*pressure|"
+    r"speed|head|flow|voltage|rpm|orifice\s*temp"
+    r")\b"
+)
+_TEMP_DEGREE_UNIT = re.compile(
+    r"(?i)\b(?:deg(?:ree)?s?\.?\s*c|°\s*c|celsius)\b"
+)
+
 
 def _trim_size_number(value: str) -> str:
     text = str(value or "").strip()
@@ -27,10 +42,10 @@ def _trim_size_number(value: str) -> str:
         return text.split(".", 1)[0]
     try:
         number = float(text)
-        if number.is_integer():
-            return str(int(number))
     except ValueError:
-        pass
+        return text
+    if number.is_integer():
+        return str(int(number))
     return text
 
 
@@ -74,6 +89,77 @@ def is_is_standard_number(text: str, number: str) -> bool:
     return False
 
 
+def is_performance_spec_number(text: str, number: str) -> bool:
+    """True when ``number`` is operating temp / k-factor / similar, not nominal size.
+
+    Example: ``i) Operating Temp. : 68 deg.C.`` with parent size ``15 mm`` —
+    ``68`` must not become Size.
+    """
+    digits = re.sub(r"[^0-9.]", "", str(number or ""))
+    if not digits:
+        return False
+    blob = str(text or "")
+    if not blob:
+        return False
+
+    # Explicit temperature unit next to the number.
+    if re.search(
+        rf"(?i)(?<![0-9]){re.escape(digits)}\s*"
+        r"(?:deg(?:ree)?s?\.?\s*c|°\s*c|celsius)\b",
+        blob,
+    ):
+        return True
+    if re.search(
+        rf"(?i)(?:deg(?:ree)?s?\.?\s*c|°\s*c|celsius)\s*[:=]?\s*"
+        rf"{re.escape(digits)}\b",
+        blob,
+    ):
+        return True
+
+    # Labelled performance measures: ``Operating Temp. : 68``, ``k_factor=80``.
+    for match in _SPEC_MEASURE_LABEL.finditer(blob):
+        window = blob[match.start() : match.start() + 80]
+        if re.search(rf"(?i)[:=\s]\s*{re.escape(digits)}\b", window):
+            # Do not treat a nearby ``15 mm`` as a temp just because the line
+            # also mentions temperature elsewhere in a longer blob.
+            if re.search(
+                rf"(?i)(?<![0-9]){re.escape(digits)}\s*(?:mm|nb|dia(?:meter)?)\b",
+                blob,
+            ):
+                continue
+            return True
+
+    # Whole line is a temp/spec continuation (roman / letter) with this number.
+    if _SPEC_MEASURE_LABEL.search(blob) and _TEMP_DEGREE_UNIT.search(blob):
+        if re.search(rf"(?i)(?<![0-9]){re.escape(digits)}\b", blob) and not re.search(
+            rf"(?i)(?<![0-9]){re.escape(digits)}\s*(?:mm|nb|dia(?:meter)?)\b",
+            blob,
+        ):
+            return True
+
+    return False
+
+
+def parse_operating_temp_from_text(text: Any) -> str | None:
+    """Return operating temperature digits from BOQ prose, or None."""
+    blob = str(text or "").strip()
+    if not blob:
+        return None
+    match = re.search(
+        r"(?i)(?:operating\s*)?temp(?:erature)?\.?\s*:?\s*"
+        r"(\d+(?:\.\d+)?)\s*(?:deg(?:ree)?s?\.?\s*c|°\s*c|celsius)?",
+        blob,
+    )
+    if not match:
+        match = re.search(
+            r"(?i)(\d+(?:\.\d+)?)\s*(?:deg(?:ree)?s?\.?\s*c|°\s*c|celsius)\b",
+            blob,
+        )
+    if not match:
+        return None
+    return _trim_size_number(match.group(1))
+
+
 def parse_nominal_size_from_text(
     text: Any,
     *,
@@ -82,7 +168,8 @@ def parse_nominal_size_from_text(
     """
     Return nominal (size, unit) from BOQ prose.
 
-    Prefers ``63 mm dia`` over ``IS : 636-1979`` standard numbers.
+    Prefers ``63 mm dia`` over ``IS : 636-1979`` standard numbers and over
+    operating temperatures (``68 deg.C.``).
     When ``require_explicit_unit`` is True, only ``dia`` / ``mm`` / ``NB`` /
     ``inch`` patterns match — never bare numbers (uncertain → null).
     """
@@ -94,13 +181,13 @@ def parse_nominal_size_from_text(
 
     for match in _SIZE_DIA.finditer(blob):
         size = _trim_size_number(match.group(1))
-        if is_is_standard_number(blob, size):
+        if is_is_standard_number(blob, size) or is_performance_spec_number(blob, size):
             continue
         candidates.append((0, size, _unit_from_token("mm", blob=blob) or "mm"))
 
     for match in _SIZE_WITH_UNIT.finditer(blob):
         size = _trim_size_number(match.group(1))
-        if is_is_standard_number(blob, size):
+        if is_is_standard_number(blob, size) or is_performance_spec_number(blob, size):
             continue
         unit = _unit_from_token(match.group(2), blob=blob)
         candidates.append((1, size, unit))
@@ -108,7 +195,7 @@ def parse_nominal_size_from_text(
     if not require_explicit_unit:
         for match in _GENERIC_NUMBER.finditer(blob):
             size = _trim_size_number(match.group(1))
-            if is_is_standard_number(blob, size):
+            if is_is_standard_number(blob, size) or is_performance_spec_number(blob, size):
                 continue
             unit = _unit_from_token(match.group(2), blob=blob)
             candidates.append((2, size, unit))
@@ -127,7 +214,7 @@ def is_invalid_extracted_size(
     context_text: str = "",
     attributes: dict[str, Any] | None = None,
 ) -> bool:
-    """True when AI confused an IS standard (or label) with nominal size."""
+    """True when AI confused an IS standard, temperature, or label with size."""
     raw = str(size or "").strip()
     if not raw:
         return False
@@ -146,6 +233,27 @@ def is_invalid_extracted_size(
         is_digits = re.sub(r"[^0-9]", "", str(is_value))
         if is_digits and is_digits == digits:
             return True
+
+    temp_value = (
+        attrs.get("temp")
+        or attrs.get("operating_temp")
+        or attrs.get("temperature")
+        or attrs.get("operating_temperature")
+    )
+    if temp_value:
+        temp_digits = re.sub(r"[^0-9.]", "", str(temp_value))
+        if temp_digits and temp_digits == digits:
+            return True
+
+    if context_text and is_performance_spec_number(context_text, digits):
+        confident, _ = parse_nominal_size_from_text(
+            context_text,
+            require_explicit_unit=True,
+        )
+        if confident and confident != digits:
+            return True
+        # Spec number with no alternate nominal size → clear the wrong Size.
+        return True
 
     if context_text and is_is_standard_number(context_text, digits):
         confident, _ = parse_nominal_size_from_text(

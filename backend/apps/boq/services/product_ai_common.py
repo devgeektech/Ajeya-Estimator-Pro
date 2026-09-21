@@ -373,13 +373,12 @@ def _compute_match_confidence(
         return 100.0
 
     if prefer_filled_fields:
-        # Rematch: filled core fields dominate the shown %.
+        # Rematch: filled core fields dominate the shown %. Do not blend the AI's
+        # match_confidence — that jittered % on identical Re-analyse inputs.
         if product_mapped:
             blended = (0.88 * structured) + (0.12 * float(attr_score or 0.0))
         else:
             blended = structured
-        if ai_confidence is not None:
-            blended = (0.92 * blended) + (0.08 * float(ai_confidence))
         return round(max(0.0, min(100.0, blended)), 2)
 
     # Prefer product identity (cat/sub/class/size) over sparse attribute fill so

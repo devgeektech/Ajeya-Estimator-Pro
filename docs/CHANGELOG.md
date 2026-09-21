@@ -5,6 +5,15 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
+## 2026-09-21 — Analysis: Not found placeholders + temp≠size + stable rematch %
+
+- Empty Analysis core/attribute inputs show placeholder **Not found** (was Optional).
+- Operating Temp / deg.C (and similar performance specs) are never treated as Size;
+  Size comes from parent orifice/bore (e.g. ``15 mm``); temp fills attribute ``temp``.
+- Missing Unit recovered from BOQ evidence when Size is known (``15 mm`` → unit mm).
+- Re-analyse match % no longer blends AI ``match_confidence`` (identical inputs stay
+  stable). Synonym / temp rules strengthened in extract prompts and sanitize path.
+
 ## 2026-09-17 — Rematch: fair % + empty unfound inputs + slot-led recall
 
 - Match confidence scores **filled** extract/expert fields only (blank inputs

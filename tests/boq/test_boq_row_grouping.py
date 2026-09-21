@@ -114,6 +114,40 @@ class SlotProductContextTests(SimpleTestCase):
         self.assertTrue(payload["slots"][0].get("product_context"))
         self.assertIn("pipe", payload["slots"][0]["product_context"].lower())
 
+    def test_operating_temp_slots_keep_parent_sprinkler_context(self):
+        rows = [
+            _row("r1", "3.1", None, "Sprinkler heads", depth=0),
+            _row("r2", "a)", "r1", "Pendent sprinklers 15 mm", depth=1),
+            _row(
+                "r3",
+                "",
+                "r2",
+                "i) Operating Temp. : 68 deg.C.",
+                qty=120,
+                unit="No.",
+                depth=2,
+            ),
+            _row(
+                "r4",
+                "",
+                "r2",
+                "ii) Operating Temp. : 79 deg.C.",
+                qty=10,
+                unit="No.",
+                depth=2,
+            ),
+        ]
+        groups = grouped_anchor_rows({"rows": rows})
+        self.assertTrue(groups)
+        package = groups[0]
+        self.assertEqual(package["slot_count"], 2)
+        for slot in package["slots"]:
+            context = str(slot.get("product_context") or "")
+            self.assertIn("15", context)
+            self.assertIn("sprinkler", context.lower())
+            self.assertNotIn("Operating Temp", context)
+            self.assertIsNone(slot.get("size_hint"))
+
 
 class ExtractIdentityRepairTests(SimpleTestCase):
     def test_snap_overrides_wrong_pipe_with_sluice_from_context(self):

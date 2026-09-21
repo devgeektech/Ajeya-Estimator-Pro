@@ -9,10 +9,11 @@ from utils.product_synonyms import (
 class SynonymRulesForAiTests(SimpleTestCase):
     def test_rules_are_short_and_include_materials(self):
         rules = format_synonym_rules_for_ai()
-        self.assertLess(len(rules), 1500)
+        self.assertLess(len(rules), 2500)
         self.assertIn("GI", rules)
         self.assertIn("galvanized", rules.lower())
         self.assertIn("Meaning-first", rules)
+        self.assertIn("Operating temperature", rules)
         # Full product phrase catalog must not appear in prompt rules.
         self.assertNotIn("ACCESSORIES > ROSETTEE PLATE:", rules)
         self.assertNotIn("Product synonyms (Category > Sub-category:", rules)
