@@ -2012,3 +2012,14 @@ Product behaviour truth: `docs/PRODUCT.md`. Session memory: `docs/SESSION_STATE.
 - Removed legacy hardcoded product taxonomy mappings (_MAIN_PRODUCT_PHRASES, _PRODUCT_FIRST_CAT, _PRODUCT_FIRST_SUB) across utils and services.
 - Introduced get_dynamic_taxonomy_hints to build extraction hints dynamically from the active Rate_Master taxonomy.
 - Fixed matching edge cases (e.g., sand bucket set) by dynamically generating bi-directional synonyms and setting appropriate category priorities.
+
+## 2026-09-21 — Fix Make List categorization TypeError and test suite KeyError
+
+- Reverted str() removals in Make List display logic to fix AttributeError on numeric Excel fields.
+- Fixed KeyError in sanitize_product_against_evidence test.
+
+
+## 2026-09-21 — Fix make list mapping ImportError
+
+- Updated make list category mapping service to use dynamic taxonomy hints instead of deleted hardcoded constants.
+

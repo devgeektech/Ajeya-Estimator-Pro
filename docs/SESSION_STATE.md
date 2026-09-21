@@ -73,24 +73,9 @@ oldest row + `media/database/` workbook deleted.
 
 Keep only the latest entry below. Older work is in `docs/CHANGELOG.md`.
 
-### 2026-09-21 — Dynamic Sub-Category fetching from BOQ
+### 2026-09-21 — Fix Make List categorization TypeError and test suite KeyError
 
-Completed: Expanded `_MAIN_PRODUCT_PHRASES` dynamically using `_AI_SYNONYM_CATALOG` to ensure multi-word sub-categories (like "sand bucket set", "upright sprinkler", etc.) are extracted accurately from BOQ text over AI guesses. Excluded generic terms ("ms", "pipe", etc.) to prevent false overrides.
-Pending: Restart Celery so workers load the new extraction logic. Re-run Analyse on section 4.10 to verify "sand bucket set" extraction. Commit and push when asked.
-Issues: None.
-Next: User validates extraction accuracy for "sand bucket set" and other multi-word subcategories.
-
-
-
-
-
-
-
-
-
-### 2026-09-21 — Dynamic BOQ Taxonomy Migration
-
-Completed: Migrated hardcoded BOQ product extraction rules (_MAIN_PRODUCT_PHRASES, _PRODUCT_FIRST_CAT, etc.) to a dynamic taxonomy loaded from the Rate_Master database. Updated product_synonyms.py, catalog_size_rules.py, and boq_extraction_slots.py. Fixed failing tests by maintaining category priority rules in the dynamic logic.
+Completed: Reverted `str()` removal in `serial_normalizer.py` and `boq_row_grouping_service.py` that caused `AttributeError` on numeric Excel values in the Make List. Fixed a broken test in `test_product_extraction_sanitize.py` that crashed with `KeyError` when verifying deleted attributes. All tests pass. Fixed `ImportError` in `make_list_category_mapping_service.py` by migrating make list hints to the dynamic taxonomy loading function (`get_dynamic_taxonomy_hints`), completing the dynamic taxonomy migration that had missed updating the imports.
 Pending: None
 Issues: None
-Next: Monitor system for extraction accuracy on diverse BOQs.
+Next: Await user feedback.
