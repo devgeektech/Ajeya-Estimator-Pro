@@ -312,7 +312,7 @@ def _format_description_attributes(
 
 def _trim_number(value: str) -> str:
     """``1.00`` → ``1`` so sizes read naturally."""
-    text = (value or "").strip()
+    text = str(value or "").strip()
     if re.fullmatch(r"\d+\.0+", text):
         return text.split(".")[0]
     if re.fullmatch(r"\d+\.\d*?[1-9]0+", text):

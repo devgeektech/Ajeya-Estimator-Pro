@@ -470,6 +470,9 @@ def structured_match_score(
                     breakdown[name] = hint_points
                     weighted_score += hint_points
                     filled_core_names.add(name)
+                elif _is_filled(right):
+                    weight_total += weight
+                    breakdown[name] = 0.0
             elif name == "sub_category":
                 hint_ratio = _hint_field_score(hint, right)
                 if hint_ratio > 0:
@@ -478,6 +481,9 @@ def structured_match_score(
                     breakdown[name] = hint_points
                     weighted_score += hint_points
                     filled_core_names.add(name)
+                elif _is_filled(right):
+                    weight_total += weight
+                    breakdown[name] = 0.0
             else:
                 breakdown[name] = None  # omitted — not found in BOQ/extract
             continue
