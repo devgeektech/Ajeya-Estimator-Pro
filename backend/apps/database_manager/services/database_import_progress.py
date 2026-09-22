@@ -19,6 +19,7 @@ STATUS_SUCCEEDED = "succeeded"
 STATUS_FAILED = "failed"
 
 _STALE_PROCESSING_SECONDS = 60 * 45  # imports can take ~10 minutes; expire stuck jobs
+_TERMINAL_STATUS_TTL_SECONDS = 90  # succeeded/failed only until UI has consumed them
 
 
 def _progress_dir() -> Path:
@@ -36,16 +37,30 @@ def _lock_path() -> Path:
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(f".{os.getpid()}.tmp")
-    tmp.write_text(
-        json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
-        encoding="utf-8",
-    )
-    os.replace(tmp, path)
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    except FileNotFoundError:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            if tmp.is_file():
+                tmp.unlink()
+        except OSError:
+            pass
+        raise
 
 
 def read_import_status() -> dict[str, Any]:
-    """Return current import status for UI polling."""
+    """Return current import status for UI polling.
+
+    Self-heals stuck ``processing`` and expires old terminal statuses to idle.
+    """
     path = _status_path()
     if not path.is_file():
         return {"status": STATUS_IDLE}
@@ -58,13 +73,16 @@ def read_import_status() -> dict[str, Any]:
 
     status = str(data.get("status") or STATUS_IDLE)
     updated_at = float(data.get("updated_at") or 0)
+    finished_at = float(data.get("finished_at") or updated_at or 0)
+    now = time.time()
     if status == STATUS_PROCESSING and updated_at:
-        age = time.time() - updated_at
+        age = now - updated_at
         if age > _STALE_PROCESSING_SECONDS:
             failed = {
                 "status": STATUS_FAILED,
                 "message": "Import timed out or the server stopped. Previous database unchanged.",
-                "updated_at": time.time(),
+                "updated_at": now,
+                "finished_at": now,
                 "started_at": data.get("started_at"),
                 "filename": data.get("filename") or "",
                 "uploaded_by_email": data.get("uploaded_by_email") or "",
@@ -75,6 +93,16 @@ def read_import_status() -> dict[str, Any]:
             except Exception:
                 logger.exception("Failed marking stale database import as failed")
             return failed
+
+    if status in (STATUS_SUCCEEDED, STATUS_FAILED) and finished_at:
+        if (now - finished_at) > _TERMINAL_STATUS_TTL_SECONDS:
+            try:
+                path.unlink(missing_ok=True)
+                if status == STATUS_FAILED:
+                    _release_lock_file()
+            except Exception:
+                logger.exception("Failed clearing terminal database import status")
+            return {"status": STATUS_IDLE}
 
     return {
         "status": status,

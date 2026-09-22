@@ -26,6 +26,8 @@ from apps.boq.services.boq_row_grouping_service import (
     full_description_for_row,
     resolve_anchor_row_id,
     single_row_description,
+    slot_context_for_qty_row,
+    slot_context_index,
 )
 from apps.boq.services.make_list_constraint_service import walk_rows_tree
 from apps.boq.services.product_ai_mapping_service import ProductAIMappingService
@@ -234,8 +236,8 @@ class BOQAnalysisService:
             match_started = time.perf_counter()
 
             def _on_enrich_progress(done: int, total: int) -> None:
-                total = max(int(total or 0), 1)
-                done = max(0, min(int(done or 0), total))
+                total = max(total or 0, 1)
+                done = max(0, min(done or 0, total))
                 # Matching covers roughly 55% → 95% (leave headroom for save/complete).
                 percent = min(95, 55 + int((done / total) * 40))
                 logger.info(
@@ -255,6 +257,7 @@ class BOQAnalysisService:
             # Attach full section as AI context; slot line drives product identity.
             # Do not fold the whole section into Chroma query text (hydrant titles
             # were drowning pipe/valve slots).
+            slot_lookup = slot_context_index(boq_data)
             for row in extracted_rows:
                 row_id = str(row.get("row_id") or "")
                 section_text = _row_description(boq_data, row_id) if row_id else ""
@@ -274,10 +277,15 @@ class BOQAnalysisService:
                         # Single-line section: description_hint / product owns identity.
                         slot_text = str(product.get("description_hint") or "").strip()
                     if section_text or slot_text:
+                        slot_meta = slot_context_for_qty_row(
+                            boq_data, slot_id, index=slot_lookup
+                        )
                         product["_boq_row"] = {
                             "row_id": row_id,
                             "description": section_text,
                             "slot_description": slot_text,
+                            "product_context": slot_meta.get("product_context") or "",
+                            "evidence_text": slot_meta.get("evidence_text") or "",
                             "serial": str(row.get("serial") or row.get("ser_no") or ""),
                         }
 
@@ -412,13 +420,13 @@ class BOQAnalysisService:
                 raise ValidationError("Wait for the current job to finish.")
 
             target = next(
-                (row for row in rows if str(row.get("row_id")) == str(row_id)),
+                (row for row in rows if str(row.get("row_id")) == row_id),
                 None,
             )
             if target is None:
                 raise ValidationError(f"Unknown BOQ row: {row_id}")
 
-            rematch_plan = None
+            rematch_plan: dict[str, Any] | None = None
             products = list(target.get("products") or [])
             if force_reextract or not products:
                 # Release lock before long workbook re-extract.
@@ -432,7 +440,7 @@ class BOQAnalysisService:
                 products = [dict(product) for product in products]
                 work_product_index = product_index
                 if work_product_index is not None:
-                    want = int(work_product_index)
+                    want = work_product_index
                     selected = next(
                         (
                             product
@@ -480,7 +488,7 @@ class BOQAnalysisService:
             version_id = int(stored_db_id or 0)
             if not version_id:
                 active_version = get_active_database_version()
-                version_id = int(active_version.pk) if active_version else 0
+                version_id = active_version.pk if active_version else 0
             if not version_id:
                 raise ValidationError("No active master database. Upload a database first.")
 
@@ -491,22 +499,25 @@ class BOQAnalysisService:
                 # Product-wise Re-analyse: one product + BOQ row + UI inputs.
                 source_product = stub_products[0]
                 boq_payload = boq_obj.boq_data or {}
-                section_text = _row_description(boq_payload, str(row_id))
+                section_text = _row_description(boq_payload, row_id)
                 slot_id = str(
                     source_product.get("qty_row_id")
                     or source_product.get("source_row_id")
                     or ""
                 ).strip()
                 slot_text = ""
-                if slot_id and slot_id != str(row_id):
+                if slot_id and slot_id != row_id:
                     slot_text = single_row_description(boq_payload, slot_id)
                 elif not slot_text:
                     slot_text = str(source_product.get("description_hint") or "").strip()
                 # Full section for AI meaning; expert UI fields + slot line for recall.
+                slot_meta = slot_context_for_qty_row(boq_payload, slot_id)
                 boq_context = {
-                    "row_id": str(row_id),
+                    "row_id": row_id,
                     "description": section_text,
                     "slot_description": slot_text,
+                    "product_context": slot_meta.get("product_context") or "",
+                    "evidence_text": slot_meta.get("evidence_text") or "",
                     "serial": str(target.get("serial") or target.get("ser_no") or ""),
                 }
                 updated_product = mapper.rematch_product(
@@ -541,7 +552,7 @@ class BOQAnalysisService:
                     # Replace only the rematched product; leave sibling % / fields intact.
                     updated_rows = []
                     for row in latest_rows:
-                        if str(row.get("row_id")) != str(row_id):
+                        if str(row.get("row_id")) != row_id:
                             updated_rows.append(row)
                             continue
                         latest_products = list(row.get("products") or [])
@@ -555,7 +566,7 @@ class BOQAnalysisService:
                 else:
                     updated_rows = _replace_rows(latest_rows, rematched_rows or [])
                 extraction_meta = dict(latest.get("extraction") or existing.get("extraction") or {})
-                extraction_meta["last_row_rematch"] = str(row_id)
+                extraction_meta["last_row_rematch"] = row_id
                 extraction_meta["last_product_rematch"] = product_index
                 analysis_payload = {
                     **latest,
@@ -668,25 +679,25 @@ class BOQAnalysisService:
         refine=True (same recall path as expert Re-analyse) so candidates and
         confidence scores align with a manual rematch.
         """
-        version_id = int(database_version_id or 0)
+        version_id = database_version_id or 0
         if not version_id:
             active_version = get_active_database_version()
-            version_id = int(active_version.pk) if active_version else 0
+            version_id = active_version.pk if active_version else 0
         if not version_id:
             logger.warning("Attribute enrichment skipped: no active master database")
             return rows
         try:
             mapper = ProductAIMappingService(version_id)
             product_count = sum(len(row.get("products") or []) for row in rows)
-            product_count = max(int(product_count or 0), 1)
+            product_count = max(product_count, 1)
 
             def _on_first(done: int, total: int) -> None:
                 if not progress_callback:
                     return
                 # First pass occupies [0, product_count] of overall
                 # [0, product_count + refine_total]. Use 2x until refine starts.
-                first_total = max(int(total or 0), product_count, 1)
-                progress_callback(min(int(done or 0), first_total), first_total * 2)
+                first_total = max(total or 0, product_count, 1)
+                progress_callback(min(done or 0, first_total), first_total * 2)
 
             map_started = time.perf_counter()
             mapped = mapper.map_rows(
@@ -704,10 +715,10 @@ class BOQAnalysisService:
             def _on_refine(done: int, total: int) -> None:
                 if not progress_callback:
                     return
-                refine_total = max(int(total or 0), 1)
+                refine_total = max(total or 0, 1)
                 overall_total = product_count + refine_total
                 progress_callback(
-                    min(product_count + int(done or 0), overall_total),
+                    min(product_count + (done or 0), overall_total),
                     overall_total,
                 )
 

@@ -371,7 +371,7 @@
                                 name="{{ field.key }}"
                                 value="{{ field.value }}"
                                 class="extraction-input"
-                                placeholder="Optional"
+                                placeholder="Not found"
                             >
                             {% endif %}
                         </label>
@@ -407,7 +407,7 @@
                                         name="attr_{{ attr.key }}"
                                         value="{{ attr.value }}"
                                         class="extraction-input"
-                                        placeholder="Optional"
+                                        placeholder="Not found"
                                         @input="recalcAttributeConfidence()"
                                     >
                                     <button
@@ -424,7 +424,7 @@
                                     name="attr_{{ attr.key }}"
                                     value="{{ attr.value }}"
                                     class="extraction-input"
-                                    placeholder="{% if attr.filled %}{% else %}Not found in BOQ{% endif %}"
+                                    placeholder="{% if attr.filled %}{% else %}Not found{% endif %}"
                                     @input="recalcAttributeConfidence()"
                                 >
                                 {% endif %}
@@ -439,7 +439,7 @@
                                             class="extraction-input"
                                             :name="'attr_' + item.key"
                                             x-model="item.value"
-                                            placeholder="Optional"
+                                            placeholder="Not found"
                                             @input="recalcAttributeConfidence(); scheduleAutoSave()"
                                         >
                                         <button

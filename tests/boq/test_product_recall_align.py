@@ -21,7 +21,6 @@ class ProductRecallAlignTests(SimpleTestCase):
             "size": "200",
             "_boq_row": {
                 "description": "Supply reflux type check valve 200 mm dia for hydrant system",
-                "slot_description": "200 mm dia",
             },
         }
         result = self.recall._product_for_recall(product, refine=False)

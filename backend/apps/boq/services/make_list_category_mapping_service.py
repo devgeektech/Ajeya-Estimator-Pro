@@ -13,10 +13,9 @@ from ai.context import (
 )
 from ai.service import AIService
 from utils.product_synonyms import (
-    MAKE_LIST_DESCRIPTION_HINTS,
-    MAKE_LIST_SUB_CATEGORY_HINTS,
     expand_make_list_search_text,
     format_synonym_rules_for_ai,
+    get_dynamic_taxonomy_hints,
 )
 
 logger = logging.getLogger("boq_ai")
@@ -219,7 +218,8 @@ def _heuristic_sub_category(
         if not any(token in text for token in type_hits):
             return None
 
-    for phrase, hint in MAKE_LIST_SUB_CATEGORY_HINTS:
+    _, sub_hints = get_dynamic_taxonomy_hints(sub_categories_by_category)
+    for phrase, hint in sub_hints:
         phrase_norm = _normalize(phrase)
         if not phrase_norm or phrase_norm not in text:
             continue
@@ -297,7 +297,8 @@ def _heuristic_category(
     if not description or not categories:
         return None, None, 0.0, False
     text = expand_make_list_search_text(description) or _normalize(description)
-    for phrase, hint in MAKE_LIST_DESCRIPTION_HINTS:
+    cat_hints, _ = get_dynamic_taxonomy_hints(sub_categories_by_category)
+    for phrase, hint in cat_hints:
         phrase_norm = _normalize(phrase)
         if not phrase_norm or phrase_norm not in text:
             continue

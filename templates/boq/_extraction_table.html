@@ -435,6 +435,7 @@ document.addEventListener('alpine:init', () => {
                 data.line_html,
                 { preserveActiveTab: true },
             );
+            window.dispatchEvent(new CustomEvent('product-id-assigned'));
         } catch (error) {
             alert(error.message || 'Failed to select candidate.');
             if (btn) {
@@ -464,6 +465,7 @@ document.addEventListener('alpine:init', () => {
                 data.product_index != null ? data.product_index : productIndex,
                 data.line_html,
             );
+            window.dispatchEvent(new CustomEvent('product-id-assigned'));
         } catch (error) {
             alert(error.message || 'Failed to confirm match.');
             if (btn) {

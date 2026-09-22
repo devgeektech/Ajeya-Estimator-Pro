@@ -32,9 +32,11 @@ AI_CANDIDATE_LIMIT = 5
 
 # Sub_Category is nearest to product identity; Category next; size still gates
 # wrong dia but must not outrank a wrong family.
+# sub_category is the strongest identity signal — raised to 35 (was 30).
+# category reduced to 20 (was 24) since sub_category already implies it.
 _TEXT_WEIGHTS = {
-    "sub_category": 30.0,
-    "category": 24.0,
+    "sub_category": 35.0,
+    "category": 20.0,
     "class": 10.0,
     "size": 18.0,
     "unit": 5.0,
@@ -68,6 +70,12 @@ _CONFLICTING_PHRASE_PAIRS: tuple[tuple[str, str], ...] = (
     ("ball valve", "pipe"),
     ("non return valve", "pipe"),
     ("check valve", "pipe"),
+    ("sprinkler", "pipe"),
+    ("hydrant", "gi pipe"),
+    ("hydrant", "ms pipe"),
+    ("hose box", "pipe"),
+    ("hose reel", "pipe"),
+    ("extinguisher", "pipe"),
 )
 # Exact Sub_Category pairs that must never cross-match (substring-safe).
 _SUB_CATEGORY_CONFLICTS: frozenset[frozenset[str]] = frozenset(
@@ -237,7 +245,7 @@ def product_type_conflicts(extracted: dict[str, Any], rate: Rate_Master_Output) 
     """
     hint = extracted.get("description_hint")
     catalog_blob = " ".join(
-        str(value or "") for value in (rate.Category, rate.Sub_Category, rate.Class)
+        (value or "") for value in (rate.Category, rate.Sub_Category, rate.Class)
     )
     extract_blob = " ".join(
         str(value or "")
@@ -246,7 +254,7 @@ def product_type_conflicts(extracted: dict[str, Any], rate: Rate_Master_Output) 
     left_text = _normalize_text(extract_blob)
     right_text = _normalize_text(catalog_blob)
     extract_sub = str(extracted.get("sub_category") or "").strip().upper()
-    catalog_sub = str(rate.Sub_Category or "").strip().upper()
+    catalog_sub = (rate.Sub_Category or "").strip().upper()
     if extract_sub and catalog_sub:
         pair = frozenset({extract_sub, catalog_sub})
         if pair in _SUB_CATEGORY_CONFLICTS:
@@ -297,8 +305,6 @@ def _hint_field_score(hint: Any, label: Any) -> float:
 
 def _hint_category_score(hint: Any, category_label: Any) -> float:
     """Credit Category from description phrases (e.g. sand buckets → HYDRANT)."""
-    from utils.product_synonyms import MAKE_LIST_DESCRIPTION_HINTS
-
     direct = _hint_field_score(hint, category_label)
     if direct > 0:
         return direct
@@ -306,7 +312,15 @@ def _hint_category_score(hint: Any, category_label: Any) -> float:
     cat_text = _normalize_text(category_label)
     if not hint_text or not cat_text:
         return 0.0
-    for phrase, mapped_category in MAKE_LIST_DESCRIPTION_HINTS:
+
+    from ai.context import load_rate_master_taxonomy
+    from utils.product_synonyms import get_dynamic_taxonomy_hints
+    
+    taxonomy = load_rate_master_taxonomy()
+    by_category = dict(taxonomy.get("sub_categories_by_category") or {})
+    cat_hints, _ = get_dynamic_taxonomy_hints(by_category)
+    
+    for phrase, mapped_category in cat_hints:
         if phrase in hint_text and _normalize_text(mapped_category) == cat_text:
             return 0.85
     return 0.0
@@ -391,10 +405,10 @@ def structured_match_score(
 ) -> tuple[float, dict[str, Any]]:
     """Return 0-100 structured score using product fields only (never make/vendor).
 
-    Core field weights stay in the denominator even when the extract leaves a
-    field blank. Otherwise size+unit alone normalize to 100% for every same-size
-    neighbor (including unrelated categories). Blank category/sub still get
-    partial credit when ``description_hint`` clearly names the catalog label.
+    Only **filled extract fields** (and attributes the AI/expert found) count in
+    the denominator — blank inputs are not treated as mismatches. Thin identity
+    (only size/unit, no category/sub/hint) is capped so same-size unrelated
+    neighbors cannot reach 100%.
     """
     extracted_attrs = {
         str(key): str(value)
@@ -433,6 +447,9 @@ def structured_match_score(
     weighted_score = 0.0
     weight_total = 0.0
     hint = extracted.get("description_hint")
+    filled_core_names: set[str] = set()
+    # Track fields that came from actual AI extractions (not hint-credit fallback).
+    real_filled_names: set[str] = set()
 
     for name, left, right, scorer in field_checks:
         weight = _TEXT_WEIGHTS[name]
@@ -446,20 +463,47 @@ def structured_match_score(
         # Catalog Capacity=0 is a sentinel — do not score extract capacity against it.
         if name == "capacity" and not _is_filled(right):
             continue
-        weight_total += weight
         if not _is_filled(left):
-            # Sparse extracts (slot fallback): let description vouch for cat/sub.
+            # Unfound extract field: do not count as a miss in general.
+            # Exception: when there IS evidence of what the product is (description_hint
+            # or category filled), a blank sub_category / category is a real gap
+            # — count it as a scored miss so confidence reflects the missing identity.
+            # If no evidence at all (genuinely unknown product), skip silently.
+            has_evidence = _is_filled(hint) or _is_filled(extracted.get("category"))
             if name == "category":
-                hint_points = _hint_category_score(hint, right) * weight
-                breakdown[name] = hint_points
-                weighted_score += hint_points
+                hint_ratio = _hint_category_score(hint, right)
+                if hint_ratio > 0:
+                    weight_total += weight
+                    hint_points = hint_ratio * weight
+                    breakdown[name] = hint_points
+                    weighted_score += hint_points
+                    filled_core_names.add(name)
+                elif _is_filled(right) and has_evidence:
+                    # Category is identifiable from evidence but was left blank — miss.
+                    weight_total += weight
+                    breakdown[name] = 0.0
+                    breakdown["category_blank_miss"] = True
             elif name == "sub_category":
-                hint_points = _hint_field_score(hint, right) * weight
-                breakdown[name] = hint_points
-                weighted_score += hint_points
+                hint_ratio = _hint_field_score(hint, right)
+                if hint_ratio > 0:
+                    weight_total += weight
+                    hint_points = hint_ratio * weight
+                    breakdown[name] = hint_points
+                    weighted_score += hint_points
+                    filled_core_names.add(name)
+                elif _is_filled(right) and has_evidence:
+                    # Sub_category identifiable from evidence but blank — scored miss.
+                    # This prevents a 100% score when only size/category matched while
+                    # sub_category (the strongest product identity) was missing.
+                    weight_total += weight
+                    breakdown[name] = 0.0
+                    breakdown["sub_category_blank_miss"] = True
             else:
-                breakdown[name] = 0.0
+                breakdown[name] = None  # omitted — not found in BOQ/extract
             continue
+        weight_total += weight
+        filled_core_names.add(name)
+        real_filled_names.add(name)  # actual AI/expert extraction — not hint credit
         points = scorer(left, right) * weight
         breakdown[name] = points
         weighted_score += points
@@ -471,20 +515,47 @@ def structured_match_score(
         breakdown["attribute_details"] = attr_scores
         weighted_score += attr_ratio * weight
         weight_total += weight
+        real_filled_names.add("attributes")
 
     if weight_total <= 0:
         return 0.0, breakdown
 
     total = (weighted_score / weight_total) * 100.0
 
+    # Hint-only guard: when no structured field was actually extracted by the AI
+    # (only hint-credit from the raw BOQ description drove the score), the match
+    # is speculative. Cap to a low value so these items never appear as high-
+    # confidence matches — they should surface as uncertain / pending.
+    _HINT_ONLY_SCORE_CAP = 25.0
+    if not real_filled_names:
+        total = min(total, _HINT_ONLY_SCORE_CAP)
+        breakdown["hint_only_cap"] = _HINT_ONLY_SCORE_CAP
+
+    # Thin identity: only size/unit (no family) must not look like a full match.
+    identity_keys = {"category", "sub_category"}
+    has_family = bool(identity_keys & filled_core_names) or bool(
+        _significant_type_tokens(hint)
+    )
+    if not has_family and filled_core_names and filled_core_names <= {"size", "unit", "capacity"}:
+        total = min(total, 55.0)
+        breakdown["thin_identity_cap"] = 55.0
+
     # Hard size gate: only when both sides have a real nominal size.
+    # Use a reduced penalty when sub_category taxonomy already matches — a
+    # correct SLUICE VALVE at 200mm should outscore a PIPE/GI at exactly 250mm.
     if (
         _is_filled(effective_size)
         and _is_filled(rate_size)
         and not _sizes_compatible(effective_size, rate_size)
     ):
-        total = max(0.0, total - _SIZE_MISMATCH_PENALTY)
-        breakdown["size_mismatch_penalty"] = _SIZE_MISMATCH_PENALTY
+        extract_sub = _normalize_text(extracted.get("sub_category"))
+        catalog_sub = _normalize_text(rate.Sub_Category)
+        taxonomy_confirmed = bool(
+            extract_sub and catalog_sub and labels_equivalent(extract_sub, catalog_sub)
+        )
+        penalty = 20.0 if taxonomy_confirmed else _SIZE_MISMATCH_PENALTY
+        total = max(0.0, total - penalty)
+        breakdown["size_mismatch_penalty"] = penalty
 
     # Hard family gate: wrong product type cannot clear the match threshold.
     if product_type_conflicts(extracted, rate):
@@ -546,7 +617,7 @@ def build_match_query_text(extracted: dict[str, Any]) -> str:
         if key_norm in {"material", "body_material", "construction", "moc", "type", "valve_type"}:
             for term in expand_query_terms(value):
                 parts.append(f"{key}={term}")
-    return " ".join(str(part).strip() for part in parts if _is_filled(part))
+    return " ".join(part.strip() for part in parts if _is_filled(part))
 
 
 def _dedupe_candidates_by_product_id(
@@ -610,6 +681,11 @@ class ProductMatchingService:
         hits = self._rate_hits_from_helper_hits(helper_hits)
         # Always merge SQL neighbors so catalog rows are not missed when Chroma is weak.
         hits = self._merge_size_sql_hits(extracted, hits)
+        # Guarantee that the extracted taxonomy (sub_category + category) is
+        # represented in the candidate pool — Chroma alone can miss the correct
+        # product family when the BOQ section text is pipe-heavy but the product
+        # is a valve/hydrant item.
+        hits = self._guarantee_taxonomy_hits(extracted, hits)
 
         return self._rank_candidates(
             extracted,
@@ -652,7 +728,7 @@ class ProductMatchingService:
         # One representative rate per Product_ID (lowest Final_Material_Amount wins ties).
         best_by_pid: dict[str, Rate_Master_Output] = {}
         for rate in rates:
-            pid = str(rate.Product_ID or "").strip()
+            pid = (rate.Product_ID or "").strip()
             if not pid:
                 continue
             current = best_by_pid.get(pid)
@@ -725,20 +801,75 @@ class ProductMatchingService:
             rate = item.get("rate")
             if rate is None or rate.pk in seen:
                 continue
-            rate_size = _size_for_score(getattr(rate, "Size", None))
-            extract_size = _size_for_score(extracted.get("size"))
-            # Skip size gate when catalog Size is blank/sentinel (hose box Size=0).
-            if (
-                _is_filled(extract_size)
-                and _is_filled(rate_size)
-                and not _sizes_compatible(extract_size, rate_size)
-            ):
-                continue
             seen.add(rate.pk)
             merged.append(
                 {
                     "rate_master_id": rate.pk,
                     "similarity": max(0.35, float(item.get("confidence") or 0) / 100.0),
+                }
+            )
+        return merged
+
+    def _guarantee_taxonomy_hits(
+        self,
+        extracted: dict[str, Any],
+        hits: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Ensure catalog rows for the extracted taxonomy are in the candidate pool.
+
+        When Chroma returns only wrong-family rows (e.g. PIPE hits when the BOQ
+        section text is pipe-heavy but the product is a SLUICE VALVE), the correct
+        sub_category rows never make it into the pool. This pass runs a direct
+        sub_category + category SQL query and injects matching rows so `_rank_candidates`
+        can score and surface them.
+        """
+        sub_category = extracted.get("sub_category")
+        category = extracted.get("category")
+        if not _is_filled(sub_category) or not _is_filled(category):
+            return hits
+
+        # Check if any existing hit already belongs to the correct taxonomy.
+        existing_ids = {
+            int(hit["rate_master_id"])
+            for hit in hits
+            if hit.get("rate_master_id") not in (None, "")
+        }
+        # Fast path: load rates for existing hits and see if any match taxonomy.
+        from utils.product_synonyms import expand_query_terms
+        rate_map = self._load_rates(list(existing_ids))
+        sub_norm = _normalize_text(sub_category)
+        cat_norm = _normalize_text(category)
+        has_taxonomy_hit = any(
+            _normalize_text(r.Sub_Category) == sub_norm
+            and _normalize_text(r.Category) == cat_norm
+            for r in rate_map.values()
+        )
+        if has_taxonomy_hit:
+            return hits
+
+        # No matching-taxonomy row in pool — run targeted SQL.
+        from common.db import q as _q, q_and as _q_and, q_or as _q_or
+        version_id = self.database_version_id
+        base = Rate_Master_Output.objects.filter(database_version_id=version_id)
+
+        def _syn_q(raw: Any, *, field: str) -> Q:
+            query = Q()
+            for term in expand_query_terms(raw):
+                query = _q_or(query, _q(**{f"{field}__iexact": term}))
+                query = _q_or(query, _q(**{f"{field}__icontains": term}))
+            query = _q_or(query, _q(**{f"{field}__iexact": str(raw).strip()}))
+            return query
+
+        tax_q = _q_and(_syn_q(category, field="Category"), _syn_q(sub_category, field="Sub_Category"))
+        merged = list(hits)
+        for rate in base.filter(tax_q)[:20]:
+            if rate.pk in existing_ids:
+                continue
+            existing_ids.add(rate.pk)
+            merged.append(
+                {
+                    "rate_master_id": rate.pk,
+                    "similarity": 0.40,  # Neutral similarity — structured score will rank it properly.
                 }
             )
         return merged
@@ -752,7 +883,7 @@ class ProductMatchingService:
         prefer_lowest_price: bool = False,
         result_limit: int | None = None,
     ) -> dict[str, Any]:
-        keep = max(int(result_limit or CANDIDATE_LIMIT), CANDIDATE_LIMIT)
+        keep = max(result_limit or CANDIDATE_LIMIT, CANDIDATE_LIMIT)
         candidates: list[dict[str, Any]] = []
         rate_map = self._load_rates([hit["rate_master_id"] for hit in hits])
         for hit in hits:
@@ -794,27 +925,6 @@ class ProductMatchingService:
         if not candidates:
             candidates = self._sql_fallback_candidates(extracted)
 
-        # Prefer size-compatible candidates when extract size is known.
-        # Keep catalog rows with blank/sentinel Size=0 (hose box) — they are not
-        # nominal-dia products and must not be filtered out by cabinet dims.
-        extract_size = _size_for_score(extracted.get("size"))
-        if _is_filled(extract_size):
-            sized = [
-                item
-                for item in candidates
-                if (
-                    not _is_filled(
-                        _size_for_score(getattr(item.get("rate"), "Size", None))
-                    )
-                    or _sizes_compatible(
-                        extract_size,
-                        _size_for_score(getattr(item.get("rate"), "Size", None)),
-                    )
-                )
-            ]
-            if sized:
-                candidates = sized
-
         candidates = _dedupe_candidates_by_product_id(candidates)
 
         if approved_makes:
@@ -825,22 +935,73 @@ class ProductMatchingService:
             ]
             candidates = filtered
 
-        if prefer_lowest_price and candidates:
-            candidates.sort(
-                key=lambda item: (
-                    1 if item.get("type_mismatch") else 0,
-                    float(item.get("selection_amount") or 0.0),
-                    -float(item.get("confidence") or 0.0),
+        extract_size = _size_for_score(extracted.get("size"))
+        valid = [c for c in candidates if not c.get("type_mismatch")]
+        conflicting = [c for c in candidates if c.get("type_mismatch")]
+
+        extract_sub = _normalize_text(extracted.get("sub_category"))
+        extract_cat = _normalize_text(extracted.get("category"))
+
+        def _taxonomy_score(item: dict[str, Any]) -> float:
+            """Score 0-2 for sub_category + category match — used as primary sort key.
+
+            Ensures the correct product family (e.g. SLUICE VALVE) always ranks above
+            a wrong-family row (e.g. PIPE/GI) that happens to share the nominal size,
+            regardless of Chroma similarity.
+            """
+            rate = item.get("rate")
+            if rate is None:
+                return 0.0
+            score = 0.0
+            if extract_sub and labels_equivalent(extract_sub, _normalize_text(rate.Sub_Category)):
+                score += 1.0
+            if extract_cat and _normalize_text(rate.Category) == extract_cat:
+                score += 0.5
+            return score
+
+        if valid:
+            if prefer_lowest_price:
+                valid.sort(
+                    key=lambda item: (
+                        float(item.get("selection_amount") or 0.0),
+                        -float(item.get("confidence") or 0.0),
+                    )
                 )
-            )
+                conflicting.sort(
+                    key=lambda item: (
+                        float(item.get("selection_amount") or 0.0),
+                        -float(item.get("confidence") or 0.0),
+                    )
+                )
+            else:
+                # Primary sort: taxonomy match (sub_category first, then category).
+                # Secondary sort: blended confidence descending.
+                # This guarantees a correct SLUICE VALVE at nearby size outranks
+                # a wrong PIPE row at the exact size.
+                valid.sort(
+                    key=lambda item: (
+                        -_taxonomy_score(item),
+                        -float(item.get("confidence") or 0.0),
+                    )
+                )
+                conflicting.sort(key=lambda item: -float(item.get("confidence") or 0.0))
+            candidates = valid + conflicting
         else:
-            # Same family/subtype first, then confidence — wrong-family size twins last.
-            candidates.sort(
-                key=lambda item: (
-                    1 if item.get("type_mismatch") else 0,
-                    -float(item.get("confidence") or 0.0),
+            if prefer_lowest_price:
+                candidates.sort(
+                    key=lambda item: (
+                        1 if item.get("type_mismatch") else 0,
+                        float(item.get("selection_amount") or 0.0),
+                        -float(item.get("confidence") or 0.0),
+                    )
                 )
-            )
+            else:
+                candidates.sort(
+                    key=lambda item: (
+                        1 if item.get("type_mismatch") else 0,
+                        -float(item.get("confidence") or 0.0),
+                    )
+                )
 
         best = candidates[0] if candidates else None
         confidence = best["confidence"] if best else 0.0
@@ -892,8 +1053,12 @@ class ProductMatchingService:
         """Recall Rate_Master rows by filled fields (synonym-aware, multi-pass).
 
         Pass 1: category + sub/class synonyms + size.
-        Pass 2: category + size only (class/sub may use long vs short forms).
-        Pass 3: size + material synonym text in Class/Sub/Attribute.
+        Pass 2: category + sub synonyms + size.
+        Pass 3: category + sub synonyms (same sub-category, any size in DB).
+        Pass 4: category + size only (catch other subtypes of same category matching size).
+        Pass 5: category only (same category, any size).
+        Pass 6: size + material synonym text in Class/Sub/Attribute.
+        Pass 7: description/taxonomy text only (ignore size).
         """
         version_id = self.database_version_id
         base = Rate_Master_Output.objects.filter(database_version_id=version_id)
@@ -923,7 +1088,7 @@ class ProductMatchingService:
             return query
 
         passes: list[Any] = []
-        # Pass 1 — tight filters (category uses synonym expansion).
+        # Pass 1 — tight filters (category + sub + class + size).
         q1 = Q()
         if _is_filled(category):
             q1 = q_and(q1, _synonym_q(category, field="Category"))
@@ -937,37 +1102,64 @@ class ProductMatchingService:
         if q1:
             passes.append(base.filter(q1))
 
-        # Pass 2 — category + size only (catch DI vs ductile iron on Class).
+        # Pass 2 — category + sub_category + size
         q2 = Q()
         if _is_filled(category):
             q2 = q_and(q2, _synonym_q(category, field="Category"))
+        if _is_filled(sub_category):
+            q2 = q_and(q2, _synonym_q(sub_category, field="Sub_Category"))
         if size_filter:
             q2 = q_and(q2, size_filter)
         if q2 and q2 != q1:
             passes.append(base.filter(q2))
 
-        # Pass 3 — size + synonym text anywhere on Class/Sub/Attribute/Category.
+        # Pass 3 — category + sub_category (same product sub-category, any size in catalog)
+        q3 = Q()
+        if _is_filled(category):
+            q3 = q_and(q3, _synonym_q(category, field="Category"))
+        if _is_filled(sub_category):
+            q3 = q_and(q3, _synonym_q(sub_category, field="Sub_Category"))
+        if q3 and q3 != q2 and q3 != q1:
+            passes.append(base.filter(q3))
+
+        # Pass 4 — category + size only (catch DI vs ductile iron on Class).
+        q4 = Q()
+        if _is_filled(category):
+            q4 = q_and(q4, _synonym_q(category, field="Category"))
+        if size_filter:
+            q4 = q_and(q4, size_filter)
+        if q4 and q4 != q2 and q4 != q1:
+            passes.append(base.filter(q4))
+
+        # Pass 5 — category only (same category, any size).
+        q5 = Q()
+        if _is_filled(category):
+            q5 = _synonym_q(category, field="Category")
+        if q5 and q5 != q3:
+            passes.append(base.filter(q5))
+
+        # Pass 6 — size + synonym text anywhere on Class/Sub/Attribute/Category.
         material_blob = Q()
         for raw in (product_class, sub_category, category, extracted.get("description_hint")):
             if not _is_filled(raw) or _is_placeholder_class(raw):
                 continue
             for term in expand_query_terms(raw):
                 # Skip full-sentence dump terms — they never icontain-match labels.
-                if len(str(term).strip()) > 48:
+                if len(term.strip()) > 48:
                     continue
                 material_blob = q_or(material_blob, q(Class__icontains=term))
                 material_blob = q_or(material_blob, q(Sub_Category__icontains=term))
                 material_blob = q_or(material_blob, q(Category__icontains=term))
                 material_blob = q_or(material_blob, q(Attribute__icontains=term))
-        q3 = material_blob
+        q6 = material_blob
         if size_filter:
-            q3 = q_and(q3, size_filter) if q3 else size_filter
-        if q3:
-            passes.append(base.filter(q3))
+            q6 = q_and(q6, size_filter) if q6 else size_filter
+        if q6:
+            passes.append(base.filter(q6))
 
-        # Pass 4 — description/taxonomy text only (ignore size). Cabinet dimensions
+        # Pass 7 — description/taxonomy text only (ignore size). Cabinet dimensions
         # like 30"x24"x10" must not hide FIRE HOSE BOX rows with blank Size.
-        if material_blob:
+        if material_blob and material_blob != q3:
             passes.append(base.filter(material_blob))
 
         seen: set[int] = set()
@@ -978,6 +1170,10 @@ class ProductMatchingService:
                     continue
                 seen.add(rate.pk)
                 structured, breakdown = structured_match_score(extracted, rate)
+                type_mismatch = product_type_conflicts(extracted, rate)
+                confidence = structured
+                if type_mismatch:
+                    confidence = min(confidence, _TYPE_MISMATCH_SCORE_CAP)
                 candidates.append(
                     {
                         "rate_master_id": rate.pk,
@@ -986,12 +1182,13 @@ class ProductMatchingService:
                         "tech_key": rate.display_key(),
                         "make": rate.Make,
                         "vendor": rate.Vendor,
-                        "confidence": round(structured, 2),
+                        "confidence": round(confidence, 2),
                         "chroma_similarity": 0.0,
                         "structured_score": round(structured, 2),
                         "score_breakdown": breakdown,
                         "selection_amount": float(selection_amount(rate)),
                         "rate": rate,
+                        "type_mismatch": type_mismatch,
                     }
                 )
                 if len(candidates) >= 80:
@@ -999,7 +1196,37 @@ class ProductMatchingService:
             if len(candidates) >= 80:
                 break
 
-        candidates.sort(key=lambda item: float(item.get("confidence") or 0.0), reverse=True)
+        extract_size = _size_for_score(extracted.get("size"))
+        valid = [c for c in candidates if not c.get("type_mismatch")]
+        conflicting = [c for c in candidates if c.get("type_mismatch")]
+        if valid:
+            if _is_filled(extract_size):
+                valid_sized = [
+                    c
+                    for c in valid
+                    if (
+                        not _is_filled(
+                            _size_for_score(getattr(c.get("rate"), "Size", None))
+                        )
+                        or _sizes_compatible(
+                            extract_size,
+                            _size_for_score(getattr(c.get("rate"), "Size", None)),
+                        )
+                    )
+                ]
+                if valid_sized:
+                    valid_unsized = [c for c in valid if c not in valid_sized]
+                    valid = valid_sized + valid_unsized
+            valid.sort(key=lambda item: -float(item.get("confidence") or 0.0))
+            conflicting.sort(key=lambda item: -float(item.get("confidence") or 0.0))
+            candidates = valid + conflicting
+        else:
+            candidates.sort(
+                key=lambda item: (
+                    1 if item.get("type_mismatch") else 0,
+                    -float(item.get("confidence") or 0.0),
+                )
+            )
         return candidates
 
     def recall_sql_candidates(
@@ -1012,10 +1239,9 @@ class ProductMatchingService:
 
         Used by Analysis display for unmatched products so tab GET stays read-only.
         """
-        keep = max(1, int(limit or 3))
+        keep = max(1, limit or 3)
         candidates = self._sql_fallback_candidates(extracted)
         candidates = _dedupe_candidates_by_product_id(candidates)
-        candidates.sort(key=lambda item: float(item.get("confidence") or 0.0), reverse=True)
         return candidates[:keep]
 
 

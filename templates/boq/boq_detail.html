@@ -314,6 +314,7 @@
     data-extract-status-url="{% url 'boq:status' boq.pk %}?expect=extract"
     data-detail-analysis-url="{% url 'boq:detail' boq.pk %}?tab=analysis"
     data-is-extracting="{% if is_extracting %}1{% else %}0{% endif %}"
+    @product-id-assigned.window="missingProductIdCount = Math.max(0, missingProductIdCount - 1)"
     x-data="{
         tab: '{{ default_tab }}',
         analysisEnabled: {{ tab_access.analysis|yesno:'true,false' }},
@@ -1294,9 +1295,9 @@
                     {% if extraction_display.missing_field_count %}
                         <span class="extraction-missing-summary">{{ extraction_display.missing_field_count }} field(s) need review.</span>
                     {% endif %}
-                    {% if extraction_display.missing_product_id_count %}
-                        <span class="extraction-missing-summary">{{ extraction_display.missing_product_id_count }} product(s) without a Product Id — match them here (Select / Confirm Manually / Re-analyse), or click <strong>Next</strong> to send them to <strong>Not available</strong> on Make &amp; Vendor (no rate or labour lookup).</span>
-                    {% endif %}
+                        <span class="extraction-missing-summary" x-show="missingProductIdCount > 0" x-cloak>
+                            <span x-text="missingProductIdCount"></span> product(s) without a Product Id — match them here (Select / Confirm Manually / Re-analyse), or click <strong>Next</strong> to send them to <strong>Not available</strong> on Make &amp; Vendor (no rate or labour lookup).
+                        </span>
                     {% if can_edit_extraction %}
                         Confirm products, then <strong>Next</strong> → Make &amp; Vendor.
                     {% endif %}

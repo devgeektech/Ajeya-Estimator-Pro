@@ -1087,6 +1087,22 @@
             font-weight: 700;
         }
 
+        /* Badge shown next to Sub-category label when AI inferred it from the
+           product description rather than extracting it directly from the BOQ. */
+        .extraction-field__inferred-badge {
+            font-size: .62rem;
+            font-style: italic;
+            font-weight: 500;
+            color: #b45309;
+            background: rgba(251, 191, 36, 0.18);
+            border: 1px solid rgba(251, 191, 36, 0.45);
+            border-radius: 3px;
+            padding: 0px 4px;
+            margin-left: 4px;
+            cursor: help;
+            letter-spacing: .01em;
+        }
+
         .analysis-tab-canvas .extraction-attributes-block .extraction-field__label {
             font-weight: 700;
             color: var(--text);

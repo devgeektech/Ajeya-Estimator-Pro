@@ -486,6 +486,8 @@ class ProductAIMappingService(
                 or boq_row.get("full_description")
                 or "",
                 "slot_description": boq_row.get("slot_description") or "",
+                "product_context": boq_row.get("product_context") or "",
+                "evidence_text": boq_row.get("evidence_text") or "",
                 "serial": boq_row.get("serial") or boq_row.get("ser_no") or "",
             }
             work = refresh_product_from_boq_context(

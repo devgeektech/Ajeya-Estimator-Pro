@@ -47,14 +47,14 @@ def _attribute_value_for_schema_key(
         return None
     if schema_key in attrs and not _is_blank(attrs.get(schema_key)):
         return attrs.get(schema_key)
-    key_l = str(schema_key).strip().lower()
+    key_l = schema_key.strip().lower()
     for raw_key, value in attrs.items():
-        if str(raw_key).strip().lower() == key_l and not _is_blank(value):
+        if raw_key.strip().lower() == key_l and not _is_blank(value):
             return value
     wanted = normalize_attribute_key(schema_key)
     if wanted:
         for raw_key, value in attrs.items():
-            if normalize_attribute_key(str(raw_key)) == wanted and not _is_blank(value):
+            if normalize_attribute_key(raw_key) == wanted and not _is_blank(value):
                 return value
     return None
 
@@ -449,15 +449,18 @@ def _shape_product(
         missing = _is_blank(value) and key in _REQUIRED_FIELDS
         if missing:
             missing_count += 1
-        fields.append(
-            {
-                "key": key,
-                "label": label,
-                "value": "" if value is None else str(value),
-                "missing": missing,
-                "readonly": False,
-            }
-        )
+        field_entry: dict[str, Any] = {
+            "key": key,
+            "label": label,
+            "value": "" if value is None else str(value),
+            "missing": missing,
+            "readonly": False,
+        }
+        # Show a visual indicator when sub_category was AI-inferred, not directly
+        # extracted from the BOQ line, so experts know to verify it.
+        if key == "sub_category" and product.get("sub_category_inferred"):
+            field_entry["inferred"] = True
+        fields.append(field_entry)
 
     attribute_fields = _shape_attribute_fields(product)
     missing_attr_keys = [

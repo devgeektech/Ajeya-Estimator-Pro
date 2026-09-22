@@ -35,6 +35,7 @@ from .services.boq_deletion_service import BOQDeletionService
 from .services.boq_service import BOQCreationService
 from .services.boq_upload_progress import (
     begin_upload,
+    clear_terminal_upload_status,
     is_upload_busy,
     mark_upload_failed,
     mark_upload_succeeded,
@@ -321,6 +322,8 @@ class BOQListView(LoginRequiredMixin, ListView):
             }
             for boq in context["boqs"]
         ]
+        # Drop leftover succeeded/failed so list Upload never inherits stale state.
+        clear_terminal_upload_status(int(self.request.user.pk))
         context["upload_busy"] = is_upload_busy(self.request.user.pk)
         return context
 
@@ -1423,6 +1426,11 @@ class BOQExportView(LoginRequiredMixin, View):
 class BOQUploadView(LoginRequiredMixin, FormView):
     form_class = BOQUploadForm
     template_name = "boq/boq_form.html"
+
+    def get(self, request, *args, **kwargs):
+        # Clear leftover succeeded/failed so a new upload is not treated as done.
+        clear_terminal_upload_status(int(request.user.pk))
+        return super().get(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)

@@ -61,6 +61,16 @@ DEFAULT_KEY_ALIASES: dict[str, str] = {
     "nominal_bore": "size",
     "dia": "size",
     "diameter": "size",
+    # Operating temperature (sprinkler heads, etc.)
+    "temp": "temp",
+    "temperature": "temp",
+    "operating_temp": "temp",
+    "operating_temperature": "temp",
+    "op_temp": "temp",
+    "k_factor": "k_factor",
+    "kfactor": "k_factor",
+    "response": "response",
+    "response_type": "response",
 }
 
 

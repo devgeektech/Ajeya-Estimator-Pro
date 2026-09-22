@@ -5,6 +5,79 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
+## 2026-09-22 — Sub-Category AI Inference, Confidence Scoring Fixes & Product ID Threshold
+
+- **`PRODUCT_ID_CONFIRM_CONFIDENCE` raised 70 → 95**: Product ID auto-fills only on green-band (≥95%). Orange/red products show candidates but no auto Product ID.
+- **Score reweighting**: `sub_category` weight 30→35, `category` weight 24→20.
+- **Blank sub_category = scored miss when evidence exists**: Prevents 100% on size/category-only matches when sub_category was missing but product was identifiable.
+- **AI-powered sub_category inference** (`_infer_missing_sub_category`): New AI call using `ai/prompts/infer_sub_category.txt` — understands product semantically and picks correct sub from DB taxonomy. Updates `description_hint` with inferred sub. Runs on initial Analyse only.
+- **`sub_category_inferred` flag + visual badge**: Amber italic "AI-inferred" badge on Sub-category field in Analysis tab when inferred vs extracted.
+
+---
+
+## 2026-09-21 — Fix Top DB Candidates Taxonomy Focus & AI Extraction Misclassification
+
+- **Adaptive size mismatch penalty**: When extracted `sub_category` matches the catalog row (`taxonomy_confirmed`), size mismatch penalty drops from −45 to −20. SLUICE VALVE at 200mm now scores ~57% vs PIPE/MS at exact 250mm (23%). Correct product family always wins.
+- **`_guarantee_taxonomy_hits`** pass in `ProductMatchingService.match_product`: If no Chroma hit belongs to the extracted `category + sub_category`, a targeted SQL query injects up to 20 matching rows before ranking. Prevents Chroma wrong-family bias from blocking correct candidates entirely.
+- **Taxonomy-aware sort key** in `_rank_candidates`: Valid candidates sort by `_taxonomy_score` (sub_category=1.0, category=0.5) as primary, then blended confidence. Correct product family always surfaces first.
+- **`product_noun_taxonomy_hints`** (36 entries) added to `build_database_context` in `ai/context.py`: explicit BOQ noun → Category/Sub_Category table for landing valve, external hydrant, branch pipe, reflux/NRV valve, hose reel, etc.
+- **Extraction prompt** updated (`ai/prompts/extract_products.txt`): Added CRITICAL TAXONOMY TABLE at top, HYDRANT/VALVE/reflux valve examples in STEP 1. Clarified that material keywords (SS, CI, MS) describe material/class — they do not change product type to PIPE.
+
+## 2026-09-21 — Fix Inflated Confidence Score When AI Extracts Nothing
+
+- Root cause: `structured_match_score` could return 81% for a product where the AI extracted no structured fields at all. The raw BOQ text (used as `description_hint` fallback) contained words like "M.S.pipeline", which satisfied `labels_equivalent(hint, "MS") = True` (0.9 hint score) and `"pipe" in "pipeline"` for category credit — driving a false high score.
+- Added `real_filled_names` tracking inside `structured_match_score` in `product_matching_service.py`. Only fields that were actually extracted by AI/expert (not hint-credit fallback) are counted in this set.
+- When `real_filled_names` is empty (nothing actually extracted), a `_HINT_ONLY_SCORE_CAP = 25.0` is applied so speculative hint-only matches cannot surface as high-confidence results. Items with no extraction now correctly appear as uncertain/pending.
+- Verified: empty-extraction case drops from 81.1 → 25.0; real AI extractions (category + sub_category present) still reach 100%.
+
+## 2026-09-21 — Top Database Candidate Taxonomy & Family Prioritization
+
+- Fixed an issue where non-matching sizes for a product caused unrelated products (e.g. PIPE or TANK or mismatched valve subtypes) sharing the same numeric size to crowd out true matching Sub_Category / Category candidates in Top Database Candidates.
+- In `product_matching_service.py`, separated candidate ranking into valid (non-conflicting taxonomy) vs conflicting (mismatched family). Valid Sub_Category / Category candidates are always prioritized over type-mismatched rows.
+- Enhanced SQL fallback search passes to recall all rows belonging to the extracted Sub_Category / Category even when the exact nominal size is missing from the database.
+- In `product_ai_candidates.py`, prevented type-mismatched prior seeds from outranking fresh valid candidates and preserved user-refined category/sub-category inputs during Re-analyse.
+
+## 2026-09-21 — Type Hinting and Redundant Type Coercion Cleanup
+
+- Generalized `get_dynamic_taxonomy_hints` parameter type from `dict[str, set[str] | list[str]]` to `Mapping[str, Collection[str]]` to resolve invariance type errors when passing `dict[str, list[str]]`.
+- Removed redundant `str()` and `int()` calls across `boq_analysis_service.py`, `boq_extraction_display_service.py`, `boq_extraction_slots.py`, `boq_row_grouping_service.py`, and `serial_normalizer.py`.
+
+## 2026-09-21 — Dynamic Sub-Category fetching from BOQ
+
+- Expanded `_MAIN_PRODUCT_PHRASES` in `catalog_size_rules.py` dynamically using `_AI_SYNONYM_CATALOG` to prioritize explicitly-mentioned multi-word sub-categories (e.g. "sand bucket set", "upright sprinkler") from BOQ text over AI extractions.
+- Filtered out generic or short materials/terms ("ms", "pipe", "valve", etc.) to prevent false positive overrides.
+
+## 2026-09-21 — Analysis: Not found placeholders + temp≠size + stable rematch %
+
+- Empty Analysis core/attribute inputs show placeholder **Not found** (was Optional).
+- Operating Temp / deg.C (and similar performance specs) are never treated as Size;
+  Size comes from parent orifice/bore (e.g. ``15 mm``); temp fills attribute ``temp``.
+- Missing Unit recovered from BOQ evidence when Size is known (``15 mm`` → unit mm).
+- Re-analyse match % no longer blends AI ``match_confidence`` (identical inputs stay
+  stable). Synonym / temp rules strengthened in extract prompts and sanitize path.
+
+## 2026-09-17 — Rematch: fair % + empty unfound inputs + slot-led recall
+
+- Match confidence scores **filled** extract/expert fields only (blank inputs
+  no longer dilute to ~40–50%); size+unit-only identity capped at 55%.
+- Analyse / Re-analyse leave Class/Size/Unit/Capacity/Attributes **empty** when
+  AI did not find them; expert **Select** still loads Rate_Master into the UI.
+- Rematch Chroma recall prefers AI Description + filled inputs + qty **slot**
+  line; full section text is used only when identity is empty (stops PIPE
+  chapter pollution). Rematch auto-accept floor = 30%; 100% freeze only on Confirm.
+
+## 2026-09-17 — BOQ upload: ignore stale succeeded status
+
+- Leftover `media/job_progress/boq_upload_status_*.json` with ``succeeded``
+  could make the upload page redirect to the BOQs list as if the new upload
+  finished, without a POST (seen on EC2 after deletes left an empty list).
+- Upload/list GET clears terminal succeeded/failed; form poll only treats
+  succeeded/failed as done for the current click session.
+- Self-heal (no manual file cleanup): terminal status expires to idle after
+  90s; stuck ``processing`` fails after 5 minutes; job_progress JSON writes
+  recreate the directory and retry on ``FileNotFoundError``; database import
+  status uses the same terminal TTL.
+
 ## 2026-09-14 — Section 1.3 same-product: mm vs nb unit wipe
 
 - Catalog Unit ``nb`` was clearing BOQ ``mm dia`` sizes during sanitize; refill
@@ -1969,3 +2042,27 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 Pre-2026-07-10 history and ultra-fine UI tweaks: use `git log` / prior commits.
 Product behaviour truth: `docs/PRODUCT.md`. Session memory: `docs/SESSION_STATE.md`.
+
+
+## 2026-09-21 — Dynamic BOQ Taxonomy Migration
+
+- Removed legacy hardcoded product taxonomy mappings (_MAIN_PRODUCT_PHRASES, _PRODUCT_FIRST_CAT, _PRODUCT_FIRST_SUB) across utils and services.
+- Introduced get_dynamic_taxonomy_hints to build extraction hints dynamically from the active Rate_Master taxonomy.
+- Fixed matching edge cases (e.g., sand bucket set) by dynamically generating bi-directional synonyms and setting appropriate category priorities.
+
+## 2026-09-21 — Fix Make List categorization TypeError and test suite KeyError
+
+- Reverted str() removals in Make List display logic to fix AttributeError on numeric Excel fields.
+- Fixed KeyError in sanitize_product_against_evidence test.
+
+
+## 2026-09-21 — Fix make list mapping ImportError
+
+- Updated make list category mapping service to use dynamic taxonomy hints instead of deleted hardcoded constants.
+
+
+## 2026-09-21 — Matching and editing bugfixes
+
+- Fixed a scoring bug where empty extraction sub-categories erroneously matched Rate_Master products without penalty.
+- Fixed an AttributeError in extraction edit API when dealing with numeric size inputs.
+

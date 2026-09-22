@@ -1,4 +1,6 @@
 import io
+import json
+import time
 from django.test import TestCase, Client
 from django.urls import reverse
 from django.contrib.auth import get_user_model
@@ -8,6 +10,7 @@ from apps.boq.models import BOQ
 from apps.boq.services.boq_upload_progress import (
     STATUS_PROCESSING,
     begin_upload,
+    clear_terminal_upload_status,
     is_upload_busy,
     mark_upload_failed,
     mark_upload_succeeded,
@@ -85,6 +88,47 @@ class BOQUploadTestCase(TestCase):
         mark_upload_succeeded(user_id=self.user.pk, boq_name="A")
         self.assertFalse(is_upload_busy(self.user.pk))
         self.assertEqual(read_upload_status(self.user.pk)["status"], "succeeded")
+
+    def test_clear_terminal_upload_status(self):
+        mark_upload_succeeded(user_id=self.user.pk, boq_name="Old")
+        self.assertEqual(read_upload_status(self.user.pk)["status"], "succeeded")
+        clear_terminal_upload_status(self.user.pk)
+        self.assertEqual(read_upload_status(self.user.pk)["status"], "idle")
+        begin_upload(user_id=self.user.pk, boq_name="Live")
+        clear_terminal_upload_status(self.user.pk)
+        self.assertEqual(read_upload_status(self.user.pk)["status"], STATUS_PROCESSING)
+
+    def test_terminal_status_expires_to_idle(self):
+        mark_upload_succeeded(user_id=self.user.pk, boq_name="Old")
+        from apps.boq.services import boq_upload_progress as prog
+
+        path = prog._status_path(self.user.pk)
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["finished_at"] = time.time() - (prog._TERMINAL_STATUS_TTL_SECONDS + 5)
+        data["updated_at"] = data["finished_at"]
+        path.write_text(json.dumps(data), encoding="utf-8")
+        self.assertEqual(read_upload_status(self.user.pk)["status"], "idle")
+        self.assertFalse(path.is_file())
+
+    def test_stale_processing_auto_fails(self):
+        begin_upload(user_id=self.user.pk, boq_name="Stuck")
+        from apps.boq.services import boq_upload_progress as prog
+
+        path = prog._status_path(self.user.pk)
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["updated_at"] = time.time() - (prog._STALE_PROCESSING_SECONDS + 5)
+        path.write_text(json.dumps(data), encoding="utf-8")
+        status = read_upload_status(self.user.pk)
+        self.assertEqual(status["status"], "failed")
+        self.assertFalse(is_upload_busy(self.user.pk))
+
+    @patch("apps.database_manager.services.activation.get_active_database_version")
+    def test_upload_get_clears_stale_succeeded(self, mock_get_active):
+        mock_get_active.return_value = 1
+        mark_upload_succeeded(user_id=self.user.pk, boq_name="Stale")
+        response = self.client.get(reverse("boq:upload"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(read_upload_status(self.user.pk)["status"], "idle")
 
     def test_upload_status_endpoint(self):
         begin_upload(user_id=self.user.pk, boq_name="Busy")

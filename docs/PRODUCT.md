@@ -350,25 +350,28 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
      blended confidence ≥ 30%; otherwise status is `provisional` (schema for
      gap-fill, no confirmed `db_product_id` / Product_ID) or `unmatched`
   4. Analysis UI **Category / Sub_Category / Class / Size / Unit / Capacity** and
-     **Attribute** values stay as **BOQ-extracted** (mapped onto Rate_Master
-     taxonomy / schema) whenever AI found them — including low-confidence /
-     provisional matches — so experts do not retype extract evidence. Match
-     confidence compares those extract fields to the selected Rate_Master row —
-     Analyse does **not** overwrite core fields from the match. When confidence
-     is **below 50%**, a warning points to the top **3** selectable database
-     candidates; empty Attribute keys remain blank only when not found in the
-     BOQ. **Select candidate** still loads Rate_Master details into the UI when
-     the expert confirms a row.
+     **Attribute** values stay as **BOQ-extracted** whenever AI found them —
+     including low-confidence / provisional matches — so experts do not retype
+     extract evidence. Fields the AI did **not** find stay **empty** (Analyse /
+     Re-analyse do **not** fill blanks from Rate_Master); empty Analysis inputs
+     show placeholder **Not found**. Operating temperature / deg.C values are
+     attributes (``temp``), never Size — Size stays orifice/bore (e.g. ``15 mm``)
+     from the owning product line. Match confidence
+     compares those extract fields to the selected Rate_Master row using the
+     fixed field weights (blank inputs are omitted from the score, not counted
+     as misses). Re-analyse match % is driven by structured field overlap only
+     (AI ``match_confidence`` is not blended, so identical inputs stay stable).
+     When confidence is **below 50%**, a warning points to the top
+     **3** selectable database candidates. **Select candidate** still loads
+     Rate_Master details into the UI when the expert confirms a row.
   5. Attribute UI uses the selected candidate’s Attribute schema; values are filled
      from BOQ-extracted evidence the AI can map (keys with no evidence stay blank)
   6. If the wrong product was picked, the reviewer edits fields/attributes (blank
      or wrong columns, including **AI Description** / ``description_hint``) and
-     clicks **Re-analyse** on **that product**. AI Description must name
-     Category / Sub-category / Class / Size / Unit / Capacity in plain language
-     and is the primary DB search key. Experts may rewrite it; rematch uses that
-     text first plus the **full BOQ section**, refreshes database candidates, and
-     AI picks the best Rate_Master neighbor (`rematch_product`). Chapter titles
-     (e.g. Sprinkler System) must not override slot products (pipe/valve).
+     clicks **Re-analyse** on **that product**. Rematch search uses, in order:
+     expert-filled inputs + **AI Description** (primary), the qty/unit **slot
+     line**, and the full BOQ section only when identity inputs are empty.
+     Chapter pipework text must not steer a valve/hydrant rematch to PIPE.
      Expert-filled inputs (including Class ``0``) are kept; one-product rematch
      does not change sibling products. Empty sections with no products still
      **re-extract** from the workbook.
@@ -401,11 +404,11 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
   still omits the slot, a BOQ-evidence review product preserves that line rather
   than silently dropping it. Section-only header rows are hidden (products live
   with the Unit/Qty groups).
-- **Candidate match %:** each top database candidate is scored from filled product
-  fields against that Rate_Master row (fixed field weights — size+unit alone
-  cannot normalize to 100%). Scores use extract/expert fields, not fields copied
-  from Rate_Master after a pick. Unrelated product types stay below the 30%
-  confirm threshold even if category/size were overwritten.
+- **Candidate match %:** each top database candidate is scored from **filled**
+  product fields against that Rate_Master row (fixed field weights — blank
+  extract fields are omitted; size+unit alone cannot normalize to 100%). Scores
+  use extract/expert fields, not fields copied from Rate_Master after a pick.
+  Unrelated product types stay below the 30% confirm threshold.
 - **Per-slot details:** each lettered Unit/Qty slot carries a ``size_hint`` and
   local evidence. After AI extract, code rebinds size/unit from that slot,
   prefers BOQ PN rating for capacity, keeps catalog Class ``0``,

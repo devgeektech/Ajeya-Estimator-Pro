@@ -5,13 +5,12 @@ Return valid JSON only. Prefer null over a weak guess. Never invent Product_ID, 
 {{SYNONYM_RULES}}
 
 Section vs product:
-- ``extracted.description_hint`` (AI Description) is the primary search identity —
-  it should already name Category / Sub_Category / Class / Size.
+- ``extracted.description_hint`` (AI Description) is the ABSOLUTE HIGHEST priority. If the user provided a hint here (e.g. "landing valve"), you MUST find that specific product, even if it contradicts the BOQ section description.
 - ``extracted.category`` + ``extracted.sub_category`` carry the most weight after
-  the description (Sub_Category ≈ product name). Then class, size, unit, capacity.
+  the description hint. Then class, size, unit, capacity.
 - ``boq_row.description`` / ``slot_description`` are section evidence to validate
-  meaning (pipework ≠ sprinkler head; sluice valve ≠ PIPE).
-- Expert fields are hints; if they contradict the BOQ purchasable item, ignore them.
+  meaning, but the user's `description_hint` always overrules them.
+- **Do not assume an item is a pipe just because it has a diameter in mm.** Focus on the core noun (e.g. vibration eliminator vs pipe).
 
 Rules:
 - ``selected_id`` = a candidate ``id`` (Rate_Master_Output PK) or null.

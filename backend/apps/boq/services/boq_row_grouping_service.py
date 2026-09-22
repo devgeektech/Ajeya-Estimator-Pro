@@ -63,8 +63,12 @@ _PRODUCT_NOUN_HINT = re.compile(
 
 
 def _parse_size_hint_from_description(text: Any) -> tuple[str | None, str | None]:
-    """Return (size_hint, unit) from a slot description like ``200mm dia``."""
-    return parse_nominal_size_from_text(text)
+    """Return (size_hint, unit) from a slot description like ``200mm dia``.
+
+    Requires an explicit mm/NB/dia measure so operating-temp lines
+    (``68 deg.C.``) never become size hints.
+    """
+    return parse_nominal_size_from_text(text, require_explicit_unit=True)
 
 
 def qty_cell_status(fields: dict[str, Any]) -> tuple[str, Any, Any]:
@@ -412,12 +416,12 @@ def _qty_rows_in_lineage(
 
 
 def _is_size_only_slot_line(text: str) -> bool:
-    return bool(_SIZE_ONLY_SLOT_LINE.match(str(text or "").strip()))
+    return bool(_SIZE_ONLY_SLOT_LINE.match((text or "").strip()))
 
 
 def _is_supply_sentence(text: str) -> bool:
     """True for a BOQ line that names the purchasable product (not size-only)."""
-    blob = str(text or "").strip()
+    blob = (text or "").strip()
     if not blob or len(blob) < 12:
         return False
     if _is_size_only_slot_line(blob):
@@ -431,7 +435,7 @@ def _is_supply_sentence(text: str) -> bool:
 
 
 def _is_material_or_spec_line(text: str) -> bool:
-    blob = str(text or "").strip()
+    blob = (text or "").strip()
     if not blob or _is_size_only_slot_line(blob):
         return False
     return bool(_MATERIAL_OR_SPEC_LINE.search(blob))
@@ -542,8 +546,12 @@ def build_slots_for_section(
             qty_id_set=qty_id_set,
         )
         # When the qty row itself names the product, prefer that over a distant parent.
-        if description and not _is_size_only_slot_line(description) and _is_supply_sentence(
+        # Spec-only qty lines (Operating Temp / pressure) keep the parent product_context.
+        if (
             description
+            and not _is_size_only_slot_line(description)
+            and not _SPEC_QTY_LINE.search(description)
+            and _is_supply_sentence(description)
         ):
             product_context = description.strip()
         slots.append(
@@ -567,6 +575,38 @@ def build_slots_for_section(
         cursor = qty_pos + 1
 
     return slots
+
+
+def slot_context_index(boq_data: dict[str, Any] | None) -> dict[str, dict[str, str]]:
+    """Map qty_row_id → product_context / evidence_text for the whole BOQ."""
+    index: dict[str, dict[str, str]] = {}
+    if not boq_data:
+        return index
+    for group in grouped_anchor_rows(boq_data):
+        for slot in group.get("slots") or []:
+            qty_id = str(slot.get("qty_row_id") or "").strip()
+            if not qty_id or qty_id in index:
+                continue
+            index[qty_id] = {
+                "product_context": str(slot.get("product_context") or "").strip(),
+                "evidence_text": str(slot.get("evidence_text") or "").strip(),
+            }
+    return index
+
+
+def slot_context_for_qty_row(
+    boq_data: dict[str, Any] | None,
+    qty_row_id: str,
+    *,
+    index: dict[str, dict[str, str]] | None = None,
+) -> dict[str, str]:
+    """Return ``product_context`` / ``evidence_text`` for one Unit/Qty slot id."""
+    slot_id = (qty_row_id or "").strip()
+    empty = {"product_context": "", "evidence_text": ""}
+    if not boq_data or not slot_id:
+        return empty
+    lookup = index if index is not None else slot_context_index(boq_data)
+    return dict(lookup.get(slot_id) or empty)
 
 
 def anchor_qty_unit(index: dict[str, dict[str, Any]], anchor_row_id: str) -> tuple[Any, Any]:
@@ -604,7 +644,7 @@ def single_row_description(boq_data: dict[str, Any], row_id: str) -> str:
     Letter slots must keep ``a) 150 mm dia`` alone — combining sibling sizes
     makes size parsers pick the wrong diameter (often the shortest, e.g. 80).
     """
-    wanted = str(row_id or "").strip()
+    wanted = (row_id or "").strip()
     if not wanted:
         return ""
     for row in boq_data.get("rows") or []:
