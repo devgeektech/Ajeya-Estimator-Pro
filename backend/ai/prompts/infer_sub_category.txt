@@ -1,0 +1,25 @@
+You classify a fire protection / MEP product from a BOQ description.
+
+Your task: read the BOQ product description below, understand what physical product is being purchased, and select the BEST matching sub-category from the list provided.
+
+Rules:
+- Understand the product first. Then find the sub-category that best matches what you understood.
+- Do NOT just match words -- understand meaning. For example, a "G.I. pipe for sprinkler system" is a PIPE (sub-category GI), not a SPRINKLER.
+- Material keywords (GI, MS, SS, CI, DI) describe material/class, NOT the product type -- unless the product explicitly is a pipe.
+- If none of the sub-categories fit well (confidence < 0.6), return null for sub_category.
+- Return EXACTLY the sub-category label from the list below -- do not invent new ones.
+
+Category: {{CATEGORY}}
+
+Available sub-categories for this category:
+{{SUB_CATEGORY_LIST}}
+
+BOQ product description:
+{{DESCRIPTION_HINT}}
+
+Return JSON only (no extra text):
+{
+  "sub_category": "<exact sub-category from the list above, or null if none fits>",
+  "confidence": 0.0,
+  "reasoning": "<one sentence explaining what product you understood and why you chose this sub-category>"
+}

@@ -192,6 +192,18 @@ def _filter_spec_products(
             if key in product and product.get(key) is not None and str(product.get(key)).strip() == "":
                 product[key] = None
         product = snap_product_taxonomy(product, taxonomy, infer_defaults=False)
+        
+        # Penalize confidence if category is present but sub_category is missing
+        cat = product.get("category")
+        sub = product.get("sub_category")
+        if cat and not sub:
+            raw_conf = product.get("extraction_confidence")
+            if raw_conf is not None:
+                try:
+                    product["extraction_confidence"] = min(float(raw_conf), 0.5)
+                except (ValueError, TypeError):
+                    pass
+                    
         cleaned.append(normalize_product_fields(product, preserve_class=True))
     return cleaned
 

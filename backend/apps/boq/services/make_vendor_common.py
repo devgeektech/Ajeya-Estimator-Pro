@@ -52,8 +52,8 @@ def _align_option_label(value: str | None, options: list[str] | None) -> str:
     Selecting the wrong spelling leaves Alpine x-model with no matching
     ``<option>``, so the UI shows ``Select make…`` while the rate is filled.
     """
-    text = str(value or "").strip()
-    choices = [str(item).strip() for item in (options or []) if str(item).strip()]
+    text = (value or "").strip()
+    choices = [item.strip() for item in (options or []) if item.strip()]
     if not text:
         return ""
     if text in choices:
@@ -111,8 +111,11 @@ def loaded_catalog_product_id(product: dict[str, Any] | None) -> str:
     text = str(item.get("catalog_product_id") or "").strip()
     if text:
         return text
+    
+    # If there is no confirmed database product ID, there is no loaded catalog ID.
     if item.get("db_product_id") in (None, ""):
         return ""
+        
     text = str(item.get("suggested_catalog_product_id") or "").strip()
     if text:
         return text
@@ -135,7 +138,8 @@ def count_missing_loaded_product_ids(analysis: dict[str, Any] | None) -> int:
         if bool(row.get("is_activity_only")) and not (row.get("products") or []):
             continue
         for product in row.get("products") or []:
-            if not loaded_catalog_product_id(product):
+            # A product is missing an ID if it does not have a confirmed catalog_product_id
+            if not str(product.get("catalog_product_id") or "").strip():
                 missing += 1
     return missing
 
@@ -201,15 +205,15 @@ def _build_same_price_choices(
             continue
         if winner_make and _normalize_text(rate.Make) != winner_make:
             continue
-        rate_id = int(rate.pk)
+        rate_id = rate.pk
         if rate_id in seen_ids:
             continue
         seen_ids.add(rate_id)
         ties.append(
             {
                 "rate_master_id": rate_id,
-                "make": str(rate.Make or "").strip(),
-                "vendor": str(rate.Vendor or "").strip(),
+                "make": (rate.Make or "").strip(),
+                "vendor": (rate.Vendor or "").strip(),
                 "amount": round(float(amount), 4),
                 "product_id": rate.Product_ID,
                 "rate_id": rate.Rate_ID,
@@ -299,7 +303,7 @@ def _taxonomy_label(product: dict[str, Any]) -> str:
 
 
 def _subcategory_storage_key(category: str, sub_category: str) -> str:
-    return f"{str(category or '').strip()}{_SUBCATEGORY_SEP}{str(sub_category or '').strip()}"
+    return f"{(category or '').strip()}{_SUBCATEGORY_SEP}{(sub_category or '').strip()}"
 
 
 def _product_matches_subcategory(
@@ -314,7 +318,7 @@ def _product_matches_subcategory(
     if _normalize_text(product_category) != _normalize_text(category):
         return False
     # Empty sub-category = apply to the entire category.
-    target_sub = str(sub_category or "").strip()
+    target_sub = (sub_category or "").strip()
     if not target_sub or target_sub == "—":
         return True
     product_sub = str(product.get("sub_category") or "").strip()

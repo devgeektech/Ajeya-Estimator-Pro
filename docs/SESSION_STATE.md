@@ -3,6 +3,28 @@
 Compact active memory. Full spec: `docs/PRODUCT.md`. Schema: `docs/DATABASE.md`.
 History: `docs/CHANGELOG.md` (do not duplicate session diaries here).
 
+### 2026-09-22 — Sub-Category AI Inference, Confidence Scoring & Product ID Threshold
+
+Completed:
+- Raised `PRODUCT_ID_CONFIRM_CONFIDENCE` from 70 → 95 (green band only auto-fills Product ID).
+- Reweighted `sub_category` 30→35, `category` 24→20 in `_TEXT_WEIGHTS`.
+- Blank `sub_category` (when evidence exists) now counted as scored miss, not silently skipped.
+- Added `sub_category_inferred=True` flag in `snap_product_taxonomy` when synonym-recovery fires.
+- New `ai/prompts/infer_sub_category.txt` — short AI prompt for semantic product classification.
+- New `_infer_missing_sub_category()` in `ProductAIApplyMixin` — AI call that understands the product from `description_hint` + `category`, picks sub_category from DB taxonomy list, runs on initial Analyse only (not Re-analyse), confidence floor 0.6, updates `description_hint` with inferred sub.
+- Added `inferred` flag to sub_category field in `boq_extraction_display_service.py`.
+- Template + CSS: amber italic "AI-inferred" badge on Sub-category field when inferred.
+- Django system check: no issues (4 silenced — deploy-only warnings).
+
+Pending:
+- Re-analyse BOQ 11111111 (section 1.1) to validate GI sub_category appears on all 3 products.
+- Validate confidence score drops correctly for products where sub_category needed inference.
+
+Issues: None.
+
+Next: Monitor re-analyse results. Add unit tests for new scoring behavior if pytest installed.
+
+
 ## Current Status
 
 - **Phase:** Fresh start on new master DB schema (Rate_Master_Output / Labour_master_Output)

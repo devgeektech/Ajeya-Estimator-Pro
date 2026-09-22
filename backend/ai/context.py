@@ -404,6 +404,9 @@ def snap_product_taxonomy(
             )
             if recovered:
                 item["sub_category"] = recovered
+                # Flag as inferred so the UI can show a visual indicator and
+                # so the AI inference step can rebuild description_hint with it.
+                item["sub_category_inferred"] = True
 
     sub_category = str(item.get("sub_category") or "").strip() or None
     raw_class = item.get("class")

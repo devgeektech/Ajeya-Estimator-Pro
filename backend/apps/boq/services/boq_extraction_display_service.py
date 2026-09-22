@@ -449,15 +449,18 @@ def _shape_product(
         missing = _is_blank(value) and key in _REQUIRED_FIELDS
         if missing:
             missing_count += 1
-        fields.append(
-            {
-                "key": key,
-                "label": label,
-                "value": "" if value is None else str(value),
-                "missing": missing,
-                "readonly": False,
-            }
-        )
+        field_entry: dict[str, Any] = {
+            "key": key,
+            "label": label,
+            "value": "" if value is None else str(value),
+            "missing": missing,
+            "readonly": False,
+        }
+        # Show a visual indicator when sub_category was AI-inferred, not directly
+        # extracted from the BOQ line, so experts know to verify it.
+        if key == "sub_category" and product.get("sub_category_inferred"):
+            field_entry["inferred"] = True
+        fields.append(field_entry)
 
     attribute_fields = _shape_attribute_fields(product)
     missing_attr_keys = [

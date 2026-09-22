@@ -5,6 +5,16 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
+## 2026-09-22 — Sub-Category AI Inference, Confidence Scoring Fixes & Product ID Threshold
+
+- **`PRODUCT_ID_CONFIRM_CONFIDENCE` raised 70 → 95**: Product ID auto-fills only on green-band (≥95%). Orange/red products show candidates but no auto Product ID.
+- **Score reweighting**: `sub_category` weight 30→35, `category` weight 24→20.
+- **Blank sub_category = scored miss when evidence exists**: Prevents 100% on size/category-only matches when sub_category was missing but product was identifiable.
+- **AI-powered sub_category inference** (`_infer_missing_sub_category`): New AI call using `ai/prompts/infer_sub_category.txt` — understands product semantically and picks correct sub from DB taxonomy. Updates `description_hint` with inferred sub. Runs on initial Analyse only.
+- **`sub_category_inferred` flag + visual badge**: Amber italic "AI-inferred" badge on Sub-category field in Analysis tab when inferred vs extracted.
+
+---
+
 ## 2026-09-21 — Fix Top DB Candidates Taxonomy Focus & AI Extraction Misclassification
 
 - **Adaptive size mismatch penalty**: When extracted `sub_category` matches the catalog row (`taxonomy_confirmed`), size mismatch penalty drops from −45 to −20. SLUICE VALVE at 200mm now scores ~57% vs PIPE/MS at exact 250mm (23%). Correct product family always wins.

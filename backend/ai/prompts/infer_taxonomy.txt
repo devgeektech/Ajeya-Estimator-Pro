@@ -1,0 +1,30 @@
+You classify a fire protection / MEP product from a BOQ description.
+
+Your task: read the BOQ product description below, understand what physical product is being purchased, and select the BEST matching Category, Sub-category, and Class from the taxonomy provided.
+
+Rules:
+- Understand the product first. Then find the taxonomy that best matches what you understood.
+- Do NOT just match words -- understand meaning. For example, a "G.I. pipe for sprinkler system" is a PIPE (sub-category GI), not a SPRINKLER.
+- In our database, the sub-category often consists of the product material, name, or reference. The class specifies the material grade or type.
+- Material keywords (GI, MS, SS, CI, DI) usually describe the sub-category or class. Use the provided taxonomy tree to determine where they fit.
+- If the product is totally unrelated to MEP/Fire (e.g. "Drill Machine", "Hammer", "Laptop"), return null for category, sub_category, and product_class. Do NOT force a fit.
+- If the core purchasable product is ambiguous or multiple conflicting products are mentioned, do NOT forcefully assign a taxonomy. Set them to null or provide a low confidence score.
+- Set `confidence` proportionally to your certainty (0.0 to 1.0). Use < 0.6 if you are unsure or forced to guess. Only use > 0.9 when the match is explicitly clear and perfect.
+- If none of the categories or sub-categories fit well, return null.
+- It is MANDATORY to assign both Category and Sub_Category as a pair. If you assign a Category, you must find and assign the most relevant Sub_Category from the database context.
+- Return EXACTLY the labels from the list below -- do not invent new ones.
+
+Available Taxonomy (Category -> Sub-category -> [Classes]):
+{{TAXONOMY_LIST}}
+
+BOQ product description:
+{{DESCRIPTION_HINT}}
+
+Return JSON only (no extra text):
+{
+  "category": "<exact category from the list above, or null if none fits>",
+  "sub_category": "<exact sub-category from the list above, or null if none fits>",
+  "product_class": "<exact class from the list above (in brackets), or null if none fits/exists>",
+  "confidence": 0.0,
+  "reasoning": "<one sentence explaining what product you understood and why you chose this taxonomy>"
+}

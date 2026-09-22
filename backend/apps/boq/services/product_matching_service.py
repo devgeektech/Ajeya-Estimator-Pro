@@ -32,9 +32,11 @@ AI_CANDIDATE_LIMIT = 5
 
 # Sub_Category is nearest to product identity; Category next; size still gates
 # wrong dia but must not outrank a wrong family.
+# sub_category is the strongest identity signal — raised to 35 (was 30).
+# category reduced to 20 (was 24) since sub_category already implies it.
 _TEXT_WEIGHTS = {
-    "sub_category": 30.0,
-    "category": 24.0,
+    "sub_category": 35.0,
+    "category": 20.0,
     "class": 10.0,
     "size": 18.0,
     "unit": 5.0,
@@ -462,8 +464,12 @@ def structured_match_score(
         if name == "capacity" and not _is_filled(right):
             continue
         if not _is_filled(left):
-            # Unfound extract field: do not count as a miss. Optional hint credit
-            # for category/sub when the AI Description names the catalog label.
+            # Unfound extract field: do not count as a miss in general.
+            # Exception: when there IS evidence of what the product is (description_hint
+            # or category filled), a blank sub_category / category is a real gap
+            # — count it as a scored miss so confidence reflects the missing identity.
+            # If no evidence at all (genuinely unknown product), skip silently.
+            has_evidence = _is_filled(hint) or _is_filled(extracted.get("category"))
             if name == "category":
                 hint_ratio = _hint_category_score(hint, right)
                 if hint_ratio > 0:
@@ -472,9 +478,11 @@ def structured_match_score(
                     breakdown[name] = hint_points
                     weighted_score += hint_points
                     filled_core_names.add(name)
-                elif _is_filled(right):
+                elif _is_filled(right) and has_evidence:
+                    # Category is identifiable from evidence but was left blank — miss.
                     weight_total += weight
                     breakdown[name] = 0.0
+                    breakdown["category_blank_miss"] = True
             elif name == "sub_category":
                 hint_ratio = _hint_field_score(hint, right)
                 if hint_ratio > 0:
@@ -483,9 +491,13 @@ def structured_match_score(
                     breakdown[name] = hint_points
                     weighted_score += hint_points
                     filled_core_names.add(name)
-                elif _is_filled(right):
+                elif _is_filled(right) and has_evidence:
+                    # Sub_category identifiable from evidence but blank — scored miss.
+                    # This prevents a 100% score when only size/category matched while
+                    # sub_category (the strongest product identity) was missing.
                     weight_total += weight
                     breakdown[name] = 0.0
+                    breakdown["sub_category_blank_miss"] = True
             else:
                 breakdown[name] = None  # omitted — not found in BOQ/extract
             continue

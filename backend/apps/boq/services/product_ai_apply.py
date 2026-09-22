@@ -8,6 +8,8 @@ from typing import Any
 
 from ai.context import (
     align_product_taxonomy_from_rate,
+    load_rate_master_taxonomy,
+    snap_product_taxonomy,
 )
 from ai.service import AIService
 from apps.boq.services.product_ai_common import (
@@ -65,7 +67,7 @@ _AI_NO_MATCH_NOTES = re.compile(
 
 def _ai_notes_reject_match(notes: str) -> bool:
     """True when the mapping model explicitly said no DB product fits."""
-    return bool(_AI_NO_MATCH_NOTES.search(str(notes or "")))
+    return bool(_AI_NO_MATCH_NOTES.search(notes or ""))
 
 
 class ProductAIApplyMixin:
@@ -152,6 +154,143 @@ class ProductAIApplyMixin:
         return by_ref
 
 
+    def _infer_missing_taxonomy(
+        self,
+        product: dict[str, Any],
+        taxonomy: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Use AI semantic understanding to infer category & sub_category when blank.
+
+        Only runs when:
+        - sub_category is currently blank
+        - description_hint is non-empty (gives AI the product context to understand)
+
+        Returns the product dict with category and/or sub_category filled in
+        (and sub_category_inferred=True) if AI assigns one with sufficient confidence (>= 0.6).
+        Also rebuilds description_hint to include the inferred sub_category so
+        subsequent Chroma recall benefits from the more specific identity.
+        """
+        hint = str(product.get("description_hint") or "").strip()
+        category = str(product.get("category") or "").strip()
+        sub_category = str(product.get("sub_category") or "").strip()
+
+        # Only infer when there is evidence and sub_category is missing.
+        if not hint or sub_category:
+            return product
+
+        taxonomy = taxonomy or load_rate_master_taxonomy()
+        by_category = dict(taxonomy.get("sub_categories_by_category") or {})
+        classes_by_cat_sub = dict(taxonomy.get("classes_by_category_sub_category") or {})
+        
+        # Format the taxonomy list for the prompt
+        taxonomy_lines = []
+        for cat, subs in by_category.items():
+            for sub in subs:
+                classes = classes_by_cat_sub.get(cat, {}).get(sub, [])
+                if classes:
+                    taxonomy_lines.append(f"{cat} -> {sub} -> [{', '.join(classes)}]")
+                else:
+                    taxonomy_lines.append(f"{cat} -> {sub}")
+        
+        if not taxonomy_lines:
+            return product
+            
+        taxonomy_list = "\n".join(f"- {line}" for line in taxonomy_lines)
+
+        try:
+            template = AIService.load_prompt("infer_taxonomy.txt")
+        except Exception as exc:
+            logger.warning("infer_taxonomy: prompt load failed: %s", exc)
+            return product
+
+        prompt = (
+            template
+            .replace("{{TAXONOMY_LIST}}", taxonomy_list)
+            .replace("{{DESCRIPTION_HINT}}", hint)
+        )
+
+        try:
+            result = self._ai.complete_json(prompt, template_name="infer_taxonomy.txt")
+        except Exception as exc:
+            logger.warning(
+                "infer_taxonomy: AI call failed for hint=%s: %s",
+                hint[:80], exc,
+            )
+            return product
+
+        inferred_cat = str(result.get("category") or "").strip()
+        inferred_sub = str(result.get("sub_category") or "").strip()
+        inferred_class = str(result.get("product_class") or "").strip()
+        try:
+            confidence = float(result.get("confidence") or 0.0)
+        except (TypeError, ValueError):
+            confidence = 0.0
+        reasoning = str(result.get("reasoning") or "").strip()
+
+        if not inferred_sub or confidence < 0.6:
+            logger.info(
+                "infer_taxonomy: rejected inference (or null returned) cat=%r sub=%r class=%r conf=%.2f hint=%.60s",
+                inferred_cat, inferred_sub, inferred_class, confidence, hint,
+            )
+            return product
+
+        # Validate against known taxonomy
+        valid_cat = None
+        valid_sub = None
+        valid_class = None
+        
+        for cat, subs in by_category.items():
+            if inferred_cat and cat.strip().upper() == inferred_cat.upper():
+                valid_cat = cat.strip()
+            
+            # Allow AI to just pick sub_category and we infer the valid_cat
+            for s in subs:
+                if s.strip().upper() == inferred_sub.upper():
+                    valid_sub = s.strip()
+                    if not valid_cat:
+                        valid_cat = cat.strip()
+                        
+                    # Validate the class if one was inferred
+                    if inferred_class:
+                        classes = classes_by_cat_sub.get(valid_cat, {}).get(valid_sub, [])
+                        for c in classes:
+                            if c.strip().upper() == inferred_class.upper():
+                                valid_class = c.strip()
+                                break
+                    break
+            
+            if valid_sub and valid_cat:
+                break
+
+        if not valid_sub or not valid_cat:
+            logger.info(
+                "infer_taxonomy: inferred sub %r not found in taxonomy, rejected. hint=%.60s",
+                inferred_sub, hint,
+            )
+            return product
+
+        logger.info(
+            "infer_taxonomy: assigned cat=%r sub=%r class=%r conf=%.2f reasoning=%r hint=%.60s",
+            valid_cat, valid_sub, valid_class, confidence, reasoning, hint,
+        )
+
+        updated = dict(product)
+        updated["category"] = valid_cat
+        updated["sub_category"] = valid_sub
+        if valid_class:
+            updated["class"] = valid_class
+        updated["sub_category_inferred"] = True
+
+        if valid_sub.upper() not in hint.upper():
+            updated["description_hint"] = f"{hint} ({valid_sub})".strip()
+
+        # Re-snap taxonomy with the new sub_category assigned.
+        updated = snap_product_taxonomy(updated, taxonomy, infer_defaults=False)
+        # Preserve the inferred flag (snap may reset unknown fields).
+        updated["sub_category_inferred"] = True
+        return updated
+
+
     def _apply_mapping(
         self,
         product: dict[str, Any],
@@ -163,6 +302,13 @@ class ProductAIApplyMixin:
     ) -> dict[str, Any]:
         enriched = dict(product)
         extracted_attrs = coerce_attributes_dict(product.get("attributes"))
+
+        # AI-powered sub_category inference: when AI extraction left sub_category
+        # blank but the description and category provide enough context, ask AI
+        # to understand the product and assign the correct sub_category.
+        # Runs before recall/scoring so Chroma uses the enriched description.
+        taxonomy = load_rate_master_taxonomy()
+        enriched = self._infer_missing_taxonomy(enriched, taxonomy)
 
         selected_id = None
         attribute_map: dict[str, str] = {}
@@ -301,7 +447,7 @@ class ProductAIApplyMixin:
                 if top_rate is not None:
                     structured, _ = structured_match_score(enriched, top_rate)
                     if structured >= MATCH_CONFIDENCE_THRESHOLD:
-                        selected_id = int(top["id"])
+                        selected_id = int(top["id"]) if top.get("id") is not None else None
 
         # Reject catalog rows whose family conflicts with AI understanding
         # (e.g. sluice valve hint vs PIPE/GI size twin). Try next candidates.
@@ -369,7 +515,7 @@ class ProductAIApplyMixin:
         attributes = {
             key: value
             for key, value in mapped_attributes.items()
-            if normalize_attribute_key(str(key)) in schema_set and _is_filled(value)
+            if normalize_attribute_key(key) in schema_set and _is_filled(value)
         }
         # Rematch / Analyse: keep expert/extract attribute values only — leave
         # unfound schema keys empty for the expert to fill before rematch.
@@ -387,14 +533,14 @@ class ProductAIApplyMixin:
             mapped_attributes=attributes,
             schema_keys=schema_keys,
             ai_confidence=ai_confidence,
-            prefer_filled_fields=bool(rematch),
+            prefer_filled_fields=rematch,
         )
         summary_source = snapshot or _candidate_snapshot(rate, confidence=confidence)
         missing_keys = _missing_attribute_keys(schema_keys, attributes)
         # Keep % visible on the selected row in Top database candidates.
         for item in slim_candidates:
             try:
-                if int(item.get("id") or 0) == int(rate.pk):
+                if int(item.get("id") or 0) == rate.pk:
                     item["confidence"] = confidence
                     break
             except (TypeError, ValueError):
@@ -682,7 +828,7 @@ class ProductAIApplyMixin:
         slim = [_slim_candidate(item) for item in candidates]
         for item in slim:
             try:
-                if int(item.get("id") or 0) == int(rate.pk):
+                if int(item.get("id") or 0) == rate.pk:
                     item["confidence"] = confidence
                     break
             except (TypeError, ValueError):
@@ -789,10 +935,7 @@ class ProductAIApplyMixin:
         def _acceptable(rate_id: int | None) -> int | None:
             if rate_id is None:
                 return None
-            try:
-                rid = int(rate_id)
-            except (TypeError, ValueError):
-                return None
+            rid = rate_id
             rate = rate_map.get(rid)
             if rate is None:
                 return None
@@ -852,7 +995,7 @@ class ProductAIApplyMixin:
                 attrs = {
                     key: value
                     for key, value in merged.items()
-                    if normalize_attribute_key(str(key)) in schema_set and _is_filled(value)
+                    if normalize_attribute_key(key) in schema_set and _is_filled(value)
                 }
                 return ProductAIApplyMixin._provisional_from_candidate(
                     enriched,
@@ -969,8 +1112,8 @@ class ProductAIApplyMixin:
                 ).first()
             except (TypeError, ValueError):
                 rate = None
-            if rate and str(rate.Product_ID or "").strip():
-                helper = helper_service.get_by_product_id(str(rate.Product_ID).strip())
+            if rate and (rate.Product_ID or "").strip():
+                helper = helper_service.get_by_product_id(rate.Product_ID.strip())
                 if helper is not None:
                     enriched["catalog_product_id"] = helper.Product_ID
                     enriched["product_helper_id"] = helper.pk
@@ -978,7 +1121,7 @@ class ProductAIApplyMixin:
                         enriched.get("db_match_confidence") or 100.0
                     )
                     return enriched
-                enriched["catalog_product_id"] = str(rate.Product_ID).strip()
+                enriched["catalog_product_id"] = rate.Product_ID.strip()
                 return enriched
 
         # Clear stale Product Id on provisional / red matches.
