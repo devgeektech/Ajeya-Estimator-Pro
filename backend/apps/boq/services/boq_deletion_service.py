@@ -12,6 +12,7 @@ from apps.audit.services import record
 from apps.boq.models import BOQ
 from apps.boq.services.boq_job_progress import clear_boq_job_progress
 from apps.boq.services.extract_json_store import boq_extract_dir, delete_extract_json_dir
+from ai.cache import clear_boq_extract_cache
 
 logger = logging.getLogger("boq_ai")
 
@@ -43,6 +44,8 @@ class BOQDeletionService:
         delete_extract_json_dir(boq_name)
         clear_boq_job_progress(boq_id)
         self._clear_progress_tmp_files(boq_id)
+        # Clear per-BOQ AI extraction cache from Redis.
+        clear_boq_extract_cache(boq_id)
 
         with transaction.atomic():
             # Re-fetch under lock so a concurrent job cannot resurrect state.

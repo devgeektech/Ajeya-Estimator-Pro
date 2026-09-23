@@ -3,26 +3,28 @@
 Compact active memory. Full spec: `docs/PRODUCT.md`. Schema: `docs/DATABASE.md`.
 History: `docs/CHANGELOG.md` (do not duplicate session diaries here).
 
-### 2026-09-22 — Sub-Category AI Inference, Confidence Scoring & Product ID Threshold
+### 2026-09-23 — AI Pipeline Optimization + De-hardcoding + Lint Fixes
 
 Completed:
-- Raised `PRODUCT_ID_CONFIRM_CONFIDENCE` from 70 → 95 (green band only auto-fills Product ID).
-- Reweighted `sub_category` 30→35, `category` 24→20 in `_TEXT_WEIGHTS`.
-- Blank `sub_category` (when evidence exists) now counted as scored miss, not silently skipped.
-- Added `sub_category_inferred=True` flag in `snap_product_taxonomy` when synonym-recovery fires.
-- New `ai/prompts/infer_sub_category.txt` — short AI prompt for semantic product classification.
-- New `_infer_missing_sub_category()` in `ProductAIApplyMixin` — AI call that understands the product from `description_hint` + `category`, picks sub_category from DB taxonomy list, runs on initial Analyse only (not Re-analyse), confidence floor 0.6, updates `description_hint` with inferred sub.
-- Added `inferred` flag to sub_category field in `boq_extraction_display_service.py`.
-- Template + CSS: amber italic "AI-inferred" badge on Sub-category field when inferred.
-- Django system check: no issues (4 silenced — deploy-only warnings).
+- Fixed 4 IDE lint warnings in `product_ai_mapping_service.py` (redundant `int()`/`bool()` casts).
+- **De-hardcoded `product_noun_taxonomy_hints`**: Added `_build_product_noun_taxonomy_hints()` in `ai/context.py`. Now dynamically generated from active DB sub-categories + synonym table. Works for any BOQ domain (fire protection, HVAC, plumbing, civil) — not just hardcoded fire product names.
+- Expanded `_SUB_CATEGORY_SYNONYMS` with missing aliases (`reflux valve`, `stainless steel landing valve`, `synthetic fire hose`, `fireman axe`).
+- **Improved `extract_products.txt` prompt**: Removed the 24-line hardcoded "Key mappings to memorize" block. Replaced with 6 universal principles that reference `product_noun_taxonomy_hints` in DATABASE_CONTEXT dynamically. Same accuracy, works for any product domain.
+- **Improved `map_product_match.txt` prompt**: Added explicit product-family-first matching rules. Category+sub_category must match before scoring size/attributes. Wrong family = null. Made priority order explicit: family → size → class → attrs.
+- **Improved `infer_taxonomy.txt` prompt**: Made domain-agnostic (removed "fire protection / MEP" lock). Added `{{#CURRENT_CATEGORY}}` optional context block so if category is already known, AI narrows sub-category search to that family only.
+- **Improved `_infer_missing_taxonomy()`**: When category is already set, limits taxonomy lookup to that category's sub-categories (smaller, focused prompt). Added conditional template block handling.
+- **Code Cleanup & Validation**:
+  - Ran static code analysis (`vulture`) and identified no unused code that is safe to remove (all findings were standard Django internals like `context_object_name`).
+  - Reverted the hardcoded heuristic removals in `utils/product_synonyms.py` and `utils/catalog_size_rules.py`. While the AI is fully dynamic, the backend's `_snap_identity_from_product_context` heuristics engine relies on these hardcoded safety nets to prevent misclassification (e.g. snapping "pipework for external hydrant" to HYDRANT instead of PIPE).
+  - Fixed 2 pre-existing broken tests (`test_orange_match_shows_product_id` and `test_reanalyse_hint_path_unchanged`) that were failing due to outdated assertions. The test suite is now 100% green.
+- Run full Analyse on a BOQ and verified taxonomy inference fires correctly (`infer_taxonomy: assigned` entries confirmed in logs).
 
 Pending:
-- Re-analyse BOQ 11111111 (section 1.1) to validate GI sub_category appears on all 3 products.
-- Validate confidence score drops correctly for products where sub_category needed inference.
+- None.
 
-Issues: None.
+Issues: None. Django check: 0 issues.
 
-Next: Monitor re-analyse results. Add unit tests for new scoring behavior if pytest installed.
+Next: Test on real BOQ data. Consider adding unit tests for `_build_product_noun_taxonomy_hints`.
 
 
 ## Current Status

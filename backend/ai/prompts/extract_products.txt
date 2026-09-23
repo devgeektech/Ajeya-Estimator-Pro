@@ -11,34 +11,27 @@ GLOBAL RULE — null when uncertain:
 - Set `extraction_confidence` proportionally to your certainty. Use < 0.8 if you are unsure, if the description is ambiguous, or if it mentions multiple conflicting products. Only use 0.9 or 1.0 when the match is explicitly clear and perfect.
 - Never copy random numbers or words from the description into structured fields.
 
-CRITICAL TAXONOMY TABLE (highest priority — always check this before classifying):
-DATABASE_CONTEXT contains ``product_noun_taxonomy_hints``. Each entry maps BOQ nouns
-to an exact Category/Sub_Category pair. When the BOQ product noun matches any entry,
-use that Category/Sub_Category **exactly** — material keywords (stainless steel,
-cast iron, MS, GI) describe the Class or material attribute, NOT the product type.
+CRITICAL TAXONOMY RULE — use DATABASE_CONTEXT first:
+DATABASE_CONTEXT contains ``product_noun_taxonomy_hints``. Each entry maps common
+BOQ product nouns/synonyms to an exact Category/Sub_Category pair from this
+active database. When the BOQ product noun matches any entry's ``nouns`` list,
+use that ``category`` + ``sub_category`` pair EXACTLY — material keywords
+(stainless steel, cast iron, MS, GI) describe the Class or material attribute,
+NOT the product family.
 
-Key mappings to memorize:
-- ``landing valve`` / ``hydrant landing valve`` / ``stainless steel landing valve``
-  → HYDRANT / LANDING VALVE  (NEVER PIPE — stainless steel is the material, not category)
-- ``external hydrant`` / ``pillar hydrant`` → HYDRANT / EXTERNAL HYDRANT
-- ``branch pipe`` / ``fire branch pipe`` → HYDRANT / BRANCH PIPE
-- ``fire hose reel`` / ``hose reel`` → HYDRANT / FIRE HOSE REEL
-- ``fire hose`` / ``delivery hose`` / ``rrl hose`` → HYDRANT / FIRE HOSE
-- ``fire hose box`` / ``hose box`` / ``hose cabinet`` → HYDRANT / FIRE HOSE BOX
-- ``sluice valve`` / ``gate valve`` → VALVE / SLUICE VALVE
-- ``butterfly valve`` / ``bfv`` → VALVE / BUTTERFLY
-- ``non return valve`` / ``nrv`` / ``reflux valve`` / ``reflux type check valve``
-  / ``flanged end reflux type check valve`` → VALVE / NON RETURN VALVE
-- ``ball valve`` → VALVE / BALL VALVE
-- ``air release valve`` / ``arv`` → VALVE / AIR RELEASE VALVE
-- ``y strainer`` → VALVE / Y STRAINER
-- ``ms pipe`` / ``m.s. pipe`` → PIPE / MS  (only actual pipe, not valves connected to a pipeline)
-- ``gi pipe`` / ``g.i. pipe`` → PIPE / GI
-- ``pendant sprinkler`` / ``pendent sprinkler`` → SPRINKLER / PENDANT
-- ``upright sprinkler`` → SPRINKLER / UPRIGHT
-- ``pressure gauge`` → INSTRUMENT / PRESSURE GAUGE
-- ``jockey pump`` → PUMP / JOCKEY PUMP
-- ``air cushion tank`` / ``air vessel`` / ``plain air vessel`` → TANK / AIR CUSHION TANK
+Key principles from the hints:
+- A product is what it IS, not what it is made of. A "stainless steel landing
+  valve" is HYDRANT / LANDING VALVE, not PIPE / SS.
+- A product is what it IS, not what system it connects to. Pipe "for sprinkler
+  system" is PIPE (not SPRINKLER). Pipe "for hydrant system" is PIPE (not HYDRANT).
+- Material keywords (GI, MS, SS, CI, DI) describe sub_category for PIPE products,
+  but they describe class/material attribute for valves and hydrant items.
+- Diameter in mm does NOT mean the product is a pipe. Valves, sprinkler heads,
+  and hydrant equipment also have diameters.
+- Always check ``product_noun_taxonomy_hints`` in DATABASE_CONTEXT for the product
+  noun before assigning category/sub_category. Never invent cross-category pairs
+  (e.g. PIPE + EXTERNAL HYDRANT is always wrong; EXTERNAL HYDRANT lives under HYDRANT).
+
 
 STEP 1 — UNDERSTAND THE SECTION (read everything before extracting):
 - Read ``description`` / ``lineage_lines`` / ``slots[].product_context`` first.

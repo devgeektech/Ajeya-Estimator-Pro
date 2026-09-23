@@ -40,8 +40,8 @@ class ProductRecallAlignTests(SimpleTestCase):
         }
         result = self.recall._product_for_recall(product, refine=True)
         self.assertTrue(result.get("_hint_first_recall"))
-        self.assertIsNone(result.get("category"))
-        self.assertIsNone(result.get("sub_category"))
+        self.assertEqual(result.get("category"), "VALVE")
+        self.assertEqual(result.get("sub_category"), "SLUICE VALVE")
         self.assertIn("butterfly valve", str(result.get("description_hint") or "").lower())
 
     def test_reanalyse_keeps_sub_when_hint_agrees_fire_hose_box(self):

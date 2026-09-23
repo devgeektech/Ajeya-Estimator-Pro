@@ -212,7 +212,7 @@ CELERY_SKIP_WORKER_CHECK = env.bool("CELERY_SKIP_WORKER_CHECK", default=False)
 # --- OpenAI -----------------------------------------------------------------
 
 OPENAI_API_KEY = env.str("OPENAI_API_KEY", default="")
-OPENAI_MODEL = env.str("OPENAI_MODEL", default="gpt-4o-mini")
+OPENAI_MODEL = env.str("OPENAI_MODEL", default="gpt-4.1-mini")
 OPENAI_EMBEDDING_MODEL = env.str("OPENAI_EMBEDDING_MODEL", default="text-embedding-3-small")
 OPENAI_EMBEDDING_DIMENSIONS = env.int("OPENAI_EMBEDDING_DIMENSIONS", default=1536)
 OPENAI_EMBEDDING_BATCH_SIZE = env.int("OPENAI_EMBEDDING_BATCH_SIZE", default=500)
@@ -230,6 +230,16 @@ AI_PRODUCT_MAPPING_BATCH_SIZE = env.int("AI_PRODUCT_MAPPING_BATCH_SIZE", default
 AI_EXTRACT_PARALLELISM = env.int("AI_EXTRACT_PARALLELISM", default=1)
 # Pause between sequential extract batches to stay under Tier-1 TPM (200k/min).
 AI_EXTRACT_PACING_SECONDS = env.float("AI_EXTRACT_PACING_SECONDS", default=2.5)
+# Per-BOQ Redis cache for AI extraction / taxonomy results (avoids repeat calls
+# when experts re-analyse the same section).
+AI_EXTRACT_CACHE_ENABLED = env.bool("AI_EXTRACT_CACHE_ENABLED", default=True)
+# Cache TTL in seconds (default 7 days).
+AI_EXTRACT_CACHE_TTL = env.int("AI_EXTRACT_CACHE_TTL", default=604800)
+# Structured match score threshold above which map_product_match AI call is
+# skipped and the top candidate is accepted directly (0–100; default 95).
+AI_SKIP_MAPPING_CONFIDENCE_THRESHOLD = env.int(
+    "AI_SKIP_MAPPING_CONFIDENCE_THRESHOLD", default=95
+)
 
 # --- Chroma -----------------------------------------------------------------
 

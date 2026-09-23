@@ -6,6 +6,8 @@ import logging
 import re
 from typing import Any
 
+from django.conf import settings
+
 from ai.context import (
     align_product_taxonomy_from_rate,
     load_rate_master_taxonomy,
@@ -75,6 +77,7 @@ class ProductAIApplyMixin:
 
     # Provided by ProductAIMappingService.__init__.
     database_version_id: int
+    boq_id: int | str | None
     _ai: AIService
 
     def _run_ai_batches(self, prepared: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -83,7 +86,14 @@ class ProductAIApplyMixin:
         PRODUCTS_PAYLOAD is built here (not loaded from a file): a JSON list of
         ``{product_ref, extracted, candidates[]}`` for the current batch.
         Each candidate ``id`` is ``Rate_Master_Output.id`` (table PK).
+
+        High-confidence bypass: when the top candidate's structured score is
+        already >= AI_SKIP_MAPPING_CONFIDENCE_THRESHOLD, the product is
+        accepted directly without calling OpenAI.
         """
+        skip_threshold = float(
+            getattr(settings, "AI_SKIP_MAPPING_CONFIDENCE_THRESHOLD", 95) or 95
+        )
         template = AIService.load_prompt("map_product_match.txt")
         by_ref: dict[str, dict[str, Any]] = {}
         batch_size = _mapping_batch_size()
@@ -99,6 +109,38 @@ class ProductAIApplyMixin:
                 except (TypeError, ValueError):
                     cid = 0
                 return (conf, cid)
+
+            # Partition: items that need AI vs. those that can skip it.
+            needs_ai: list[dict[str, Any]] = []
+            for item in batch:
+                if not item["candidates"]:
+                    continue
+                top_conf = float(
+                    sorted(item["candidates"], key=_candidate_sort_key)[0].get("confidence") or 0
+                )
+                if top_conf >= skip_threshold:
+                    # Auto-accept top candidate without AI mapping call.
+                    top = sorted(item["candidates"], key=_candidate_sort_key)[0]
+                    by_ref[item["product_ref"]] = {
+                        "product_ref": item["product_ref"],
+                        "selected_id": top.get("id"),
+                        "match_confidence": top_conf,
+                        "attribute_map": {},
+                        "mapped_attributes": top.get("attributes") or {},
+                        "unmapped_attributes": {},
+                        "notes": f"Auto-accepted (structured score {top_conf:.0f}% >= {skip_threshold:.0f}%)",
+                    }
+                    logger.info(
+                        "AI mapping bypass: product_ref=%s top_conf=%.0f%% >= threshold=%.0f%%",
+                        item["product_ref"],
+                        top_conf,
+                        skip_threshold,
+                    )
+                else:
+                    needs_ai.append(item)
+
+            if not needs_ai:
+                continue
 
             payload = [
                 {
@@ -134,8 +176,7 @@ class ProductAIApplyMixin:
                         for candidate in sorted(item["candidates"], key=_candidate_sort_key)
                     ],
                 }
-                for item in batch
-                if item["candidates"]
+                for item in needs_ai
             ]
             if not payload:
                 continue
@@ -161,9 +202,9 @@ class ProductAIApplyMixin:
     ) -> dict[str, Any]:
         """Use AI semantic understanding to infer category & sub_category when blank.
 
-        Only runs when:
-        - sub_category is currently blank
-        - description_hint is non-empty (gives AI the product context to understand)
+        Runs when sub_category is blank and description_hint is non-empty.
+        If category is already set it is passed as context so the AI can focus
+        on finding the right sub-category within that family.
 
         Returns the product dict with category and/or sub_category filled in
         (and sub_category_inferred=True) if AI assigns one with sufficient confidence (>= 0.6).
@@ -181,20 +222,27 @@ class ProductAIApplyMixin:
         taxonomy = taxonomy or load_rate_master_taxonomy()
         by_category = dict(taxonomy.get("sub_categories_by_category") or {})
         classes_by_cat_sub = dict(taxonomy.get("classes_by_category_sub_category") or {})
-        
+
+        # When category is already set, limit taxonomy lines to that category
+        # so the AI focuses on choosing the right sub-category within the family.
+        if category and category in by_category:
+            target_cats = {category: by_category[category]}
+        else:
+            target_cats = by_category
+
         # Format the taxonomy list for the prompt
         taxonomy_lines = []
-        for cat, subs in by_category.items():
+        for cat, subs in target_cats.items():
             for sub in subs:
                 classes = classes_by_cat_sub.get(cat, {}).get(sub, [])
                 if classes:
                     taxonomy_lines.append(f"{cat} -> {sub} -> [{', '.join(classes)}]")
                 else:
                     taxonomy_lines.append(f"{cat} -> {sub}")
-        
+
         if not taxonomy_lines:
             return product
-            
+
         taxonomy_list = "\n".join(f"- {line}" for line in taxonomy_lines)
 
         try:
@@ -202,6 +250,22 @@ class ProductAIApplyMixin:
         except Exception as exc:
             logger.warning("infer_taxonomy: prompt load failed: %s", exc)
             return product
+
+        # Handle optional {{#CURRENT_CATEGORY}}...{{/CURRENT_CATEGORY}} block.
+        import re as _re
+        _BLOCK_RE = _re.compile(
+            r"\{\{#CURRENT_CATEGORY\}\}(.*?)\{\{/CURRENT_CATEGORY\}\}",
+            _re.DOTALL,
+        )
+        if category:
+            # Keep the block content, substituting the category label.
+            template = _BLOCK_RE.sub(
+                lambda m: m.group(1).replace("{{CURRENT_CATEGORY}}", category),
+                template,
+            )
+        else:
+            # Remove the conditional block entirely.
+            template = _BLOCK_RE.sub("", template)
 
         prompt = (
             template
@@ -234,22 +298,22 @@ class ProductAIApplyMixin:
             )
             return product
 
-        # Validate against known taxonomy
-        valid_cat = None
-        valid_sub = None
-        valid_class = None
-        
+        # Validate against known taxonomy — must be an exact known label.
+        valid_cat: str | None = None
+        valid_sub: str | None = None
+        valid_class: str | None = None
+
         for cat, subs in by_category.items():
             if inferred_cat and cat.strip().upper() == inferred_cat.upper():
                 valid_cat = cat.strip()
-            
+
             # Allow AI to just pick sub_category and we infer the valid_cat
             for s in subs:
                 if s.strip().upper() == inferred_sub.upper():
                     valid_sub = s.strip()
                     if not valid_cat:
                         valid_cat = cat.strip()
-                        
+
                     # Validate the class if one was inferred
                     if inferred_class:
                         classes = classes_by_cat_sub.get(valid_cat, {}).get(valid_sub, [])
@@ -258,7 +322,7 @@ class ProductAIApplyMixin:
                                 valid_class = c.strip()
                                 break
                     break
-            
+
             if valid_sub and valid_cat:
                 break
 

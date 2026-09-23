@@ -8,24 +8,7 @@ from typing import Any
 from apps.database_manager.models import Product_Helper
 from apps.database_manager.services.activation import get_active_database_version
 
-_SIZE_MEANING: dict[tuple[str, str], str] = {
-    ("HYDRANT", "FIRE HOSE"): "hose length (m) — e.g. 15m → size 15, unit m",
-    ("HYDRANT", "FIRE HOSE BOX"): "cabinet outer dims → Capacity (e.g. 30X24X10); Size often 0",
-    ("HYDRANT", "FIRE HOSE REEL"): "hose bore/outlet (mm) — reel hose length in attributes",
-    ("HYDRANT", "BRANCH PIPE"): "nozzle/outlet nominal bore (mm) — e.g. 20mm outlet → size 20, unit mm",
-    ("HYDRANT", "SHORT BRANCH PIPE"): "coupling diameter (mm) — nozzle bore in attributes",
-    ("HYDRANT", "FIRE DOOR"): "frame dims → Capacity (e.g. 1200 X 2100); Size often 0",
-    ("PIPE", "MS"): "nominal pipe diameter (mm dia / NB)",
-    ("PIPE", "GI"): "nominal pipe diameter (mm dia / NB)",
-    ("VALVE", "SLUICE VALVE"): "nominal valve size (mm / NB); PN → Capacity",
-    ("PUMP", "HYDRANT PUMP"): "flow rating → Capacity (lpm); Size often 0",
-    ("PUMP", "JOCKEY PUMP"): "flow rating → Capacity (lpm); Size often 0",
-    ("EXTINGUISHER", "ABC"): "extinguisher weight (kg)",
-    ("EXTINGUISHER", "FOAM"): "extinguisher volume (liter)",
-    ("TANK", "GRP WATER TANK"): "tank volume (kl)",
-}
-
-_SWG_GAUGE = re.compile(r"(?i)(?<![0-9])(\d+(?:\.\d+)?)\s*swg\b")
+# Size meaning and rules are now handled by DATABASE_CONTEXT directly in AI prompts.
 _LENGTH_WITH_UNIT = re.compile(
     r"(?i)(?<![0-9])(\d+(?:\.\d+)?)\s*(?:m|metre|meter|mtr)s?\b(?:\s*length)?"
 )
@@ -34,18 +17,6 @@ _LENGTH_OF_PHRASE = re.compile(
 )
 _BOX_DIMENSIONS = re.compile(
     r"(?i)(\d+(?:\.\d+)?)\s*[\"']?\s*[x×]\s*(\d+(?:\.\d+)?)\s*[\"']?\s*[x×]\s*(\d+(?:\.\d+)?)"
-)
-_NO_NOMINAL_SIZE_SUBS = frozenset(
-    {
-        "FIRE HOSE BOX",
-        "FIRE DOOR",
-        "PENDANT",
-        "UPRIGHT",
-        "SIDE WALL",
-        "FIRE MAN AXE",
-        "SAND BUCKET SET",
-        "FIRE PUMP PANEL",
-    }
 )
 # Longest phrase first — main purchasable product beats contents (branch pipe / hose inside).
 
@@ -116,8 +87,7 @@ def load_size_unit_patterns(
                 "units": units,
                 "sample_sizes": sizes,
                 "sample_capacities": capacities,
-                "size_meaning": _SIZE_MEANING.get((cat, sub))
-                or _default_size_meaning(units),
+                "size_meaning": _default_size_meaning(units),
             }
         )
     return patterns
@@ -249,6 +219,7 @@ def parse_size_for_product(
     sub_category: Any = None,
     pattern: dict[str, Any] | None = None,
     require_explicit_unit: bool = True,
+    taxonomy: dict[str, Any] | None = None,
 ) -> tuple[str | None, str | None]:
     """
     Parse Size + Unit from BOQ text using catalog pattern for the product family.
@@ -271,8 +242,9 @@ def parse_size_for_product(
         if length:
             return length, length_unit
 
-    if sub in {"FIRE HOSE BOX", "FIRE DOOR"} or primary_unit == "inch":
-        # Cabinets / doors: outer dimensions belong in Capacity, not Size.
+    no_size_subs = taxonomy.get("no_size_subs", frozenset()) if taxonomy else frozenset()
+    if sub in no_size_subs or primary_unit == "inch":
+        # Outer dimensions or components often belong in Capacity, not Size.
         return None, None
 
     if primary_unit in {"kg", "liter", "kl", "lpm"}:
@@ -358,45 +330,8 @@ def resolve_main_product_from_evidence(text: str, *, taxonomy: dict[str, Any] | 
     by_category = dict(taxonomy.get("sub_categories_by_category") or {})
     cat_hints, sub_hints = get_dynamic_taxonomy_hints(by_category)
     
-    # We must find the category for the sub_hint. We can construct a map or use the returned tuple.
-    # Wait, sub_hints is a list of (phrase, sub_category). 
-    # But get_dynamic_taxonomy_hints appended it as (phrase, sub_category_string).
-    # To return (category, sub_category), we need the category.
-    # Let's map it.
-    sub_to_cat = {}
-    for c, subs in by_category.items():
-        for s in subs:
-            sub_to_cat[str(s).strip().upper()] = str(c).strip().upper()
-            
-    # Add manual fallbacks if missing
-    sub_to_cat.setdefault("FIRE HOSE BOX", "HYDRANT")
-    sub_to_cat.setdefault("FIRE HOSE REEL", "HYDRANT")
-    sub_to_cat.setdefault("SHORT BRANCH PIPE", "HYDRANT")
-    sub_to_cat.setdefault("BRANCH PIPE", "HYDRANT")
-    sub_to_cat.setdefault("SAND BUCKET SET", "HYDRANT")
-
-    # We only want to snap the identity if it's a known 'container' or composite product.
-    # Otherwise we risk aggressively overriding base products like PIPE.
-    composite_subs = {"FIRE HOSE BOX", "FIRE HOSE REEL", "SHORT BRANCH PIPE", "BRANCH PIPE"}
-
-    for phrase, sub in sub_hints:
-        if sub not in composite_subs:
-            continue
-        if phrase not in blob:
-            continue
-        # Contents mentioned after "accommodate/hold" must not beat the enclosure.
-        if phrase in {"branch pipe", "short branch pipe", "fire hose", "hose reel"}:
-            box_pos = max(
-                blob.find("fire hose box"),
-                blob.find("hose box"),
-                blob.find("hose cabinet"),
-            )
-            branch_pos = blob.find(phrase)
-            if box_pos >= 0 and branch_pos > box_pos and _CONTENT_CONTEXT.search(blob):
-                continue
-                
-        category = sub_to_cat.get(sub)
-        return category, sub
+    # Rely purely on the AI to understand the product context instead of hardcoded
+    # MEP heuristics and overrides.
     return None, None
 
 
@@ -421,26 +356,11 @@ def normalize_main_product_identity(
         item["category"] = category
         item["sub_category"] = sub_category
 
-    if target_sub == "FIRE HOSE BOX":
-        item["category"] = category
-        item["sub_category"] = sub_category
-        if _is_blank_value(item.get("size")) or is_swg_gauge_number(
-            str(item.get("size")), blob
-        ):
-            item["size"] = None
-            item["unit"] = None
-        box_capacity = parse_box_capacity_from_text(blob)
-        if box_capacity:
-            item["capacity"] = box_capacity
-        if _MS_SHEET.search(blob):
-            item["class"] = "MS"
-        attrs = dict(item.get("attributes") or {})
-        for key in list(attrs.keys()):
-            if str(key).strip().lower() in {"type", "is", "is_standard"}:
-                attrs[key] = None
-        item["attributes"] = attrs
+    # Specific product overrides based on hardcoded types have been removed.
+    # The AI extraction is trusted for attributes and class.
 
-    if target_sub in _NO_NOMINAL_SIZE_SUBS and not _is_blank_value(item.get("size")):
+    no_size_subs = taxonomy.get("no_size_subs", frozenset()) if taxonomy else frozenset()
+    if target_sub in no_size_subs and not _is_blank_value(item.get("size")):
         if is_swg_gauge_number(str(item.get("size")), blob):
             item["size"] = None
             item["unit"] = None

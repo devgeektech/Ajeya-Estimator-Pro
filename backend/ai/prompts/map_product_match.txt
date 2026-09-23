@@ -4,27 +4,36 @@ Return valid JSON only. Prefer null over a weak guess. Never invent Product_ID, 
 
 {{SYNONYM_RULES}}
 
-Section vs product:
-- ``extracted.description_hint`` (AI Description) is the ABSOLUTE HIGHEST priority. If the user provided a hint here (e.g. "landing valve"), you MUST find that specific product, even if it contradicts the BOQ section description.
-- ``extracted.category`` + ``extracted.sub_category`` carry the most weight after
-  the description hint. Then class, size, unit, capacity.
-- ``boq_row.description`` / ``slot_description`` are section evidence to validate
-  meaning, but the user's `description_hint` always overrules them.
-- **Do not assume an item is a pipe just because it has a diameter in mm.** Focus on the core noun (e.g. vibration eliminator vs pipe).
-
-Rules:
-- ``selected_id`` = a candidate ``id`` (Rate_Master_Output PK) or null.
-- Candidates are best-first. On a true tie, pick the first.
-- Choose the candidate that satisfies product family first (category/sub), then
-  nominal size, class/capacity, attributes — not the one with the most token overlap.
-- Wrong product family → null even if size matches (sluice valve vs PIPE;
-  pipework vs SPRINKLER head; hose reel vs hose box).
+Product family first — always:
+- Match the product FAMILY (category/sub_category) before anything else.
+- A candidate is ONLY eligible if its category AND sub_category both match the extracted product.
+  Wrong family → selected_id: null, even if size or other fields match perfectly.
+  Examples: sluice valve vs PIPE; pipework vs SPRINKLER head; hose reel vs hose box.
+- Then within the correct family: prefer the candidate whose size, class, capacity, and
+  attributes best match the extracted fields.
 - Class ``0`` is a real valve class. PIPE MS/GI live in sub_category. Ignore make/vendor.
-- Rematch (``extracted.rematch`` true): use expert inputs as hints, but validate
-  against BOQ meaning. Confidence = how well the DB row matches extract identity.
+
+Priority order for matching:
+1. Category match (required — eliminates candidates)
+2. Sub_category match (required — eliminates candidates)
+3. Size / nominal bore match (high weight)
+4. Class match (medium weight)
+5. Capacity / attribute match (lower weight)
+
+Key rules:
+- ``extracted.description_hint`` (AI Description) is the ABSOLUTE HIGHEST priority for
+  understanding what product was bought. If it says "landing valve", find a landing valve.
+- ``extracted.category`` + ``extracted.sub_category`` carry the most weight after the hint.
+- ``boq_row.description`` / ``slot_description`` are section context only — they validate
+  meaning but do not override the extracted sub_category.
+- Do NOT assume an item is a pipe just because it has a diameter in mm. Focus on the core
+  product noun (e.g. vibration eliminator, landing valve, branch pipe, sprinkler head).
+- Rematch (``extracted.rematch`` true): use expert-filled inputs as hints, validate against
+  BOQ meaning. Confidence = how well the DB row matches extracted identity.
 - Map attributes onto candidate schema; leftovers in ``unmapped_attributes``.
-- ``match_confidence`` 0–100 (0 if null; &lt;30 if uncertain). Abbreviations /
-  industry wording that mean the same thing must not lower confidence.
+- ``match_confidence`` 0–100 (0 if null; <30 if uncertain). Industry abbreviations
+  that mean the same thing must not lower confidence.
+- Candidates are best-first. On a true tie, pick the first.
 
 Respond with:
 {

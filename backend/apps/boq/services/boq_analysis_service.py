@@ -206,7 +206,7 @@ class BOQAnalysisService:
                     phase="extract",
                 )
 
-            extraction = BOQExtractionService(boq_data).extract(
+            extraction = BOQExtractionService(boq_data, boq_id=boq.pk).extract(
                 progress_callback=_on_extract_progress,
             )
             logger.info(
@@ -294,6 +294,7 @@ class BOQAnalysisService:
                 database_version_id=db_snap.get("database_version_id"),
                 progress_callback=_on_enrich_progress,
                 boq_data=boq_data,
+                boq_id=boq.pk,
             )
             logger.info(
                 "BOQ analysis match+refine phase id=%s elapsed_s=%.1f",
@@ -615,7 +616,7 @@ class BOQAnalysisService:
         try:
             boq_payload, _make_list_payload = load_extract_data(boq)
             boq_data = structure_for_analysis(boq_payload)
-            extraction = BOQExtractionService(boq_data).extract_anchor(row_id)
+            extraction = BOQExtractionService(boq_data, boq_id=boq.pk).extract_anchor(row_id)
             anchor_id = str(extraction.get("anchor_row_id") or row_id)
 
             replacements: list[dict[str, Any]] = []
@@ -638,6 +639,7 @@ class BOQAnalysisService:
                 replacements,
                 database_version_id=int(existing.get("database_version_id") or 0) or None,
                 boq_data=boq_data,
+                boq_id=boq.pk,
             )
             replacements = rehydrate_analysis_rows_quantity(boq_data, replacements)
             updated_rows = _replace_rows(list(existing.get("rows") or []), replacements)
@@ -672,6 +674,7 @@ class BOQAnalysisService:
         database_version_id: int | None = None,
         progress_callback=None,
         boq_data: dict[str, Any] | None = None,
+        boq_id: int | str | None = None,
     ) -> list[dict[str, Any]]:
         """Map BOQ-extracted products to top Rate_Master neighbors.
 
@@ -687,7 +690,7 @@ class BOQAnalysisService:
             logger.warning("Attribute enrichment skipped: no active master database")
             return rows
         try:
-            mapper = ProductAIMappingService(version_id)
+            mapper = ProductAIMappingService(version_id, boq_id=boq_id)
             product_count = sum(len(row.get("products") or []) for row in rows)
             product_count = max(product_count, 1)
 
@@ -766,7 +769,7 @@ class BOQAnalysisService:
             return False
 
         try:
-            mapper = ProductAIMappingService(active_version.pk)
+            mapper = ProductAIMappingService(active_version.pk, boq_id=boq.pk)
             updated_rows = mapper.map_rows(
                 rows,
                 only_missing=True,

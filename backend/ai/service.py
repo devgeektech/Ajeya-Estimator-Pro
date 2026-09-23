@@ -29,6 +29,8 @@ class AIService:
 
     @staticmethod
     def _supports_custom_temperature(model: str) -> bool:
+        # Only pure reasoning model families skip temperature.
+        # gpt-4.1-mini, gpt-4o, gpt-4o-mini all support temperature=0.
         model_name = model.lower()
         return not model_name.startswith(("gpt-5", "o1", "o3", "o4"))
 
@@ -43,6 +45,33 @@ class AIService:
             return json.loads(content)
         except json.JSONDecodeError as exc:
             raise AIServiceError(f"AI returned invalid JSON: {exc}") from exc
+
+    def get_or_complete_json(
+        self,
+        prompt: str,
+        *,
+        template_name: str = "",
+        cache_key: str | None = None,
+    ) -> tuple[dict[str, Any], bool]:
+        """Return (result, cache_hit).
+
+        When cache_key is provided and a cached result exists, returns the
+        cached dict without calling OpenAI (cache_hit=True).
+        Falls through to complete_json on miss or when caching is disabled.
+        """
+        if cache_key:
+            from ai.cache import get_ai_cached, set_ai_cached
+            cached = get_ai_cached(cache_key)
+            if cached is not None:
+                return cached, True
+
+        result = self.complete_json(prompt, template_name=template_name)
+
+        if cache_key:
+            from ai.cache import set_ai_cached
+            set_ai_cached(cache_key, result)
+
+        return result, False
 
     def complete(
         self,
@@ -60,7 +89,7 @@ class AIService:
             "messages": [{"role": "user", "content": prompt}],
         }
         # Deterministic Analyse: same BOQ → same extract/match when the model
-        # honors temperature/seed (gpt-4o-mini does).
+        # honors temperature/seed (gpt-4.1-mini does; reasoning models do not).
         if self._supports_custom_temperature(str(self.model)):
             kwargs["temperature"] = 0
         kwargs["seed"] = 42

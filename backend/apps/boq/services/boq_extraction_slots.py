@@ -742,7 +742,9 @@ def _snap_identity_from_product_context(
     blob = (product_context or "").strip()
     main_cat, main_sub = resolve_main_product_from_evidence(blob, taxonomy=taxonomy)
     if main_cat and main_sub:
-        item = normalize_main_product_identity(item, evidence_text=blob, taxonomy=taxonomy)
+        # Only override if AI failed to assign a category
+        if not item.get("category"):
+            item = normalize_main_product_identity(item, evidence_text=blob, taxonomy=taxonomy)
         item = _snap_class_from_text(item, blob)
         return snap_product_taxonomy(item, taxonomy, infer_defaults=False)
 
@@ -752,12 +754,10 @@ def _snap_identity_from_product_context(
     target_cat = (category or "").strip().upper()
     target_sub = (sub_category or "").strip().upper()
 
-    # Strong owning noun wins when AI category/sub disagree or are blank.
-    if category and (not current_cat or (target_cat and current_cat != target_cat)):
+    # Only fill if AI category/sub are blank (Trust the AI)
+    if category and not current_cat:
         item["category"] = category
-    if sub_category and (
-        not current_sub or (target_sub and current_sub != target_sub)
-    ):
+    if sub_category and not current_sub:
         item["sub_category"] = sub_category
     item = _snap_class_from_text(item, blob)
     return snap_product_taxonomy(item, taxonomy, infer_defaults=False)

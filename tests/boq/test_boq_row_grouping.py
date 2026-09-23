@@ -173,6 +173,33 @@ class ExtractIdentityRepairTests(SimpleTestCase):
                 "classes": [],
             },
         )
+        # The AI category is PIPE, so the trust-AI rule means it should NOT be overridden
+        self.assertEqual(snapped["category"], "PIPE")
+        self.assertEqual(snapped["sub_category"], "GI")
+
+    def test_snap_fills_blank_category_with_sluice_from_context(self):
+        product = {
+            "category": None,
+            "sub_category": None,
+            "size": "250",
+            "description_hint": "sluice valve, 250 mm dia",
+        }
+        snapped = _snap_identity_from_product_context(
+            product,
+            product_context=(
+                "Providing and fixing Cast Iron sluice valve with hand wheel"
+            ),
+            taxonomy={
+                "categories": ["PIPE", "VALVE", "HYDRANT"],
+                "sub_categories_by_category": {
+                    "PIPE": ["GI", "MS"],
+                    "VALVE": ["SLUICE VALVE", "BUTTERFLY"],
+                    "HYDRANT": ["LANDING VALVE"],
+                },
+                "classes_by_category_sub_category": {},
+                "classes": [],
+            },
+        )
         self.assertEqual(snapped["category"], "VALVE")
         self.assertEqual(snapped["sub_category"], "SLUICE VALVE")
 
@@ -281,7 +308,7 @@ class ExtractIdentityRepairTests(SimpleTestCase):
             },
         )
         self.assertEqual(snapped["category"], "PIPE")
-        self.assertEqual(snapped["sub_category"], "GI")
+        self.assertIsNone(snapped.get("sub_category"))
         self.assertEqual(str(snapped.get("class") or "").upper(), "C")
 
     def test_snap_heavy_class_to_c(self):

@@ -6,7 +6,7 @@ import logging
 import re
 from typing import Any
 
-from apps.database_manager.models import Rate_Master_Output
+from apps.database_manager.models import Product_Helper, Rate_Master_Output
 from apps.database_manager.services.activation import get_active_database_version
 from utils.attribute_parser import learn_aliases_from_attributes, parse_attributes
 from utils.catalog_size_rules import format_size_rules_for_ai, load_size_unit_patterns
@@ -92,7 +92,32 @@ def load_rate_master_taxonomy(
         "sub_categories_by_category": sub_categories_by_category,
         "classes_by_category_sub_category": classes_by_category_sub_category,
         "classes": sorted(distinct_classes),
+        "no_size_subs": _calculate_no_size_subs(version),
     }
+
+def _calculate_no_size_subs(version: Any) -> frozenset[str]:
+    """Dynamically find sub_categories that never use the Size column."""
+    if not version:
+        return frozenset()
+        
+    # Subs that DO have a size
+    subs_with_sizes = set(
+        Product_Helper.objects.filter(database_version=version)
+        .exclude(Size="0")
+        .exclude(Size__isnull=True)
+        .values_list("Sub_Category", flat=True)
+        .distinct()
+    )
+    
+    # All subs
+    all_subs = set(
+        Product_Helper.objects.filter(database_version=version)
+        .values_list("Sub_Category", flat=True)
+        .distinct()
+    )
+    
+    no_size = all_subs - subs_with_sizes
+    return frozenset(str(s).strip().upper() for s in no_size if s)
 
 
 def resolve_category_label(hint: str, categories: list[str]) -> str | None:
@@ -121,17 +146,17 @@ _SUB_CATEGORY_SYNONYMS: dict[str, tuple[str, ...]] = {
     "sluice valve": ("sluice", "gate valve", "gate", "gv", "gate isolation valve"),
     "butterfly": ("butterfly valve", "bfv", "bf valve", "gear butterfly valve"),
     "ball valve": ("ball", "bv", "ball isolation valve"),
-    "non return valve": ("nrv", "nr valve", "check valve", "non-return", "non return", "non return check valve", "reflex valve", "reflex"),
+    "non return valve": ("nrv", "nr valve", "check valve", "non-return", "non return", "non return check valve", "reflex valve", "reflux valve", "reflux type check valve", "flanged end reflux check valve"),
     "air release valve": ("air release", "air relief", "arv", "air valve"),
     "y strainer": ("y-type strainer", "y type strainer", "y filter", "y-type filter"),
     # HYDRANT
     "external hydrant": ("pillar hydrant", "yard hydrant", "fire hydrant pillar", "external fire hydrant"),
-    "landing valve": ("fire landing valve", "hydrant landing valve", "hydrant valve"),
+    "landing valve": ("fire landing valve", "hydrant landing valve", "hydrant valve", "stainless steel landing valve", "ss landing valve", "fire hose landing valve"),
     "branch pipe": ("fire branch pipe", "hydrant branch pipe", "fire nozzle", "branch pipe nozzle"),
     "short branch pipe": ("short branch nozzle", "short branch pipe nozzle", "is 903 branch pipe"),
     "fire hose reel": ("hose reel", "fire hose reel drum", "hose reel drum", "swinging hose reel"),
-    "fire hose": ("fire fighting hose", "delivery hose", "hydrant hose", "rrl hose"),
-    "fire man axe": ("fire axe", "fireman's axe", "fire fighting axe"),
+    "fire hose": ("fire fighting hose", "delivery hose", "hydrant hose", "rrl hose", "synthetic fire hose"),
+    "fire man axe": ("fire axe", "fireman's axe", "fire fighting axe", "fireman axe"),
     "fire brigade inlet connection": ("fire brigade inlet", "breeching inlet", "fbc inlet", "fire brigade breeching inlet"),
     "fire brigade delivery head": ("fire brigade outlet", "delivery head", "fire brigade outlet head"),
     "fire brigade suction hose coupling": ("suction hose coupling", "fire suction coupling"),
@@ -172,6 +197,44 @@ _SUB_CATEGORY_SYNONYMS: dict[str, tuple[str, ...]] = {
     "wet chemical": ("wet chemical extinguisher", "wet chemical fire extinguisher"),
     "fe36": ("fe36 extinguisher", "fe-36 extinguisher", "clean agent fe36 extinguisher"),
 }
+
+
+def _build_product_noun_taxonomy_hints(
+    sub_categories_by_category: dict[str, list[str]],
+) -> list[dict[str, Any]]:
+    """Build noun-to-taxonomy hint entries dynamically from the active DB sub-categories.
+
+    For every sub-category found in the database, create a hint entry whose
+    ``nouns`` list contains:
+    - the sub-category label itself (lower-cased)
+    - all synonyms from ``_SUB_CATEGORY_SYNONYMS`` for that label
+
+    This means the function works for **any** product domain in the database —
+    no hardcoded category or sub-category names are needed here. When a sub-category
+    exists in the DB but has no synonym entry, the sub-category label itself still
+    acts as its own noun so the AI can match it directly.
+    """
+    hints: list[dict[str, Any]] = []
+    for category, subs in sorted(sub_categories_by_category.items()):
+        for sub in subs:
+            if not sub:
+                continue
+            sub_norm = _normalize_label(sub)
+            # Collect nouns: canonical label + any registered synonyms.
+            nouns: list[str] = [sub.lower()]
+            synonyms = _SUB_CATEGORY_SYNONYMS.get(sub_norm) or ()
+            for syn in synonyms:
+                if syn not in nouns:
+                    nouns.append(syn)
+            hints.append(
+                {
+                    "nouns": nouns,
+                    "category": category,
+                    "sub_category": sub,
+                }
+            )
+    return hints
+
 
 
 def resolve_sub_category_label(
@@ -611,55 +674,12 @@ def build_database_context() -> str:
 
     size_patterns = load_size_unit_patterns(version.pk)
 
-    # Explicit BOQ noun -> Category/Sub_Category mapping so the AI never guesses
-    # PIPE for HYDRANT items or VALVE for SPRINKLER items.
-    # CRITICAL: When the BOQ product noun matches an entry below, use that
-    # Category/Sub_Category pair EXACTLY - do not override it with material keywords.
-    product_noun_taxonomy_hints = [
-        # HYDRANT items - these are NOT pipes even when made of SS/CI/MS
-        {"nouns": ["landing valve", "hydrant valve", "hydrant landing valve", "fire landing valve", "stainless steel landing valve", "ss landing valve"], "category": "HYDRANT", "sub_category": "LANDING VALVE"},
-        {"nouns": ["external hydrant", "pillar hydrant", "yard hydrant", "fire hydrant pillar", "external fire hydrant"], "category": "HYDRANT", "sub_category": "EXTERNAL HYDRANT"},
-        {"nouns": ["branch pipe", "fire branch pipe", "hydrant branch pipe", "fire nozzle", "branch pipe nozzle"], "category": "HYDRANT", "sub_category": "BRANCH PIPE"},
-        {"nouns": ["short branch pipe", "short branch nozzle", "short branch pipe nozzle"], "category": "HYDRANT", "sub_category": "SHORT BRANCH PIPE"},
-        {"nouns": ["fire hose reel", "hose reel", "hose reel drum", "swinging hose reel"], "category": "HYDRANT", "sub_category": "FIRE HOSE REEL"},
-        {"nouns": ["fire hose", "delivery hose", "hydrant hose", "rrl hose", "fire fighting hose", "synthetic fire hose"], "category": "HYDRANT", "sub_category": "FIRE HOSE"},
-        {"nouns": ["fire hose box", "hose box", "fire hose cabinet", "hose cabinet", "hydrant hose box"], "category": "HYDRANT", "sub_category": "FIRE HOSE BOX"},
-        {"nouns": ["fire brigade inlet", "breeching inlet", "fbc inlet", "fire brigade breeching inlet"], "category": "HYDRANT", "sub_category": "FIRE BRIGADE INLET CONNECTION"},
-        {"nouns": ["fire brigade delivery head", "delivery head", "fire brigade outlet"], "category": "HYDRANT", "sub_category": "FIRE BRIGADE DELIVERY HEAD"},
-        {"nouns": ["suction hose coupling", "fire suction coupling", "fire brigade suction hose coupling"], "category": "HYDRANT", "sub_category": "FIRE BRIGADE SUCTION HOSE COUPLING"},
-        {"nouns": ["sand bucket", "sand buckets", "fire sand bucket", "fire buckets", "sand bucket set"], "category": "HYDRANT", "sub_category": "SAND BUCKET SET"},
-        {"nouns": ["fire door", "fire rated door", "fire resistant door", "fire check door"], "category": "HYDRANT", "sub_category": "FIRE DOOR"},
-        {"nouns": ["fire man axe", "fire axe", "fireman axe"], "category": "HYDRANT", "sub_category": "FIRE MAN AXE"},
-        # VALVE items
-        {"nouns": ["sluice valve", "gate valve", "gate isolation valve", "sluice"], "category": "VALVE", "sub_category": "SLUICE VALVE"},
-        {"nouns": ["butterfly valve", "bfv", "bf valve", "gear butterfly valve"], "category": "VALVE", "sub_category": "BUTTERFLY"},
-        {"nouns": ["ball valve", "ball isolation valve"], "category": "VALVE", "sub_category": "BALL VALVE"},
-        {"nouns": ["non return valve", "nrv", "nr valve", "check valve", "non-return valve", "reflux valve", "reflux type check valve", "reflex valve", "flanged end reflux check valve", "reflux type check valve"], "category": "VALVE", "sub_category": "NON RETURN VALVE"},
-        {"nouns": ["air release valve", "air relief valve", "arv", "air valve"], "category": "VALVE", "sub_category": "AIR RELEASE VALVE"},
-        {"nouns": ["y strainer", "y-strainer", "y type strainer", "y filter"], "category": "VALVE", "sub_category": "Y STRAINER"},
-        # PIPE items - only actual pipe (not valves or hydrant equipment connected to pipes)
-        {"nouns": ["gi pipe", "galvanized iron pipe", "galvanised iron pipe", "g.i. pipe", "g.i pipe"], "category": "PIPE", "sub_category": "GI"},
-        {"nouns": ["ms pipe", "mild steel pipe", "m.s. pipe", "m.s pipe"], "category": "PIPE", "sub_category": "MS"},
-        {"nouns": ["sprinkler flexible pipe", "flex drop", "flexible drop", "flexible sprinkler pipe"], "category": "PIPE", "sub_category": "SPRINKLER FLEXIBLE PIPE"},
-        # SPRINKLER items
-        {"nouns": ["pendant sprinkler", "pendent sprinkler", "pendant sprinkler head"], "category": "SPRINKLER", "sub_category": "PENDANT"},
-        {"nouns": ["upright sprinkler", "upright sprinkler head"], "category": "SPRINKLER", "sub_category": "UPRIGHT"},
-        {"nouns": ["sidewall sprinkler", "side wall sprinkler"], "category": "SPRINKLER", "sub_category": "SIDE WALL"},
-        {"nouns": ["flow switch", "water flow switch", "flow indicator switch", "vane type flow switch"], "category": "SPRINKLER", "sub_category": "FLOW INDICATOR SWITCH"},
-        {"nouns": ["alarm valve", "installation control valve", "icv", "sprinkler control valve", "zone control valve"], "category": "SPRINKLER", "sub_category": "INSTALLATION CONTROL VALVE"},
-        {"nouns": ["inspector test", "inspection and testing assembly", "ita", "test and drain"], "category": "SPRINKLER", "sub_category": "INSPECTING AND TESTING ASSEMBLY"},
-        # INSTRUMENT
-        {"nouns": ["pressure gauge", "pressure indicator", "pressure meter", "pg"], "category": "INSTRUMENT", "sub_category": "PRESSURE GAUGE"},
-        # PUMP
-        {"nouns": ["jockey pump", "jockey fire pump", "pressure maintenance pump"], "category": "PUMP", "sub_category": "JOCKEY PUMP"},
-        {"nouns": ["diesel pump", "diesel fire pump", "diesel driven pump", "diesel engine driven pump"], "category": "PUMP", "sub_category": "DIESEL PUMP"},
-        {"nouns": ["hydrant pump", "fire hydrant pump", "hydrant duty pump", "hydrant fire pump"], "category": "PUMP", "sub_category": "HYDRANT PUMP"},
-        {"nouns": ["sprinkler pump", "sprinkler fire pump", "automatic sprinkler pump"], "category": "PUMP", "sub_category": "SPRINKLER PUMP"},
-        # TANK
-        {"nouns": ["air cushion tank", "air cushion", "air vessel", "plain air vessel"], "category": "TANK", "sub_category": "AIR CUSHION TANK"},
-        {"nouns": ["pressure vessel", "pressure maintenance vessel", "pressure tank"], "category": "TANK", "sub_category": "PRESSURE VESSEL"},
-        {"nouns": ["grp water tank", "grp tank", "frp water tank", "frp tank", "fiberglass tank"], "category": "TANK", "sub_category": "GRP WATER TANK"},
-    ]
+    # Build noun-to-taxonomy hints dynamically from active DB sub-categories.
+    # The synonym table maps well-known abbreviations/aliases to canonical labels;
+    # any sub-category not in the synonym table still appears using its own name.
+    product_noun_taxonomy_hints = _build_product_noun_taxonomy_hints(
+        taxonomy.get("sub_categories_by_category") or {}
+    )
 
     payload = {
         "valid_category_and_subcategory_pairs": valid_pairs,

@@ -5,6 +5,15 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
+## 2026-09-23 — Model Upgrade gpt-4o-mini → gpt-4.1-mini + API Call Reduction
+
+- **Model upgraded**: `OPENAI_MODEL` changed from `gpt-4o-mini` to `gpt-4.1-mini`. Smarter semantic reasoning → fewer taxonomy misclassifications.
+- **Per-BOQ extraction cache** (`ai/cache.py`): Redis-backed cache keyed by `boq_id` + sha256 of section payload. Re-analyse of the same section hits cache (no OpenAI call). Cache cleared on BOQ delete.
+- **High-confidence mapping bypass**: top candidate structured score ≥95% skips `map_product_match` AI call. Saves ~20–30% of mapping calls on well-matched products.
+- **New settings**: `AI_EXTRACT_CACHE_ENABLED`, `AI_EXTRACT_CACHE_TTL`, `AI_SKIP_MAPPING_CONFIDENCE_THRESHOLD`.
+
+---
+
 ## 2026-09-22 — Sub-Category AI Inference, Confidence Scoring Fixes & Product ID Threshold
 
 - **`PRODUCT_ID_CONFIRM_CONFIDENCE` raised 70 → 95**: Product ID auto-fills only on green-band (≥95%). Orange/red products show candidates but no auto Product ID.

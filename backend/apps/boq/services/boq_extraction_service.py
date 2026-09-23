@@ -80,8 +80,9 @@ class BOQExtractionService:
     """Extract products from grouped BOQ anchor rows via OpenAI."""
 
 
-    def __init__(self, boq_data: dict):
+    def __init__(self, boq_data: dict, boq_id: int | str | None = None):
         self.boq_data = boq_data or {}
+        self.boq_id = boq_id
         self.ai = AIService()
         self._database_context: str | None = None
         self._taxonomy: dict[str, Any] | None = None
@@ -438,14 +439,37 @@ class BOQExtractionService:
     ) -> list[dict[str, Any]]:
         template = AIService.load_prompt("extract_products.txt")
         payload = [_compact_anchor_payload(group) for group in groups]
+        rows_payload_json = json.dumps(payload, ensure_ascii=False, default=str)
         prompt = (
             template.replace("{{SYNONYM_RULES}}", format_synonym_rules_for_ai())
             .replace("{{DATABASE_CONTEXT}}", self._database_context_text())
-            .replace("{{ROWS_PAYLOAD}}", json.dumps(payload, ensure_ascii=False, default=str))
+            .replace("{{ROWS_PAYLOAD}}", rows_payload_json)
         )
         if minimum_slot_retry:
             prompt += _MINIMUM_SLOT_RETRY_INSTRUCTION
-        response = self.ai.complete_json(prompt, template_name="extract_products.txt")
+
+        # Build a per-BOQ cache key from the section payload.
+        # minimum_slot_retry uses a distinct key so the retry call is cached
+        # separately from the first-pass result.
+        cache_key: str | None = None
+        if self.boq_id and not minimum_slot_retry:
+            from ai.cache import make_extract_cache_key
+            cache_key = make_extract_cache_key(
+                boq_id=self.boq_id,
+                payload_json=rows_payload_json,
+            )
+
+        response, cache_hit = self.ai.get_or_complete_json(
+            prompt,
+            template_name="extract_products.txt",
+            cache_key=cache_key,
+        )
+        if cache_hit:
+            logger.info(
+                "BOQ extract cache HIT boq_id=%s rows=%s",
+                self.boq_id,
+                ",".join(str(g.get("row_id") or "") for g in groups),
+            )
         rows = response.get("rows") or []
         if not isinstance(rows, list):
             raise AIServiceError("Extraction response missing rows list.")

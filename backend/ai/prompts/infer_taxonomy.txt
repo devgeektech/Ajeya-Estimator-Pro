@@ -1,18 +1,24 @@
-You classify a fire protection / MEP product from a BOQ description.
+You are a product taxonomy classifier. Your task is to identify which Category and Sub-category from the provided database taxonomy best matches the described product.
 
-Your task: read the BOQ product description below, understand what physical product is being purchased, and select the BEST matching Category, Sub-category, and Class from the taxonomy provided.
+Your task: read the product description, understand what physical product is being purchased, and select the BEST matching Category, Sub-category, and Class from the taxonomy provided.
 
 Rules:
 - Understand the product first. Then find the taxonomy that best matches what you understood.
-- Do NOT just match words -- understand meaning. For example, a "G.I. pipe for sprinkler system" is a PIPE (sub-category GI), not a SPRINKLER.
-- In our database, the sub-category often consists of the product material, name, or reference. The class specifies the material grade or type.
-- Material keywords (GI, MS, SS, CI, DI) usually describe the sub-category or class. Use the provided taxonomy tree to determine where they fit.
-- If the product is totally unrelated to MEP/Fire (e.g. "Drill Machine", "Hammer", "Laptop"), return null for category, sub_category, and product_class. Do NOT force a fit.
-- If the core purchasable product is ambiguous or multiple conflicting products are mentioned, do NOT forcefully assign a taxonomy. Set them to null or provide a low confidence score.
-- Set `confidence` proportionally to your certainty (0.0 to 1.0). Use < 0.6 if you are unsure or forced to guess. Only use > 0.9 when the match is explicitly clear and perfect.
+- Do NOT just match words — understand meaning. For example, a "G.I. pipe for sprinkler system" is a PIPE (sub-category GI), not a SPRINKLER.
+- In the database, the sub-category often identifies the product name, material, or reference. The class specifies the material grade or type.
+- Material keywords (GI, MS, SS, CI, DI) usually describe the sub-category or class for pipe products. For valves and hydrant equipment they describe class/material attributes only.
+- A product is what it IS, not what it is made of. A "stainless steel landing valve" belongs to LANDING VALVE (sub-category), not to PIPE/SS.
+- A product is what it IS, not what system it connects to. Pipe "for sprinkler system" is still a PIPE product. Do not assign it to SPRINKLER.
+- Diameter in mm does NOT mean the product is a pipe. Many products (valves, hydrant items) also have diameters.
+- If the product is completely unrelated to any taxonomy category (e.g. "Laptop", "Hammer", "Structural Steel"), return null for all fields. Do NOT force a fit.
+- If the core purchasable product is ambiguous or multiple conflicting products are mentioned, do NOT forcefully assign. Set them to null or provide a low confidence score.
+- Set `confidence` proportionally to your certainty (0.0 to 1.0). Use < 0.6 if you are unsure or forced to guess. Only use > 0.9 when the match is explicitly clear and unambiguous.
 - If none of the categories or sub-categories fit well, return null.
-- It is MANDATORY to assign both Category and Sub_Category as a pair. If you assign a Category, you must find and assign the most relevant Sub_Category from the database context.
-- Return EXACTLY the labels from the list below -- do not invent new ones.
+- It is MANDATORY to assign both Category and Sub_Category as a pair. If you assign a Category, you must find and assign the most relevant Sub_Category from the database context. Exception: only set both to null together.
+- Return EXACTLY the labels from the list below — do not invent new ones.
+{{#CURRENT_CATEGORY}}
+- The product has already been classified as Category: "{{CURRENT_CATEGORY}}". If this is correct, keep it and focus on finding the best Sub_Category within it. If it is clearly wrong, correct both Category and Sub_Category.
+{{/CURRENT_CATEGORY}}
 
 Available Taxonomy (Category -> Sub-category -> [Classes]):
 {{TAXONOMY_LIST}}

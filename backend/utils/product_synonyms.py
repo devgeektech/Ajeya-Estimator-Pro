@@ -163,32 +163,13 @@ def get_dynamic_taxonomy_hints(by_category: Mapping[str, Collection[str]]) -> tu
                     cat_hints.append((syn_lower, cat))
                     sub_hints.append((syn_lower, sub.strip().upper()))
                     
-    cat_hints.extend([
-        ("pipework", "PIPE"), ("piping", "PIPE"), ("dia pipe", "PIPE"),
-        ("fire hose box", "HYDRANT"), ("external fire hose box", "HYDRANT"),
-        ("hose box", "HYDRANT"), ("hose cabinet", "HYDRANT"),
-        ("sand bucket set", "HYDRANT"), ("sand buckets", "HYDRANT"), ("sand bucket", "HYDRANT"),
-    ])
-    sub_hints.extend([
-        ("fire hose box", "FIRE HOSE BOX"), ("external fire hose box", "FIRE HOSE BOX"),
-        ("hose box", "FIRE HOSE BOX"), ("hose cabinet", "FIRE HOSE BOX"),
-        ("sand bucket set", "SAND BUCKET SET"), ("sand buckets", "SAND BUCKET SET"), ("sand bucket", "SAND BUCKET SET"),
-    ])
-
+    # Remove hardcoded hints; let the database taxonomy and AI drive matching.
     unique_cat = list(set(cat_hints))
     unique_sub = list(set(sub_hints))
     
-    # Priority: PIPE/VALVE > HYDRANT/SPRINKLER (to avoid chapter title noise like "External Hydrant System" overshadowing pipes)
-    def _priority(item: tuple[str, str]) -> int:
-        cat = item[1]
-        if cat in ("PIPE", "VALVE"):
-            return 2
-        if cat in ("HYDRANT", "SPRINKLER", "FIRE EXTINGUISHER"):
-            return 1
-        return 0
-
-    unique_cat.sort(key=lambda x: (_priority(x), len(x[0])), reverse=True)
-    unique_sub.sort(key=lambda x: (_priority(x), len(x[0])), reverse=True)
+    # Simple length-based priority (longest phrase first)
+    unique_cat.sort(key=lambda x: len(x[0]), reverse=True)
+    unique_sub.sort(key=lambda x: len(x[0]), reverse=True)
     
     return unique_cat, unique_sub
 
@@ -360,25 +341,18 @@ def format_synonym_rules_for_ai() -> str:
     lines.extend(
         [
             "- Abbreviations, spelling variants, and industry synonyms must NOT",
-            "  lower confidence when the meaning matches (GI pipe = galvanized iron pipe).",
-            "- Pipe class phrases map to Rate_Master Class when listed: Heavy Class",
-            "  → C, Medium Class → B, Light Class → A (do not invent other classes).",
-            "- Valve subtypes are distinct: sluice ≠ butterfly ≠ ball ≠ non-return",
-            "  (check / reflux / NRV). Wrong subtype → reject even if both are VALVE.",
+            "  lower confidence when the meaning matches.",
+            "- Product subtypes are distinct. Wrong subtype → reject even if both belong to the same Category.",
             "- Do NOT match by shared words alone. Wrong product family or wrong",
-            "  nominal size → reject even if some tokens overlap (e.g. hose reel vs",
-            "  hose box; sluice valve vs hydrant chapter title; sluice valve vs PIPE).",
-            "- Indian Standard codes (IS:636, IS 903-1975) are NOT nominal size —",
-            "  use the mm/dia/NB figure (e.g. 63 mm dia → size 63, is attribute 636).",
-            "  If only an IS code is visible and nominal size is unclear, leave size null.",
+            "  nominal size → reject even if some tokens overlap.",
+            "- Industry standard codes (e.g. IS codes, ASTM, BS) are NOT nominal size —",
+            "  use the dimension figure. If nominal size is unclear, leave size null.",
             "- For every structured field (not only size): prefer null over guessing.",
-            "  Do not fill Class, Capacity, make_hint, or attributes from chapter titles,",
+            "  Do not fill Class, Capacity, or attributes from chapter titles,",
             "  qty columns, or unrelated text — only from the owning slot / product_context.",
-            "- Size/Unit follow DATABASE_CONTEXT size_unit_patterns: FIRE HOSE uses length",
-            "  (m); PIPE/VALVE/branch pipe use nominal mm; never SWG gauge or WxHxD as Size.",
-            "- Operating temperature (68 deg.C / °C), k-factor, response, speed, head,",
-            "  flow, RPM are attributes — NEVER Size. Size is orifice/bore/dia (e.g. 15 mm).",
-            "- When the BOQ states a measure unit next to Size (15 mm, 65 NB), fill Unit.",
+            "- Size/Unit follow DATABASE_CONTEXT size_unit_patterns.",
+            "- Operating parameters (temperature, pressure, speed, voltage) are attributes — NEVER Size. Size refers to physical dimensions.",
+            "- When the BOQ states a measure unit next to Size (e.g. 15 mm), fill Unit.",
             "- Prefer the candidate / taxonomy label that satisfies the BOQ",
             "  requirement, not the one with the most string overlap.",
             "- If no catalog row matches the product family/subtype, select null",

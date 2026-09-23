@@ -12,7 +12,7 @@ class SynonymRulesForAiTests(SimpleTestCase):
         self.assertIn("GI", rules)
         self.assertIn("galvanized", rules.lower())
         self.assertIn("Meaning-first", rules)
-        self.assertIn("Operating temperature", rules)
+        self.assertIn("Operating parameters", rules)
         # Full product phrase catalog must not appear in prompt rules.
         self.assertNotIn("ACCESSORIES > ROSETTEE PLATE:", rules)
         self.assertNotIn("Product synonyms (Category > Sub-category:", rules)

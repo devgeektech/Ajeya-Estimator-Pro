@@ -51,6 +51,7 @@ def _append_section_to_recall_hint(
     section_text: str,
     sub_category: Any,
     prefer_slot: bool = False,
+    taxonomy: dict[str, Any] | None = None,
 ) -> str:
     """Append BOQ evidence as supporting context unless it would pollute recall.
 
@@ -58,10 +59,9 @@ def _append_section_to_recall_hint(
     when rematching a valve/hydrant product. Prefer the qty/unit slot line when
     ``prefer_slot`` is set (Re-analyse with filled identity).
     """
-    from utils.catalog_size_rules import _NO_NOMINAL_SIZE_SUBS
-
     sub = str(sub_category or "").strip().upper()
-    if sub in _NO_NOMINAL_SIZE_SUBS:
+    no_size_subs = taxonomy.get("no_size_subs", frozenset()) if taxonomy else frozenset()
+    if sub in no_size_subs:
         return hint
     support = (section_text or "").strip()
     if not support:
@@ -169,6 +169,7 @@ class ProductAICandidatesMixin:
                 section_text=support,
                 sub_category=kept_sub,
                 prefer_slot=prefer_slot,
+                taxonomy=getattr(self._matcher, "_taxonomy", None) if getattr(self, "_matcher", None) else None,
             )
             return product_for_recall
 
@@ -309,7 +310,7 @@ class ProductAICandidatesMixin:
         product_for_recall = self._product_for_recall(product)
         match = self._matcher.match_product(
             product_for_recall,
-            chroma_limit=max(int(chroma_limit or _RECALL_CHROMA_LIMIT), _RECALL_CHROMA_LIMIT),
+            chroma_limit=max(chroma_limit or _RECALL_CHROMA_LIMIT, _RECALL_CHROMA_LIMIT),
             result_limit=_AI_CANDIDATE_LIMIT,
         )
         return self._snapshots_from_match(match, product_for_recall)

@@ -317,7 +317,14 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
   `AI_PRODUCT_MAPPING_BATCH_SIZE` (default **4**), `AI_EXTRACT_PARALLELISM`
   (default **1** concurrent extract batch — raise only if OpenAI tier allows),
   `AI_EXTRACT_PACING_SECONDS` (default **2.5**, pause between sequential batches),
-  `OPENAI_RETRY_MAX_ATTEMPTS` (default **8**, TPM-aware backoff in `ai/retry.py`)
+  `OPENAI_RETRY_MAX_ATTEMPTS` (default **8**, TPM-aware backoff in `ai/retry.py`),
+  `AI_EXTRACT_CACHE_ENABLED` (default **True** — per-BOQ Redis cache for extract results;
+  cache HIT skips OpenAI call for Re-analyse of same section),
+  `AI_EXTRACT_CACHE_TTL` (default **604800** seconds = 7 days),
+  `AI_SKIP_MAPPING_CONFIDENCE_THRESHOLD` (default **95** — skip `map_product_match`
+  AI call when structured score ≥ this; accepts top candidate directly)
+- **Active model:** `gpt-4.1-mini` (set via `OPENAI_MODEL`). Embedding model stays
+  `text-embedding-3-small`. Both configured in `.env`.
 - Stuck jobs: if progress stops for **5 minutes**, or shows 100% complete/failed
   while status is still `PROCESSING`/`MATCHING`, the BOQ is marked
   `ANALYSIS_FAILED` (or `EXTRACTED` if matching stalled with rows) so **Analyse**

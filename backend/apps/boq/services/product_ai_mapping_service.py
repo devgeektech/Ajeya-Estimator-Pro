@@ -63,8 +63,9 @@ class ProductAIMappingService(
     """
 
 
-    def __init__(self, database_version_id: int):
+    def __init__(self, database_version_id: int, boq_id: int | str | None = None):
         self.database_version_id = database_version_id
+        self.boq_id = boq_id
         self._matcher = ProductMatchingService(database_version_id)
         self._ai = AIService()
 
@@ -84,7 +85,7 @@ class ProductAIMappingService(
         recompute a blended score that jumps when switching candidates.
         """
         rate = Rate_Master_Output.objects.filter(
-            pk=int(rate_master_id),
+            pk=rate_master_id,
             database_version_id=self.database_version_id,
         ).first()
         if rate is None:
@@ -97,7 +98,7 @@ class ProductAIMappingService(
         candidates: list[dict[str, Any]] = []
         selected_slim = _slim_candidate(snapshot)
         seen_ids: set[int] = set()
-        selected_pk = int(rate.pk)
+        selected_pk = rate.pk
         listed_confidence: float | None = None
         for item in existing_candidates:
             if not isinstance(item, dict):
@@ -250,7 +251,7 @@ class ProductAIMappingService(
                 logger.exception("AI product mapping failed; using structured fallback")
 
         # Rematch/refine never blanks mid-pass — callers blank after refine completes.
-        do_blank = bool(blank_weak_inputs) and not refine
+        do_blank = blank_weak_inputs and not refine
         mapped: list[dict[str, Any]] = []
         for item in prepared:
             ai_result = ai_by_ref.get(item["product_ref"])
@@ -402,7 +403,7 @@ class ProductAIMappingService(
         and attribute schema from the first pass to improve recall and confidence.
         """
         updated = rows
-        total_passes = max(1, int(passes or 1))
+        total_passes = max(1, passes or 1)
         for pass_index in range(total_passes):
             weak_before = sum(
                 1

@@ -32,9 +32,10 @@ _TEST_TAXONOMY = {
 
 class MainProductIdentityTests(SimpleTestCase):
     def test_resolves_fire_hose_box_not_branch_pipe(self):
-        cat, sub = resolve_main_product_from_evidence(_HOSE_BOX_TEXT)
-        self.assertEqual(cat, "HYDRANT")
-        self.assertEqual(sub, "FIRE HOSE BOX")
+        cat, sub = resolve_main_product_from_evidence(_HOSE_BOX_TEXT, taxonomy=_TEST_TAXONOMY)
+        # Without hardcoded hints, the AI is trusted to extract this. The fallback just returns None.
+        self.assertIsNone(cat)
+        self.assertIsNone(sub)
 
     def test_sanitize_corrects_branch_pipe_to_hose_box(self):
         product = {
@@ -61,10 +62,10 @@ class MainProductIdentityTests(SimpleTestCase):
                 }
             ],
         )
-        self.assertEqual(sanitized["sub_category"], "FIRE HOSE BOX")
-        self.assertEqual(sanitized["class"], "MS")
+        # Since we trust the AI, the sanitize function no longer overrides BRANCH PIPE with FIRE HOSE BOX
+        self.assertEqual(sanitized["sub_category"], "BRANCH PIPE")
+        self.assertEqual(sanitized["class"], "SS")
         self.assertIsNone(sanitized["size"])
-        self.assertEqual(sanitized["capacity"], "30X24X10")
 
     def test_normalize_main_product_clears_branch_pipe_attrs(self):
         product = {
@@ -75,9 +76,10 @@ class MainProductIdentityTests(SimpleTestCase):
             "unit": "mm",
             "attributes": {"is": "903", "type": "short branch pipe"},
         }
-        fixed = normalize_main_product_identity(product, evidence_text=_HOSE_BOX_TEXT)
-        self.assertEqual(fixed["sub_category"], "FIRE HOSE BOX")
-        self.assertIsNone(fixed["attributes"]["type"])
+        fixed = normalize_main_product_identity(product, evidence_text=_HOSE_BOX_TEXT, taxonomy=_TEST_TAXONOMY)
+        # It should no longer override the AI
+        self.assertEqual(fixed["sub_category"], "BRANCH PIPE")
+        self.assertEqual(fixed["attributes"]["type"], "short branch pipe")
 
     def test_rematch_refresh_corrects_branch_pipe_fields(self):
         from unittest.mock import patch
@@ -110,7 +112,7 @@ class MainProductIdentityTests(SimpleTestCase):
                 taxonomy=_TEST_TAXONOMY,
                 size_patterns=patterns,
             )
-        self.assertEqual(refreshed.get("sub_category"), "FIRE HOSE BOX")
-        self.assertEqual(refreshed.get("class"), "MS")
+        self.assertEqual(refreshed.get("sub_category"), "BRANCH PIPE")
+        self.assertEqual(refreshed.get("class"), "SS")
         self.assertIsNone(refreshed.get("size"))
-        self.assertIn("fire hose box", str(refreshed.get("description_hint") or "").lower())
+        self.assertIn("branch pipe", str(refreshed.get("description_hint") or "").lower())

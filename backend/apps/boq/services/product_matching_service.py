@@ -326,14 +326,15 @@ def _hint_category_score(hint: Any, category_label: Any) -> float:
     return 0.0
 
 
-def _effective_size(extracted: dict[str, Any]) -> Any:
+def _effective_size(extracted: dict[str, Any], taxonomy: dict[str, Any] | None = None) -> Any:
     """Prefer explicit size; else catalog length; else parse from description hint."""
     if _is_filled(extracted.get("size")):
         return extracted.get("size")
     sub = str(extracted.get("sub_category") or "").strip().upper()
-    from utils.catalog_size_rules import _NO_NOMINAL_SIZE_SUBS, parse_size_for_product
+    from utils.catalog_size_rules import parse_size_for_product
 
-    if sub in _NO_NOMINAL_SIZE_SUBS:
+    no_size_subs = taxonomy.get("no_size_subs", frozenset()) if taxonomy else frozenset()
+    if sub in no_size_subs:
         return None
     unit_text = str(extracted.get("unit") or "").strip().lower()
     if unit_text == "m" or sub == "FIRE HOSE":
@@ -347,6 +348,7 @@ def _effective_size(extracted: dict[str, Any]) -> Any:
         hint,
         category=extracted.get("category"),
         sub_category=extracted.get("sub_category"),
+        taxonomy=taxonomy,
     )
     if size:
         return size
@@ -402,6 +404,7 @@ def _size_for_score(value: Any) -> Any:
 def structured_match_score(
     extracted: dict[str, Any],
     rate: Rate_Master_Output,
+    taxonomy: dict[str, Any] | None = None,
 ) -> tuple[float, dict[str, Any]]:
     """Return 0-100 structured score using product fields only (never make/vendor).
 
@@ -422,7 +425,7 @@ def structured_match_score(
         if _normalize_text(key) not in {"make", "manufacturer", "brand", "supplier", "vendor"}
     }
 
-    effective_size = _size_for_score(_effective_size(extracted))
+    effective_size = _size_for_score(_effective_size(extracted, taxonomy=taxonomy))
     rate_size = _size_for_score(rate.Size)
     field_checks: list[tuple[str, Any, Any, Any]] = [
         ("category", extracted.get("category"), rate.Category, _text_match_score),
