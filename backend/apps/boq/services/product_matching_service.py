@@ -217,7 +217,7 @@ def _significant_type_tokens(value: Any) -> set[str]:
     texts.extend(expand_query_terms(value))
     for text in texts:
         for raw in re.findall(r"[a-z0-9]+", _normalize_text(text)):
-            if len(raw) < 4 or raw in _TYPE_STOPWORDS:
+            if len(raw) < 3 or raw in _TYPE_STOPWORDS:
                 continue
             tokens.add(raw)
     return tokens

@@ -125,7 +125,7 @@ class BOQExtractionEditService:
         previous_hint = str(product.get("description_hint") or "").strip()
         submitted_hint = None
         if "description_hint" in fields:
-            submitted_hint = str(fields.get("description_hint") or "").strip()
+            submitted_hint = (fields.get("description_hint") or "").strip()
         for field in _PRODUCT_SCALAR_FIELDS:
             if field not in fields:
                 continue
@@ -188,7 +188,8 @@ class BOQExtractionEditService:
                 "products": [],
             }
             rows.append(row)
-        products = list(row.get("products") or [])
+        products_raw = row.get("products")
+        products = list(products_raw) if isinstance(products_raw, list) else []
         next_index = len(products)
         product = _blank_product(next_index)
         products.append(product)
@@ -249,7 +250,7 @@ class BOQExtractionEditService:
             active = get_active_database_version()
             if active is None:
                 raise ValidationError("No active master database.")
-            version_id = int(active.pk)
+            version_id = active.pk
 
         rows = list(analysis.get("rows") or [])
         row = self._find_row(rows, row_id)
@@ -264,7 +265,7 @@ class BOQExtractionEditService:
         try:
             updated = ProductAIMappingService(version_id).apply_selected_candidate(
                 product,
-                int(rate_master_id),
+                rate_master_id,
             )
         except ValueError as exc:
             raise ValidationError(str(exc)) from exc
@@ -336,22 +337,25 @@ class BOQExtractionEditService:
         updated["attribute_confidence"] = 100.0
         updated["needs_extraction_review"] = False
         updated["slot_fallback"] = False
-        # Resolve Product_Helper Product_ID for Analysis display + Next gate.
-        if not str(updated.get("catalog_product_id") or "").strip():
-            from apps.database_manager.models import Rate_Master_Output
+        # Fetch Rate_Master_Output to populate Product ID and extracted fields instantly
+        from apps.database_manager.models import Rate_Master_Output
 
-            rate = (
-                Rate_Master_Output.objects.filter(pk=rate_pk)
-                .only("Product_ID")
-                .first()
-            )
-            product_id = str(getattr(rate, "Product_ID", "") or "").strip() if rate else ""
+        rate = Rate_Master_Output.objects.filter(pk=rate_pk).first()
+        if rate:
+            product_id = str(getattr(rate, "Product_ID", "") or "").strip()
             if product_id:
                 updated["catalog_product_id"] = product_id
-            elif str(updated.get("suggested_catalog_product_id") or "").strip():
-                updated["catalog_product_id"] = str(
-                    updated.get("suggested_catalog_product_id")
-                ).strip()
+            updated["category"] = getattr(rate, "Category", "") or ""
+            updated["sub_category"] = getattr(rate, "Sub_Category", "") or ""
+            updated["class_name"] = getattr(rate, "Class", "") or ""
+            updated["size"] = str(getattr(rate, "Size", "")) if getattr(rate, "Size", None) is not None else ""
+            updated["capacity"] = str(getattr(rate, "Capacity", "")) if getattr(rate, "Capacity", None) is not None else ""
+            updated["unit"] = getattr(rate, "Unit", "") or ""
+            updated["attribute"] = getattr(rate, "Attribute", "") or ""
+        elif str(updated.get("suggested_catalog_product_id") or "").strip():
+            updated["catalog_product_id"] = str(
+                updated.get("suggested_catalog_product_id")
+            ).strip()
         mapping = dict(updated.get("ai_mapping") or {})
         mapping["selected_id"] = rate_pk
         mapping["selected_rate_master_id"] = rate_pk
@@ -487,7 +491,7 @@ class BOQExtractionEditService:
     @staticmethod
     def _find_row(rows: list[dict[str, Any]], row_id: str) -> dict[str, Any] | None:
         for row in rows:
-            if str(row.get("row_id")) == str(row_id):
+            if str(row.get("row_id")) == row_id:
                 return row
         return None
 

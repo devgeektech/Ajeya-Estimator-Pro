@@ -224,23 +224,23 @@
                         <div class="make-vendor-fields labour-rate-fields">
                             <label class="extraction-field">
                                 <span class="extraction-field__label">Product rate</span>
-                                <input type="text" class="extraction-input extraction-input--readonly" value="{{ product.product_rate|default:product.material_rate|default:'—' }}" readonly tabindex="-1" aria-readonly="true">
+                                <input type="text" class="extraction-input extraction-input--readonly" value="{{ product.product_rate|default_if_none:product.material_rate|default_if_none:'—' }}" readonly tabindex="-1" aria-readonly="true">
                             </label>
                             <label class="extraction-field">
                                 <span class="extraction-field__label">Labour rate</span>
-                                <input type="text" class="extraction-input extraction-input--readonly" value="{{ product.labour_rate|default:'—' }}" readonly tabindex="-1" aria-readonly="true">
+                                <input type="text" class="extraction-input extraction-input--readonly" value="{{ product.labour_rate|default_if_none:'—' }}" readonly tabindex="-1" aria-readonly="true">
                             </label>
                             <label class="extraction-field">
                                 <span class="extraction-field__label">Total amount</span>
-                                <input type="text" class="extraction-input extraction-input--readonly" value="{{ product.total_amount|default:'—' }}" readonly tabindex="-1" aria-readonly="true">
+                                <input type="text" class="extraction-input extraction-input--readonly" value="{{ product.total_amount|default_if_none:'—' }}" readonly tabindex="-1" aria-readonly="true">
                             </label>
                             <label class="extraction-field">
                                 <span class="extraction-field__label">Qty</span>
-                                <input type="text" class="extraction-input extraction-input--readonly" value="{{ product.quantity|default:'—' }}" readonly tabindex="-1" aria-readonly="true">
+                                <input type="text" class="extraction-input extraction-input--readonly" value="{{ product.quantity|default_if_none:'—' }}" readonly tabindex="-1" aria-readonly="true">
                             </label>
                             <label class="extraction-field">
                                 <span class="extraction-field__label">Final amount</span>
-                                <input type="text" class="extraction-input extraction-input--readonly" value="{{ product.final_amount|default:'—' }}" readonly tabindex="-1" aria-readonly="true">
+                                <input type="text" class="extraction-input extraction-input--readonly" value="{{ product.final_amount|default_if_none:'—' }}" readonly tabindex="-1" aria-readonly="true">
                             </label>
                         </div>
                     </section>

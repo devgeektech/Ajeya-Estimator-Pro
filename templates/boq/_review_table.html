@@ -143,27 +143,27 @@
                         <div class="make-vendor-fields review-rate-fields">
                             <label class="extraction-field">
                                 <span class="extraction-field__label">Material amount</span>
-                                <input type="text" class="extraction-input extraction-input--readonly" value="{{ row.final_material_amount|default:'—' }}" readonly tabindex="-1" aria-readonly="true">
+                                <input type="text" class="extraction-input extraction-input--readonly" value="{{ row.final_material_amount|default_if_none:'—' }}" readonly tabindex="-1" aria-readonly="true">
                             </label>
                             <label class="extraction-field">
                                 <span class="extraction-field__label">Labour</span>
-                                <input type="text" class="extraction-input extraction-input--readonly" value="{{ row.labour|default:'—' }}" readonly tabindex="-1" aria-readonly="true">
+                                <input type="text" class="extraction-input extraction-input--readonly" value="{{ row.labour|default_if_none:'—' }}" readonly tabindex="-1" aria-readonly="true">
                             </label>
                             <label class="extraction-field">
                                 <span class="extraction-field__label">Qty (as in BOQ)</span>
-                                <input type="text" class="extraction-input extraction-input--readonly" value="{{ row.qty|default:'—' }}" readonly tabindex="-1" aria-readonly="true">
+                                <input type="text" class="extraction-input extraction-input--readonly" value="{{ row.qty|default_if_none:'—' }}" readonly tabindex="-1" aria-readonly="true">
                             </label>
                             <label class="extraction-field">
                                 <span class="extraction-field__label">TOTAL MATERIAL</span>
-                                <input type="text" class="extraction-input extraction-input--readonly" value="{{ row.total_material|default:'—' }}" readonly tabindex="-1" aria-readonly="true">
+                                <input type="text" class="extraction-input extraction-input--readonly" value="{{ row.total_material|default_if_none:'—' }}" readonly tabindex="-1" aria-readonly="true">
                             </label>
                             <label class="extraction-field">
                                 <span class="extraction-field__label">TOTAL LABOUR</span>
-                                <input type="text" class="extraction-input extraction-input--readonly" value="{{ row.total_labour|default:'—' }}" readonly tabindex="-1" aria-readonly="true">
+                                <input type="text" class="extraction-input extraction-input--readonly" value="{{ row.total_labour|default_if_none:'—' }}" readonly tabindex="-1" aria-readonly="true">
                             </label>
                             <label class="extraction-field review-rate-fields__amount">
                                 <span class="extraction-field__label">Total Amount</span>
-                                <input type="text" class="extraction-input extraction-input--readonly" value="{{ row.amount|default:'—' }}" readonly tabindex="-1" aria-readonly="true">
+                                <input type="text" class="extraction-input extraction-input--readonly" value="{{ row.amount|default_if_none:'—' }}" readonly tabindex="-1" aria-readonly="true">
                             </label>
                         </div>
                     </section>

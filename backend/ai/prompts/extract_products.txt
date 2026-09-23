@@ -7,7 +7,7 @@ GLOBAL RULE — null when uncertain:
   attribute: extract only what the BOQ slot / owning sentence clearly states.
 - If the value is ambiguous, inferred from chapter titles, qty digits, IS year
   suffixes, or unrelated boilerplate — set that field to **null**.
-- Do not forcefully assign a Category or Sub_Category. If the core purchasable product does not clearly match a taxonomy option, set both Category and Sub_Category to null.
+- Try hard to find a semantic match for Category and Sub_Category in `product_noun_taxonomy_hints`. If the true item is a minor variation of an existing sub-category, assign the closest matching Category and Sub_Category pair. Only use null if it is completely unrelated to anything in the database.
 - Set `extraction_confidence` proportionally to your certainty. Use < 0.8 if you are unsure, if the description is ambiguous, or if it mentions multiple conflicting products. Only use 0.9 or 1.0 when the match is explicitly clear and perfect.
 - Never copy random numbers or words from the description into structured fields.
 
@@ -56,6 +56,7 @@ STEP 1 — UNDERSTAND THE SECTION (read everything before extracting):
   - ``fire hose reel`` → HYDRANT / FIRE HOSE REEL  (not PIPE — hose reel is HYDRANT equipment)
   - ``branch pipe with nozzle`` → HYDRANT / BRANCH PIPE  (not PIPE/MS — branch pipe is HYDRANT)
   - ``sand bucket set`` → HYDRANT / SAND BUCKET SET
+  - **CRITICAL HALLUCINATION RULE**: Never assume a product is a "pipe" just because you don't know what it is. If the slot mentions capacity like `20 KL`, `L`, `LPM`, or `KLD`, it is typically a TANK or PUMP, absolutely NEVER a pipe. Do NOT add invented words like "dia", "mm", or "pipe" to the `description_hint` if they are missing from the raw text.
 - Size-only slots inherit the product from ``product_context``.
 - **Main product only:** when a line buys an enclosure/cabinet/box (fire hose box,
   hose reel drum, panel), phrases like ``to accommodate branch pipes / delivery
@@ -93,9 +94,10 @@ Priority order for every product:
      from cabinet prose as separate Size. Never use **SWG** gauge (``18 SWG``) as Size.
    - **PUMP** → flow lpm in **Capacity**; Size often 0.
    - **EXTINGUISHER** → weight kg or volume liter per catalog Unit.
+   - **MULTIPLE SIZES**: If a description mentions multiple sizes (e.g., '150 mm dia flanged inlet' and '63mm outlets'), extract the PRIMARY size of the item itself (the main body or inlet size, e.g., 150), NOT the size of its secondary connections, accessories, or outlets.
    - **Never** use Indian Standard numbers as Size (``IS:636`` → attribute ``is``).
    - **Never** use SWG sheet gauge, cabinet WxHxD, qty column, or unrelated digits as Size.
-   - **Never** invent or hallucinate a Size. If no explicit size is mentioned in the text for that slot, set Size to null. Do not use the quantity as a size.
+   - **CRITICAL**: Never invent or hallucinate a Size. If no explicit product size is mentioned in the text (e.g. 65 mm dia), set Size to null. Do NOT use the item Quantity as the Size. If a line says "10 Nos", the size is null, not 10.
    - **Never** use operating temperature / deg.C / °C as Size
      (``i) Operating Temp. : 68 deg.C.`` → attribute ``temp`` = 68; Size stays the
      parent orifice/bore e.g. ``15 mm`` from ``a) Pendent sprinklers 15 mm``).
@@ -126,7 +128,7 @@ Binding:
 
 Taxonomy:
 - ``category`` + ``sub_category`` required; exact DATABASE_CONTEXT pair labels.
-- It is MANDATORY to assign both Category and Sub_Category as a pair. However, DO NOT change the core product type (e.g., calling a vibration eliminator a "pipe") just to find a matching pair. If the true product does not have an exact matching Category and Sub_Category pair in the database, set BOTH to null.
+- It is MANDATORY to assign both Category and Sub_Category as a pair. However, DO NOT change the core product type (e.g., calling a vibration eliminator a "pipe") just to find a matching pair. If it does not have an exact match but is very similar to an existing pair, assign that closest matching pair. Set to null only if entirely unrelated.
 - ``class`` = exact listed label (``0`` valid for valves).
 - Electrical / MCC panels are never ACCESSORIES / ROSETTEE PLATE.
 

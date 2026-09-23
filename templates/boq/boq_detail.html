@@ -315,6 +315,18 @@
     data-detail-analysis-url="{% url 'boq:detail' boq.pk %}?tab=analysis"
     data-is-extracting="{% if is_extracting %}1{% else %}0{% endif %}"
     @product-id-assigned.window="missingProductIdCount = Math.max(0, missingProductIdCount - 1)"
+    @make-vendor-status.window="
+        const oldStatus = $event.detail.oldStatus || '';
+        const newStatus = $event.detail.status || '';
+        if (oldStatus === 'not_found' && newStatus !== 'not_found') { mvNotListedCount = Math.max(0, mvNotListedCount - 1); }
+        else if (oldStatus !== 'not_found' && newStatus === 'not_found') { mvNotListedCount++; }
+        
+        if (oldStatus === 'unmatched' && newStatus !== 'unmatched') { mvNotInDbCount = Math.max(0, mvNotInDbCount - 1); }
+        else if (oldStatus !== 'unmatched' && newStatus === 'unmatched') { mvNotInDbCount++; }
+        
+        if (oldStatus === 'not_available' && newStatus !== 'not_available') { mvNotAvailableCount = Math.max(0, mvNotAvailableCount - 1); }
+        else if (oldStatus !== 'not_available' && newStatus === 'not_available') { mvNotAvailableCount++; }
+    "
     x-data="{
         tab: '{{ default_tab }}',
         analysisEnabled: {{ tab_access.analysis|yesno:'true,false' }},
@@ -361,6 +373,8 @@
         mvNotAvailableCount: {{ make_vendor_display.stats.not_available_count|default:0 }},
         mvNotListedCount: {{ make_vendor_display.stats.not_found_count|default:0 }},
         mvNotInDbCount: {{ make_vendor_display.stats.no_match_count|default:0 }},
+        mvDefaultCount: {{ make_vendor_display.stats.default_count|default:0 }},
+        mvFilteredCount: {{ make_vendor_display.stats.filtered_count|default:0 }},
         scrollPositions: {},
         _pollInFlight: false,
         _lastPollAt: 0,
@@ -606,23 +620,17 @@
                 const hasLabel = missingIds === 1 ? 'has' : 'have';
                 const thoseLabel = missingIds === 1 ? 'This product' : 'These ' + missingIds + ' products';
                 const msg = (
-                    missingIds + ' of ' + (total || missingIds) + ' ' + missingLabel + ' ' + hasLabel
-                    + ' no Product Id yet.\n\n'
-                    + thoseLabel + ' will be marked Not available (red) on Make & Vendor, Labour, and Review. '
-                    + 'No make, vendor, rate, or labour will be looked up for them.\n\n'
-                    + (matched > 0
-                        ? ('The other ' + matched + (matched === 1 ? ' product' : ' products')
-                            + ' will continue with normal rate lookup.\n\n')
-                        : '')
-                    + 'To match them first, stay on Analysis and use Select from top candidates, '
-                    + 'Confirm Manually, or Re-analyse with AI.'
+                    missingIds + ' of ' + (total || missingIds) + ' ' + missingLabel + ' are unmatched (No Product ID) '
+                    + 'and will be skipped for Make/Vendor lookup.\n\n'
+                    + 'Stay on Analysis to match them manually, or proceed to leave them as Not Available (red).'
                 );
                 let ok = true;
                 if (window.BOQConfirm && typeof window.BOQConfirm.ask === 'function') {
                     ok = await window.BOQConfirm.ask(msg, {
                         title: 'Continue to Make & Vendor?',
-                        confirmLabel: 'Continue anyway',
+                        confirmLabel: 'Proceed anyway',
                         cancelLabel: 'Stay on Analysis',
+                        cancelClass: 'btn btn--warning',
                     });
                 } else {
                     ok = window.confirm(msg);
@@ -1401,14 +1409,12 @@
             x-cloak
         >
             <div class="make-vendor-summary__counts">
-                <strong>{{ make_vendor_display.stats.product_count|default:0 }}</strong> products
-                · <span class="make-vendor-summary__default">{{ make_vendor_display.stats.default_count|default:0 }} default</span>
-                · <span class="make-vendor-summary__filtered">{{ make_vendor_display.stats.filtered_count|default:0 }} filtered</span>
-                · <span class="make-vendor-summary__not-found">{{ make_vendor_display.stats.not_found_count|default:0 }} not listed</span>
-                · <span class="make-vendor-summary__no-match">{{ make_vendor_display.stats.no_match_count|default:0 }} not in Db</span>
-                {% if make_vendor_display.stats.not_available_count %}
-                · <span class="make-vendor-summary__not-available">{{ make_vendor_display.stats.not_available_count }} not available</span>
-                {% endif %}
+                <strong x-text="totalProductCount || {{ make_vendor_display.stats.product_count|default:0 }}"></strong> products
+                · <span class="badge badge--green" style="margin-left: 4px;" x-text="(mvDefaultCount || {{ make_vendor_display.stats.default_count|default:0 }}) + ' default'"></span>
+                · <span class="make-vendor-summary__filtered" x-text="(mvFilteredCount || {{ make_vendor_display.stats.filtered_count|default:0 }}) + ' filtered'"></span>
+                · <span class="badge badge--yellow" style="margin-left: 4px;" x-text="(mvNotListedCount || {{ make_vendor_display.stats.not_found_count|default:0 }}) + ' prod. has No Approved Make Listed'"></span>
+                <span class="badge badge--yellow" style="margin-left: 4px;" x-text="(mvNotInDbCount || {{ make_vendor_display.stats.no_match_count|default:0 }}) + ' Not Found in Db for Approved Make'"></span>
+                <span class="badge badge--red" style="margin-left: 4px;" x-show="(mvNotAvailableCount || {{ make_vendor_display.stats.not_available_count|default:0 }}) > 0" x-text="(mvNotAvailableCount || {{ make_vendor_display.stats.not_available_count|default:0 }}) + ' not available'" x-cloak></span>
                 {% if make_vendor_display.stats.vendor_review_count %}
                 · <span class="make-vendor-summary__vendor-review">{{ make_vendor_display.stats.vendor_review_count }} vendor review</span>
                 {% endif %}

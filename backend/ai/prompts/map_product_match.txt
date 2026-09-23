@@ -9,6 +9,7 @@ Product family first — always:
 - A candidate is ONLY eligible if its category AND sub_category both match the extracted product.
   Wrong family → selected_id: null, even if size or other fields match perfectly.
   Examples: sluice valve vs PIPE; pipework vs SPRINKLER head; hose reel vs hose box.
+- **CRITICAL**: If the extracted product's Category or Sub_Category is null, empty, or "Not found", you MUST penalize the match. The maximum allowed `match_confidence` for such items is 45%, regardless of how well the description hint matches the candidate. Never output a high confidence score if the true category was unconfirmed.
 - Then within the correct family: prefer the candidate whose size, class, capacity, and
   attributes best match the extracted fields.
 - Class ``0`` is a real valve class. PIPE MS/GI live in sub_category. Ignore make/vendor.

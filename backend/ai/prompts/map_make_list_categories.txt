@@ -19,10 +19,10 @@ Rules:
 - Prefer meaning over wording. Use the short material/equivalence rules below;
   map free-text intent onto taxonomy labels (no phrase-list lookup required).
 - One description may map to **multiple targets** when it names more than one
-  product family. Example:
-  "Sprinklers & Rosette Plates (All Types)" →
-  targets for SPRINKLER (whole family or each listed sprinkler head type) **and**
-  ACCESSORIES / ROSETTEE PLATE (or the listed rosette label).
+  product family or distinct item type. Examples:
+  1) "Sprinklers & Rosette Plates (All Types)" → targets for SPRINKLER **and** ACCESSORIES / ROSETTEE PLATE.
+  2) "C. I. Sluice Valves & Non-return Valves" → targets for VALVE / SLUICE VALVE **and** VALVE / NON RETURN VALVE.
+  Always emit a target for each distinct item mentioned in a compound list.
 - When the text says "All Types" / "any type" for a family:
   - either set ``sub_category: null`` for that category (means the approved makes
     apply to the whole category), **or**

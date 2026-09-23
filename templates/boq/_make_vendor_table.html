@@ -218,7 +218,8 @@
                     return {
                         'is-active': this.activeProduct === index,
                         'is-matched': matched,
-                        'is-unmatched': !matched,
+                        'is-unmatched': !matched && this.productStatus[index] === 'not_available',
+                        'is-warning': !matched && this.productStatus[index] !== 'not_available',
                     };
                 },
                 onProductStatus(event) {
@@ -282,6 +283,8 @@
                     matchedSummary: '{{ product.matched_summary|default:''|escapejs }}',
                     notes: '{{ product.notes|default:''|escapejs }}',
                     materialRate: '{{ product.line_output.material_rate|default:''|escapejs }}',
+                    rateId: '{{ product.rate_id|default:''|escapejs }}',
+                    productId: '{{ product.catalog_product_id|default:''|escapejs }}',
                     notFound: {{ product.highlight_no_make|yesno:'true,false' }},
                     notAvailable: {{ product.is_not_available|yesno:'true,false' }},
                     showManualApply: {{ product.show_manual_apply|yesno:'true,false' }},
@@ -381,6 +384,7 @@
                             type="text"
                             class="extraction-input"
                             x-model="make"
+                            @change="onMakeChange()"
                             list="make-options-{{ line.row_id }}-{{ product.product_index }}"
                             placeholder="Enter make…"
                             autocomplete="off"
@@ -399,6 +403,7 @@
                             type="text"
                             class="extraction-input"
                             x-model="vendor"
+                            @change="onVendorChange()"
                             list="vendor-options-{{ line.row_id }}-{{ product.product_index }}"
                             placeholder="Enter vendor (optional)"
                             autocomplete="off"
@@ -457,7 +462,7 @@
                         <input
                             type="text"
                             class="extraction-input extraction-input--readonly"
-                            value="{{ product.rate_id|default:'—' }}"
+                            :value="rateId || '—'"
                             readonly
                             tabindex="-1"
                             aria-readonly="true"
@@ -468,7 +473,7 @@
                         <input
                             type="text"
                             class="extraction-input extraction-input--readonly"
-                            value="{{ product.catalog_product_id|default:'—' }}"
+                            :value="productId || '—'"
                             readonly
                             tabindex="-1"
                             aria-readonly="true"
@@ -818,13 +823,18 @@ document.addEventListener('alpine:init', () => {
         make: config.make || '',
         vendor: config.vendor || '',
         status: config.status || 'not_searched',
+        initialStatus: config.status || 'not_searched',
         confidence: config.confidence,
         techKey: config.techKey || '',
         matchedSummary: config.matchedSummary || '',
         notes: config.notes || '',
         materialRate: config.materialRate || '',
+        rateId: config.rateId || '',
+        productId: config.productId || '',
         notFound: Boolean(config.notFound),
+        initialNotFound: Boolean(config.notFound),
         notAvailable: Boolean(config.notAvailable),
+        initialNotAvailable: Boolean(config.notAvailable),
         statusLabelServer: config.statusLabelServer || '',
         showManualApply: Boolean(config.showManualApply),
         allowTypedEntry: Boolean(config.allowTypedEntry),
@@ -955,10 +965,7 @@ document.addEventListener('alpine:init', () => {
                 this.materialRate = '';
                 return;
             }
-            // Dropdown mode: auto-load Final_Material_Amount for the pair.
-            if (this.allowTypedEntry) {
-                return;
-            }
+            // Auto-load Final_Material_Amount for the pair.
             this._rateTimer = setTimeout(() => {
                 this.autoLoadRates();
             }, 300);
@@ -1041,6 +1048,8 @@ document.addEventListener('alpine:init', () => {
                 if (selection.make) this.make = selection.make;
                 if (selection.vendor != null) this.vendor = selection.vendor || '';
                 this.materialRate = line.material_rate || '';
+                this.rateId = selection.rate_id || '';
+                this.productId = selection.product_id || '';
                 this.notes = selection.notes || this.notes;
                 this.samePriceTie = Boolean(selection.same_price_tie);
                 this.samePriceChoices = Array.isArray(selection.same_price_choices)
@@ -1056,6 +1065,8 @@ document.addEventListener('alpine:init', () => {
                 reloadMakeVendor(this.rowId);
                 return selection;
             }
+            const oldLogicalStatus = this.notAvailable ? 'not_available' : (this.notFound ? 'not_found' : this.status);
+            
             this.status = selection.status || 'unmatched';
             this.confidence = selection.confidence;
             this.techKey = selection.tech_key || '';
@@ -1069,12 +1080,17 @@ document.addEventListener('alpine:init', () => {
             if (selection.make) this.make = selection.make;
             if (selection.vendor != null) this.vendor = selection.vendor || '';
             this.materialRate = line.material_rate || '';
+            this.rateId = selection.rate_id || '';
+            this.productId = selection.product_id || '';
             if (selection.status === 'matched') {
                 this.notFound = false;
+                this.notAvailable = false;
             }
+            const newLogicalStatus = this.notAvailable ? 'not_available' : (this.notFound ? 'not_found' : this.status);
             this.$dispatch('make-vendor-status', {
                 productIndex: this.productIndex,
-                status: this.status,
+                oldStatus: oldLogicalStatus,
+                status: newLogicalStatus,
             });
             return selection;
         },

@@ -252,7 +252,16 @@
     }
 
     if (nameInput) {
+        let debounceTimer = null;
         nameInput.addEventListener('blur', () => { checkNameAvailable(); });
+        nameInput.addEventListener('input', () => {
+            const slot = form.querySelector('[data-error-for="boq_name"]');
+            if (slot) slot.textContent = '';
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                checkNameAvailable();
+            }, 600);
+        });
     }
 
     submitBtn.addEventListener('click', async () => {

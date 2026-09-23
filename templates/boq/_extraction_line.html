@@ -298,7 +298,7 @@
                 {% endif %}
 
                 {% if product.db_candidates %}
-                <details class="extraction-db-candidates"{% if product.show_candidates_open or product.show_weak_match_warning or product.db_match_status == 'unmatched' %} open{% endif %}>
+                <details class="extraction-db-candidates"{% if product.show_candidates_open or product.show_weak_match_warning or product.db_match_status == 'unmatched' or product.needs_extraction_review or product.match_percentage_band != 'green' %} open{% endif %}>
                     <summary>
                         Top database candidates ({{ product.db_candidates|length }})
                         {% if can_edit_extraction %} — click any to select{% endif %}
@@ -360,7 +360,7 @@
                             <input
                                 type="text"
                                 class="extraction-input extraction-input--readonly"
-                                value="{{ field.value|default:'—' }}"
+                                value="{{ field.value|default_if_none:'—' }}"
                                 readonly
                                 tabindex="-1"
                                 title="Loaded or selected Product Id (view only)"
