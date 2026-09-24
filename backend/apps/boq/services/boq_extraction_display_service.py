@@ -378,6 +378,24 @@ def _shape_product(
             database_version_id=database_version_id,
         )
 
+    for item in candidates:
+        try:
+            conf = float(item.get("confidence") or 0.0)
+            if conf <= 0.0:
+                item["confidence"] = 2.0
+            elif conf < 2.0:
+                item["confidence"] = 2.0
+        except (TypeError, ValueError):
+            item["confidence"] = 2.0
+
+    candidates.sort(
+        key=lambda x: (
+            1 if x.get("is_selected") else 0,
+            float(x.get("confidence") or 0.0)
+        ),
+        reverse=True
+    )
+
     top_candidate_pct = 0.0
     for item in candidates:
         try:
