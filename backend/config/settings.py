@@ -345,24 +345,24 @@ LOGGING = {
         "app_file": {
             "class": "common.logging_handlers.SafeRotatingFileHandler",
             "filename": str(LOGS_DIR / "application.log"),
-            "maxBytes": 5 * 1024 * 1024,
-            "backupCount": 5,
+            "maxBytes": 400 * 1024,  # Approx 3,000 lines
+            "backupCount": 1,
             "formatter": "verbose",
             "filters": ["skip_broken_pipe"],
         },
         "error_file": {
             "class": "common.logging_handlers.SafeRotatingFileHandler",
             "filename": str(LOGS_DIR / "errors.log"),
-            "maxBytes": 5 * 1024 * 1024,
-            "backupCount": 5,
+            "maxBytes": 400 * 1024,  # Approx 3,000 lines
+            "backupCount": 1,
             "level": "ERROR",
             "formatter": "verbose",
         },
         "instruction_file": {
             "class": "common.logging_handlers.SafeRotatingFileHandler",
             "filename": str(LOGS_DIR / "instructions.log"),
-            "maxBytes": 10 * 1024 * 1024,
-            "backupCount": 5,
+            "maxBytes": 600 * 1024,  # Approx 3,000 lines (instruction logs are denser)
+            "backupCount": 1,
             "formatter": "verbose",
         },
     },
