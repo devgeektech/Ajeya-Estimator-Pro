@@ -3,28 +3,20 @@
 Compact active memory. Full spec: `docs/PRODUCT.md`. Schema: `docs/DATABASE.md`.
 History: `docs/CHANGELOG.md` (do not duplicate session diaries here).
 
-### 2026-09-23 — AI Pipeline Optimization + De-hardcoding + Lint Fixes
+### 2026-09-24 — Dynamic Contextual AI Extraction and Logical Confidence Scoring
 
 Completed:
-- Fixed 4 IDE lint warnings in `product_ai_mapping_service.py` (redundant `int()`/`bool()` casts).
-- **De-hardcoded `product_noun_taxonomy_hints`**: Added `_build_product_noun_taxonomy_hints()` in `ai/context.py`. Now dynamically generated from active DB sub-categories + synonym table. Works for any BOQ domain (fire protection, HVAC, plumbing, civil) — not just hardcoded fire product names.
-- Expanded `_SUB_CATEGORY_SYNONYMS` with missing aliases (`reflux valve`, `stainless steel landing valve`, `synthetic fire hose`, `fireman axe`).
-- **Improved `extract_products.txt` prompt**: Removed the 24-line hardcoded "Key mappings to memorize" block. Replaced with 6 universal principles that reference `product_noun_taxonomy_hints` in DATABASE_CONTEXT dynamically. Same accuracy, works for any product domain.
-- **Improved `map_product_match.txt` prompt**: Added explicit product-family-first matching rules. Category+sub_category must match before scoring size/attributes. Wrong family = null. Made priority order explicit: family → size → class → attrs.
-- **Improved `infer_taxonomy.txt` prompt**: Made domain-agnostic (removed "fire protection / MEP" lock). Added `{{#CURRENT_CATEGORY}}` optional context block so if category is already known, AI narrows sub-category search to that family only.
-- **Improved `_infer_missing_taxonomy()`**: When category is already set, limits taxonomy lookup to that category's sub-categories (smaller, focused prompt). Added conditional template block handling.
-- **Code Cleanup & Validation**:
-  - Ran static code analysis (`vulture`) and identified no unused code that is safe to remove (all findings were standard Django internals like `context_object_name`).
-  - Reverted the hardcoded heuristic removals in `utils/product_synonyms.py` and `utils/catalog_size_rules.py`. While the AI is fully dynamic, the backend's `_snap_identity_from_product_context` heuristics engine relies on these hardcoded safety nets to prevent misclassification (e.g. snapping "pipework for external hydrant" to HYDRANT instead of PIPE).
-  - Fixed 2 pre-existing broken tests (`test_orange_match_shows_product_id` and `test_reanalyse_hint_path_unchanged`) that were failing due to outdated assertions. The test suite is now 100% green.
-- Run full Analyse on a BOQ and verified taxonomy inference fires correctly (`infer_taxonomy: assigned` entries confirmed in logs).
+- Replaced static/hardcoded product examples with a generalized, dynamic **MOUNTED / CONTEXTUAL ITEMS RULE** in `ai/prompts/extract_products.txt`. The AI is now instructed conceptually to distinguish between the primary component being purchased (e.g., instruments, valves) and the underlying structure it mounts to (e.g., pipes, ducts), ensuring it works dynamically across all scenarios and doesn't mistakenly categorize mounted items as pipes.
+- Updated `description_hint` instructions in `extract_products.txt` to ensure the AI explicitly includes all extracted attributes to aid logical matching.
+- Updated `map_product_match.txt` to instruct the AI to calculate the confidence score strictly based on the extracted metadata matching the candidate's fields, specifically penalizing mismatches in size and material, and forbidding arbitrary or random scores.
+- **Fixed Dashboard BOQ Deletion Redirect**: Updated `BOQDeleteView` to check for and redirect to a `next` query parameter. Updated the BOQ row actions form template (`_boq_row_actions.html`) to pass `request.path` as the `next` param, ensuring users remain on the Dashboard after deleting a BOQ instead of being bounced to the BOQ list page.
 
 Pending:
 - None.
 
-Issues: None. Django check: 0 issues.
+Issues: None.
 
-Next: Test on real BOQ data. Consider adding unit tests for `_build_product_noun_taxonomy_hints`.
+Next: Test extraction on real BOQ data featuring diverse dynamically-contextual items.
 
 
 ## Current Status

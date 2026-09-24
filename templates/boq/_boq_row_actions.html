@@ -13,7 +13,7 @@
     </a>
     <form
         method="post"
-        action="{% url 'boq:delete' boq.pk %}"
+        action="{% url 'boq:delete' boq.pk %}?next={{ request.path|urlencode }}"
         class="inline-form"
         data-confirm="Delete BOQ '{{ boq.boq_name }}'? This permanently removes the workbook, make list, analysis files, and job progress. This cannot be undone."
         onsubmit="return window.BOQConfirm ? window.BOQConfirm.submit(event, this) : confirm(this.getAttribute('data-confirm'));"

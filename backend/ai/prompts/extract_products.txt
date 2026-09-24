@@ -56,6 +56,7 @@ STEP 1 — UNDERSTAND THE SECTION (read everything before extracting):
   - ``fire hose reel`` → HYDRANT / FIRE HOSE REEL  (not PIPE — hose reel is HYDRANT equipment)
   - ``branch pipe with nozzle`` → HYDRANT / BRANCH PIPE  (not PIPE/MS — branch pipe is HYDRANT)
   - ``sand bucket set`` → HYDRANT / SAND BUCKET SET
+  - **MOUNTED / CONTEXTUAL ITEMS RULE**: When a description states an item is to be installed "on", "for", or "in following sizes of" another item (e.g., a component installed on a pipe, duct, or system), extract the **primary component being purchased**, not the underlying structure. The size typically refers to the primary component's connection size to that structure. Do not mistakenly categorize the item as the underlying structure (e.g., do not categorize an instrument or valve as a pipe just because it mounts to a pipe).
   - **CRITICAL HALLUCINATION RULE**: Never assume a product is a "pipe" just because you don't know what it is. If the slot mentions capacity like `20 KL`, `L`, `LPM`, or `KLD`, it is typically a TANK or PUMP, absolutely NEVER a pipe. Do NOT add invented words like "dia", "mm", or "pipe" to the `description_hint` if they are missing from the raw text.
 - Size-only slots inherit the product from ``product_context``.
 - **Main product only:** when a line buys an enclosure/cabinet/box (fire hose box,
@@ -113,8 +114,7 @@ Binding:
 
 ``description_hint`` — REQUIRED AI Description (search key, max ~400 chars):
 - Write plain English that includes **Category, Sub_Category, Class, Size, Unit,
-  Capacity** (skip only truly unknown fields). This text is used to search the
-  database — it must identify the product family clearly.
+  Capacity, and all Attributes** extracted (skip only truly unknown fields). This text is used to match against the database — it must precisely reflect all your extracted parameters so the matching AI can score it logically.
 - Good: ``class C MS pipe (PIPE), 65 mm dia``
 - Good: ``SYNTHETIC (RRL) fire hose (HYDRANT / FIRE HOSE), 15 m length, 63 mm dia coupling``
 - Good: ``external fire hose box (HYDRANT / FIRE HOSE BOX), capacity 30X24X10 inch``

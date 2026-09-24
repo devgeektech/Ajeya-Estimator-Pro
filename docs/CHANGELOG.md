@@ -5,6 +5,23 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
+## 2026-09-23 — AI Pipeline Optimization + De-hardcoding + Lint Fixes
+
+- Fixed 4 IDE lint warnings in `product_ai_mapping_service.py` (redundant `int()`/`bool()` casts).
+- **De-hardcoded `product_noun_taxonomy_hints`**: Added `_build_product_noun_taxonomy_hints()` in `ai/context.py`. Now dynamically generated from active DB sub-categories + synonym table. Works for any BOQ domain (fire protection, HVAC, plumbing, civil) — not just hardcoded fire product names.
+- Expanded `_SUB_CATEGORY_SYNONYMS` with missing aliases (`reflux valve`, `stainless steel landing valve`, `synthetic fire hose`, `fireman axe`).
+- **Improved `extract_products.txt` prompt**: Removed the 24-line hardcoded "Key mappings to memorize" block. Replaced with 6 universal principles that reference `product_noun_taxonomy_hints` in DATABASE_CONTEXT dynamically. Same accuracy, works for any product domain.
+- **Improved `map_product_match.txt` prompt**: Added explicit product-family-first matching rules. Category+sub_category must match before scoring size/attributes. Wrong family = null. Made priority order explicit: family → size → class → attrs.
+- **Improved `infer_taxonomy.txt` prompt**: Made domain-agnostic (removed "fire protection / MEP" lock). Added `{{#CURRENT_CATEGORY}}` optional context block so if category is already known, AI narrows sub-category search to that family only.
+- **Improved `_infer_missing_taxonomy()`**: When category is already set, limits taxonomy lookup to that category's sub-categories (smaller, focused prompt). Added conditional template block handling.
+- **Code Cleanup & Validation**:
+  - Ran static code analysis (`vulture`) and identified no unused code that is safe to remove (all findings were standard Django internals like `context_object_name`).
+  - Reverted the hardcoded heuristic removals in `utils/product_synonyms.py` and `utils/catalog_size_rules.py`. While the AI is fully dynamic, the backend's `_snap_identity_from_product_context` heuristics engine relies on these hardcoded safety nets to prevent misclassification (e.g. snapping "pipework for external hydrant" to HYDRANT instead of PIPE).
+  - Fixed 2 pre-existing broken tests (`test_orange_match_shows_product_id` and `test_reanalyse_hint_path_unchanged`) that were failing due to outdated assertions. The test suite is now 100% green.
+- Run full Analyse on a BOQ and verified taxonomy inference fires correctly (`infer_taxonomy: assigned` entries confirmed in logs).
+
+---
+
 ## 2026-09-23 — Model Upgrade gpt-4o-mini → gpt-4.1-mini + API Call Reduction
 
 - **Model upgraded**: `OPENAI_MODEL` changed from `gpt-4o-mini` to `gpt-4.1-mini`. Smarter semantic reasoning → fewer taxonomy misclassifications.

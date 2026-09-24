@@ -32,8 +32,7 @@ Key rules:
 - Rematch (``extracted.rematch`` true): use expert-filled inputs as hints, validate against
   BOQ meaning. Confidence = how well the DB row matches extracted identity.
 - Map attributes onto candidate schema; leftovers in ``unmapped_attributes``.
-- ``match_confidence`` 0–100 (0 if null; <30 if uncertain). Industry abbreviations
-  that mean the same thing must not lower confidence.
+- ``match_confidence`` 0–100 (0 if null; <30 if uncertain). Calculate this score strictly based on how well the candidate's fields (Category, Sub_Category, Size, Class, Capacity) match the `extracted.description_hint`. Do NOT assign random or arbitrary scores. If size, material, or sub-category mismatches, the score MUST drop significantly. Industry abbreviations that mean the same thing must not lower confidence.
 - Candidates are best-first. On a true tie, pick the first.
 
 Respond with:

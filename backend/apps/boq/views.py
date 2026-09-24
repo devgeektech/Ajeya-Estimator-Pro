@@ -150,7 +150,7 @@ def _render_extraction_line_html(request, boq: BOQ, row_id: str) -> str:
         has_make_list_file=bool(boq.make_list_file),
     ).build()
     line = next(
-        (item for item in display.get("lines") or [] if str(item.get("row_id")) == str(row_id)),
+        (item for item in display.get("lines") or [] if str(item.get("row_id")) == row_id),
         None,
     )
     if line is None:
@@ -176,10 +176,10 @@ _last_status_progress_log: dict[int, tuple[int, str]] = {}
 def _echo_analyse_progress_to_server(boq: BOQ, *, percent: int, label: str) -> None:
     """Log Analyse progress on the Django runserver console while the UI polls."""
     if boq.status not in {BOQStatus.PROCESSING, BOQStatus.MATCHING}:
-        _last_status_progress_log.pop(int(boq.pk), None)
+        _last_status_progress_log.pop(boq.pk, None)
         return
-    key = int(boq.pk)
-    marker = (int(percent), str(label or "").strip())
+    key = boq.pk
+    marker = (percent, (label or "").strip())
     if _last_status_progress_log.get(key) == marker:
         return
     _last_status_progress_log[key] = marker
@@ -323,7 +323,8 @@ class BOQListView(LoginRequiredMixin, ListView):
             for boq in context["boqs"]
         ]
         # Drop leftover succeeded/failed so list Upload never inherits stale state.
-        clear_terminal_upload_status(int(self.request.user.pk))
+        assert self.request.user.pk is not None
+        clear_terminal_upload_status(self.request.user.pk)
         context["upload_busy"] = is_upload_busy(self.request.user.pk)
         return context
 
@@ -1393,6 +1394,11 @@ class BOQDeleteView(LoginRequiredMixin, View):
             logger.exception("BOQ delete failed for id=%s", pk)
             messages.error(request, "Could not delete this BOQ. Try again.")
             return HttpResponseRedirect(reverse("boq:detail", kwargs={"pk": pk}))
+        
+        next_url = request.GET.get("next") or request.POST.get("next")
+        if next_url:
+            return HttpResponseRedirect(next_url)
+            
         return HttpResponseRedirect(reverse("boq:list"))
 
 
@@ -1429,13 +1435,15 @@ class BOQUploadView(LoginRequiredMixin, FormView):
 
     def get(self, request, *args, **kwargs):
         # Clear leftover succeeded/failed so a new upload is not treated as done.
-        clear_terminal_upload_status(int(request.user.pk))
+        assert request.user.pk is not None
+        clear_terminal_upload_status(request.user.pk)
         return super().get(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         from apps.database_manager.services.activation import get_active_database_version
 
+        assert self.request.user.pk is not None
         context["has_active_database"] = get_active_database_version() is not None
         context["upload_busy"] = is_upload_busy(self.request.user.pk)
         return context
@@ -1449,7 +1457,8 @@ class BOQUploadView(LoginRequiredMixin, FormView):
 
     def post(self, request, *args, **kwargs):
         form = self.get_form()
-        user_id = int(request.user.pk)
+        assert request.user.pk is not None
+        user_id = request.user.pk
         boq_name = str(request.POST.get("boq_name") or "").strip()
         # Mark busy as soon as the POST arrives so the list Upload button greys
         # out if the user switches tabs while parsing/validating.
@@ -1468,7 +1477,8 @@ class BOQUploadView(LoginRequiredMixin, FormView):
         return self.form_invalid(form)
 
     def form_valid(self, form):
-        user_id = int(self.request.user.pk)
+        assert self.request.user.pk is not None
+        user_id = self.request.user.pk
         boq_name = str(form.cleaned_data.get("boq_name") or "").strip()
         try:
             BOQCreationService(
