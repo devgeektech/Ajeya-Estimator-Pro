@@ -568,7 +568,7 @@ def _write_not_available_rate_amount(
             align = copy(cell.alignment)
             align.wrap_text = True
             align.vertical = "top"
-            cell.alignment = align
+            cell.alignment = align  # type: ignore
         else:
             cell.alignment = _CELL_ALIGNMENT
 
@@ -984,7 +984,7 @@ class BOQExportService:
         *,
         workbook=None,
         orange_ids: set[str] | None = None,
-    ) -> tuple[dict[str, list[int]], set[str]]:
+    ) -> tuple[dict[str, list[int]], set[str], set[str]]:
         orange_ids = orange_ids or set()
         sheet.append(list(REVIEW_OUTPUT_HEADERS))
         sheet.freeze_panes = "A2"

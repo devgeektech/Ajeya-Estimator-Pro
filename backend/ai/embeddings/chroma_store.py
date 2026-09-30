@@ -130,7 +130,7 @@ def helper_metadata(helper: Product_Helper) -> dict:
     return {
         "database_version_id": helper.database_version.pk,
         "product_helper_id": helper.pk,
-        "product_id": str(helper.Product_ID or "").strip(),
+        "product_id": str(helper.Product_ID or "").strip(),  # type: ignore
         "category": helper.Category or "",
         "sub_category": helper.Sub_Category or "",
         "class": helper.Class or "",
@@ -181,7 +181,7 @@ class ChromaEmbeddingStore:
 
     def reset_version(self, database_version_id: int) -> None:
         """Remove indexed products for one database version."""
-        self.collection.delete(where={"database_version_id": int(database_version_id)})
+        self.collection.delete(where={"database_version_id": int(database_version_id)})  # type: ignore
 
     def query_similar(
         self,
@@ -192,7 +192,7 @@ class ChromaEmbeddingStore:
     ) -> list[dict]:
         """Return nearest Product_Helper hits (Product_ID) by embedding distance."""
         where_filter: Any = (
-            {"database_version_id": int(database_version_id)}
+            {"database_version_id": int(database_version_id)}  # type: ignore
             if database_version_id is not None
             else None
         )
@@ -213,8 +213,8 @@ class ChromaEmbeddingStore:
             metadata = dict(metadatas[index] if index < len(metadatas) else {})
             distance = distances[index] if index < len(distances) else 1.0
             document = documents[index] if index < len(documents) else ""
-            product_id = resolve_product_id(str(doc_id), metadata)
-            helper_id = resolve_helper_id(str(doc_id), metadata)
+            product_id = resolve_product_id(str(doc_id), metadata)  # type: ignore
+            helper_id = resolve_helper_id(str(doc_id), metadata)  # type: ignore
             if not product_id and helper_id is None:
                 continue
             hits.append(

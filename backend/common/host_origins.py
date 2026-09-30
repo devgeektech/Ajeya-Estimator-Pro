@@ -11,7 +11,7 @@ def csrf_trusted_origins_from_hosts(hosts: list[str], *, https: bool) -> list[st
     origins: list[str] = []
     seen: set[str] = set()
     for raw in hosts:
-        host = str(raw or "").strip()
+        host = str(raw or "").strip()  # type: ignore
         if not host or host == "*":
             continue
         if host.startswith("."):

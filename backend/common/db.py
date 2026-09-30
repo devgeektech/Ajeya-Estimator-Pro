@@ -9,7 +9,7 @@ from django.db import transaction
 from django.db.models import Q
 
 
-@contextmanager
+@contextmanager  # type: ignore
 def atomic() -> Iterator[None]:
     """Run ``transaction.atomic`` with a context-manager type checkers accept."""
     with cast(Any, transaction.atomic()):

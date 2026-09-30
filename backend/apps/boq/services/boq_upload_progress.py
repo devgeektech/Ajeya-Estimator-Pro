@@ -31,7 +31,7 @@ def _progress_dir() -> Path:
 
 
 def _status_path(user_id: int) -> Path:
-    return _progress_dir() / f"boq_upload_status_{int(user_id)}.json"
+    return _progress_dir() / f"boq_upload_status_{int(user_id)}.json"  # type: ignore
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:

@@ -124,10 +124,10 @@ class MakeVendorCascadeMixin:
         boq = self._get_boq()
         self._ensure_editable(boq)
 
-        category_text = str(category or "").strip()
-        sub_category_text = str(sub_category or "").strip()
-        make_text = str(make or "").strip()
-        vendor_text = str(vendor or "").strip()
+        category_text = str(category or "").strip()  # type: ignore
+        sub_category_text = str(sub_category or "").strip()  # type: ignore
+        make_text = str(make or "").strip()  # type: ignore
+        vendor_text = str(vendor or "").strip()  # type: ignore
         if not category_text:
             raise ValidationError("Category is required.")
         # Sub-category may be blank to apply make/vendor across the whole category.
@@ -467,8 +467,8 @@ class MakeVendorCascadeMixin:
         boq = self._get_boq()
         self._ensure_editable(boq)
 
-        category_text = str(category or "").strip()
-        sub_category_text = str(sub_category or "").strip()
+        category_text = str(category or "").strip()  # type: ignore
+        sub_category_text = str(sub_category or "").strip()  # type: ignore
         if sub_category_text.casefold() in {"(entire category)", "entire category"}:
             sub_category_text = ""
         if not category_text:
@@ -811,7 +811,7 @@ class MakeVendorCascadeMixin:
 
         # Prefer the pre-capture missing count when capture cleared stale ids.
         if missing_ids and not not_available_count:
-            not_available_count = int(missing_ids)
+            not_available_count = int(missing_ids)  # type: ignore
         updated_count = 0
         matched_count = 0
         selections = dict(analysis.get("subcategory_make_selections") or {})
@@ -906,7 +906,9 @@ class MakeVendorCascadeMixin:
 
                 applied_make = str(match_payload.get("make") or "").strip()
                 applied_vendor = str(match_payload.get("vendor") or "").strip()
-                rate_detail = match_payload.get("rate_detail") or {}
+                rate_detail = match_payload.get("rate_detail")
+                if not isinstance(rate_detail, dict):
+                    rate_detail = {}
                 if not applied_make:
                     applied_make = str(rate_detail.get("make") or "").strip()
                 if not applied_vendor:
@@ -1009,9 +1011,9 @@ class MakeVendorCascadeMixin:
         return {
             "updated_count": updated_count,
             "matched_count": matched_count,
-            "pair_count": len(pair_stats),
+            "pair_count": len(pair_stats),  # type: ignore
             "product_id_count": len(set(captured_ids)),
-            "not_available_count": int(not_available_count),
+            "not_available_count": int(not_available_count),  # type: ignore
             "selections": list(pair_stats.values()),
             "make_vendor_defaults_applied": True,
             "status": boq.status,

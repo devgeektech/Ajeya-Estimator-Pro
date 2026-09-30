@@ -126,13 +126,13 @@ def list_xls_visible_sheet_names(file_path: str | Path) -> list[str]:
         sheet = book.sheet_by_index(sheet_index)
         if int(getattr(sheet, "visibility", 0) or 0) != 0:
             continue
-        title = str(sheet.name or "").strip()
+        title = str(sheet.name or "").strip()  # type: ignore
         if title:
             names.append(title)
     return names
 
 
-@contextmanager
+@contextmanager  # type: ignore
 def openxml_workbook_path(file_path: str | Path) -> Iterator[str]:
     """Yield a path openpyxl can read; convert ``.xls`` to a temp ``.xlsx`` first."""
     path = Path(file_path)

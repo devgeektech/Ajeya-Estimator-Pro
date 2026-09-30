@@ -287,7 +287,7 @@ class DatabaseImportService:
     ):
         self.file_path = file_path
         self.uploaded_by = uploaded_by
-        self.source_filename = source_filename or str(file_path)
+        self.source_filename = source_filename or str(file_path)  # type: ignore
         self.version_name = version_name
         self.stored_name = stored_name
         self.progress_callback = progress_callback

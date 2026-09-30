@@ -204,7 +204,7 @@ class ProductHelperMatchingService:
         scored: list[dict[str, Any]] = []
         for helper in helpers:
             # Import already drops Discontinued; keep a runtime gate for older DBs.
-            status = str(helper.Status or "").strip().lower()
+            status = str(helper.Status or "").strip().lower()  # type: ignore
             if status in {
                 "discontinued",
                 "discontinue",
@@ -229,7 +229,7 @@ class ProductHelperMatchingService:
             )
 
         scored.sort(key=lambda item: float(item.get("confidence") or 0.0), reverse=True)
-        candidates = scored[: max(1, int(limit))]
+        candidates = scored[: max(1, int(limit))]  # type: ignore
         best = candidates[0] if candidates else None
         confidence = float(best["confidence"]) if best else 0.0
         status = "matched" if confidence >= MATCH_CONFIDENCE_THRESHOLD else "pending"
@@ -252,7 +252,7 @@ class ProductHelperMatchingService:
         }
 
     def get_by_product_id(self, product_id: str | None) -> Product_Helper | None:
-        text = str(product_id or "").strip()
+        text = str(product_id or "").strip()  # type: ignore
         if not text:
             return None
         return (

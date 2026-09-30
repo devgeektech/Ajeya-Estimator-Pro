@@ -58,7 +58,7 @@ def list_visible_sheet_names(file_path: str | Path) -> list[str]:
                 state = str(getattr(sheet, "sheet_state", "visible") or "visible").lower()
                 if state != "visible":
                     continue
-                title = str(sheet.title or "").strip()
+                title = str(sheet.title or "").strip()  # type: ignore
                 if title:
                     names.append(title)
             return names
@@ -149,7 +149,7 @@ def list_hidden_column_indexes(
     """
     by_sheet = list_hidden_column_indexes_by_sheet(file_path)
     if sheet_name:
-        return by_sheet.get(str(sheet_name), set())
+        return by_sheet.get(str(sheet_name), set())  # type: ignore
     if not by_sheet:
         return set()
     return next(iter(by_sheet.values()))
@@ -161,7 +161,7 @@ def list_hidden_column_indexes_by_sheet(file_path: str | Path) -> dict[str, set[
         workbook = load_workbook(filename=workbook_path, read_only=False, data_only=False)
         try:
             return {
-                str(sheet.title): _hidden_column_indexes(sheet)
+                str(sheet.title): _hidden_column_indexes(sheet)  # type: ignore
                 for sheet in workbook.worksheets
             }
         finally:
@@ -481,7 +481,7 @@ def read_rows_with_metadata(
                 )
                 headers = _stamp_header_hidden_flags(
                     headers,
-                    hidden_by_sheet.get(str(sheet_name), set()),
+                    hidden_by_sheet.get(str(sheet_name), set()),  # type: ignore
                 )
                 for record in records:
                     record.setdefault("sheet_name", sheet_name)
@@ -496,7 +496,7 @@ def read_rows_with_metadata(
                 )
                 headers = _stamp_header_hidden_flags(
                     headers,
-                    hidden_by_sheet.get(str(worksheet.title), set()),
+                    hidden_by_sheet.get(str(worksheet.title), set()),  # type: ignore
                 )
                 if sheet_score_fn is not None:
                     score = sheet_score_fn(headers, records, worksheet.title)

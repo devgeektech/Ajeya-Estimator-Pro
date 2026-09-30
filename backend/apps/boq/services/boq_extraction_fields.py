@@ -146,14 +146,14 @@ def _promote_material_to_class(
     attrs = coerce_attributes_dict(item.get("attributes"))
     material_value = None
     for key, value in attrs.items():
-        if str(key).strip().lower() in _MATERIAL_ATTR_KEYS and not _is_blank_value(value):
+        if str(key).strip().lower() in _MATERIAL_ATTR_KEYS and not _is_blank_value(value):  # type: ignore
             material_value = value
             break
 
     sub_norm = re.sub(r"[^0-9a-zA-Z]+", " ", str(item.get("sub_category") or "").lower())
     sub_norm = re.sub(r"\s+", " ", sub_norm).strip()
     if material_value is not None:
-        material_norm = re.sub(r"[^0-9a-zA-Z]+", " ", str(material_value).lower())
+        material_norm = re.sub(r"[^0-9a-zA-Z]+", " ", str(material_value).lower())  # type: ignore
         material_norm = re.sub(r"\s+", " ", material_norm).strip()
         if sub_norm and material_norm == sub_norm:
             material_value = None

@@ -233,7 +233,7 @@ def word_count(text: str) -> int:
 
 def normalize_make_segment(segment: str) -> str:
     """Normalize common PDF artefacts in make segments (``ARCO- Spain`` → ``ARCO-Spain``)."""
-    text = str(segment or "").strip().strip(".,;:")
+    text = str(segment or "").strip().strip(".,;:")  # type: ignore
     text = _HYPHEN_SPACE.sub("-", text)
     text = re.sub(r"\s*,\s*", ", ", text)
     text = re.sub(r"\s*\(\s*", " (", text)
@@ -258,7 +258,7 @@ def peel_fused_case_brand(token: str) -> tuple[str, str | None]:
     core = normalize_make_segment(token)
     if not core or " " in core:
         # Keep punctuation that marks fusion boundaries (``Approved)Tyco``).
-        core = str(token or "").strip().strip(".,;")
+        core = str(token or "").strip().strip(".,;")  # type: ignore
         core = _HYPHEN_SPACE.sub("-", core)
         core = re.sub(r"\s+", " ", core).strip()
     if not core or " " in core:
@@ -279,7 +279,7 @@ def peel_fused_case_brand(token: str) -> tuple[str, str | None]:
 
 def peel_fused_case_makes(segment: str) -> tuple[str, list[str]]:
     """Peel case-fused trailing brands from any token (``pipeASR``, ``IS:1239Tata``)."""
-    text = str(segment or "").strip()
+    text = str(segment or "").strip()  # type: ignore
     if not text:
         return text, []
     words = text.split()
@@ -380,7 +380,7 @@ def is_valid_approved_make(make: str) -> bool:
         return True
     if all(_normalize_make_key(word) in _REJECT_MAKE_ALONE | _MAKE_STOPWORDS for word in words):
         return False
-    return bool(looks_like_make_word(words[0]))
+    return bool(looks_like_make_word(words[0]))  # type: ignore
 
 
 def repair_description_and_makes(
@@ -392,7 +392,7 @@ def repair_description_and_makes(
 
     Examples: ``Bolts Hilti`` → description gains ``Bolts``, make becomes ``Hilti``.
     """
-    desc_parts = [str(description or "").strip()] if str(description or "").strip() else []
+    desc_parts = [str(description or "").strip()] if str(description or "").strip() else []  # type: ignore
     cleaned_makes: list[str] = []
     seen: set[str] = set()
 

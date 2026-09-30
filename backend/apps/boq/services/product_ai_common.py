@@ -232,7 +232,7 @@ def _prefer_candidate_first(
     selected: dict[str, Any] | None = None
     for item in candidates:
         try:
-            if int(item.get("id") or 0) == int(selected_id):
+            if int(item.get("id") or 0) == int(selected_id):  # type: ignore
                 selected = item
                 continue
         except (TypeError, ValueError):

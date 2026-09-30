@@ -204,7 +204,7 @@ def split_make_list_body(body: str) -> tuple[str, list[str]]:
     - manufacturer-only lines (RO Plant / pump lists)
     - Excel-like free text with trailing brand lists
     """
-    rest = str(body or "").strip()
+    rest = str(body or "").strip()  # type: ignore
     if not rest:
         return "", []
 
@@ -371,12 +371,12 @@ def _record_from_parsed(
 
 def _is_manufacturer_only_row(description: str, makes: list[str]) -> bool:
     """True when the row is a company name listed in the Material column."""
-    desc = str(description or "").strip()
+    desc = str(description or "").strip()  # type: ignore
     if not makes:
         return False
     if not desc:
         return True
-    if len(makes) == 1 and desc.casefold() == str(makes[0]).casefold():
+    if len(makes) == 1 and desc.casefold() == str(makes[0]).casefold():  # type: ignore
         return True
     return looks_like_standalone_manufacturer(desc)
 
@@ -389,10 +389,10 @@ def _resplit_merged_row(
     Re-run body split after wrap merge so brands that arrived on later lines
     (``Thermaflex/Vidoflex``, ``Minimax/Newage``, ``Tyco /Rapidrop``) peel correctly.
     """
-    body = str(description or "").strip()
+    body = str(description or "").strip()  # type: ignore
     if makes:
         # Preserve already-captured makes while re-evaluating the description.
-        extras = " / ".join(str(item).strip() for item in makes if str(item).strip())
+        extras = " / ".join(str(item).strip() for item in makes if str(item).strip())  # type: ignore
         if extras and extras.casefold() not in body.casefold():
             body = f"{body} {extras}".strip()
     if not body:

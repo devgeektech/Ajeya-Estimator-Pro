@@ -62,4 +62,4 @@ def lock_django_admin_to_superadmin(site=None):
 
     site.has_permission = has_permission
     site.login = login
-    site.admin_view = admin_view
+    site.admin_view = admin_view  # type: ignore

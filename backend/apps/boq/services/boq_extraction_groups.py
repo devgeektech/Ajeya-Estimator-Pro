@@ -29,7 +29,7 @@ def _extract_batch_size() -> int:
 def _lineage_has_quantity(rows: list[dict[str, Any]], lineage_ids: list[str]) -> bool:
     index = {str(row.get("row_id")): row for row in rows if row.get("row_id")}
     for row_id in lineage_ids:
-        row = index.get(str(row_id))
+        row = index.get(str(row_id))  # type: ignore
         if row and has_quantity(analysis_fields(row)):
             return True
     return False

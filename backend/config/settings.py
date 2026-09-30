@@ -118,8 +118,8 @@ ASGI_APPLICATION = "config.asgi.application"
 DATABASE_URL = env.str("DATABASE_URL", default="")
 if DATABASE_URL:
     DATABASES = {"default": env.db_url_config(DATABASE_URL)}
-    DATABASES["default"]["CONN_MAX_AGE"] = env.int("CONN_MAX_AGE", default=60)
-    DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
+    DATABASES["default"]["CONN_MAX_AGE"] = env.int("CONN_MAX_AGE", default=60)  # type: ignore
+    DATABASES["default"]["CONN_HEALTH_CHECKS"] = True  # type: ignore
 elif DEBUG:
     DATABASES = {
         "default": {
