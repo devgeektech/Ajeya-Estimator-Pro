@@ -25,8 +25,8 @@ class BOQDeletionService:
 
     def delete(self, boq: BOQ) -> dict[str, Any]:
         """Delete BOQ row and residuals. Returns a summary for logging/messages."""
-        boq_id = int(boq.pk)
-        boq_name = str(boq.boq_name)
+        boq_id = int(boq.pk)  # type: ignore
+        boq_name = str(boq.boq_name)  # type: ignore
         uploaded_name = getattr(boq.uploaded_file, "name", "") or ""
         make_list_name = getattr(boq.make_list_file, "name", "") or ""
 

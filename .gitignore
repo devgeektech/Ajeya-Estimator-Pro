@@ -29,7 +29,7 @@ db.sqlite3-journal
 
 # Media / generated files
 /media/
-/logs/*.log
+/logs/*.log*
 /deploy/
 
 # OS / IDE

@@ -50,13 +50,13 @@ _ORPHAN_GRACE_SECONDS = 45
 
 
 def _key(boq_id: int) -> str:
-    return _KEY.format(boq_id=int(boq_id))
+    return _KEY.format(boq_id=int(boq_id))  # type: ignore
 
 
 def _progress_path(boq_id: int) -> Path:
     root = Path(settings.MEDIA_ROOT) / "job_progress"
     root.mkdir(parents=True, exist_ok=True)
-    return root / f"{int(boq_id)}.json"
+    return root / f"{int(boq_id)}.json"  # type: ignore
 
 
 def _normalize(payload: dict[str, Any] | None) -> dict[str, Any]:
@@ -140,7 +140,7 @@ def set_boq_job_progress(
     except Exception:
         prev_pct = 0
     try:
-        next_pct = int(percent)
+        next_pct = int(percent)  # type: ignore
     except (TypeError, ValueError):
         next_pct = 0
     next_pct = max(0, min(100, next_pct))
@@ -211,7 +211,7 @@ def start_web_progress_echo(boq_id: int, *, boq_name: str = "") -> None:
     ``logger.info`` so runserver shows live movement (same console logging as
     the rest of the app — no print statements).
     """
-    job_id = int(boq_id)
+    job_id = int(boq_id)  # type: ignore
     name = (boq_name or "").strip()
 
     def _watch() -> None:

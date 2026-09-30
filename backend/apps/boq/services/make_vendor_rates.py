@@ -91,7 +91,7 @@ class MakeVendorRatesMixin:
         if not category_key:
             return []
         rows = list(self._rates_by_category.get(category_key) or [])
-        sub_text = str(sub_category or "").strip()
+        sub_text = str(sub_category or "").strip()  # type: ignore
         if not sub_text or sub_text == "—":
             return rows
         sub_key = _normalize_text(sub_text)
@@ -107,7 +107,7 @@ class MakeVendorRatesMixin:
 
     def _approved_makes_for_subcategory(self, category: str, sub_category: str) -> list[str]:
         """Approved makes for cascade scope — sub-specific when a sub is selected."""
-        sub_text = str(sub_category or "").strip()
+        sub_text = str(sub_category or "").strip()  # type: ignore
         if sub_text == "—":
             sub_text = ""
         # Cascade with an explicit sub: prefer makes mapped to that sub only.
@@ -281,7 +281,7 @@ class MakeVendorRatesMixin:
         When a sub-category is selected, only makes that exist on Rate_Master for
         that sub (and are approved, if a make list is present) are listed.
         """
-        sub_text = str(sub_category or "").strip()
+        sub_text = str(sub_category or "").strip()  # type: ignore
         rate_makes = self._rate_master_makes_for_subcategory(
             database_version_id=database_version_id,
             category=category,

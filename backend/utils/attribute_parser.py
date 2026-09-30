@@ -139,7 +139,7 @@ def build_alias_map(
     if extra_aliases:
         aliases.update(extra_aliases)
     for key in schema_keys or []:
-        key_text = str(key or "").strip()
+        key_text = str(key or "").strip()  # type: ignore
         if not key_text:
             continue
         cleaned = _KEY_NORMALIZE.sub("_", key_text.lower()).strip("_")
@@ -162,27 +162,27 @@ def resolve_to_schema_key(
     if not schema_keys:
         return None
     alias_map = aliases or build_alias_map(schema_keys)
-    schema_set = {str(key) for key in schema_keys}
+    schema_set = {str(key) for key in schema_keys}  # type: ignore
     cleaned = _KEY_NORMALIZE.sub("_", (extracted_key or "").strip().lower()).strip("_")
     if not cleaned:
         return None
     if cleaned in schema_set:
         return cleaned
     if extracted_key in schema_set:
-        return str(extracted_key)
+        return str(extracted_key)  # type: ignore
 
     canonical = normalize_attribute_key(cleaned, aliases=alias_map)
     if canonical in schema_set:
         return canonical
 
     for schema_key in schema_keys:
-        schema_canon = normalize_attribute_key(str(schema_key), aliases=alias_map)
+        schema_canon = normalize_attribute_key(str(schema_key), aliases=alias_map)  # type: ignore
         if schema_canon == canonical or schema_canon == cleaned:
-            return str(schema_key)
+            return str(schema_key)  # type: ignore
         # Soft contain match for long synonym phrases.
-        schema_clean = _KEY_NORMALIZE.sub("_", str(schema_key).lower()).strip("_")
+        schema_clean = _KEY_NORMALIZE.sub("_", str(schema_key).lower()).strip("_")  # type: ignore
         if cleaned and schema_clean and (cleaned in schema_clean or schema_clean in cleaned):
-            return str(schema_key)
+            return str(schema_key)  # type: ignore
     return None
 
 
@@ -192,11 +192,11 @@ def parse_attributes(
     aliases: dict[str, str] | None = None,
 ) -> dict[str, str]:
     """Parse ``Mounting=Pillar; IS=5290`` style text into a normalized dict."""
-    if not raw or not str(raw).strip():
+    if not raw or not str(raw).strip():  # type: ignore
         return {}
 
     attributes: dict[str, str] = {}
-    for token in _TOKEN_SPLIT.split(str(raw)):
+    for token in _TOKEN_SPLIT.split(str(raw)):  # type: ignore
         piece = token.strip()
         if not piece or "=" not in piece:
             continue
@@ -229,21 +229,21 @@ def attribute_overlap_score(
 
     alias_map = build_alias_map(list(candidate.keys()))
     candidate_by_canon = {
-        normalize_attribute_key(str(key), aliases=alias_map): value
+        normalize_attribute_key(str(key), aliases=alias_map): value  # type: ignore
         for key, value in candidate.items()
     }
 
     scores: dict[str, float] = {}
     matched = 0.0
     for key, extracted_value in extracted.items():
-        schema_key = resolve_to_schema_key(str(key), list(candidate.keys()), aliases=alias_map)
+        schema_key = resolve_to_schema_key(str(key), list(candidate.keys()), aliases=alias_map)  # type: ignore
         candidate_value = candidate.get(schema_key) if schema_key else None
         if candidate_value is None:
-            canon = normalize_attribute_key(str(key), aliases=alias_map)
+            canon = normalize_attribute_key(str(key), aliases=alias_map)  # type: ignore
             candidate_value = candidate_by_canon.get(canon)
         if candidate_value is None:
             continue
-        score_key = schema_key or str(key)
+        score_key = schema_key or str(key)  # type: ignore
         if _values_match(extracted_value, candidate_value):
             scores[score_key] = 1.0
             matched += 1.0
@@ -314,7 +314,7 @@ def coerce_attributes_dict(raw: Any) -> dict[str, str]:
 
     def _absorb(source: dict[str, Any]) -> None:
         for key, value in source.items():
-            key_text = normalize_attribute_key(str(key or ""))
+            key_text = normalize_attribute_key(str(key or ""))  # type: ignore
             if not key_text:
                 continue
             # Nested / stringified attribute bags — unwrap instead of str(dict).

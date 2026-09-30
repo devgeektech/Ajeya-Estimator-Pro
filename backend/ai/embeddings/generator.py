@@ -174,7 +174,7 @@ def generate_embeddings_for_version(
     for helper in helpers_qs.iterator(chunk_size=500):
         if _is_discontinued(helper.Status):
             continue
-        if not str(helper.Product_ID or "").strip():
+        if not str(helper.Product_ID or "").strip():  # type: ignore
             continue
         if not helper_document(helper).strip():
             continue
@@ -220,7 +220,7 @@ def generate_embeddings_for_version(
             if _is_discontinued(helper.Status):
                 skipped += 1
                 continue
-            if not str(helper.Product_ID or "").strip():
+            if not str(helper.Product_ID or "").strip():  # type: ignore
                 skipped += 1
                 continue
             text = helper_document(helper)

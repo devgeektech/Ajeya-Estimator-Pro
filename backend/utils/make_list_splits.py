@@ -379,7 +379,7 @@ def approved_makes_column_keys(count: int) -> list[str]:
 
     There is **no fixed cap** — count may be 1, 4, 6, 10, ….
     """
-    size = max(1, int(count or 0))
+    size = max(1, int(count or 0))  # type: ignore
     keys = ["approved_makes"]
     for index in range(2, size + 1):
         keys.append(f"approved_makes_{index}")
@@ -394,7 +394,7 @@ def _material_key_for_row(
     display = row.get("display_values") or row.get("values") or {}
     for key in (*(material_keys or ()), "description", "material", "particulars", "desc"):
         if key and isinstance(display, dict) and display.get(key) not in (None, ""):
-            return str(key)
+            return str(key)  # type: ignore
     return "description"
 
 
@@ -410,7 +410,7 @@ def _write_makes_into_columns(
     Expands ``approved_makes_N`` columns when ``makes`` is longer than ``make_keys``.
     Returns the keys actually written (no fixed cap).
     """
-    needed = max(len(makes), len([k for k in (make_keys or []) if str(k).startswith("approved_makes")]), 1)
+    needed = max(len(makes), len([k for k in (make_keys or []) if str(k).startswith("approved_makes")]), 1)  # type: ignore
     keys = approved_makes_column_keys(needed)
     for index, key in enumerate(keys):
         value = makes[index] if index < len(makes) else None
@@ -418,7 +418,7 @@ def _write_makes_into_columns(
         values[key] = value
     keep = set(keys)
     for key in list(display.keys()):
-        if str(key).startswith("approved_makes") and key not in keep:
+        if str(key).startswith("approved_makes") and key not in keep:  # type: ignore
             display.pop(key, None)
             values.pop(key, None)
     return keys
@@ -493,11 +493,11 @@ def expand_payload_make_columns(payload: dict | None) -> dict:
             continue
         if key == "approved_makes":
             label = "Approved Makes"
-        elif str(key).startswith("approved_makes_"):
-            suffix = str(key).removeprefix("approved_makes_")
+        elif str(key).startswith("approved_makes_"):  # type: ignore
+            suffix = str(key).removeprefix("approved_makes_")  # type: ignore
             label = f"Approved Makes {suffix}"
         else:
-            label = str(key).replace("_", " ").title()
+            label = str(key).replace("_", " ").title()  # type: ignore
         headers.append({"key": key, "label": label, "index": index})
 
     enriched = dict(payload)

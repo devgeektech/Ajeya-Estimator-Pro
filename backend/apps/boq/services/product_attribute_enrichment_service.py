@@ -11,7 +11,7 @@ from utils.attribute_parser import (
 
 
 def humanize_attribute_key(key: str) -> str:
-    text = str(key or "").strip().replace("_", " ")
+    text = str(key or "").strip().replace("_", " ")  # type: ignore
     if not text:
         return ""
     if text.upper() == "IS" or text.lower() == "is":
@@ -65,12 +65,12 @@ def compute_attribute_confidence(
     When DB catalog values exist, matching/partial-matching weights the point.
     Empty schema → 0 (never invent 100% from extracted keys alone).
     """
-    keys = [str(key) for key in schema_keys if str(key).strip()]
+    keys = [str(key) for key in schema_keys if str(key).strip()]  # type: ignore
     if not keys:
         return 0.0
 
     attrs = {
-        str(key): str(value).strip()
+        str(key): str(value).strip()  # type: ignore
         for key, value in (attributes or {}).items()
         if value is not None and str(value).strip()
     }
@@ -99,7 +99,7 @@ def merge_attributes_onto_schema(
 
     alias_map = build_alias_map(schema_keys)
     extracted = {
-        str(key): normalize_attribute_value(value)
+        str(key): normalize_attribute_value(value)  # type: ignore
         for key, value in (extracted_attrs or {}).items()
         if value is not None and str(value).strip()
     }

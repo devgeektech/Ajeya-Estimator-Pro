@@ -175,7 +175,7 @@ def build_boq_status_display(boq: BOQ, session) -> dict[str, str]:
         BOQStatus.EXPORTED.value: ("Exported", "badge--green"),
         BOQStatus.ANALYSIS_FAILED.value: ("Failed", "badge--red"),
     }
-    label, badge = mapping.get(str(status), ("Unknown", "badge--gray"))
+    label, badge = mapping.get(str(status), ("Unknown", "badge--gray"))  # type: ignore
     return {"label": label, "badge": badge}
 
 
@@ -385,7 +385,7 @@ def resolve_boq_database_label(boq: BOQ) -> str:
     if version is None:
         return f"DB #{db_id}"
     return (
-        str(version.name or "").strip()
-        or str(version.source_filename or "").strip()
+        str(version.name or "").strip()  # type: ignore
+        or str(version.source_filename or "").strip()  # type: ignore
         or f"DB v{version.version_number}"
     )

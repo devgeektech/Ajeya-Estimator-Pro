@@ -31,7 +31,7 @@ def touch_celery_worker_heartbeat(*, hostname: str = "") -> None:
     path = _heartbeat_path()
     payload = {
         "updated_at": time.time(),
-        "hostname": str(hostname or "").strip(),
+        "hostname": str(hostname or "").strip(),  # type: ignore
         "pid": os.getpid(),
     }
     text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))

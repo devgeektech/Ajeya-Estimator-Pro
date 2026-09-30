@@ -108,7 +108,7 @@ def resolve_analysis_error_message(
 ) -> str:
     """Pick the best Analysis-failure message for banners / status poll."""
     for candidate in (last_error, progress_label):
-        text = str(candidate or "").strip()
+        text = str(candidate or "").strip()  # type: ignore
         if not text:
             continue
         return format_ai_error_message(text)

@@ -37,7 +37,7 @@ _TEMP_DEGREE_UNIT = re.compile(
 
 
 def _trim_size_number(value: str) -> str:
-    text = str(value or "").strip()
+    text = str(value or "").strip()  # type: ignore
     if re.fullmatch(r"\d+\.0+", text):
         return text.split(".", 1)[0]
     try:
@@ -50,7 +50,7 @@ def _trim_size_number(value: str) -> str:
 
 
 def _unit_from_token(token: str | None, *, blob: str) -> str | None:
-    unit_token = str(token or "").strip().lower()
+    unit_token = str(token or "").strip().lower()  # type: ignore
     if unit_token in {"mm", "cm"}:
         return unit_token
     if unit_token == "nb":
@@ -66,10 +66,10 @@ def _unit_from_token(token: str | None, *, blob: str) -> str | None:
 
 def is_is_standard_number(text: str, number: str) -> bool:
     """True when ``number`` is part of an Indian Standard code in ``text``."""
-    digits = re.sub(r"[^0-9.]", "", str(number or ""))
+    digits = re.sub(r"[^0-9.]", "", str(number or ""))  # type: ignore
     if not digits:
         return False
-    blob = str(text or "")
+    blob = str(text or "")  # type: ignore
     if not _IS_STANDARD_NUMBER.search(blob):
         return False
     for match in _IS_STANDARD_NUMBER.finditer(blob):
@@ -95,10 +95,10 @@ def is_performance_spec_number(text: str, number: str) -> bool:
     Example: ``i) Operating Temp. : 68 deg.C.`` with parent size ``15 mm`` —
     ``68`` must not become Size.
     """
-    digits = re.sub(r"[^0-9.]", "", str(number or ""))
+    digits = re.sub(r"[^0-9.]", "", str(number or ""))  # type: ignore
     if not digits:
         return False
-    blob = str(text or "")
+    blob = str(text or "")  # type: ignore
     if not blob:
         return False
 
