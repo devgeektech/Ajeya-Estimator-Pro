@@ -486,7 +486,7 @@ def parse_make_list_pdf(file_path: str) -> tuple[list[dict], list[dict]]:
     for page_number, page in enumerate(reader.pages, start=1):
         try:
             text = page.extract_text(extraction_mode="layout") or ""
-        except TypeError:
+        except Exception:
             text = page.extract_text() or ""
             
         for raw_line in text.splitlines():

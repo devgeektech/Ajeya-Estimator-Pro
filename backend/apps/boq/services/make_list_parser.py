@@ -201,7 +201,14 @@ def _parse_excel_make_list(uploaded_file, *, source_filename: str) -> dict:
 
 def _parse_pdf_make_list(uploaded_file, *, source_filename: str) -> dict:
     file_path = _resolve_path(uploaded_file)
-    headers, records = parse_make_list_pdf(file_path)
+    try:
+        headers, records = parse_make_list_pdf(file_path)
+    except Exception as exc:
+        raise MakeListParseError(
+            "Could not extract text from the PDF. "
+            "The file may be corrupted, image-only, or missing font definitions."
+        ) from exc
+
     if not headers or not records:
         raise MakeListParseError(
             "Could not extract make-list rows from the PDF. "
