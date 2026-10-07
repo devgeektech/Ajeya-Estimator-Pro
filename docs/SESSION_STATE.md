@@ -88,11 +88,14 @@ oldest row + `media/database/` workbook deleted.
 ## Session Log
 
 Keep only the latest entry below. Older work is in `docs/CHANGELOG.md`.
-### 2026-10-07 — Add Rate Only tag for zero quantity
+### 2026-10-07 — Re-analyse confidence fix and Top DB selection highlighting
 
 Completed:
-- Added `Rate Only` badge for extraction lines and review tables when the line quantity is zero (`line.qty == 0`). The badge is displayed in orange color on the left side of the product count tag. Modified `_extraction_line.html`, `_review_table.html`, `_make_vendor_table.html`, and `_labour_table.html`.
+- Highlighted text color for product candidate IDs in the Top DB candidates when they match the currently assigned `db_product_id` (or when none is assigned), rather than drawing a background circle.
+- Adjusted server `.env` variables (`AI_ROW_EXTRACTION_BATCH_SIZE=10`, `AI_PRODUCT_MAPPING_BATCH_SIZE=10`, `AI_EXTRACT_PARALLELISM=2`) to align with local settings and eliminate the production performance bottleneck.
+- Switched native `alert()` calls in `_extraction_table.html` to use a consistent custom `window.appAlert`.
+- Fixed the issue where a manual "Top DB candidate" selection artificially locked the product into a 100% confidence score during subsequent `Re-analyse` executions. Now, `rematch_product` explicitly clears pre-filled database attributes (`attribute_source == "database"`) prior to the AI map request, forcing a genuine re-extraction from the product description and resulting in an honest match confidence score.
 
 Pending: None
 Issues: None
-Next: Continue with further BOQ UI refinements.
+Next: Continue with further BOQ refinements.

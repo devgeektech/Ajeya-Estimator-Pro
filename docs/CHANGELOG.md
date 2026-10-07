@@ -2096,3 +2096,9 @@ Product behaviour truth: `docs/PRODUCT.md`. Session memory: `docs/SESSION_STATE.
 - Fixed a scoring bug where empty extraction sub-categories erroneously matched Rate_Master products without penalty.
 - Fixed an AttributeError in extraction edit API when dealing with numeric size inputs.
 
+## 2026-10-07 — Re-analyse confidence fix and Top DB selection highlighting
+
+- Highlighted text color for product candidate IDs in the Top DB candidates when they match the currently assigned `db_product_id` (or when none is assigned), rather than drawing a background circle.
+- Adjusted server `.env` variables (`AI_ROW_EXTRACTION_BATCH_SIZE=10`, `AI_PRODUCT_MAPPING_BATCH_SIZE=10`, `AI_EXTRACT_PARALLELISM=2`) to align with local settings and eliminate the production performance bottleneck.
+- Switched native `alert()` calls in `_extraction_table.html` to use a consistent custom `window.appAlert`.
+- Fixed the issue where a manual "Top DB candidate" selection artificially locked the product into a 100% confidence score during subsequent `Re-analyse` executions. Now, `rematch_product` explicitly clears pre-filled database attributes (`attribute_source == "database"`) prior to the AI map request, forcing a genuine re-extraction from the product description and resulting in an honest match confidence score.

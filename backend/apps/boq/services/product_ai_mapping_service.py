@@ -510,6 +510,12 @@ class ProductAIMappingService(
             "ai_mapping",
         ):
             work.pop(key, None)
+            
+        if work.get("attribute_source") == "database":
+            work["attributes"] = {}
+            work["attribute_schema"] = []
+            work["attribute_source"] = "extracted"
+            
         mapped = self.map_products([work], refine=True)
         result = mapped[0] if mapped else self._fallback_without_match(work)
         if isinstance(result, dict):
