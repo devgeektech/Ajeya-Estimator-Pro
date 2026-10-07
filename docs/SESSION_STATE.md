@@ -10,6 +10,7 @@ Completed:
 - Updated the AI mapping prompt (`map_product_match.txt`) to aggressively scan the `description_hint` and `boq_row.description` to re-extract missing attributes if the user leaves them blank during Re-analyse.
 - Replaced the `alert` popup on the Extract row with a visually integrated, top-of-screen `appAlert` banner.
 - Updated Re-analyse highlights: selected Database Candidate attributes are now highlighted via text color (e.g. `text-emerald-700 font-semibold`) instead of a circular background to improve readability.
+- **Fixed PDF Make List Extraction**: Changed PyPDF extraction to use `extraction_mode="layout"`. This prevents tabular PDFs from being extracted column-wise (all items first, then all makes) which previously broke the make list parsing logic. The layout mode preserves horizontal rows.
 - Synced branches and deployed fixes to main.
 
 Pending:
@@ -17,7 +18,7 @@ Pending:
 
 Issues: None.
 
-Next: Test Re-analyse locally or on the server.
+Next: Test PDF Make List uploads.
 
 ### 2026-09-24 — Dynamic Contextual AI Extraction and Logical Confidence Scoring
 
