@@ -497,7 +497,7 @@ class ProductAIMappingService(
             )
             work["_boq_row"] = boq_context
         # Drop locked match identity so rematch is driven by filled fields + fresh
-        # recall. Prior candidates remain on ``db_candidates`` for leftover slots.
+        # recall. Clear prior candidates so AI doesn't artificially recycle them.
         for key in (
             "db_product_id",
             "suggested_db_product_id",
@@ -508,6 +508,8 @@ class ProductAIMappingService(
             "catalog_product_id",
             "suggested_catalog_product_id",
             "ai_mapping",
+            "db_candidates",
+            "product_id",
         ):
             work.pop(key, None)
             
