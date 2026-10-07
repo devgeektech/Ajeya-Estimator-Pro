@@ -520,7 +520,12 @@ def structured_match_score(
                     breakdown[name] = 0.0
                     breakdown["sub_category_blank_miss"] = True
             else:
-                breakdown[name] = None  # omitted — not found in BOQ/extract
+                if _is_filled(right) and has_evidence:
+                    weight_total += weight
+                    breakdown[name] = 0.0
+                    breakdown[f"{name}_blank_miss"] = True
+                else:
+                    breakdown[name] = None  # omitted — not found in BOQ/extract
             continue
         weight_total += weight
         filled_core_names.add(name)
@@ -528,15 +533,21 @@ def structured_match_score(
         points = scorer(left, right) * weight
         breakdown[name] = points
         weighted_score += points
-
-    if extracted_attrs:
-        attr_ratio, attr_scores = attribute_overlap_score(extracted_attrs, rate_attrs)
+        
+    has_evidence = _is_filled(hint) or _is_filled(extracted.get("category"))
+    if extracted_attrs or (rate_attrs and has_evidence):
+        if not extracted_attrs:
+            attr_ratio = 0.0
+            attr_scores = {}
+        else:
+            attr_ratio, attr_scores = attribute_overlap_score(extracted_attrs, rate_attrs)
         weight = _TEXT_WEIGHTS["attributes"]
         breakdown["attributes"] = attr_ratio * weight
         breakdown["attribute_details"] = attr_scores
         weighted_score += attr_ratio * weight
         weight_total += weight
-        real_filled_names.add("attributes")
+        if extracted_attrs:
+            real_filled_names.add("attributes")
 
     if weight_total <= 0:
         return 0.0, breakdown
