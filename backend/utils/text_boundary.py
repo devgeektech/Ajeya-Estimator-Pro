@@ -398,6 +398,8 @@ def repair_description_and_makes(
 
     for raw in makes or []:
         text = normalize_make_segment(raw)
+        if text and text.islower():
+            text = text.title()
         if not text:
             continue
         words = text.split()

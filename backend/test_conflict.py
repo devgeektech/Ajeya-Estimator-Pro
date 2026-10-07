@@ -33,9 +33,9 @@ for value in (rate.Category, rate.Sub_Category, rate.Class):
 print("catalog_tokens:", catalog_tokens)
 print("intersection:", hint_tokens & catalog_tokens)
 
-extract_sub = str(extracted.get("sub_category") or "").strip().upper()
+extract_sub = extracted.get("sub_category", "").strip().upper()
 catalog_sub = (rate.Sub_Category or "").strip().upper()
 print("extract_sub:", extract_sub)
 print("catalog_sub:", catalog_sub)
 
-print("product_type_conflicts:", product_type_conflicts(extracted, rate))
+print("product_type_conflicts:", product_type_conflicts(extracted, rate))  # type: ignore

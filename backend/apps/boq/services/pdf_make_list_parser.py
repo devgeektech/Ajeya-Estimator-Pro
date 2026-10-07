@@ -477,94 +477,104 @@ _SOLO_SERIAL = re.compile(r"^\d+\.?$")
 
 def parse_make_list_pdf(file_path: str) -> tuple[list[dict], list[dict]]:
     """Return ``(headers, records)`` for a make-list PDF."""
-    reader = PdfReader(file_path)
+    import pdfplumber
+
     # (line_number, page, serial, description, makes, is_section_heading)
     parsed_rows: list[tuple[int, int, str, str, list[str], bool]] = []
     line_number = 0
     pending_serial: str | None = None
 
-    for page_number, page in enumerate(reader.pages, start=1):
-        try:
-            text = page.extract_text(extraction_mode="layout") or ""
-        except Exception:
-            text = page.extract_text() or ""
+    with pdfplumber.open(file_path) as pdf:
+        for page_number, page in enumerate(pdf.pages, start=1):
+            text = ""
+            try:
+                table = page.extract_table()
+                if table:
+                    lines = []
+                    for row in table:
+                        lines.append("   ".join(c if c is not None else "" for c in row))
+                    text = "\n".join(lines)
+                if not text.strip():
+                    text = page.extract_text(layout=True) or ""
+            except Exception:
+                text = ""
             
-        for raw_line in text.splitlines():
-            line = raw_line.strip()
-            if not line or is_pdf_header_line(line) or is_pdf_document_banner(line):
+            for raw_line in text.splitlines():
+                line = raw_line.strip()
+                if not line or is_pdf_header_line(line) or is_pdf_document_banner(line):
+                    pending_serial = None
+                    continue
+                # Section / category banners (e.g. "Pipes and Fittings",
+                # "Gun Metal Fire Fighting Fittings & Accessories") — UI only.
+                # Skip when a solo serial is pending — the next line is a product
+                # wrap (e.g. Sprinkler Heads), not a new section.
+                if pending_serial is None and is_pdf_category_banner(line):
+                    line_number += 1
+                    parsed_rows.append((line_number, page_number, "", line, [], True))
+                    continue
+
+                # PDF often splits "1" onto its own line ahead of the material text.
+                if _SOLO_SERIAL.match(line):
+                    pending_serial = line.rstrip(".")
+                    continue
+
+                candidate = f"{pending_serial} {line}".strip() if pending_serial else line
                 pending_serial = None
-                continue
-            # Section / category banners (e.g. "Pipes and Fittings",
-            # "Gun Metal Fire Fighting Fittings & Accessories") — UI only.
-            # Skip when a solo serial is pending — the next line is a product
-            # wrap (e.g. Sprinkler Heads), not a new section.
-            if pending_serial is None and is_pdf_category_banner(line):
-                line_number += 1
-                parsed_rows.append((line_number, page_number, "", line, [], True))
-                continue
 
-            # PDF often splits "1" onto its own line ahead of the material text.
-            if _SOLO_SERIAL.match(line):
-                pending_serial = line.rstrip(".")
-                continue
-
-            candidate = f"{pending_serial} {line}".strip() if pending_serial else line
-            pending_serial = None
-
-            # Category banners may arrive with a leftover pending serial cleared
-            # above; catch banner text that was not alone on its line.
-            if is_pdf_category_banner(candidate):
-                line_number += 1
-                parsed_rows.append((line_number, page_number, "", candidate, [], True))
-                continue
-
-            parsed = parse_make_list_pdf_line(candidate)
-            if parsed:
-                serial, description, makes = parsed
-                line_number += 1
-                parsed_rows.append(
-                    (line_number, page_number, serial, description, makes, False)
-                )
-                continue
-
-            # Orphan text under a section banner: show as description-only
-            # (no mapping / no approved makes), rather than dropping it.
-            if parsed_rows and parsed_rows[-1][5]:
-                # Prefer promoting another category banner over a free text row.
+                # Category banners may arrive with a leftover pending serial cleared
+                # above; catch banner text that was not alone on its line.
                 if is_pdf_category_banner(candidate):
                     line_number += 1
-                    parsed_rows.append(
-                        (line_number, page_number, "", candidate, [], True)
-                    )
-                else:
+                    parsed_rows.append((line_number, page_number, "", candidate, [], True))
+                    continue
+
+                parsed = parse_make_list_pdf_line(candidate)
+                if parsed:
+                    serial, description, makes = parsed
                     line_number += 1
                     parsed_rows.append(
-                        (line_number, page_number, "", candidate, [], False)
+                        (line_number, page_number, serial, description, makes, False)
                     )
-                continue
+                    continue
 
-            # Orphan under a manufacturer-only row (e.g. ``Plumbing pumps``).
-            last = parsed_rows[-1] if parsed_rows else None
-            if last and _is_manufacturer_only_row(last[3], last[4]) and not last[5]:
-                line_number += 1
-                parsed_rows.append(
-                    (
-                        line_number,
-                        page_number,
-                        "",
-                        candidate,
-                        [],
-                        is_pdf_category_banner(candidate),
+                # Orphan text under a section banner: show as description-only
+                # (no mapping / no approved makes), rather than dropping it.
+                if parsed_rows and parsed_rows[-1][5]:
+                    # Prefer promoting another category banner over a free text row.
+                    if is_pdf_category_banner(candidate):
+                        line_number += 1
+                        parsed_rows.append(
+                            (line_number, page_number, "", candidate, [], True)
+                        )
+                    else:
+                        line_number += 1
+                        parsed_rows.append(
+                            (line_number, page_number, "", candidate, [], False)
+                        )
+                    continue
+
+                # Orphan under a manufacturer-only row (e.g. ``Plumbing pumps``).
+                last = parsed_rows[-1] if parsed_rows else None
+                if last and _is_manufacturer_only_row(last[3], last[4]) and not last[5]:
+                    line_number += 1
+                    parsed_rows.append(
+                        (
+                            line_number,
+                            page_number,
+                            "",
+                            candidate,
+                            [],
+                            is_pdf_category_banner(candidate),
+                        )
                     )
+                    continue
+
+                # Wrapped continuation of the previous numbered item.
+                _merge_continuation_into_last(
+                    parsed_rows,
+                    page_number=page_number,
+                    continuation=candidate,
                 )
-                continue
-
-            # Wrapped continuation of the previous numbered item.
-            _merge_continuation_into_last(
-                parsed_rows,
-                page_number=page_number,
-                continuation=candidate,
-            )
 
     max_makes = max((len(makes) for *_, makes, _section in parsed_rows), default=1)
     headers = _make_list_headers(max_makes)
