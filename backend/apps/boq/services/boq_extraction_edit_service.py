@@ -270,9 +270,7 @@ class BOQExtractionEditService:
         except ValueError as exc:
             raise ValidationError(str(exc)) from exc
 
-        composed = compose_description_hint(updated)
-        if composed:
-            updated["description_hint"] = composed
+        # description_hint is left unchanged as per user request.
 
         position = self._product_position(products, product_index)
         if position is None:
@@ -359,9 +357,7 @@ class BOQExtractionEditService:
             updated["ai_mapping"]["notes"] = f"Manually loaded Product ID: {product_id}."
             updated["ai_mapping"]["selection_source"] = "manual_load"
 
-        composed = compose_description_hint(updated)
-        if composed:
-            updated["description_hint"] = composed
+        # description_hint is left unchanged as per user request.
 
         position = self._product_position(products, product_index)
         if position is None:
