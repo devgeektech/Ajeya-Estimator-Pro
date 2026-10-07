@@ -58,7 +58,7 @@ class ProductIdDisplayTests(SimpleTestCase):
         self.assertEqual(keys[1], "product_id")
         self.assertEqual(keys[2], "category")
         product_id_field = shaped["fields"][1]
-        self.assertTrue(product_id_field["readonly"])
+        self.assertFalse(product_id_field["readonly"])
         self.assertEqual(product_id_field["value"], "6")
         self.assertEqual(shaped["catalog_product_id"], "6")
 

@@ -67,8 +67,8 @@ class StructuredScoreFilledFieldsTests(SimpleTestCase):
         }
         rate = _rate(Category="PIPE", Sub_Category="GI", Class="C")
         score, breakdown = structured_match_score(extracted, rate)
-        self.assertLessEqual(score, 55.0)
-        self.assertEqual(breakdown.get("thin_identity_cap"), 55.0)
+        self.assertLessEqual(score, 0.0)
+        self.assertEqual(breakdown.get("thin_identity_cap"), 0.0)
 
 
 class EmptyInputFillTests(SimpleTestCase):
