@@ -21,6 +21,13 @@
                     {% endif %}
                 </div>
                 <div class="make-vendor-line__meta">
+                <span class="badge badge--orange" title="Rate Only" data-active-product-rate-only
+                    {% if line.product_count >= 2 %}
+                        {% if not line.products.0.is_rate_only %}style="display: none;"{% endif %}
+                    {% else %}
+                        {% if not line.is_rate_only %}style="display: none;"{% endif %}
+                    {% endif %}
+                >Rate Only</span>
                     {% if line.product_count >= 2 %}
                     <span
                         class="extraction-line__qty-unit"
@@ -73,6 +80,10 @@
                             if (qtyEl) {
                                 qtyEl.textContent = 'Quantity: {{ product.quantity_display|escapejs }}, Unit: {{ product.quantity_unit_display|escapejs }}';
                                 qtyEl.hidden = {{ product.show_quantity|yesno:'false,true' }};
+                            }
+                            const rateOnlyEl = $el.closest('.make-vendor-line').querySelector('[data-active-product-rate-only]');
+                            if (rateOnlyEl) {
+                                rateOnlyEl.style.display = {{ product.is_rate_only|yesno:'true,false' }} ? 'inline-block' : 'none';
                             }
                         "
                     >Product {{ product.display_number|default:forloop.counter }}</button>

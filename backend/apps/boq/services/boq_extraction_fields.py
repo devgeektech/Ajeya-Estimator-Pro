@@ -11,6 +11,7 @@ from utils.attribute_parser import coerce_attributes_dict
 from utils.nominal_size import parse_nominal_size_from_text, sanitize_product_size
 from utils.catalog_size_rules import normalize_catalog_size_capacity, pattern_for_product
 from utils.product_synonyms import display_material_label
+from apps.boq.services.boq_line_output_service import quantity_is_rate_sum_only
 
 
 _PLACEHOLDER_CLASS_VALUES = frozenset(
@@ -243,6 +244,7 @@ def quantity_display_fields(product: dict[str, Any]) -> dict[str, Any]:
         ),
         "show_quantity": has_quantity or bool(str(quantity_unit or "").strip()),
         "rate_only": bool(product.get("rate_only")),
+        "is_rate_only": quantity_is_rate_sum_only(quantity, rate_only=bool(product.get("rate_only"))),
     }
 
 

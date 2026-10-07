@@ -88,15 +88,11 @@ oldest row + `media/database/` workbook deleted.
 ## Session Log
 
 Keep only the latest entry below. Older work is in `docs/CHANGELOG.md`.
-
-### 2026-09-21 — Fix Top DB Candidates taxonomy focus and AI extraction misclassification
+### 2026-10-07 — Add Rate Only tag for zero quantity
 
 Completed:
-- Adaptive size mismatch penalty in `structured_match_score`: reduced from 45 to 20 when extracted sub_category matches the catalog row's sub_category (taxonomy-confirmed). SLUICE VALVE at nearby size now scores 56% vs PIPE at exact size 23% — correct family wins.
-- Added `_guarantee_taxonomy_hits` in `ProductMatchingService.match_product`: when no Chroma hit belongs to the extracted category+sub_category, a direct SQL query injects up to 20 matching rows so `_rank_candidates` can score them. Prevents Chroma returning only wrong-family rows.
-- Taxonomy-aware sort key in `_rank_candidates`: valid (non-type-mismatch) candidates sort by `_taxonomy_score` (sub_category match = 1.0, category match = 0.5) first, then blended confidence. Correct product family always tops the list.
-- Added `product_noun_taxonomy_hints` (36 entries) to `build_database_context` in `ai/context.py`: maps BOQ product nouns to Category/Sub_Category. Landing valve, external hydrant, branch pipe, reflux/NRV valve etc. now have explicit entries.
-- Updated `ai/prompts/extract_products.txt`: added CRITICAL TAXONOMY TABLE at top, HYDRANT/VALVE/reflux examples in STEP 1, clarified material keywords (SS, CI, MS) describe material — not product type.
+- Added `Rate Only` badge for extraction lines and review tables when the line quantity is zero (`line.qty == 0`). The badge is displayed in orange color on the left side of the product count tag. Modified `_extraction_line.html`, `_review_table.html`, `_make_vendor_table.html`, and `_labour_table.html`.
+
 Pending: None
 Issues: None
-Next: Re-run Analyse on BOQ with stainless steel landing valve and sluice valve sections to verify AI extracts correct taxonomy and top DB candidates are correct family.
+Next: Continue with further BOQ UI refinements.

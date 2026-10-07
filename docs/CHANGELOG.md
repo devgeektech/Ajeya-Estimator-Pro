@@ -5,6 +5,10 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
+## 2026-10-07 — Add Rate Only tag for zero quantity
+
+- Added `Rate Only` badge for extraction lines and review tables when the line quantity is zero (`line.qty == 0`), displayed next to the product count tag.
+
 ## 2026-09-23 — AI Pipeline Optimization + De-hardcoding + Lint Fixes
 
 - Fixed 4 IDE lint warnings in `product_ai_mapping_service.py` (redundant `int()`/`bool()` casts).

@@ -10,6 +10,7 @@ from apps.boq.services.boq_extraction_service import (
     quantity_display_fields,
     rehydrate_products_quantity_from_group,
 )
+from apps.boq.services.boq_line_output_service import quantity_is_rate_sum_only
 from apps.boq.services.boq_row_fields import (
     is_blank as _is_blank,
     is_job_unit,
@@ -888,6 +889,7 @@ class BOQExtractionDisplayService:
                     "qty_row_count": qty_row_count,
                     "slot_count": int(group.get("slot_count") or qty_row_count),
                     "rate_only": bool(group.get("rate_only")),
+                    "is_rate_only": quantity_is_rate_sum_only(qty, rate_only=bool(group.get("rate_only"))),
                     "boq_rate": group.get("boq_rate"),
                     "status": status,
                     "skip_reason": analysis_row.get("skip_reason") or "",
