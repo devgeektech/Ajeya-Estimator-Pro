@@ -154,6 +154,24 @@ _TYPE_STOPWORDS = frozenset(
         "size",
         "unit",
         "class",
+        "mild",
+        "steel",
+        "stainless",
+        "cast",
+        "iron",
+        "ductile",
+        "galvanised",
+        "galvanized",
+        "carbon",
+        "brass",
+        "rubber",
+        "forged",
+        "upvc",
+        "cpvc",
+        "hdpe",
+        "pvc",
+        "grp",
+        "copper",
     }
 )
 
@@ -540,8 +558,8 @@ def structured_match_score(
         _significant_type_tokens(hint)
     )
     if not has_family and filled_core_names and filled_core_names <= {"size", "unit", "capacity"}:
-        total = min(total, 55.0)
-        breakdown["thin_identity_cap"] = 55.0
+        total = min(total, 0.0)
+        breakdown["thin_identity_cap"] = 0.0
 
     # Hard size gate: only when both sides have a real nominal size.
     # Use a reduced penalty when sub_category taxonomy already matches — a

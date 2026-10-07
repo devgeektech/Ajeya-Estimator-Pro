@@ -151,7 +151,7 @@
                             rateOnlyEl.style.display = {{ product.is_rate_only|yesno:'true,false' }} ? 'inline-block' : 'none';
                         }
                     "
-                >Product {{ product.display_number }} <span class="extraction-product-tabs__pct">{{ product.match_percentage|floatformat:0 }}%</span></button>
+                >Product {{ product.display_number }} {% if not product.is_manual_load %}<span class="extraction-product-tabs__pct">{{ product.match_percentage|floatformat:0 }}%</span>{% endif %}</button>
                 {% endfor %}
                 {% if can_edit_extraction and line.status != 'skipped' %}
                 <button
@@ -240,9 +240,13 @@
                         {% if product.db_match.summary %}
                         <span class="extraction-db-match__summary">{{ product.db_match.summary }}</span>
                         {% endif %}
+                        {% if product.is_manual_load %}
+                        <span class="badge badge--green extraction-confidence-badge">Manually Loaded</span>
+                        {% else %}
                         <span class="badge badge--{{ product.match_percentage_band|default:product.attribute_confidence_band }} extraction-confidence-badge">
                             {{ product.match_percentage|default:product.attribute_confidence|floatformat:0 }}% match
                         </span>
+                        {% endif %}
                         {% if can_edit_extraction and product.show_confirm_match %}
                         <button
                             type="button"
@@ -278,9 +282,13 @@
                         {% else %}
                         <span class="extraction-db-match__heading">Low-confidence match</span>
                         {% endif %}
+                        {% if not product.is_manual_load %}
                         <span class="badge badge--{{ product.match_percentage_band|default:'red' }} extraction-confidence-badge">
                             {{ product.match_percentage|floatformat:0 }}% match
                         </span>
+                        {% else %}
+                        <span class="badge badge--green extraction-confidence-badge">Manually Loaded</span>
+                        {% endif %}
                         {% if can_edit_extraction and product.show_confirm_match %}
                         <button
                             type="button"
@@ -326,7 +334,7 @@
                             >
                                 <span class="extraction-db-candidates__summary">{{ candidate.summary }}</span>
                                 {% if candidate.confidence is not None %}
-                                <span class="extraction-db-candidates__pct">{{ candidate.confidence|floatformat:0 }}%</span>
+                                <span class="extraction-db-candidates__pct">{% if candidate.is_selected and product.is_manual_load %}-{% else %}{{ candidate.confidence|floatformat:0 }}%{% endif %}</span>
                                 {% endif %}
                                 {% if candidate.is_selected %}
                                 <span class="extraction-db-candidates__selected">Selected</span>
@@ -337,7 +345,7 @@
                             {% else %}
                             <span class="extraction-db-candidates__summary">{{ candidate.summary }}</span>
                             {% if candidate.confidence is not None %}
-                            <span class="extraction-db-candidates__pct">{{ candidate.confidence|floatformat:0 }}%</span>
+                            <span class="extraction-db-candidates__pct">{% if candidate.is_selected and product.is_manual_load %}-{% else %}{{ candidate.confidence|floatformat:0 }}%{% endif %}</span>
                             {% endif %}
                             {% if candidate.is_selected %}
                             <span class="extraction-db-candidates__selected">Selected</span>
@@ -367,6 +375,23 @@
                                 rows="2"
                                 placeholder="Plain-language product description — edit if wrong, then Re-analyse with AI"
                             >{{ field.value }}</textarea>
+                            {% elif field.key == 'product_id' %}
+                            <div class="extraction-product-id-wrap" style="display: flex; gap: 4px;">
+                                <input
+                                    type="text"
+                                    name="{{ field.key }}"
+                                    class="extraction-input"
+                                    value="{{ field.value|default_if_none:'' }}"
+                                    placeholder="Enter Product ID"
+                                >
+                                <button
+                                    type="button"
+                                    class="btn btn--xsmall btn--primary"
+                                    title="Load product by ID"
+                                    style="padding: 0 12px;"
+                                    @click.prevent="loadProductId($el.previousElementSibling.value)"
+                                >Load</button>
+                            </div>
                             {% elif field.readonly %}
                             <input
                                 type="text"
@@ -374,7 +399,7 @@
                                 value="{{ field.value|default_if_none:'—' }}"
                                 readonly
                                 tabindex="-1"
-                                title="Loaded or selected Product Id (view only)"
+                                title="Read-only field"
                             >
                             {% else %}
                             <input

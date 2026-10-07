@@ -14,6 +14,13 @@
 {% if can_edit_extraction %}
 <script>
 document.addEventListener('alpine:init', () => {
+    window.appAlert = async function(message) {
+        if (window.BOQConfirm && typeof window.BOQConfirm.alert === 'function') {
+            await window.BOQConfirm.alert(message, { title: 'Notice' });
+        } else {
+            alert(message);
+        }
+    };
     const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
 
     window.extractionAjaxPost = async function extractionAjaxPost(url, fields) {
@@ -49,7 +56,7 @@ document.addEventListener('alpine:init', () => {
             } catch (e) { /* ignore */ }
             window.location.reload();
         } catch (error) {
-            alert(error.message || 'Failed to add product.');
+            window.appAlert(error.message || 'Failed to add product.');
         }
     };
 
@@ -154,6 +161,8 @@ document.addEventListener('alpine:init', () => {
         } else if (nextPct && !currentPct) {
             currentBtn.appendChild(document.createTextNode(' '));
             currentBtn.appendChild(nextPct.cloneNode(true));
+        } else if (!nextPct && currentPct) {
+            currentPct.remove();
         }
         if (nextBtn.getAttribute('title')) {
             currentBtn.setAttribute('title', nextBtn.getAttribute('title'));
@@ -196,6 +205,16 @@ document.addEventListener('alpine:init', () => {
         }
         const nextPanel = nextCard.closest('.extraction-product-panel') || nextCard;
         const currentPanel = currentCard.closest('.extraction-product-panel') || currentCard;
+        
+        const currentDetails = currentPanel.querySelector('details.extraction-db-candidates');
+        const nextDetails = nextPanel.querySelector('details.extraction-db-candidates');
+        if (currentDetails && nextDetails) {
+            if (currentDetails.hasAttribute('open')) {
+                nextDetails.setAttribute('open', '');
+            } else {
+                nextDetails.removeAttribute('open');
+            }
+        }
         if (window.Alpine && typeof Alpine.destroyTree === 'function') {
             Alpine.destroyTree(currentPanel);
         }
@@ -285,7 +304,7 @@ document.addEventListener('alpine:init', () => {
         const productsRoot = fromEl && fromEl.closest('.extraction-products');
         const data = window.getActiveExtractionProductData(fromEl);
         if (!data || typeof data.reanalyseRow !== 'function') {
-            alert('Select a product tab first.');
+            window.appAlert('Select a product tab first.');
             return;
         }
         let lineData = null;
@@ -358,7 +377,7 @@ document.addEventListener('alpine:init', () => {
             } catch (e) { /* ignore */ }
             window.location.reload();
         } catch (error) {
-            alert(error.message || 'Re-analyse failed.');
+            window.appAlert(error.message || 'Re-analyse failed.');
             if (btn) {
                 btn.disabled = false;
                 btn.dataset.busy = '0';
@@ -372,7 +391,7 @@ document.addEventListener('alpine:init', () => {
     window.removeActiveExtractionProduct = async function removeActiveExtractionProduct(fromEl, editUrl, boqPk) {
         const data = window.getActiveExtractionProductData(fromEl);
         if (!data) {
-            alert('Select a product tab first.');
+            window.appAlert('Select a product tab first.');
             return;
         }
         const confirmed = window.BOQConfirm
@@ -400,7 +419,7 @@ document.addEventListener('alpine:init', () => {
             } catch (e) { /* ignore */ }
             window.location.reload();
         } catch (error) {
-            alert(error.message || 'Failed to remove product.');
+            window.appAlert(error.message || 'Failed to remove product.');
         }
     };
 
@@ -437,7 +456,7 @@ document.addEventListener('alpine:init', () => {
             );
             window.dispatchEvent(new CustomEvent('product-id-assigned'));
         } catch (error) {
-            alert(error.message || 'Failed to select candidate.');
+            window.appAlert(error.message || 'Failed to select candidate.');
             if (btn) {
                 btn.disabled = false;
             }
@@ -467,7 +486,7 @@ document.addEventListener('alpine:init', () => {
             );
             window.dispatchEvent(new CustomEvent('product-id-assigned'));
         } catch (error) {
-            alert(error.message || 'Failed to confirm match.');
+            window.appAlert(error.message || 'Failed to confirm match.');
             if (btn) {
                 btn.disabled = false;
             }
@@ -490,6 +509,42 @@ document.addEventListener('alpine:init', () => {
         saveError: '',
         reanalysing: false,
         autoSaveTimer: null,
+        async loadProductId(productId) {
+            const rawId = String(productId || '').trim();
+            if (!rawId) {
+                this.emitSaveStatus('error', 'Please enter a Product ID to load.');
+                return;
+            }
+            const btn = this.$el.querySelector('button[title="Load product by ID"]');
+            if (btn) btn.disabled = true;
+            this.emitSaveStatus('saving', 'Loading product...');
+            try {
+                const data = await window.extractionAjaxPost(this.url, {
+                    action: 'load_product_id',
+                    row_id: this.rowId,
+                    product_index: String(this.productIndex),
+                    product_id: rawId,
+                });
+                if (data && data.line_html) {
+                    this.emitSaveStatus('ok');
+                    window.replaceExtractionProductPanel(
+                        data.row_id || this.rowId,
+                        data.product_index != null ? data.product_index : this.productIndex,
+                        data.line_html,
+                    );
+                    window.dispatchEvent(new CustomEvent('product-id-assigned'));
+                } else if (data && data.error) {
+                    this.emitSaveStatus('error', data.error);
+                    window.appAlert(data.error);
+                }
+            } catch (error) {
+                const msg = error.message || 'Invalid id';
+                this.emitSaveStatus('error', msg);
+                window.appAlert(msg);
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        },
         emitSaveStatus(phase, message = '') {
             this.$dispatch('extraction-save-status', {
                 productIndex: this.productIndex,
@@ -528,11 +583,11 @@ document.addEventListener('alpine:init', () => {
             }
             const form = this.getForm();
             if (form && form.querySelector(`[name="attr_${key}"]`)) {
-                alert('That attribute already exists on this product.');
+                window.appAlert('That attribute already exists on this product.');
                 return;
             }
             if (this.extraAttrs.some((item) => item.key === key)) {
-                alert('That attribute already exists on this product.');
+                window.appAlert('That attribute already exists on this product.');
                 return;
             }
             this.extraAttrs.push({
@@ -693,7 +748,7 @@ document.addEventListener('alpine:init', () => {
                 this.reanalysing = false;
                 this.saveError = error.message || 'Re-analyse failed.';
                 this.emitSaveStatus('error', this.saveError);
-                alert(this.saveError);
+                window.appAlert(this.saveError);
                 throw error;
             }
         },

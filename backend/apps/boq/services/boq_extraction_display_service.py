@@ -340,7 +340,7 @@ def _shape_product(
     fill_threshold = float(ANALYSIS_INPUT_FILL_CONFIDENCE)
 
     candidates = []
-    selected_id = product.get("db_product_id") or product.get("suggested_db_product_id")
+    selected_id = product.get("db_product_id")
     for item in (product.get("db_candidates") or [])[:3]:
         cand_id = item.get("id")
         is_selected = False
@@ -379,19 +379,9 @@ def _shape_product(
             database_version_id=database_version_id,
         )
 
-    for item in candidates:
-        try:
-            conf = float(item.get("confidence") or 0.0)
-            if conf <= 0.0:
-                item["confidence"] = 2.0
-            elif conf < 2.0:
-                item["confidence"] = 2.0
-        except (TypeError, ValueError):
-            item["confidence"] = 2.0
-
     candidates.sort(
         key=lambda x: (
-            1 if x.get("is_selected") else 0,
+            1 if x.get("is_manual_insert") else 0,
             float(x.get("confidence") or 0.0)
         ),
         reverse=True
@@ -461,7 +451,7 @@ def _shape_product(
                     "label": "Product Id",
                     "value": product_id_value,
                     "missing": False,
-                    "readonly": True,
+                    "readonly": False,
                 }
             )
         value = product.get(key)
@@ -581,6 +571,7 @@ def _shape_product(
         "missing_attribute_count": len(missing_attr_keys),
         "missing_count": missing_count,
         "summary": _product_summary(product),
+        "is_manual_load": selection_source == "manual_load",
         "raw": product,
     }
 

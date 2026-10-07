@@ -285,6 +285,95 @@ class BOQExtractionEditService:
         self._persist(boq, analysis)
         return updated
 
+    def load_by_product_id(
+        self,
+        *,
+        row_id: str,
+        product_index: int,
+        product_id: str,
+    ) -> dict[str, Any]:
+        """Manually load a product by its text Product_ID (e.g. 'P1001')."""
+        from apps.boq.services.product_ai_mapping_service import ProductAIMappingService
+        from apps.database_manager.services.activation import get_active_database_version
+        from apps.database_manager.models import Rate_Master_Output, Product_Helper
+
+        boq = self._get_boq()
+        self._ensure_editable(boq)
+
+        analysis = dict(boq.analysis_data or {})
+        stored_db_id = int(analysis.get("database_version_id") or 0) or None
+        if stored_db_id:
+            version_id = stored_db_id
+        else:
+            active = get_active_database_version()
+            if active is None:
+                raise ValidationError("No active master database.")
+            version_id = active.pk
+
+        rows = list(analysis.get("rows") or [])
+        row = self._find_row(rows, row_id)
+        if row is None:
+            raise ValidationError(f"Unknown BOQ row: {row_id}")
+
+        products = list(row.get("products") or [])
+        product = self._find_product(products, product_index)
+        if product is None:
+            raise ValidationError(f"Unknown product index: {product_index}")
+
+        candidate_pk = None
+        for cand in product.get("db_candidates") or []:
+            cand_pid = str(cand.get("product_id") or "").strip()
+            if cand_pid and cand_pid.lower() == product_id.lower():
+                try:
+                    candidate_pk = int(cand.get("id"))
+                    break
+                except (TypeError, ValueError):
+                    pass
+
+        if candidate_pk:
+            rate_match = Rate_Master_Output.objects.filter(
+                database_version_id=version_id,
+                pk=candidate_pk
+            ).first()
+        else:
+            rate_match = Rate_Master_Output.objects.filter(
+                database_version_id=version_id,
+                Product_ID__iexact=product_id
+            ).first()
+
+        if not rate_match:
+            raise ValidationError(f"Invalid id: {product_id} not found in database.")
+
+        try:
+            updated = ProductAIMappingService(version_id).apply_selected_candidate(
+                product,
+                rate_match.pk,
+            )
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+
+        # Override confidence since it's a manual load by ID without AI
+        updated["db_match_confidence"] = 100.0
+        updated["attribute_confidence"] = 100.0
+        if "ai_mapping" in updated:
+            updated["ai_mapping"]["notes"] = f"Manually loaded Product ID: {product_id}."
+            updated["ai_mapping"]["selection_source"] = "manual_load"
+
+        composed = compose_description_hint(updated)
+        if composed:
+            updated["description_hint"] = composed
+
+        position = self._product_position(products, product_index)
+        if position is None:
+            raise ValidationError(f"Unknown product index: {product_index}")
+        products[position] = updated
+        row["products"] = products
+        row["skip_matching"] = not products
+        analysis["rows"] = rows
+        analysis["phase"] = PHASE_EXTRACTED
+        self._persist(boq, analysis)
+        return updated
+
     def confirm_match(
         self,
         *,

@@ -2651,8 +2651,12 @@
         .extraction-db-candidates__link:hover .muted {
             color: inherit;
         }
-        .extraction-db-candidates__list li.is-selected {
+        .extraction-db-candidates__list li.is-selected,
+        .extraction-db-candidates__list li.is-selected .extraction-db-candidates__pct,
+        .extraction-db-candidates__list li.is-selected .extraction-db-candidates__selected,
+        .extraction-db-candidates__list li.is-selected .extraction-db-candidates__tech {
             font-weight: 600;
+            color: #ca8a04;
         }
         .extraction-db-candidates .muted {
             color: var(--text-muted);

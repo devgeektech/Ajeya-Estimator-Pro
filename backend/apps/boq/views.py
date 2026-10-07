@@ -867,6 +867,43 @@ class BOQExtractionEditView(LoginRequiredMixin, View):
                         line_html=line_html,
                     )
                 messages.success(request, message)
+            elif action == "load_product_id":
+                try:
+                    product_index = int(request.POST.get("product_index") or "0")
+                    product_id = (request.POST.get("product_id") or "").strip()
+                except ValueError:
+                    message = "Invalid input."
+                    if ajax:
+                        return _extraction_edit_json_error(message)
+                    messages.error(request, message)
+                    return HttpResponseRedirect(redirect_url)
+                if not product_id:
+                    message = "Please provide a Product ID."
+                    if ajax:
+                        return _extraction_edit_json_error(message)
+                    messages.error(request, message)
+                    return HttpResponseRedirect(redirect_url)
+                try:
+                    editor.load_by_product_id(
+                        row_id=row_id,
+                        product_index=product_index,
+                        product_id=product_id,
+                    )
+                except ValidationError as exc:
+                    if ajax:
+                        return _extraction_edit_json_error(str(exc))
+                    messages.error(request, str(exc))
+                    return HttpResponseRedirect(redirect_url)
+                message = f"Loaded product ID {product_id}."
+                if ajax:
+                    line_html = _render_extraction_line_html(request, boq, row_id)
+                    return _extraction_edit_json_ok(
+                        message,
+                        row_id=row_id,
+                        product_index=product_index,
+                        line_html=line_html,
+                    )
+                messages.success(request, message)
             elif action == "confirm_match":
                 try:
                     product_index = int(request.POST.get("product_index") or "0")

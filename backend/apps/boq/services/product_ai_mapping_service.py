@@ -120,10 +120,8 @@ class ProductAIMappingService(
                 raw_confidence = item.get("confidence")
                 if raw_confidence is not None:
                     preserved["confidence"] = raw_confidence
-                    try:
-                        listed_confidence = float(raw_confidence)
-                    except (TypeError, ValueError):
-                        listed_confidence = None
+                    from apps.boq.services.boq_extraction_display_service import _candidate_confidence_value
+                    listed_confidence = _candidate_confidence_value(raw_confidence)
                 candidates.append(preserved)
             else:
                 # Never rewrite other candidates' scores or summaries on select.
@@ -138,6 +136,7 @@ class ProductAIMappingService(
             if len(candidates) >= _CANDIDATE_LIMIT:
                 break
         if selected_pk not in seen_ids:
+            selected_slim["is_manual_insert"] = True
             candidates.insert(0, selected_slim)
             candidates = candidates[:_CANDIDATE_LIMIT]
 

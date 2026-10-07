@@ -126,7 +126,7 @@ class ProductAIApplyMixin:
                         "selected_id": top.get("id"),
                         "match_confidence": top_conf,
                         "attribute_map": {},
-                        "mapped_attributes": top.get("attributes") or {},
+                        "mapped_attributes": {},
                         "unmapped_attributes": {},
                         "notes": f"Auto-accepted (structured score {top_conf:.0f}% >= {skip_threshold:.0f}%)",
                     }
