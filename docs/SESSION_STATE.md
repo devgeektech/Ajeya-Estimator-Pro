@@ -3,6 +3,22 @@
 Compact active memory. Full spec: `docs/PRODUCT.md`. Schema: `docs/DATABASE.md`.
 History: `docs/CHANGELOG.md` (do not duplicate session diaries here).
 
+### 2026-10-07 — Re-analyse Missing Input Penalty & AI Re-extraction Fix
+
+Completed:
+- Modified `structured_match_score` to properly penalize missing inputs (`size`, `class`, `capacity`, `attributes`) if the DB candidate requires them and the BOQ has evidence. This lowers the Re-analyse score from 100% when the user's filled inputs are incomplete compared to the catalog row.
+- Updated the AI mapping prompt (`map_product_match.txt`) to aggressively scan the `description_hint` and `boq_row.description` to re-extract missing attributes if the user leaves them blank during Re-analyse.
+- Replaced the `alert` popup on the Extract row with a visually integrated, top-of-screen `appAlert` banner.
+- Updated Re-analyse highlights: selected Database Candidate attributes are now highlighted via text color (e.g. `text-emerald-700 font-semibold`) instead of a circular background to improve readability.
+- Synced branches and deployed fixes to main.
+
+Pending:
+- None.
+
+Issues: None.
+
+Next: Test Re-analyse locally or on the server.
+
 ### 2026-09-24 — Dynamic Contextual AI Extraction and Logical Confidence Scoring
 
 Completed:
