@@ -5,6 +5,13 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
+## 2026-10-07 — Re-analyse Penalty & AI Re-extraction Fixes
+
+- Fixed PDF Make List extraction by switching from `pypdf` to `pdfplumber`, completely resolving table layout loss on malformed PDFs missing font metadata (`Tf`).
+- Upgraded text peeling boundaries (`utils/text_boundary.py`) to preserve lowercase brand names.
+- Resolved IDE linter warnings in `pdf_make_list_parser.py` and `test_conflict.py`.
+- Merged and deployed all fixes to live.
+
 ## 2026-10-07 — Add Rate Only tag for zero quantity
 
 - Added `Rate Only` badge for extraction lines and review tables when the line quantity is zero (`line.qty == 0`), displayed next to the product count tag.
