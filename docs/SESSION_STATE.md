@@ -95,6 +95,7 @@ Completed:
 - Adjusted server `.env` variables (`AI_ROW_EXTRACTION_BATCH_SIZE=10`, `AI_PRODUCT_MAPPING_BATCH_SIZE=10`, `AI_EXTRACT_PARALLELISM=2`) to align with local settings and eliminate the production performance bottleneck.
 - Switched native `alert()` calls in `_extraction_table.html` to use a consistent custom `window.appAlert`.
 - Fixed the issue where a manual "Top DB candidate" selection artificially locked the product into a 100% confidence score during subsequent `Re-analyse` executions. Now, `rematch_product` explicitly clears pre-filled database attributes (`attribute_source == "database"`) prior to the AI map request, forcing a genuine re-extraction from the product description and resulting in an honest match confidence score.
+- Fixed an issue where the Re-analyse button continued to use the previously selected candidate's ID and matching candidates to constrain the new AI extraction. Now `db_candidates` and `product_id` are explicitly cleared so the AI can use the updated inputs to find completely fresh DB candidates.
 
 Pending: None
 Issues: None
