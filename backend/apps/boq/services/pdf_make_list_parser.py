@@ -209,6 +209,18 @@ def split_make_list_body(body: str) -> tuple[str, list[str]]:
         return "", []
 
     rest = re.sub(r"\s*/\s*", " / ", rest)
+
+    # If layout mode preserved large column gaps (>= 3 spaces), split by them first.
+    # This prevents brands from fusing into descriptions if they are unknown.
+    layout_cols = [col.strip() for col in re.split(r" {3,}", rest) if col.strip()]
+    if len(layout_cols) >= 2:
+        description = layout_cols[0]
+        makes_raw = " / ".join(layout_cols[1:])
+        return repair_description_and_makes(
+            description,
+            [normalize_make_segment(item) for item in makes_raw.split("/") if item.strip()]
+        )
+
     rest = re.sub(r"\s+", " ", rest).strip()
 
     # Manufacturer-only rows: keep name in Description and Approved Makes so the
