@@ -5,7 +5,29 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
-## 2026-10-07 — Add Rate Only tag for zero quantity
+## 2026-10-09 — Make & Vendor Dropdown Scoping, Approved Makes Completeness & Price Preview
+- **Approved Make Completeness**: Ensured 100% of approved makes from the Make List are loaded into the "Approved make" dropdown for the scoped category / subcategory, removing premature Rate_Master intersections that dropped approved makes without existing rate entries.
+- **Available Make Dropdown**: Added a dedicated "Available make" dropdown directly after "Approved make" in the top Category / Sub-category panel of Make & Vendor.
+- **Strict Mutual Exclusivity**: Selecting any make from "Approved make" automatically clears "Available make", and selecting from "Available make" automatically clears "Approved make". Only one make is active at a time.
+- **Strict Separation of Approved and Database Makes**: Prevented database makes (`Rate_Master_Output`) from ever mixing into the "Approved make" dropdown. When no approved makes exist for a scope, "Approved make" is disabled and displays only `"No Approved Make Found"`, never falling back to database makes.
+- **Strict Sub-Category Vendor Scoping**: Removed parent category fallback in `_vendors_for_subcategory_make` that leaked random vendors from unrelated subcategories into the dropdown. Now strictly returns vendors from the active subcategory and make.
+- **Stale Make Clear on Sub-Category Change**: Fixed `onSubCategoryChange` in Alpine.js so changing subcategory resets make and available make rather than pre-filling makes from other subcategories.
+- **Dynamic Price Preview Across Scopes**: Removed sub-category restriction in `previewRate` so price previews load dynamically for both category-wide and sub-category scopes, dual-indexing prices under canonical Rate_Master makes and approved make aliases.
+- **Cascade Apply Support**: Updated `apply_subcategory_make` to accept available database makes alongside approved makes when bulk-applying to categories and sub-categories.
+- **Responsive 6-Column Grid**: Updated `.make-vendor-subcategory-panel__grid` in `templates/base.html` to 6 responsive columns.
+- **Removed Review and Vendor Review Tags**: Removed the "Review" and "Vendor review" badges and notes from Make & Vendor pages because Product IDs are already assigned on the Analysis page. Selecting make and vendor now directly retrieves the Product ID + Rate ID combination from `Rate_Master_Output` and marks the card "Matched" without intermediate review states. Disabled `_flag_same_material_rate_vendor_review` and removed `vendor_review_count` from summary counters.
+- **Fixed Suggestion Confidence Badge Falsely Showing 100%**: In `templates/boq/_extraction_line.html`, removed `|default:product.attribute_confidence` from the suggestion database match badge. Django template filter `|default:` treated `0` as falsy, which erroneously substituted the attribute extraction completeness confidence (100%) in place of the 0% database match score. Now strictly renders `{{ product.match_percentage|floatformat:0 }}% match`.
+
+## 2026-10-09 — Attribute Extraction, Manual Confirmation & Mismatch Highlights
+
+- **AI Attribute Extraction Optimization**: Enhanced extraction instructions in `extract_products.txt` with explicit key mappings and examples for `mounting` (mount type), `is` (IS standards), `type`, `length`, `nozzle_size`, `pressure_rating`, etc.
+- **Sentinel & Mismatch Scoring**: Added `_is_sentinel_or_empty` support across size/class/capacity in `product_matching_service.py` to prevent sentinel values (`0`, `00`, `0.0`, `0.00`, null) in DB or extraction from degrading confidence scores.
+- **Green-Band Prefill & Clean Matched Display**: Products with green-band confidence (≥95%) come prefilled with Product IDs, display the clean "Matched database product" header without "Suggested:" prefixes, and suppress missing attribute warnings/notes. Products below green (<95%) stay provisional until manually confirmed or selected from candidates. "Confirm Manually" is shown only on products below 100% match, and hidden completely for products with 100% confidence score.
+- **Separate Rate Only Count in Summary**: Displayed missing "Rate Only" products separately in the top summary banner and Next step confirmation modal.
+- **Mismatched Field Highlighting**: Implemented `.extraction-input--mismatched` with light red background styling for any extracted field differing from the top suggested candidate row (e.g. AI extracted size `20` vs suggested candidate size `10`), active for all products with confidence score ≥ 50% evaluated against the candidate with the highest confidence score.
+- **Suggested Product Always Reflects Highest Confidence Candidate**: Ensured that the Suggested Database Product banner summary, `suggested_id`, and `confirm_match` always reflect the candidate with the highest confidence score rather than any lower-scoring candidate.
+- **Updated Input Matching Weightages**: Adjusted `_TEXT_WEIGHTS` in `product_matching_service.py` and `product_helper_matching_service.py` to: Sub-category 40%, Category 30%, Size 6%, Class 6%, Capacity 6%, Unit 6%, Attributes 6% (summing to 100%).
+- **Clean Match Card UI**: Removed missing attribute warning banners and AI notes paragraphs from extraction cards across all sections.
 
 - Added `Rate Only` badge for extraction lines and review tables when the line quantity is zero (`line.qty == 0`), displayed next to the product count tag.
 

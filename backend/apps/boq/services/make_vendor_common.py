@@ -84,10 +84,10 @@ def _catalog_product_id(product: dict[str, Any] | None) -> str:
 
 
 def loaded_catalog_product_id(product: dict[str, Any] | None) -> str:
-    """Catalog Product_ID for a product that has been matched or selected.
+    """Catalog Product_ID for a product that has been manually confirmed or loaded.
 
-    Suggested-only IDs do not count. Red match tabs (<70%) also do not count
-    until the expert Selects or Confirms, or rematch reaches orange/green %.
+    AI analysis matches stay provisional and do not assign a Product ID by default.
+    Only expert confirmation locks the ID.
     """
     from common.constants import PRODUCT_ID_CONFIRM_CONFIDENCE
 
@@ -96,51 +96,80 @@ def loaded_catalog_product_id(product: dict[str, Any] | None) -> str:
     selection_source = str(mapping.get("selection_source") or "").strip().lower()
     status = str(item.get("db_match_status") or "").strip().lower()
     try:
-        match_conf = float(item.get("db_match_confidence") or 0.0)
+        match_conf = float(item.get("db_match_confidence") or item.get("attribute_confidence") or 0.0)
     except (TypeError, ValueError):
         match_conf = 0.0
+    if match_conf == 0.0:
+        for cand in item.get("db_candidates") or []:
+            try:
+                c_conf = float(cand.get("confidence") or 0.0)
+                if c_conf > match_conf:
+                    match_conf = c_conf
+            except (TypeError, ValueError):
+                continue
 
-    expert_locked = selection_source in {"expert", "confirm"}
-    strong_match = (
-        status == "matched"
-        and match_conf >= float(PRODUCT_ID_CONFIRM_CONFIDENCE)
-    )
-    if not expert_locked and not strong_match:
+    expert_locked = selection_source in {"expert", "confirm", "manual_load"}
+    green_match = match_conf >= float(PRODUCT_ID_CONFIRM_CONFIDENCE)
+
+    if not expert_locked and not green_match:
         return ""
 
     text = str(item.get("catalog_product_id") or "").strip()
     if text:
         return text
-    
-    # If there is no confirmed database product ID, there is no loaded catalog ID.
-    if item.get("db_product_id") in (None, ""):
-        return ""
-        
+
     text = str(item.get("suggested_catalog_product_id") or "").strip()
     if text:
         return text
+
     summary = str(item.get("db_product_summary") or "").strip()
     if summary.lower().startswith("suggested:"):
-        return ""
+        summary = summary.split(":", 1)[1].strip()
     if " / " in summary:
         first = summary.split(" / ", 1)[0].strip()
         if first and first.lower() not in {"null", "none", "—", "-"}:
             return first
+
+    for cand in item.get("db_candidates") or []:
+        if isinstance(cand, dict):
+            pid = str(cand.get("product_id") or "").strip()
+            if pid:
+                return pid
+
+    if item.get("db_product_id") not in (None, ""):
+        return str(item.get("db_product_id"))
+    if item.get("suggested_db_product_id") not in (None, ""):
+        return str(item.get("suggested_db_product_id"))
+
     return ""
 
 
-def count_missing_loaded_product_ids(analysis: dict[str, Any] | None) -> int:
-    """How many Analysis products still need Select / Confirm (no Product Id)."""
+def count_missing_product_ids_summary(analysis: dict[str, Any] | None) -> tuple[int, int]:
+    """How many Analysis products still need Select / Confirm (no Product Id).
+
+    Returns:
+        (missing_count, missing_rate_only_count)
+    """
     missing = 0
+    missing_rate_only = 0
     for row in (analysis or {}).get("rows") or []:
         if str(row.get("skip_reason") or "") == "lineage_child_row":
             continue
         if bool(row.get("is_activity_only")) and not (row.get("products") or []):
             continue
         for product in row.get("products") or []:
-            # A product is missing an ID if it does not have a confirmed catalog_product_id
-            if not str(product.get("catalog_product_id") or "").strip():
+            if not loaded_catalog_product_id(product):
                 missing += 1
+                qty_str = str(product.get("quantity") or "").strip().lower()
+                is_ro = bool(product.get("rate_only")) or qty_str in {"rate only", "rate_only"}
+                if is_ro:
+                    missing_rate_only += 1
+    return missing, missing_rate_only
+
+
+def count_missing_loaded_product_ids(analysis: dict[str, Any] | None) -> int:
+    """How many Analysis products still need Select / Confirm (no Product Id)."""
+    missing, _ = count_missing_product_ids_summary(analysis)
     return missing
 
 
@@ -242,39 +271,11 @@ def _build_same_price_choices(
 
 
 def _flag_same_material_rate_vendor_review(lines: list[dict[str, Any]]) -> int:
-    """
-    Highlight products that share the same material rate but use different
-    make/vendor pairs — expert must confirm the vendor choice.
-    """
-    buckets: dict[str, list[dict[str, Any]]] = {}
+    """Vendor review flagging disabled — product IDs are assigned on Analysis page."""
     for line in lines:
         for product in line.get("products") or []:
             product["vendor_rate_review"] = False
-            line_output = product.get("line_output") or {}
-            rate_key = _normalize_material_rate_key(line_output.get("material_rate"))
-            if not rate_key:
-                continue
-            if str(product.get("match_status") or "") != "matched":
-                continue
-            buckets.setdefault(rate_key, []).append(product)
-
-    flagged = 0
-    for products in buckets.values():
-        if len(products) < 2:
-            continue
-        combos = {
-            (
-                _normalize_text(item.get("selected_make")),
-                _normalize_text(item.get("selected_vendor")),
-            )
-            for item in products
-        }
-        if len(combos) < 2:
-            continue
-        for item in products:
-            item["vendor_rate_review"] = True
-            flagged += 1
-    return flagged
+    return 0
 
 
 def _product_summary(product: dict[str, Any]) -> str:

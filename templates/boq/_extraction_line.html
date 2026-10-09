@@ -230,7 +230,7 @@
                     <div class="extraction-db-match__head">
                         {% if product.show_weak_match_warning %}
                         <span class="extraction-db-match__heading">Low-confidence match</span>
-                        {% elif product.db_match.status == 'matched' %}
+                        {% elif product.match_percentage_band == 'green' or product.db_match.status == 'matched' %}
                         <span class="extraction-db-match__heading">Matched database product</span>
                         {% elif product.db_match.status == 'provisional' %}
                         <span class="extraction-db-match__heading">Suggested database product</span>
@@ -243,8 +243,8 @@
                         {% if product.is_manual_load %}
                         <span class="badge badge--green extraction-confidence-badge">Manually Loaded</span>
                         {% else %}
-                        <span class="badge badge--{{ product.match_percentage_band|default:product.attribute_confidence_band }} extraction-confidence-badge">
-                            {{ product.match_percentage|default:product.attribute_confidence|floatformat:0 }}% match
+                        <span class="badge badge--{{ product.match_percentage_band|default:'red' }} extraction-confidence-badge">
+                            {{ product.match_percentage|floatformat:0 }}% match
                         </span>
                         {% endif %}
                         {% if can_edit_extraction and product.show_confirm_match %}
@@ -258,18 +258,6 @@
                     </div>
                     {% if product.show_weak_match_warning and product.weak_match_message %}
                     <p class="extraction-db-match__warning" role="status">{{ product.weak_match_message }}</p>
-                    {% endif %}
-                    {% if product.missing_attribute_count and not product.show_weak_match_warning %}
-                    <p class="extraction-db-match__missing">
-                        {{ product.missing_attribute_count }} missing attribute(s) —
-                        fill them below, then click <strong>Re-analyse with AI</strong> on
-                        this product. Rematch uses your AI Description (editable),
-                        filled values, the full BOQ section, and refreshes
-                        database candidates.
-                    </p>
-                    {% endif %}
-                    {% if product.db_match.notes and not product.show_weak_match_warning %}
-                    <p class="extraction-db-match__notes">{{ product.db_match.notes }}</p>
                     {% endif %}
                 </div>
                 {% elif product.show_weak_match_warning or product.db_match_status == 'unmatched' %}
@@ -300,18 +288,6 @@
                     </div>
                     {% if product.weak_match_message %}
                     <p class="extraction-db-match__warning" role="status">{{ product.weak_match_message }}</p>
-                    {% else %}
-                    <p class="extraction-db-match__notes">
-                        {% if product.db_candidates %}
-                        Similar products are listed under <strong>Top database candidates</strong>
-                        below — select any of them, or edit the inputs and click
-                        <strong>Re-analyse with AI</strong>.
-                        {% else %}
-                        Edit the <strong>AI Description</strong> (e.g. correct the
-                        product in plain language) and input columns, then click
-                        <strong>Re-analyse with AI</strong> on this product.
-                        {% endif %}
-                    </p>
                     {% endif %}
                 </div>
                 {% endif %}
@@ -366,7 +342,7 @@
 
                     <div class="extraction-field-grid">
                         {% for field in product.fields %}
-                        <label class="extraction-field {% if field.key == 'description_hint' %}extraction-field--full{% endif %}{% if field.missing %} extraction-field--missing{% endif %}{% if field.readonly %} extraction-field--readonly{% endif %}">
+                        <label class="extraction-field {% if field.key == 'description_hint' %}extraction-field--full{% endif %}{% if field.missing %} extraction-field--missing{% endif %}{% if field.readonly %} extraction-field--readonly{% endif %}{% if field.mismatched %} extraction-field--mismatched{% endif %}">
                             <span class="extraction-field__label">{{ field.label }}{% if field.missing %} *{% endif %}</span>
                             {% if field.key == 'description_hint' %}
                             <textarea
@@ -406,7 +382,8 @@
                                 type="text"
                                 name="{{ field.key }}"
                                 value="{{ field.value }}"
-                                class="extraction-input"
+                                class="extraction-input{% if field.mismatched %} extraction-input--mismatched{% endif %}"
+                                {% if field.mismatched %}style="background-color: #ffeaea !important; border-color: #ffbaba !important;"{% endif %}
                                 placeholder="Not found"
                             >
                             {% endif %}

@@ -81,6 +81,13 @@ class ProductIdDisplayTests(SimpleTestCase):
                 {"row_id": "r2", "is_activity_only": True, "products": []},
             ]
         }
+        # Green match (>=95) comes prefilled with Product ID, so only the blank product is missing
+        self.assertEqual(count_missing_loaded_product_ids(analysis), 1)
+        # If the first product is orange/red (<95) without expert confirmation, it is also missing
+        analysis["rows"][0]["products"][0]["db_match_confidence"] = 70.0
+        self.assertEqual(count_missing_loaded_product_ids(analysis), 2)
+        # Once confirmed by expert, missing count drops back to 1
+        analysis["rows"][0]["products"][0]["ai_mapping"]["selection_source"] = "confirm"
         self.assertEqual(count_missing_loaded_product_ids(analysis), 1)
 
 

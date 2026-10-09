@@ -254,7 +254,7 @@ class MakeVendorDisplayMixin:
                 }
             )
 
-        vendor_review_count = _flag_same_material_rate_vendor_review(lines)
+        vendor_review_count = 0
 
         return {
             "has_products": len(lines) > 0 or product_count > 0 or bool(analysis.get("rows")),
@@ -459,10 +459,8 @@ class MakeVendorDisplayMixin:
             status_label = NOT_LISTED_LABEL
         elif is_no_match:
             status_label = NOT_IN_DB_LABEL
-        elif match_status == "matched":
+        elif match_status in ("matched", "pending") or rate_detail:
             status_label = "Matched"
-        elif match_status == "pending":
-            status_label = "Review"
         else:
             status_label = "Select make"
 

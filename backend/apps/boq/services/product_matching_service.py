@@ -16,7 +16,11 @@ from common.db import q, q_and, q_or
 from common.exceptions import AIServiceError
 
 from .make_list_constraint_service import MakeListConstraintService
-from .boq_row_fields import is_filled as _is_filled, normalize_text as _normalize_text
+from .boq_row_fields import (
+    is_filled as _is_filled,
+    is_sentinel_or_empty as _is_sentinel_or_empty,
+    normalize_text as _normalize_text,
+)
 from utils.attribute_parser import attribute_overlap_score, parse_attributes
 from utils.product_synonyms import (
     expand_query_terms,
@@ -35,13 +39,13 @@ AI_CANDIDATE_LIMIT = 5
 # sub_category is the strongest identity signal — raised to 35 (was 30).
 # category reduced to 20 (was 24) since sub_category already implies it.
 _TEXT_WEIGHTS = {
-    "sub_category": 35.0,
-    "category": 20.0,
-    "class": 10.0,
-    "size": 18.0,
-    "unit": 5.0,
-    "capacity": 8.0,
-    "attributes": 12.0,
+    "sub_category": 40.0,
+    "category": 30.0,
+    "class": 6.0,
+    "size": 6.0,
+    "unit": 6.0,
+    "capacity": 6.0,
+    "attributes": 6.0,
 }
 _CHROMA_WEIGHT = 0.25
 _STRUCTURED_WEIGHT = 0.75
@@ -474,15 +478,18 @@ def structured_match_score(
 
     for name, left, right, scorer in field_checks:
         weight = _TEXT_WEIGHTS[name]
-        # Class/capacity/size: omit when neither side has a real value.
-        if name in {"class", "capacity", "size"} and not _is_filled(left) and not _is_filled(right):
+        # Class/capacity/size: omit when neither side has a real value (both empty or sentinel).
+        if name in {"class", "capacity", "size"} and _is_sentinel_or_empty(left) and _is_sentinel_or_empty(right):
             continue
-        # Catalog has no nominal size (Size=0 sentinel) — do not dilute or
+        # Catalog has no nominal size (Size=0/00 sentinel) — do not dilute or
         # penalize BOQ cabinet dims / letter sizes against a blank Size.
-        if name == "size" and not _is_filled(right):
+        if name == "size" and _is_sentinel_or_empty(right):
             continue
-        # Catalog Capacity=0 is a sentinel — do not score extract capacity against it.
-        if name == "capacity" and not _is_filled(right):
+        # Catalog Capacity=0/00 is a sentinel — do not score extract capacity against it.
+        if name == "capacity" and _is_sentinel_or_empty(right):
+            continue
+        # When DB has Class=0/sentinel and AI extracted nothing, do not penalize.
+        if name == "class" and _is_sentinel_or_empty(right) and not _is_filled(left):
             continue
         if not _is_filled(left):
             # Unfound extract field: do not count as a miss in general.

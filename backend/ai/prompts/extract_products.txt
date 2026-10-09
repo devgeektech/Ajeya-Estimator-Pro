@@ -104,9 +104,30 @@ Priority order for every product:
      parent orifice/bore e.g. ``15 mm`` from ``a) Pendent sprinklers 15 mm``).
    - Always extract Unit when Size is known from BOQ (``15 mm`` → size 15, unit mm).
    - If the measure type does not match the catalog Unit for that sub-category → **null**.
-4. **Attributes** only from ``attribute_keys``.
-   - Map ``Operating Temp. : 68 deg.C.`` → ``temp`` (or schema key for temperature).
-   - Map ``k_factor`` / ``response`` when the BOQ states them.
+4. **Attributes** — CRITICAL: ALWAYS extract all attributes mentioned in the description / context matching ``attribute_keys``:
+   - Leaving ``attributes`` empty (``{}``) when specifications exist in the text severely damages confidence scores. Carefully inspect all parentheses, standards, and descriptive clauses.
+   - **mounting** (mount type): "wall mounted" / "wall mounting", "floor mounted", "swinging", "pedestal", "suspended", "ceiling mounted", "flange mounted".
+   - **type**: "swinging" / "swinging-type", "type 2" / "type-2", "double", "single", "full port", "dual plate", "wafer", "flanged", "wet chemical", "water based".
+   - **is** (Indian Standard): Extract standard numbers directly e.g. "IS:884" / "IS 884" → "884", "IS:12585" → "12585", "IS:903" → "903", "IS:13095" → "13095", "IS:5312" → "5312", "IS:2002" → "2002", "IS:1239" → "1239", "IS:636" → "636".
+   - **connection_type**: "flanged", "wafer", "screwed", "threaded", "instantaneous", "grooved".
+   - **connection_material**: "stainless steel" / "ss", "gunmetal", "bronze", "brass".
+   - **connection_standard**: "is903", etc.
+   - **length**: "15m", "30m", "15 m", "30 m".
+   - **nozzle_size**: "20mm", "16mm", "12mm".
+   - **material**: "cast iron", "ductile iron", "mild steel", "stainless steel", "forged brass", "bronze".
+   - **seat_type**: "bronze", "gunmetal", "nitrile", "epdm", "stainless steel".
+   - **mesh_material**: "stainless steel", "ss".
+   - **operation**: "lever operated", "gear operated", "electrical actuator", "handwheel".
+   - **temp** (temperature): "68 deg.C", "79 deg.C", "93 deg.C" → "68", "79", "93".
+   - **k_factor**: "K=80", "80", "115", "5.6".
+   - **response**: "standard response", "quick response".
+   - **pressure_rating**: "PN16", "PN10", "class 150".
+   - **reinforcement**: "wire reinforced", "synthetic reinforced".
+   - **fire_rating**: "2 hours", "120 mins".
+   - **height**: "1200mm", "1500mm".
+   - **thickness**: "1.6mm", "2mm".
+   - **head**, **hp**, **drive**: for pumps (e.g. `drive`: "electric", "diesel"; `head`: "35"; `hp`: "15").
+   - **configuration**: "combined hydrant cabinet", "single", "double".
 
 Binding:
 - Exactly one product per Unit/Qty slot (rare exception: one slot mandates two buys).

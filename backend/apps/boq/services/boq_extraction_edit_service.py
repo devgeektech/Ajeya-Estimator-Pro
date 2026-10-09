@@ -397,7 +397,30 @@ class BOQExtractionEditService:
         if product is None:
             raise ValidationError(f"Unknown product index: {product_index}")
 
-        rate_id = product.get("db_product_id") or product.get("suggested_db_product_id")
+        from apps.boq.services.make_vendor_common import loaded_catalog_product_id
+
+        rate_id = product.get("db_product_id")
+        if rate_id in (None, ""):
+            best_cand = None
+            best_score = -1.0
+            for cand in product.get("db_candidates") or []:
+                if isinstance(cand, dict) and cand.get("id"):
+                    try:
+                        sc = float(cand.get("confidence") or 0.0)
+                        if sc > best_score:
+                            best_score = sc
+                            best_cand = cand
+                    except (TypeError, ValueError):
+                        pass
+            if best_cand:
+                rate_id = best_cand.get("id")
+            else:
+                rate_id = product.get("suggested_db_product_id")
+        if rate_id in (None, ""):
+            for cand in product.get("db_candidates") or []:
+                if cand.get("id"):
+                    rate_id = cand.get("id")
+                    break
         if rate_id in (None, ""):
             raise ValidationError(
                 "No database product to confirm. Select a candidate first."
@@ -407,16 +430,9 @@ class BOQExtractionEditService:
         except (TypeError, ValueError) as exc:
             raise ValidationError("Invalid database product id.") from exc
 
-        try:
-            current = float(
-                product.get("db_match_confidence")
-                or product.get("attribute_confidence")
-                or 0.0
-            )
-        except (TypeError, ValueError):
-            current = 0.0
-        if current >= 99.5:
-            raise ValidationError("This product is already a 100% match.")
+        source = str((product.get("ai_mapping") or {}).get("selection_source") or "").strip().lower()
+        if source in {"confirm", "manual_load", "expert_confirm"} and float(product.get("db_match_confidence") or 0.0) >= 100.0:
+            raise ValidationError("This product is already confirmed.")
 
         updated = dict(product)
         updated["db_product_id"] = rate_pk

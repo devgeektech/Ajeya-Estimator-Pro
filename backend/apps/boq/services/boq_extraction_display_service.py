@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from ai.context import load_rate_master_taxonomy
@@ -13,6 +14,9 @@ from apps.boq.services.boq_extraction_service import (
 from apps.boq.services.boq_line_output_service import quantity_is_rate_sum_only
 from apps.boq.services.boq_row_fields import (
     is_blank as _is_blank,
+    is_filled as _is_filled,
+    is_sentinel_or_empty as _is_sentinel_or_empty,
+    normalize_text as _normalize_text,
     is_job_unit,
     resolve_activity_only,
 )
@@ -21,6 +25,7 @@ from apps.boq.services.extraction_attribute_fields import COMMON_ATTRIBUTE_LABEL
 from apps.boq.services.make_list_constraint_service import MakeListConstraintService
 from apps.boq.services.make_vendor_common import (
     count_missing_loaded_product_ids,
+    count_missing_product_ids_summary,
     loaded_catalog_product_id,
 )
 from apps.boq.services.product_attribute_enrichment_service import (
@@ -267,6 +272,39 @@ def _attribute_label(key: str) -> str:
     return COMMON_ATTRIBUTE_LABELS.get(key) or humanize_attribute_key(key)
 
 
+def _normalize_size_val(val: Any) -> float | None:
+    if val is None:
+        return None
+    s = str(val).strip().lower()
+    if s in {"", "not found", "null", "none", "n/a", "na", "-", "—"}:
+        return None
+    m = re.search(r"^(\d+(?:\.\d+)?)", s)
+    if m:
+        try:
+            return float(m.group(1))
+        except (ValueError, TypeError):
+            pass
+    return None
+
+
+def _is_mismatched_value(ai_val: Any, db_val: Any, field_key: str) -> bool:
+    ai_empty = _is_sentinel_or_empty(ai_val)
+    db_empty = _is_sentinel_or_empty(db_val)
+    if ai_empty and db_empty:
+        return False
+    if not _is_filled(ai_val):
+        return False
+    if db_empty:
+        return True
+    if field_key == "size":
+        s_ai = _normalize_size_val(ai_val)
+        s_db = _normalize_size_val(db_val)
+        if s_ai is not None and s_db is not None:
+            return abs(s_ai - s_db) > 1e-4
+        return _normalize_text(ai_val) != _normalize_text(db_val)
+    return _normalize_text(ai_val) != _normalize_text(db_val)
+
+
 def _shape_attribute_fields(product: dict[str, Any]) -> dict[str, Any]:
     """
     Attributes grid = required DB schema keys only (filled when AI/expert found a value).
@@ -440,9 +478,105 @@ def _shape_product(
                 and not product.get("db_product_id")
             )
 
+    db_candidates = product.get("db_candidates") or []
+    comparison_item = None
+
+    # If expert explicitly picked a candidate, compare against that selected candidate
+    if selection_source == "expert" and selected_id:
+        for item in db_candidates:
+            if isinstance(item, dict):
+                try:
+                    if item.get("id") and int(item.get("id")) == int(selected_id):
+                        comparison_item = item
+                        break
+                except (TypeError, ValueError):
+                    pass
+
+    # Otherwise, pick the suggested candidate with the highest confidence score
+    if not comparison_item:
+        if candidates and isinstance(candidates[0], dict) and candidates[0].get("id") is not None:
+            top_cand_id = candidates[0].get("id")
+            for item in db_candidates:
+                if isinstance(item, dict):
+                    try:
+                        if item.get("id") and int(item.get("id")) == int(top_cand_id):
+                            comparison_item = item
+                            break
+                    except (TypeError, ValueError):
+                        pass
+            if not comparison_item:
+                comparison_item = candidates[0]
+
+    if not comparison_item:
+        target_id = selected_id or product.get("suggested_db_product_id")
+        if target_id:
+            for item in db_candidates:
+                if isinstance(item, dict):
+                    try:
+                        if item.get("id") and int(item.get("id")) == int(target_id):
+                            comparison_item = item
+                            break
+                    except (TypeError, ValueError):
+                        pass
+
+    if not comparison_item and db_candidates:
+        best_cand = None
+        best_score = -1.0
+        for item in db_candidates:
+            if isinstance(item, dict):
+                try:
+                    sc = float(item.get("confidence") or 0.0)
+                    if sc > best_score:
+                        best_score = sc
+                        best_cand = item
+                except (TypeError, ValueError):
+                    pass
+        comparison_item = best_cand or db_candidates[0]
+
+    if not comparison_item and candidates:
+        comparison_item = candidates[0]
+
+    comparison_candidate = None
+    if comparison_item:
+        comparison_candidate = {
+            "category": comparison_item.get("category"),
+            "sub_category": comparison_item.get("sub_category"),
+            "class": comparison_item.get("class"),
+            "size": comparison_item.get("size"),
+            "unit": comparison_item.get("unit"),
+            "capacity": comparison_item.get("capacity"),
+        }
+        # Fall back to DB record only if the snapshot dictionary lacks fields
+        if not any(v is not None for v in comparison_candidate.values()) and comparison_item.get("id"):
+            try:
+                rate = Rate_Master_Output.objects.filter(pk=int(comparison_item["id"])).first()
+                if rate:
+                    comparison_candidate = {
+                        "category": rate.Category,
+                        "sub_category": rate.Sub_Category,
+                        "class": rate.Class,
+                        "size": rate.Size,
+                        "unit": rate.Unit,
+                        "capacity": rate.Capacity,
+                    }
+            except Exception:
+                pass
+
     fields: list[dict[str, Any]] = []
     missing_count = 0
     product_id_value = loaded_catalog_product_id(product)
+    if match_band == "green" and not product_id_value:
+        if candidates and isinstance(candidates[0], dict) and candidates[0].get("product_id"):
+            product_id_value = str(candidates[0]["product_id"]).strip()
+        elif candidates and isinstance(candidates[0], dict) and candidates[0].get("summary"):
+            cand_p = str(candidates[0]["summary"]).replace("Suggested:", "").strip().split(" / ")[0].strip()
+            if cand_p and cand_p.lower() not in {"null", "none", "—", "-"}:
+                product_id_value = cand_p
+        elif " / " in str(product.get("db_product_summary") or ""):
+            cand_p = str(product.get("db_product_summary")).replace("Suggested:", "").strip().split(" / ")[0].strip()
+            if cand_p and cand_p.lower() not in {"null", "none", "—", "-"}:
+                product_id_value = cand_p
+
     for key, label in _PRODUCT_FIELDS:
         if key == "category":
             fields.append(
@@ -458,11 +592,24 @@ def _shape_product(
         missing = _is_blank(value) and key in _REQUIRED_FIELDS
         if missing:
             missing_count += 1
+
+        mismatched = False
+        # Red input background for mismatch applies to products with confidence >= 50%
+        # compared against the highest suggested confidence score product
+        if (
+            float(match_percentage or 0.0) >= 50.0
+            and comparison_candidate
+            and key in comparison_candidate
+        ):
+            cand_val = comparison_candidate.get(key)
+            mismatched = _is_mismatched_value(value, cand_val, key)
+
         field_entry: dict[str, Any] = {
             "key": key,
             "label": label,
             "value": "" if value is None else str(value),
             "missing": missing,
+            "mismatched": mismatched,
             "readonly": False,
         }
         # Show a visual indicator when sub_category was AI-inferred, not directly
@@ -472,27 +619,51 @@ def _shape_product(
         fields.append(field_entry)
 
     attribute_fields = _shape_attribute_fields(product)
-    missing_attr_keys = [
-        str(key)
-        for key in (product.get("missing_attribute_keys") or [])
-        if str(key).strip()
-    ]
-    if not missing_attr_keys:
+    if match_band == "green":
+        missing_attr_keys = []
+    else:
         missing_attr_keys = [
-            field["key"]
-            for field in attribute_fields.get("fields") or []
-            if not field.get("filled")
+            str(key)
+            for key in (product.get("missing_attribute_keys") or [])
+            if str(key).strip()
         ]
+        if not missing_attr_keys:
+            missing_attr_keys = [
+                field["key"]
+                for field in attribute_fields.get("fields") or []
+                if not field.get("filled")
+            ]
 
     db_match = None
-    if product.get("db_product_id") or product.get("db_product_summary") or db_match_status == "provisional":
-        # Banner uses the stored DB summary — not the blanked Analysis inputs.
-        summary = str(product.get("db_product_summary") or "").strip()
-        if not summary:
+    if match_band == "green":
+        db_match_status = "matched"
+    if product.get("db_product_id") or product.get("db_product_summary") or db_match_status in ("matched", "provisional") or candidates:
+        top_candidate = candidates[0] if (candidates and isinstance(candidates[0], dict)) else None
+        # When not explicitly selected/confirmed by an expert, the suggested product
+        # must always be the candidate with the highest confidence score.
+        if selection_source != "expert" and not product.get("db_product_id") and top_candidate:
+            top_summary = str(top_candidate.get("summary") or "").strip()
+            if match_band == "green":
+                summary = top_summary.replace("Suggested:", "").strip()
+            else:
+                summary = f"Suggested: {top_summary}" if not top_summary.startswith("Suggested:") else top_summary
+            suggested_id = top_candidate.get("id")
+        else:
+            # Banner uses the stored DB summary — not the blanked Analysis inputs.
+            summary = str(product.get("db_product_summary") or "").strip()
+            if match_band == "green" and summary.lower().startswith("suggested:"):
+                summary = summary.split(":", 1)[1].strip()
+            suggested_id = product.get("suggested_db_product_id")
+
+        if not summary and top_candidate:
+            top_summary = str(top_candidate.get("summary") or "").strip()
+            summary = top_summary if match_band == "green" else f"Suggested: {top_summary}"
+        elif not summary:
             summary = _candidate_summary_for_display(
                 {
                     "product_id": product.get("catalog_product_id")
-                    or product.get("suggested_catalog_product_id"),
+                    or product.get("suggested_catalog_product_id")
+                    or product_id_value,
                     "category": product.get("category"),
                     "sub_category": product.get("sub_category"),
                     "class": product.get("class"),
@@ -501,14 +672,17 @@ def _shape_product(
                     "summary": product.get("db_product_summary"),
                 }
             )
+        notes = str((product.get("ai_mapping") or {}).get("notes") or "")
+        if match_band == "green" and "missing" in notes.lower():
+            notes = ""
         db_match = {
-            "rate_master_id": product.get("db_product_id"),
-            "suggested_id": product.get("suggested_db_product_id"),
+            "rate_master_id": product.get("db_product_id") or (top_candidate.get("id") if (top_candidate and match_band == "green") else None),
+            "suggested_id": suggested_id,
             "status": db_match_status,
             "summary": summary,
             "make": product.get("db_product_make") or "",
             "tech_key": product.get("db_product_tech_key") or "",
-            "notes": ((product.get("ai_mapping") or {}).get("notes") or ""),
+            "notes": notes,
             "missing_attribute_keys": missing_attr_keys,
         }
 
@@ -551,12 +725,15 @@ def _shape_product(
         "attribute_confidence_band": attribute_fields["confidence_band"],
         "match_percentage": match_percentage,
         "match_percentage_band": match_band,
-        # Confirm → 100% when a product is already selected/suggested but not full credit.
+        # Show Confirm Manually for products with < 100% match that have a candidate to confirm
         "show_confirm_match": bool(
-            match_percentage < 99.5
+            float(match_percentage or 0.0) < 100.0
+            and selection_source not in {"expert_confirm", "confirm"}
             and (
                 product.get("db_product_id")
                 or product.get("suggested_db_product_id")
+                or (candidates and candidates[0].get("id"))
+                or (db_candidates and db_candidates[0].get("id"))
             )
         ),
         "show_weak_match_warning": unable_to_match,
@@ -902,7 +1079,7 @@ class BOQExtractionDisplayService:
             )
 
         stats = analysis.get("stats") or {}
-        missing_product_id_count = count_missing_loaded_product_ids(analysis)
+        missing_product_id_count, missing_rate_only_count = count_missing_product_ids_summary(analysis)
         return {
             "has_extraction": bool(analysis.get("rows")),
             "phase": analysis.get("phase"),
@@ -910,6 +1087,7 @@ class BOQExtractionDisplayService:
             "product_count": product_count,
             "missing_field_count": missing_field_count,
             "missing_product_id_count": missing_product_id_count,
+            "missing_rate_only_count": missing_rate_only_count,
             "matched_product_id_count": max(0, product_count - missing_product_id_count),
             "multiproduct_review_count": multiproduct_review_count,
             "has_make_list": self.has_make_list_file and self.make_list_service.has_constraints,

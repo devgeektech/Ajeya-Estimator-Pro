@@ -2101,6 +2101,12 @@ body:has(.auth) {
     min-width: 140px;
     margin: 0;
 }
+.extraction-field--mismatched .extraction-input,
+.extraction-input--mismatched {
+    background-color: #ffeaea !important;
+    border-color: #ffbaba !important;
+}
+
 .labour-category-field .extraction-field__label {
     font-weight: 700;
     color: var(--text);

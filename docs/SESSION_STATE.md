@@ -3,6 +3,34 @@
 Compact active memory. Full spec: `docs/PRODUCT.md`. Schema: `docs/DATABASE.md`.
 History: `docs/CHANGELOG.md` (do not duplicate session diaries here).
 
+### 2026-10-09 — Make & Vendor Dropdown Scoping, Approved Makes Completeness & Price Preview
+
+Completed:
+- Added a distinct **"Available make"** dropdown after "Approved make" in the Make & Vendor top bulk panel (**Apply to Category / Sub-category**).
+- Enforced strict mutual exclusivity: selecting a make from "Approved make" automatically clears "Available make", and selecting from "Available make" automatically clears "Approved make". Only one can be active at a time.
+- Fixed **Approved make** loading so that 100% of approved makes from the Make List are loaded without dropping makes that lack Rate_Master rows in that sub-category.
+- Ensured "Approved make" is always a select dropdown. When there are no approved makes, it displays a single option `"No Approved Make Found"` and remains disabled, never loading database makes into the approved dropdown.
+- Fixed **Vendor** scoping: strictly loads vendors for the active make within the selected sub-category by removing the parent category vendor fallback that previously leaked random vendors from other subcategories.
+- Fixed **Available make** selection: cleared stale auto-selection on sub-category change so it never defaults to a make from another scope.
+- Fixed **Price preview**: removed sub-category requirement so prices load and display dynamically at both category and sub-category scopes for both approved makes and available database makes.
+- Removed text inputs from the bulk panel for both make and vendor to ensure clean, consistent select inputs.
+- Robust vendor loading: implemented case/whitespace-tolerant lookup in `vendorOptions` so vendors are reliably loaded from `vendors_by_make` whether an approved make or database make is selected.
+- Updated `make_vendor_rates.py` and `make_vendor_cascade.py` to prevent injecting database makes into `make_options`.
+- Updated `_lowest_amount_maps` to compute lowest price and vendor maps for all available database makes and approved makes, enabling real-time Price preview when selecting any make or vendor.
+- Updated `apply_subcategory_make` in `make_vendor_cascade.py` to allow makes from either the approved make list or the database's available makes, cascading make/vendor selections to all analysed products in the category/sub-category.
+- Removed the **"Review"** and **"Vendor review"** tags and notes from the Make & Vendor page, since Product IDs are already assigned on the Analysis page.
+- Make & Vendor selection now strictly loads the Product ID + Rate ID combination from `Rate_Master_Output`, directly setting status to `"Matched"` upon rate retrieval.
+- Disabled `_flag_same_material_rate_vendor_review` and removed the `vendor_review_count` tag from the summary header.
+- Fixed suggestion match percentage badge in `_extraction_line.html`: removed `|default:product.attribute_confidence` which caused 0% database matches to falsely render as 100% match due to Django template `default:` evaluating 0 as falsy.
+- All 144 tests in `tests.boq` passing cleanly.
+
+Pending:
+- None.
+
+Issues: None.
+
+Next: Test Make & Vendor bulk selection in browser with real BOQ data.
+
 ### 2026-10-07 — Re-analyse Missing Input Penalty & AI Re-extraction Fix
 
 Completed:

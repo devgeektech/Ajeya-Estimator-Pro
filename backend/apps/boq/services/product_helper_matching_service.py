@@ -14,13 +14,13 @@ from .boq_row_fields import is_filled as _is_filled, normalize_text as _normaliz
 logger = logging.getLogger("boq_ai")
 
 _TEXT_WEIGHTS = {
-    "category": 25.0,
-    "sub_category": 20.0,
-    "class": 10.0,
-    "size": 15.0,
-    "unit": 5.0,
-    "capacity": 5.0,
-    "attributes": 20.0,
+    "sub_category": 40.0,
+    "category": 30.0,
+    "class": 6.0,
+    "size": 6.0,
+    "unit": 6.0,
+    "capacity": 6.0,
+    "attributes": 6.0,
 }
 
 

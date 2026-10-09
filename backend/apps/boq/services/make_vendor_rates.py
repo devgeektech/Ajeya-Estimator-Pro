@@ -232,16 +232,16 @@ class MakeVendorRatesMixin:
             vendor = (rate.get("vendor") or "").strip()
             if not make:
                 continue
-            if approved_makes and not MakeListConstraintService.make_is_allowed(
-                make, approved_makes
-            ):
-                continue
             try:
                 amount = float(rate.get("amount") or "")
             except (TypeError, ValueError):
                 continue
-            if overall is None or amount < overall:
-                overall = amount
+            is_approved = not approved_makes or MakeListConstraintService.make_is_allowed(
+                make, approved_makes
+            )
+            if is_approved:
+                if overall is None or amount < overall:
+                    overall = amount
             current_make = by_make.get(make)
             if current_make is None or amount < current_make:
                 by_make[make] = amount
@@ -250,6 +250,19 @@ class MakeVendorRatesMixin:
                 current_vendor = vendor_map.get(vendor)
                 if current_vendor is None or amount < current_vendor:
                     vendor_map[vendor] = amount
+            if approved_makes:
+                for app_make in approved_makes:
+                    if MakeListConstraintService.make_is_allowed(make, [app_make]):
+                        cur_app = by_make.get(app_make)
+                        if cur_app is None or amount < cur_app:
+                            by_make[app_make] = amount
+                        if vendor:
+                            v_app_map = by_make_vendor.setdefault(app_make, {})
+                            cur_v = v_app_map.get(vendor)
+                            if cur_v is None or amount < cur_v:
+                                v_app_map[vendor] = amount
+        if overall is None and by_make:
+            overall = min(by_make.values())
         return {
             "lowest_amount": self._format_preview_amount(overall) if overall is not None else "",
             "lowest_by_make": {
@@ -276,45 +289,15 @@ class MakeVendorRatesMixin:
         """
         Return ``(make_options, concrete_makes, selectable)``.
 
-        With make list: approved makes only (or empty / not selectable).
-        Without make list: Lowest price + Rate_Master_Output makes.
-        When a sub-category is selected, only makes that exist on Rate_Master for
-        that sub (and are approved, if a make list is present) are listed.
+        With make list: all approved makes from the Make List for this scope.
+        Without make list: empty / not selectable.
+        Database makes are presented separately as 'Available make'.
         """
-        sub_text = str(sub_category or "").strip()  # type: ignore
-        rate_makes = self._rate_master_makes_for_subcategory(
-            database_version_id=database_version_id,
-            category=category,
-            sub_category=sub_category,
-        )
         approved = self._approved_makes_for_subcategory(category, sub_category)
-
         if self.has_make_list:
-            if sub_text and sub_text != "—":
-                # Explicit sub: intersect approved makes with Rate_Master for that sub
-                # so SIEMENS/L&T from unrelated make-list lines do not appear.
-                if approved and rate_makes:
-                    scoped = [
-                        make
-                        for make in approved
-                        if MakeListConstraintService.make_is_allowed(make, rate_makes)
-                    ]
-                    if scoped:
-                        return [LOWEST_MAKE_LABEL] + list(scoped), list(scoped), True
-                if approved and not rate_makes:
-                    # Make-list has sub/category makes but no Rate_Master rows yet.
-                    return [LOWEST_MAKE_LABEL] + list(approved), list(approved), True
-                if rate_makes:
-                    return list(rate_makes), list(rate_makes), True
-                return [], [], False
-            if not approved:
-                if rate_makes:
-                    return list(rate_makes), list(rate_makes), bool(rate_makes)
-                return [], [], False
-            return [LOWEST_MAKE_LABEL] + list(approved), list(approved), True
-
-        if rate_makes:
-            return [LOWEST_MAKE_LABEL] + list(rate_makes), list(rate_makes), True
+            if approved:
+                return [LOWEST_MAKE_LABEL] + list(approved), list(approved), True
+            return [], [], False
         return [], [], False
 
 
@@ -349,23 +332,7 @@ class MakeVendorRatesMixin:
             category=category,
             sub_category=sub_category,
         )
-        vendors = _collect(scoped)
-        # Sub-category may be too narrow for vendor variety — fall back to category.
-        if (
-            len(vendors) < 2
-            and (sub_category or "").strip()
-            and sub_category != "—"
-        ):
-            category_vendors = _collect(
-                self._rate_rows_for_scope(
-                    database_version_id=database_version_id,
-                    category=category,
-                    sub_category="",
-                )
-            )
-            if len(category_vendors) > len(vendors):
-                return category_vendors
-        return vendors
+        return _collect(scoped)
 
 
     def _capture_analysis_product_id(
@@ -782,7 +749,7 @@ class MakeVendorRatesMixin:
         labour_service = LabourDetailRetrievalService(database_version_id)
         rate_detail = rate_service.get_by_id(rate.pk)
         labour_detail = labour_service.get_by_product_id(rate.Product_ID)
-        status = "matched" if confidence >= MATCH_CONFIDENCE_THRESHOLD else "pending"
+        status = "matched"
         qty_value = (
             extracted.get("quantity")
             if extracted.get("quantity") not in (None, "")
@@ -792,7 +759,7 @@ class MakeVendorRatesMixin:
             quantity=qty_value,
             rate_detail=rate_detail,
             labour_detail=labour_detail,
-            is_pending=status != "matched",
+            is_pending=False,
             rate_only=bool(extracted.get("rate_only")),
         )
         resolved_make = MakeListConstraintService.resolve_canonical_make(
@@ -806,8 +773,6 @@ class MakeVendorRatesMixin:
         notes = ""
         if same_price_choices:
             notes = SAME_PRICE_TIE_LABEL
-        elif status != "matched":
-            notes = "Closest Rate_Master_Output row found — review make/vendor or product fields."
         return {
             "make": display_make,
             "vendor": display_vendor,

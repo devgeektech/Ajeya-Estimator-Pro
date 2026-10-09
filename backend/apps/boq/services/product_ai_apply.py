@@ -476,13 +476,20 @@ class ProductAIApplyMixin:
                 -float(row.get("confidence") or 0.0),
             )
         )
-        if selected_id is not None:
+        # The suggested product must always be the non-conflicting candidate with the highest confidence score
+        # unless an expert has explicitly locked/selected the product.
+        selection_source = str(
+            (product.get("ai_mapping") or {}).get("selection_source") or ""
+        ).strip().lower()
+        is_expert_locked = selection_source in {"expert", "confirm", "manual_load"}
+        if is_expert_locked and selected_id is not None:
             head = [item for item in rescored if int(item.get("id") or 0) == selected_id]
             tail = [item for item in rescored if int(item.get("id") or 0) != selected_id]
-            # Keep AI pick visible, but list non-conflicting neighbors first after it.
             candidates = (head + tail)[:_CANDIDATE_LIMIT]
         else:
             candidates = rescored[:_CANDIDATE_LIMIT]
+            if candidates and candidates[0].get("id") is not None:
+                selected_id = int(candidates[0]["id"])
         candidate_by_id = {
             int(item["id"]): item
             for item in candidates
@@ -612,11 +619,15 @@ class ProductAIApplyMixin:
         # Selected / suggested product first so Analysis UI shows the best pick on top.
         slim_candidates = _prefer_candidate_first(slim_candidates, rate.pk)
 
-        # Confirm Product Id only when match % meets the orange band (≥70). Below
-        # that stay provisional (candidates visible, no Product Id) until Select.
-        if confidence < MATCH_CONFIDENCE_THRESHOLD or float(
-            confidence or 0.0
-        ) < float(PRODUCT_ID_CONFIRM_CONFIDENCE):
+        # Product Id auto-fills only when match % reaches green band (≥95).
+        # Orange/red matches (<95) stay provisional so they must be confirmed manually or selected.
+        selection_source = str(
+            (product.get("ai_mapping") or {}).get("selection_source") or ""
+        ).strip().lower()
+        is_green = float(confidence or 0.0) >= float(PRODUCT_ID_CONFIRM_CONFIDENCE)
+        expert_locked = selection_source in {"expert", "confirm", "manual_load"}
+
+        if not rematch and not expert_locked and not is_green:
             provisional = self._provisional_schema_match(
                 enriched,
                 rate=rate,
@@ -630,10 +641,18 @@ class ProductAIApplyMixin:
                 attribute_map=attribute_map,
                 notes=notes
                 or (
-                    "Suggested DB product — review top candidates and Select, "
-                    "or Re-analyse after correcting Category/Sub."
-                    if float(confidence or 0.0) >= float(MATCH_CONFIDENCE_THRESHOLD)
-                    else "Suggested DB product — fill missing attributes, then Re-analyse to rematch."
+                    f"1 attribute is missing ({missing_keys[0]}) — fill it, then Re-analyse or Confirm Manually."
+                    if len(missing_keys) == 1
+                    else (
+                        f"{len(missing_keys)} attributes missing ({', '.join(missing_keys)}) — fill them, then Re-analyse."
+                        if missing_keys
+                        else (
+                            "Suggested DB product — review top candidates and Select, "
+                            "or Re-analyse after correcting Category/Sub."
+                            if float(confidence or 0.0) >= float(MATCH_CONFIDENCE_THRESHOLD)
+                            else "Suggested DB product — fill missing attributes, then Re-analyse to rematch."
+                        )
+                    )
                 ),
                 ai_confidence=ai_confidence,
                 blank_weak_inputs=blank_weak_inputs,
@@ -648,7 +667,7 @@ class ProductAIApplyMixin:
 
         enriched["attributes"] = attributes
         enriched["attribute_schema"] = schema_keys
-        enriched["missing_attribute_keys"] = missing_keys
+        enriched["missing_attribute_keys"] = [] if is_green else missing_keys
         enriched["attribute_confidence"] = confidence
         enriched["attribute_source"] = "database" if schema_keys else "extracted"
         enriched["db_match_status"] = DB_MATCH_MATCHED
@@ -667,7 +686,7 @@ class ProductAIApplyMixin:
             "selected_id": rate.pk,
             "selected_rate_master_id": rate.pk,
             "attribute_map": attribute_map,
-            "notes": notes,
+            "notes": "" if is_green and "missing" in (notes or "").lower() else notes,
             "ai_confidence": ai_confidence,
             "candidate_ids": [item["id"] for item in candidates],
             "match_status": DB_MATCH_MATCHED,
@@ -780,7 +799,11 @@ class ProductAIApplyMixin:
             key=lambda row: float(row.get("confidence") or 0.0),
             reverse=True,
         )
-        if selected_id is not None:
+        selection_source = str(
+            (product.get("ai_mapping") or {}).get("selection_source") or ""
+        ).strip().lower()
+        is_expert_locked = selection_source in {"expert", "confirm", "manual_load"}
+        if is_expert_locked and selected_id is not None:
             try:
                 selected_pk = int(selected_id)
             except (TypeError, ValueError):
@@ -801,9 +824,12 @@ class ProductAIApplyMixin:
                 refreshed = refreshed[:_CANDIDATE_LIMIT]
         else:
             refreshed = refreshed[:_CANDIDATE_LIMIT]
+            if refreshed and refreshed[0].get("id") is not None:
+                selected_id = int(refreshed[0]["id"])
+                selected_pk = selected_id
 
         rate = selected_rate
-        if rate is None and selected_id is not None:
+        if (rate is None or not is_expert_locked) and selected_id is not None:
             try:
                 rate = rate_map.get(int(selected_id))
             except (TypeError, ValueError):
@@ -1160,10 +1186,7 @@ class ProductAIApplyMixin:
         confirmed = (
             status == DB_MATCH_MATCHED
             and enriched.get("db_product_id") not in (None, "")
-            and (
-                selection_source == "expert"
-                or match_conf >= float(PRODUCT_ID_CONFIRM_CONFIDENCE)
-            )
+            and selection_source in {"expert", "confirm", "manual_load"}
         )
 
         # Prefer Product_ID from the confirmed Rate_Master_Output row.

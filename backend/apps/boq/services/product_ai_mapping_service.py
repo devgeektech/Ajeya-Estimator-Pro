@@ -192,18 +192,20 @@ class ProductAIMappingService(
             "selected_id": rate.pk,
             "selected_rate_master_id": rate.pk,
             "attribute_map": attribute_map,
-            "notes": "Selected by expert from top database candidates.",
+            "notes": "Selected from top database candidates — click Confirm Manually to lock Product ID.",
             "ai_confidence": None,
             "candidate_ids": [item.get("id") for item in candidates],
             "match_status": DB_MATCH_MATCHED,
-            "selection_source": "expert",
+            "selection_source": "select",
         }
         enriched["needs_extraction_review"] = False
         enriched["slot_fallback"] = False
         # Show fetched Rate_Master details in Analysis columns for the selected product.
-        return self._attach_catalog_product_id(
-            align_product_taxonomy_from_rate(enriched, rate, overwrite_core_fields=True)
-        )
+        aligned = align_product_taxonomy_from_rate(enriched, rate, overwrite_core_fields=True)
+        aligned.pop("catalog_product_id", None)
+        if rate.Product_ID:
+            aligned["suggested_catalog_product_id"] = rate.Product_ID.strip()
+        return aligned
 
 
     def map_products(
