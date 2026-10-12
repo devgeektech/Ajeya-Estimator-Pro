@@ -621,18 +621,18 @@
             const missingIds = Number(this.missingProductIdCount || 0);
             if (missingIds > 0) {
                 const total = Number(this.totalProductCount || 0);
-                const matched = Math.max(0, Number(this.matchedProductIdCount || 0) || (total - missingIds));
-                const missingLabel = missingIds === 1 ? 'product' : 'products';
+                const totalCount = total || missingIds;
+                const prodWord = totalCount === 1 ? 'product' : 'products';
                 const hasLabel = missingIds === 1 ? 'has' : 'have';
-                const thoseLabel = missingIds === 1 ? 'This product' : 'These ' + missingIds + ' products';
+                const pronoun = missingIds === 1 ? 'it' : 'them';
                 const rateOnlyNote = Number(this.missingRateOnlyCount || 0) > 0
                     ? ' (including ' + this.missingRateOnlyCount + ' Rate Only) '
                     : ' ';
                 const msg = (
-                    missingIds + ' of ' + (total || missingIds) + ' ' + missingLabel + ' are unmatched (No Product ID)'
+                    missingIds + ' of ' + totalCount + ' ' + prodWord + ' ' + hasLabel + ' no Product ID'
                     + rateOnlyNote
-                    + 'and will be skipped for Make/Vendor lookup.\n\n'
-                    + 'Stay on Analysis to match them manually, or proceed to leave them as Not Available (red).'
+                    + 'and will skip Make/Vendor lookup.\n\n'
+                    + 'Stay on Analysis to match ' + pronoun + ', or proceed to mark ' + pronoun + ' Not Available.'
                 );
                 let ok = true;
                 if (window.BOQConfirm && typeof window.BOQConfirm.ask === 'function') {
@@ -1093,25 +1093,31 @@
             const notInDb = Number(this.mvNotInDbCount || 0);
             const willMark = alreadyNa + notListed + notInDb;
             if (willMark > 0) {
+                const prodWord = willMark === 1 ? 'product' : 'products';
+                const pronoun = willMark === 1 ? 'it' : 'them';
                 const parts = [];
                 if (alreadyNa) {
-                    parts.push(alreadyNa + ' already Not available from Analysis');
+                    parts.push(alreadyNa + ' from Analysis');
                 }
                 if (notListed) {
-                    parts.push(notListed + ' Not listed');
+                    parts.push(notListed + ' not listed');
                 }
                 if (notInDb) {
-                    parts.push(notInDb + ' Not in Db');
+                    parts.push(notInDb + ' not in DB');
                 }
-                const msg = parts.join(', ')
-                    + ' will be marked Not available on Labour (red) with no rate/labour lookup. '
-                    + 'Products with rates but no labour charge stay orange on Labour, '
-                    + 'then become Not available on Review / Export. Continue?';
+                const breakdown = parts.length > 0 ? parts.join(', ') + '.\n\n' : '\n\n';
+                const msg = (
+                    willMark + ' ' + prodWord + ' will be marked Not Available on Labour (no rates):\n'
+                    + breakdown
+                    + 'Stay on Make & Vendor to resolve ' + pronoun + ', or proceed to Labour.'
+                );
                 let ok = true;
                 if (window.BOQConfirm && typeof window.BOQConfirm.ask === 'function') {
                     ok = await window.BOQConfirm.ask(msg, {
                         title: 'Continue to Labour?',
-                        confirmLabel: 'Continue',
+                        confirmLabel: 'Proceed anyway',
+                        cancelLabel: 'Stay on Make & Vendor',
+                        cancelClass: 'btn btn--warning',
                     });
                 } else {
                     ok = window.confirm(msg);

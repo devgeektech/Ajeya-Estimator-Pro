@@ -6,8 +6,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Ajeya Estimator Pro{% endblock %}</title>
     <meta name="csrf-token" content="{{ csrf_token }}">
-<link rel="stylesheet" href="{% static 'css/app.css' %}?v=110">
+<link rel="stylesheet" href="{% static 'css/app.css' %}?v=111">
     <style>
+        .confirm-modal__message { white-space: pre-line !important; }
         /* Override stale collected CSS (DEBUG=False keeps old hashed files until server restart). */
         :root { --card-stripe: #e2e8f0; }
         html { zoom: 1 !important; height: 100%; }
@@ -3901,7 +3902,7 @@
     <div class="confirm-modal__backdrop" data-confirm-cancel></div>
     <div class="confirm-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title">
         <h2 class="confirm-modal__title" id="confirm-modal-title">Confirm action</h2>
-        <p class="confirm-modal__message" id="confirm-modal-message"></p>
+        <p class="confirm-modal__message" id="confirm-modal-message" style="white-space: pre-line;"></p>
         <label class="confirm-modal__field" id="confirm-modal-field" hidden>
             <span class="confirm-modal__field-label" id="confirm-modal-field-label">Value</span>
             <input

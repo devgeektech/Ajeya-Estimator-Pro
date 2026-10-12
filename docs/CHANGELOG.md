@@ -5,6 +5,12 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
+## 2026-10-12 — Analysis & Make/Vendor Confirmation Modal Messages Rephrase
+- **Shortened Analysis Next Modal Message**: Shortened and cleaned up the "Continue to Make & Vendor?" warning dialog text when unmatched products exist. Rephrased from *"X of Y products are unmatched (No Product ID) and will be skipped for Make/Vendor lookup. Stay on Analysis to match them manually, or proceed to leave them as Not Available (red)."* to *"X of Y products have no Product ID and will skip Make/Vendor lookup."* Moved *"Stay on Analysis to match them, or proceed to mark them Not Available."* to its own row.
+- **Shortened Make & Vendor Next Modal Message**: Shortened and restructured the "Continue to Labour?" dialog text (`goToLabour`). Rephrased from run-on text to a clean summary (*"X products will be marked Not Available on Labour (no rates): [breakdown]. Stay on Make & Vendor to resolve them, or proceed to Labour."*) on distinct rows.
+- **Updated Modal Button Labels**: Updated `goToLabour` modal action buttons from generic *"Cancel"* / *"Continue"* to *"Stay on Make & Vendor"* (styled with warning button) and *"Proceed anyway"*.
+- **Enforced Modal Line Break Rendering**: Added `style="white-space: pre-line;"` and inline CSS override to `.confirm-modal__message` in `templates/base.html` so newlines in confirmation messages always break onto a new row.
+
 ## 2026-10-09 — Make & Vendor Dropdown Scoping, Approved Makes Completeness & Price Preview
 - **Approved Make Completeness**: Ensured 100% of approved makes from the Make List are loaded into the "Approved make" dropdown for the scoped category / subcategory, removing premature Rate_Master intersections that dropped approved makes without existing rate entries.
 - **Available Make Dropdown**: Added a dedicated "Available make" dropdown directly after "Approved make" in the top Category / Sub-category panel of Make & Vendor.

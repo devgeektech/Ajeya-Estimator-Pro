@@ -3,6 +3,23 @@
 Compact active memory. Full spec: `docs/PRODUCT.md`. Schema: `docs/DATABASE.md`.
 History: `docs/CHANGELOG.md` (do not duplicate session diaries here).
 
+### 2026-10-12 — Analysis & Make/Vendor Confirmation Modals Rephrase & New Row
+
+Completed:
+- Shortened and rephrased the unmatched product warning modal message in `goToMakeVendor` on the Analysis tab to Option 1: concise, non-redundant wording (*"X of Y products have no Product ID and will skip Make/Vendor lookup."*).
+- Shortened and rephrased the `goToLabour` modal message on the Make & Vendor tab to Option 1: concise breakdown (*"X products will be marked Not Available on Labour (no rates): ..."*) with action sentence (*"Stay on Make & Vendor to resolve them, or proceed to Labour."*) on its own row.
+- Updated `goToLabour` modal button labels from generic *"Cancel"* / *"Continue"* to *"Stay on Make & Vendor"* (with warning/secondary styling) and *"Proceed anyway"*.
+- Handled singular vs plural dynamic phrasing (*"product"* vs *"products"*, *"has"* vs *"have"*, *"it"* vs *"them"*).
+- Enforced `white-space: pre-line !important;` on `.confirm-modal__message` in `templates/base.html` so newline characters render across all browser contexts and cache states.
+- All 144 tests in `tests.boq` passing.
+
+Pending:
+- None.
+
+Issues: None.
+
+Next: None.
+
 ### 2026-10-09 — Make & Vendor Dropdown Scoping, Approved Makes Completeness & Price Preview
 
 Completed:
