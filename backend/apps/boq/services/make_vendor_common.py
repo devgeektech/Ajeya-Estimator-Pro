@@ -108,7 +108,7 @@ def loaded_catalog_product_id(product: dict[str, Any] | None) -> str:
             except (TypeError, ValueError):
                 continue
 
-    expert_locked = selection_source in {"expert", "confirm", "manual_load"}
+    expert_locked = selection_source in {"expert", "confirm", "manual_load", "expert_confirm", "select"}
     green_match = match_conf >= float(PRODUCT_ID_CONFIRM_CONFIDENCE)
 
     if not expert_locked and not green_match:

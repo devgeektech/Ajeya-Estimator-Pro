@@ -13,6 +13,7 @@ from common.db import atomic
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter, quote_sheetname
+from openpyxl.worksheet.hyperlink import Hyperlink
 from openpyxl.worksheet.worksheet import Worksheet
 
 from apps.boq.models import BOQ
@@ -110,6 +111,34 @@ _REVIEW_QTY_COL = 20
 _REVIEW_TOTAL_MATERIAL_COL = 21
 _REVIEW_TOTAL_LABOUR_COL = 22
 _REVIEW_AMOUNT_COL = 23
+
+_HIGHLIGHTED_REVIEW_COLS = {
+    _REVIEW_NET_COL,
+    _REVIEW_SUBTOTAL_COL,
+    _REVIEW_FINAL_MATERIAL_COL,
+    _REVIEW_FINAL_RATE_COL,
+    _REVIEW_TOTAL_MATERIAL_COL,
+    _REVIEW_TOTAL_LABOUR_COL,
+    _REVIEW_AMOUNT_COL,
+}
+
+_FORMULA_HEADER_FILL = PatternFill(
+    start_color="FFFF00",  # Bright yellow for highlighted formula columns
+    end_color="FFFF00",
+    fill_type="solid",
+)
+_FORMULA_CELL_FILL = PatternFill(
+    start_color="FFFF00",  # Entire column in yellow
+    end_color="FFFF00",
+    fill_type="solid",
+)
+_OTHER_HEADER_FILL = PatternFill(
+    start_color="1976E7",  # User-requested #1976E7 royal blue for other columns
+    end_color="1976E7",
+    fill_type="solid",
+)
+_OTHER_HEADER_FONT = Font(bold=True, color="FFFFFF")
+_YELLOW_HEADER_FONT = Font(bold=True, color="000000")
 
 _RATE_BLOB_RE = re.compile(
     r"\b(unit[_\s-]?rate|rate|price|rs\.?\s*/\s*(unit|qty|no))\b",
@@ -234,6 +263,11 @@ def _slot_row_ids(boq_data: dict[str, Any]) -> set[str]:
             slot_id = str(slot.get("qty_row_id") or slot.get("row_id") or "").strip()
             if slot_id:
                 ids.add(slot_id)
+    if not ids:
+        for r in (boq_data or {}).get("rows") or []:
+            rid = str(r.get("row_id") or "").strip()
+            if rid:
+                ids.add(rid)
     return ids
 
 
@@ -592,11 +626,15 @@ def _style_used_range(
     skip_blank_rows: bool = True,
     red_header_columns: set[int] | None = None,
     yellow_header: bool = False,
+    highlight_columns: set[int] | None = None,
+    formula_header_fill: PatternFill | None = None,
+    formula_cell_fill: PatternFill | None = None,
 ) -> None:
     """Apply top/right wrap alignment and dark borders to used cells."""
     if sheet.max_row is None or sheet.max_column is None:
         return
     red_cols = red_header_columns or set()
+    high_cols = highlight_columns or set()
     for row_idx in range(1, sheet.max_row + 1):
         row_cells = list(sheet[row_idx])
         if skip_blank_rows and all(cell.value in (None, "") for cell in row_cells):
@@ -605,9 +643,19 @@ def _style_used_range(
             _style_cell(cell)
         if row_idx == 1:
             for col_idx, cell in enumerate(row_cells, start=1):
-                cell.font = _RED_HEADER_FONT if col_idx in red_cols else _HEADER_FONT
-                if yellow_header:
-                    cell.fill = _YELLOW_HEADER_FILL
+                if col_idx in high_cols:
+                    cell.font = _YELLOW_HEADER_FONT
+                    cell.fill = formula_header_fill or _FORMULA_HEADER_FILL
+                elif yellow_header:
+                    cell.font = _OTHER_HEADER_FONT
+                    cell.fill = _OTHER_HEADER_FILL
+                else:
+                    cell.font = _RED_HEADER_FONT if col_idx in red_cols else _HEADER_FONT
+        elif high_cols:
+            for col_idx, cell in enumerate(row_cells, start=1):
+                if col_idx in high_cols:
+                    # User requested: "the entire column should be in yellow (for highlighted columns )"
+                    cell.fill = formula_cell_fill or _FORMULA_CELL_FILL
 
 
 def _autosize_columns(sheet: Worksheet, *, min_width: int = 10, max_width: int = 42) -> None:
@@ -803,6 +851,7 @@ class BOQExportService:
             (workbook[name] for name in workbook.sheetnames if name != review_title),
             workbook.active,
         )
+        review_sheet = workbook[review_title] if review_title in workbook.sheetnames else None
         used_columns = max((int(h.get("index") or 0) + 1 for h in headers), default=1)
         column_cache: dict[int, tuple[int | None, int | None, int | None]] = {}
         _rate_key, _amount_key, qty_key, _unit_key = _header_keys(headers)
@@ -864,6 +913,42 @@ class BOQExportService:
                     value=_excel_number_value(pricing[row_id].get("amount")),
                 )
 
+            # Bidirectional hyperlinks between BOQ and Review sheets
+            if mapped:
+                quoted_review = quote_sheetname(review_title)
+                first_rev_row = mapped[0]
+                if rate_col is not None:
+                    rate_cell = sheet.cell(row=excel_row_number, column=rate_col)
+                    rate_cell.hyperlink = Hyperlink(
+                        ref=rate_cell.coordinate,
+                        location=f"{quoted_review}!{get_column_letter(_REVIEW_FINAL_RATE_COL)}{first_rev_row}",
+                        tooltip="Go to Review sheet Final Rate",
+                    )
+                if amount_col is not None:
+                    amt_cell = sheet.cell(row=excel_row_number, column=amount_col)
+                    amt_cell.hyperlink = Hyperlink(
+                        ref=amt_cell.coordinate,
+                        location=f"{quoted_review}!{get_column_letter(_REVIEW_AMOUNT_COL)}{first_rev_row}",
+                        tooltip="Go to Review sheet Amount",
+                    )
+                if review_sheet is not None:
+                    quoted_boq = quote_sheetname(sheet.title)
+                    for rev_row in mapped:
+                        if rate_col is not None:
+                            r_cell = review_sheet.cell(row=rev_row, column=_REVIEW_FINAL_RATE_COL)
+                            r_cell.hyperlink = Hyperlink(
+                                ref=r_cell.coordinate,
+                                location=f"{quoted_boq}!{get_column_letter(rate_col)}{excel_row_number}",
+                                tooltip=f"Go to {sheet.title} Rate",
+                            )
+                        if amount_col is not None:
+                            a_cell = review_sheet.cell(row=rev_row, column=_REVIEW_AMOUNT_COL)
+                            a_cell.hyperlink = Hyperlink(
+                                ref=a_cell.coordinate,
+                                location=f"{quoted_boq}!{get_column_letter(amount_col)}{excel_row_number}",
+                                tooltip=f"Go to {sheet.title} Amount",
+                            )
+
             fill = None
             if row_id in activity_only_ids:
                 fill = _ACTIVITY_ONLY_FILL
@@ -897,6 +982,7 @@ class BOQExportService:
                 not_available_qty_ids=not_available_qty_ids,
                 review_title=review_title,
                 review_rows=review_rows,
+                workbook=workbook,
             )
 
     @staticmethod
@@ -910,6 +996,7 @@ class BOQExportService:
         not_available_qty_ids: set[str] | None = None,
         review_title: str,
         review_rows: dict[str, list[int]],
+        workbook=None,
     ) -> None:
         """Rebuild a BOQ tab from parsed JSON when the upload cannot be filled."""
         not_available_qty_ids = not_available_qty_ids or set()
@@ -934,17 +1021,50 @@ class BOQExportService:
                 if written_qty is not None:
                     row_values[qty_key] = written_qty
             mapped = list(review_rows.get(row_id) or []) if is_slot else []
-            if is_slot and row_id in not_available_qty_ids:
+            if is_slot and mapped:
                 if rate_key:
-                    row_values[rate_key] = NOT_AVAILABLE_LABEL
+                    row_values[rate_key] = _review_rate_formula(review_title, mapped)
                 if amount_key:
-                    row_values[amount_key] = NOT_AVAILABLE_LABEL
-            elif is_slot and rate_key:
-                row_values[rate_key] = _review_rate_formula(review_title, mapped)
-            if is_slot and amount_key and row_id not in not_available_qty_ids:
-                row_values[amount_key] = _review_amount_formula(review_title, mapped)
+                    row_values[amount_key] = _review_amount_formula(review_title, mapped)
 
             sheet.append([row_values.get(header.get("key")) for header in headers])
+            if is_slot and mapped:
+                quoted_review = quote_sheetname(review_title)
+                first_rev_row = mapped[0]
+                rate_col = _header_excel_column(headers, rate_key)
+                amount_col = _header_excel_column(headers, amount_key)
+                if rate_col is not None:
+                    r_cell = sheet.cell(row=sheet.max_row, column=rate_col)
+                    r_cell.hyperlink = Hyperlink(
+                        ref=r_cell.coordinate,
+                        location=f"{quoted_review}!{get_column_letter(_REVIEW_FINAL_RATE_COL)}{first_rev_row}",
+                        tooltip="Go to Review sheet Final Rate",
+                    )
+                if amount_col is not None:
+                    a_cell = sheet.cell(row=sheet.max_row, column=amount_col)
+                    a_cell.hyperlink = Hyperlink(
+                        ref=a_cell.coordinate,
+                        location=f"{quoted_review}!{get_column_letter(_REVIEW_AMOUNT_COL)}{first_rev_row}",
+                        tooltip="Go to Review sheet Amount",
+                    )
+                if workbook and review_title in workbook.sheetnames:
+                    review_sheet = workbook[review_title]
+                    quoted_boq = quote_sheetname(sheet.title)
+                    for rev_row in mapped:
+                        if rate_col is not None:
+                            rev_r_cell = review_sheet.cell(row=rev_row, column=_REVIEW_FINAL_RATE_COL)
+                            rev_r_cell.hyperlink = Hyperlink(
+                                ref=rev_r_cell.coordinate,
+                                location=f"{quoted_boq}!{get_column_letter(rate_col)}{sheet.max_row}",
+                                tooltip=f"Go to {sheet.title} Rate",
+                            )
+                        if amount_col is not None:
+                            rev_a_cell = review_sheet.cell(row=rev_row, column=_REVIEW_AMOUNT_COL)
+                            rev_a_cell.hyperlink = Hyperlink(
+                                ref=rev_a_cell.coordinate,
+                                location=f"{quoted_boq}!{get_column_letter(amount_col)}{sheet.max_row}",
+                                tooltip=f"Go to {sheet.title} Amount",
+                            )
             if not is_slot:
                 continue
             if row_id in not_available_qty_ids:
@@ -1088,23 +1208,21 @@ class BOQExportService:
                 _copy_orig_format(target, excel_row)
 
                 if unavailable:
-                    # Literal Amount / Final Rate; skip formulas so Excel does not overwrite.
-                    sheet.cell(
-                        row=excel_row,
-                        column=_REVIEW_AMOUNT_COL,
-                        value=NOT_AVAILABLE_LABEL,
-                    ).border = _DARK_BORDER
-                    sheet.cell(
-                        row=excel_row,
-                        column=_REVIEW_FINAL_RATE_COL,
-                        value=NOT_AVAILABLE_LABEL,
-                    ).border = _DARK_BORDER
+                    # Keep input values empty/None, but keep Excel formulas active
+                    # so manually added products calculate and link to BOQ sheet.
                     qty_number = _excel_number_value(review_row.get("qty"))
                     if isinstance(qty_number, (int, float)):
                         sheet.cell(row=excel_row, column=_REVIEW_QTY_COL, value=qty_number)
+                    line_output = product.get("line_output") or {}
+                    _apply_review_calc_formulas(
+                        sheet,
+                        excel_row,
+                        review_row,
+                        rate_sum=bool(line_output.get("amount_is_rate_sum"))
+                        or _product_is_zero_or_rate_only(product),
+                    )
                     if target:
                         review_rows.setdefault(target, []).append(excel_row)
-                        not_available_qty_ids.add(target)
                     highlight_sheet_rows.append((excel_row, _MISSING_PRODUCT_FILL))
                     continue
 
@@ -1232,6 +1350,9 @@ class BOQExportService:
             skip_blank_rows=True,
             red_header_columns=red_header_columns,
             yellow_header=True,
+            highlight_columns=_HIGHLIGHTED_REVIEW_COLS,
+            formula_header_fill=_FORMULA_HEADER_FILL,
+            formula_cell_fill=_FORMULA_CELL_FILL,
         )
         _autosize_columns(sheet, max_width=36)
         return review_rows, activity_only_ids, not_available_qty_ids

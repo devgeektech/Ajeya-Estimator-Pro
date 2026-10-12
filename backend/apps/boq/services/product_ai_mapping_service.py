@@ -350,13 +350,12 @@ class ProductAIMappingService(
                     )
                 )
             except Exception as exc:
-                if is_fatal_ai_limit_error(exc):
-                    raise
                 # Keep this chunk unmapped rather than discarding the whole BOQ's mapping.
                 logger.exception(
-                    "Product mapping chunk %s-%s failed; leaving those products unmapped",
+                    "Product mapping chunk %s-%s failed (%s); leaving those products unmapped",
                     start,
                     start + len(chunk),
+                    exc,
                 )
                 mapped_products.extend(chunk_products)
             if progress_callback:

@@ -116,6 +116,8 @@ document.addEventListener('alpine:init', () => {
         if (window.Alpine && typeof Alpine.destroyTree === 'function') {
             Alpine.destroyTree(current);
         }
+        next.removeAttribute('x-cloak');
+        next.querySelectorAll('[x-cloak]').forEach((el) => el.removeAttribute('x-cloak'));
         current.replaceWith(next);
         if (window.Alpine && typeof Alpine.initTree === 'function') {
             Alpine.initTree(next);
@@ -173,7 +175,7 @@ document.addEventListener('alpine:init', () => {
         if (!line || !nextLine) {
             return;
         }
-        ['extraction-line--confidence-green', 'extraction-line--confidence-red', 'extraction-line--multiproduct-review'].forEach((cls) => {
+        ['extraction-line--confidence-green', 'extraction-line--confidence-orange', 'extraction-line--confidence-red', 'extraction-line--multiproduct-review'].forEach((cls) => {
             line.classList.toggle(cls, nextLine.classList.contains(cls));
         });
     };
@@ -218,6 +220,8 @@ document.addEventListener('alpine:init', () => {
         if (window.Alpine && typeof Alpine.destroyTree === 'function') {
             Alpine.destroyTree(currentPanel);
         }
+        nextPanel.removeAttribute('x-cloak');
+        nextPanel.querySelectorAll('[x-cloak]').forEach((el) => el.removeAttribute('x-cloak'));
         currentPanel.replaceWith(nextPanel);
         if (window.Alpine && typeof Alpine.initTree === 'function') {
             Alpine.initTree(nextPanel);
@@ -454,7 +458,7 @@ document.addEventListener('alpine:init', () => {
                 data.line_html,
                 { preserveActiveTab: true },
             );
-            window.dispatchEvent(new CustomEvent('product-id-assigned'));
+            window.dispatchEvent(new CustomEvent('product-id-assigned', { detail: data }));
         } catch (error) {
             window.appAlert(error.message || 'Failed to select candidate.');
             if (btn) {
@@ -468,27 +472,66 @@ document.addEventListener('alpine:init', () => {
         editUrl,
         rowId,
         productIndex,
+        productRowId,
     ) {
         const btn = fromEl;
         if (btn) {
             btn.disabled = true;
+            btn.dataset.originalText = btn.textContent;
+            btn.textContent = 'Confirming…';
+        }
+        // Cancel pending auto-save on the form to prevent overwriting confirmed score
+        const formEl = btn ? btn.closest('.extraction-product-card') : null;
+        if (formEl && window.Alpine) {
+            try {
+                const formData = Alpine.$data(formEl);
+                if (formData) {
+                    if (formData.autoSaveTimer) {
+                        clearTimeout(formData.autoSaveTimer);
+                        formData.autoSaveTimer = null;
+                    }
+                    formData._confirming = true;
+                    if (formData.saving) {
+                        let waits = 0;
+                        while (formData.saving && waits < 2) {
+                            await new Promise((resolve) => setTimeout(resolve, 50));
+                            waits++;
+                        }
+                    }
+                }
+            } catch (e) { /* ignore */ }
         }
         try {
-            const data = await window.extractionAjaxPost(editUrl, {
+            const payload = {
                 action: 'confirm_match',
                 row_id: rowId,
                 product_index: String(productIndex),
+            };
+            if (productRowId) {
+                payload.product_row_id = String(productRowId);
+            }
+            const data = await window.extractionAjaxPost(editUrl, payload);
+            const targetRowId = data.row_id || rowId;
+            const targetIndex = data.product_index != null ? data.product_index : productIndex;
+            // Cleanly replace line first to update headers, tabs, badges, and card all together
+            const replaced = window.replaceExtractionLine(targetRowId, data.line_html, {
+                activeProduct: targetIndex,
             });
-            window.replaceExtractionProductPanel(
-                data.row_id || rowId,
-                data.product_index != null ? data.product_index : productIndex,
-                data.line_html,
-            );
-            window.dispatchEvent(new CustomEvent('product-id-assigned'));
+            if (!replaced && data.line_html) {
+                window.replaceExtractionProductPanel(
+                    targetRowId,
+                    targetIndex,
+                    data.line_html,
+                );
+            }
+            window.dispatchEvent(new CustomEvent('product-id-assigned', { detail: data }));
         } catch (error) {
             window.appAlert(error.message || 'Failed to confirm match.');
             if (btn) {
                 btn.disabled = false;
+                if (btn.dataset.originalText) {
+                    btn.textContent = btn.dataset.originalText;
+                }
             }
         }
     };
@@ -532,7 +575,7 @@ document.addEventListener('alpine:init', () => {
                         data.product_index != null ? data.product_index : this.productIndex,
                         data.line_html,
                     );
-                    window.dispatchEvent(new CustomEvent('product-id-assigned'));
+                    window.dispatchEvent(new CustomEvent('product-id-assigned', { detail: data }));
                 } else if (data && data.error) {
                     this.emitSaveStatus('error', data.error);
                     window.appAlert(data.error);
@@ -678,13 +721,15 @@ document.addEventListener('alpine:init', () => {
                 if (!response.ok || !data.ok) {
                     throw new Error(data.message || 'Failed to save product.');
                 }
-                if (data.product) {
+                if (data.product && !this._confirming) {
                     this.missingCount = data.product.missing_count || 0;
                     if (data.product.attribute_confidence != null) {
                         this.attributeConfidence = Number(data.product.attribute_confidence || 0);
                     }
                 }
-                this.recalcAttributeConfidence();
+                if (!this._confirming) {
+                    this.recalcAttributeConfidence();
+                }
                 this.saved = true;
                 this.emitSaveStatus('ok');
                 setTimeout(() => { this.saved = false; }, silent ? 1500 : 2000);

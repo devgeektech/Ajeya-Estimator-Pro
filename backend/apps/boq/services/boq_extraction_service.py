@@ -419,6 +419,7 @@ class BOQExtractionService:
                 ):
                     row_by_id[row_id] = repaired
 
+        taxonomy = self._rate_master_taxonomy()
         return [
             _ensure_minimum_slot_products(
                 group,
@@ -426,6 +427,7 @@ class BOQExtractionService:
                     "row_id": group.get("row_id"),
                     "products": [],
                 },
+                taxonomy=taxonomy,
             )
             for group in groups
         ]

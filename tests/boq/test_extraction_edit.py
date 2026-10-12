@@ -130,6 +130,73 @@ class ExtractionEditActivityOnlyTests(TestCase):
         self.assertTrue(row.get("skip_matching"))
         self.assertEqual(row.get("products") or [], [])
 
+    def test_confirm_match_locks_100_and_is_idempotent(self):
+        self.boq.analysis_data = {
+            "rows": [
+                {
+                    "row_id": "r1",
+                    "products": [
+                        {
+                            "product_index": 0,
+                            "catalog_product_id": "20",
+                            "db_product_id": 100,
+                            "db_match_status": "matched",
+                            "db_match_confidence": 75.0,
+                            "db_candidates": [{"id": 100, "confidence": 75.0}],
+                            "ai_mapping": {"selection_source": "ai"},
+                        }
+                    ],
+                }
+            ]
+        }
+        self.boq.save(update_fields=["analysis_data"])
+
+        # First confirm call
+        confirmed = self.editor.confirm_match(row_id="r1", product_index=0)
+        self.assertEqual(confirmed["db_match_confidence"], 100.0)
+        self.assertEqual(confirmed["ai_mapping"]["selection_source"], "expert_confirm")
+
+        # Second confirm call on the same product must be idempotent and succeed without error
+        second = self.editor.confirm_match(row_id="r1", product_index=0)
+        self.assertEqual(second["db_match_confidence"], 100.0)
+
+    def test_confirm_match_with_product_row_id(self):
+        self.boq.analysis_data = {
+            "rows": [
+                {
+                    "row_id": "r1",
+                    "products": [
+                        {
+                            "product_index": 0,
+                            "catalog_product_id": "10",
+                            "db_product_id": 101,
+                            "db_match_confidence": 80.0,
+                        }
+                    ],
+                },
+                {
+                    "row_id": "r2",
+                    "products": [
+                        {
+                            "product_index": 0,
+                            "catalog_product_id": "20",
+                            "db_product_id": 102,
+                            "db_match_confidence": 60.0,
+                            "db_candidates": [{"id": 102, "confidence": 60.0}],
+                        }
+                    ],
+                },
+            ]
+        }
+        self.boq.save(update_fields=["analysis_data"])
+
+        # Passing section row_id="r1" with product_row_id="r2" targets product in r2
+        confirmed = self.editor.confirm_match(row_id="r1", product_index=0, product_row_id="r2")
+        self.assertEqual(confirmed["db_product_id"], 102)
+        self.assertEqual(confirmed["db_match_confidence"], 100.0)
+        # Anchor row_id for re-rendering is preserved
+        self.assertEqual(self.editor.last_matched_row_id, "r1")
+
 
 class AnalysisNextProductIdGateTests(TestCase):
     def setUp(self):

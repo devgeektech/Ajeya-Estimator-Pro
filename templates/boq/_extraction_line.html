@@ -226,16 +226,14 @@
                 </div>
                 {% endif %}
                 {% if product.db_match %}
-                <div class="extraction-db-match extraction-db-match--{{ product.db_match.status|default:product.db_match_status }}{% if product.show_weak_match_warning %} extraction-db-match--weak{% endif %}">
+                <div class="extraction-db-match extraction-db-match--{% if product.match_percentage_band == 'green' %}matched{% else %}provisional{% endif %}{% if product.show_weak_match_warning %} extraction-db-match--weak{% endif %}">
                     <div class="extraction-db-match__head">
-                        {% if product.show_weak_match_warning %}
+                        {% if product.match_percentage_band == 'green' %}
+                        <span class="extraction-db-match__heading">Matched Database Product</span>
+                        {% elif product.show_weak_match_warning %}
                         <span class="extraction-db-match__heading">Low-confidence match</span>
-                        {% elif product.match_percentage_band == 'green' or product.db_match.status == 'matched' %}
-                        <span class="extraction-db-match__heading">Matched database product</span>
-                        {% elif product.db_match.status == 'provisional' %}
-                        <span class="extraction-db-match__heading">Suggested database product</span>
                         {% else %}
-                        <span class="extraction-db-match__heading">Database match</span>
+                        <span class="extraction-db-match__heading">Suggested Database Product</span>
                         {% endif %}
                         {% if product.db_match.summary %}
                         <span class="extraction-db-match__summary">{{ product.db_match.summary }}</span>
@@ -252,7 +250,7 @@
                             type="button"
                             class="btn btn--xsmall btn--primary extraction-confirm-match"
                             title="Confirm this product manually and set match to 100%"
-                            @click="window.confirmExtractionMatch($el, '{% url 'boq:extraction_edit' boq.pk %}', '{{ product.source_row_id }}', {{ product.product_index }})"
+                            @click="window.confirmExtractionMatch($el, '{% url 'boq:extraction_edit' boq.pk %}', '{{ line.row_id }}', {{ product.product_index }}, '{{ product.source_row_id }}')"
                         >Confirm Manually</button>
                         {% endif %}
                     </div>
@@ -263,12 +261,14 @@
                 {% elif product.show_weak_match_warning or product.db_match_status == 'unmatched' %}
                 <div class="extraction-db-match extraction-db-match--{% if product.db_match_status == 'unmatched' %}unmatched{% else %}weak{% endif %}">
                     <div class="extraction-db-match__head">
-                        {% if product.db_match_status == 'unmatched' and product.db_candidates and not product.show_weak_match_warning %}
-                        <span class="extraction-db-match__heading">Suggested database candidates</span>
-                        {% elif product.db_match_status == 'unmatched' %}
+                        {% if product.match_percentage_band == 'green' %}
+                        <span class="extraction-db-match__heading">Matched Database Product</span>
+                        {% elif product.show_weak_match_warning %}
+                        <span class="extraction-db-match__heading">Low-confidence match</span>
+                        {% elif product.db_match_status == 'unmatched' and not product.db_candidates %}
                         <span class="extraction-db-match__heading">No database match yet</span>
                         {% else %}
-                        <span class="extraction-db-match__heading">Low-confidence match</span>
+                        <span class="extraction-db-match__heading">Suggested Database Product</span>
                         {% endif %}
                         {% if not product.is_manual_load %}
                         <span class="badge badge--{{ product.match_percentage_band|default:'red' }} extraction-confidence-badge">
@@ -282,7 +282,7 @@
                             type="button"
                             class="btn btn--xsmall btn--primary extraction-confirm-match"
                             title="Confirm this product manually and set match to 100%"
-                            @click="window.confirmExtractionMatch($el, '{% url 'boq:extraction_edit' boq.pk %}', '{{ product.source_row_id }}', {{ product.product_index }})"
+                            @click="window.confirmExtractionMatch($el, '{% url 'boq:extraction_edit' boq.pk %}', '{{ line.row_id }}', {{ product.product_index }}, '{{ product.source_row_id }}')"
                         >Confirm Manually</button>
                         {% endif %}
                     </div>

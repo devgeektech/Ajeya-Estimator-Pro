@@ -410,7 +410,7 @@ def _shape_product(
         )
     # Only fill missing candidate % (legacy wiped scores). Never re-score stored
     # percentages — one product rematch must not change sibling product %.
-    if selection_source != "expert":
+    if selection_source not in {"expert", "confirm", "expert_confirm", "manual_load", "select"}:
         _backfill_candidate_confidences(
             product,
             candidates,
@@ -435,11 +435,20 @@ def _shape_product(
         except (TypeError, ValueError):
             continue
 
+    # When not explicitly locked by expert, the top candidate is always the default/suggested pick.
+    if selection_source not in {"expert", "confirm", "expert_confirm", "manual_load", "select"} and candidates:
+        top_cand_id = candidates[0].get("id")
+        for item in candidates:
+            item["is_selected"] = (
+                item.get("id") is not None
+                and top_cand_id is not None
+                and int(item["id"]) == int(top_cand_id)
+            )
+
     # Badge should reflect the best listed neighbor when Analyse left product % at 0.
     match_percentage = stored_match_percentage
     if (
-        selection_source != "expert"
-        and not product.get("db_product_id")
+        selection_source not in {"expert", "confirm", "expert_confirm", "manual_load", "select"}
         and top_candidate_pct > match_percentage
     ):
         match_percentage = top_candidate_pct
@@ -482,7 +491,7 @@ def _shape_product(
     comparison_item = None
 
     # If expert explicitly picked a candidate, compare against that selected candidate
-    if selection_source == "expert" and selected_id:
+    if selection_source in {"expert", "expert_confirm", "manual_load", "select"} and selected_id:
         for item in db_candidates:
             if isinstance(item, dict):
                 try:
@@ -639,9 +648,11 @@ def _shape_product(
         db_match_status = "matched"
     if product.get("db_product_id") or product.get("db_product_summary") or db_match_status in ("matched", "provisional") or candidates:
         top_candidate = candidates[0] if (candidates and isinstance(candidates[0], dict)) else None
+        is_expert_locked = selection_source in {"expert", "confirm", "expert_confirm", "manual_load", "select"}
+
         # When not explicitly selected/confirmed by an expert, the suggested product
         # must always be the candidate with the highest confidence score.
-        if selection_source != "expert" and not product.get("db_product_id") and top_candidate:
+        if not is_expert_locked and top_candidate:
             top_summary = str(top_candidate.get("summary") or "").strip()
             if match_band == "green":
                 summary = top_summary.replace("Suggested:", "").strip()
@@ -653,7 +664,7 @@ def _shape_product(
             summary = str(product.get("db_product_summary") or "").strip()
             if match_band == "green" and summary.lower().startswith("suggested:"):
                 summary = summary.split(":", 1)[1].strip()
-            suggested_id = product.get("suggested_db_product_id")
+            suggested_id = product.get("suggested_db_product_id") or product.get("db_product_id")
 
         if not summary and top_candidate:
             top_summary = str(top_candidate.get("summary") or "").strip()
@@ -675,10 +686,13 @@ def _shape_product(
         notes = str((product.get("ai_mapping") or {}).get("notes") or "")
         if match_band == "green" and "missing" in notes.lower():
             notes = ""
+
+        is_matched = match_band == "green" or is_expert_locked
+        effective_status = "matched" if is_matched else "provisional"
         db_match = {
-            "rate_master_id": product.get("db_product_id") or (top_candidate.get("id") if (top_candidate and match_band == "green") else None),
+            "rate_master_id": product.get("db_product_id") or (top_candidate.get("id") if (top_candidate and match_band == "green") else None) if is_matched else None,
             "suggested_id": suggested_id,
-            "status": db_match_status,
+            "status": effective_status,
             "summary": summary,
             "make": product.get("db_product_make") or "",
             "tech_key": product.get("db_product_tech_key") or "",
@@ -728,7 +742,7 @@ def _shape_product(
         # Show Confirm Manually for products with < 100% match that have a candidate to confirm
         "show_confirm_match": bool(
             float(match_percentage or 0.0) < 100.0
-            and selection_source not in {"expert_confirm", "confirm"}
+            and selection_source not in {"expert", "confirm", "expert_confirm", "manual_load"}
             and (
                 product.get("db_product_id")
                 or product.get("suggested_db_product_id")
@@ -1079,7 +1093,18 @@ class BOQExtractionDisplayService:
             )
 
         stats = analysis.get("stats") or {}
-        missing_product_id_count, missing_rate_only_count = count_missing_product_ids_summary(analysis)
+        missing_product_id_count = 0
+        missing_rate_only_count = 0
+        for line in lines:
+            for p in line.get("products") or []:
+                has_id = bool(str(p.get("catalog_product_id") or "").strip())
+                if not has_id:
+                    missing_product_id_count += 1
+                    qty_str = str(p.get("quantity") or "").strip().lower()
+                    is_ro = bool(p.get("rate_only")) or qty_str in {"rate only", "rate_only"}
+                    if is_ro:
+                        missing_rate_only_count += 1
+
         return {
             "has_extraction": bool(analysis.get("rows")),
             "phase": analysis.get("phase"),

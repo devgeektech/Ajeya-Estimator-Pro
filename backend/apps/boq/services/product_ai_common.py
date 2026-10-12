@@ -364,6 +364,7 @@ def _compute_match_confidence(
     # Strong core identity must not stall at 90–92% from AI/attr blend drag.
     core_clean = (
         not breakdown.get("size_mismatch_penalty")
+        and not breakdown.get("size_mismatch")
         and not breakdown.get("description_type_mismatch")
     )
     if core_clean and structured >= 95.0:
@@ -392,8 +393,8 @@ def _compute_match_confidence(
     else:
         blended = structured
     if ai_confidence is not None:
-        # AI may under-score synonym rewrites; keep structured dominant when strong.
-        ai_weight = 0.15 if structured >= 75 else 0.30
+        # 30% is defined by AI understanding & meaning from sections
+        ai_weight = 0.30
         blended = ((1.0 - ai_weight) * blended) + (ai_weight * float(ai_confidence))
     # Soft lift: near-perfect structured with no hard conflict → full credit.
     if core_clean and structured >= 92.0 and blended >= 88.0:
@@ -406,10 +407,11 @@ def _downgrade_unrelated_auto_match(
     confidence: float,
 ) -> dict[str, Any]:
     """Clear a confirmed pick when description and catalog product disagree."""
-    source = str((product.get("ai_mapping") or {}).get("selection_source") or "")
-    if source == "expert":
+    source = str((product.get("ai_mapping") or {}).get("selection_source") or "").strip().lower()
+    if source in {"expert", "expert_confirm", "manual_load"}:
         return product
-    if confidence >= MATCH_CONFIDENCE_THRESHOLD:
+    from common.constants import PRODUCT_ID_CONFIRM_CONFIDENCE
+    if confidence >= float(PRODUCT_ID_CONFIRM_CONFIDENCE):
         return product
     if str(product.get("db_match_status") or "") != DB_MATCH_MATCHED:
         return product

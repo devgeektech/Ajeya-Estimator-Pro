@@ -261,7 +261,7 @@ class MakeVendorRatesMixin:
                             cur_v = v_app_map.get(vendor)
                             if cur_v is None or amount < cur_v:
                                 v_app_map[vendor] = amount
-        if overall is None and by_make:
+        if overall is None and by_make and not approved_makes:
             overall = min(by_make.values())
         return {
             "lowest_amount": self._format_preview_amount(overall) if overall is not None else "",

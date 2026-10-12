@@ -305,3 +305,22 @@ class WeakMatchPrefillTests(SimpleTestCase):
         self.assertIn("32 / HYDRANT / LANDING VALVE", shaped["db_match"]["summary"])
         self.assertNotIn("113 / HYDRANT / SHORT BRANCH PIPE", shaped["db_match"]["summary"])
 
+    def test_selected_candidate_under_100_shows_confirm_manually(self):
+        product = {
+            "catalog_product_id": "32",
+            "db_product_id": 32,
+            "db_match_status": "matched",
+            "db_match_confidence": 85.0,
+            "ai_mapping": {"selection_source": "select"},
+            "db_candidates": [{"id": 32, "confidence": 85.0}],
+        }
+        shaped = _shape_product(product, display_number=1, total=1, source_row_id="r1")
+        self.assertTrue(shaped.get("show_confirm_match"))
+
+        # Once confirmed at 100%, confirm manually button is hidden
+        product["ai_mapping"]["selection_source"] = "expert_confirm"
+        product["db_match_confidence"] = 100.0
+        shaped_100 = _shape_product(product, display_number=1, total=1, source_row_id="r1")
+        self.assertFalse(shaped_100.get("show_confirm_match"))
+
+

@@ -481,7 +481,7 @@ class ProductAIApplyMixin:
         selection_source = str(
             (product.get("ai_mapping") or {}).get("selection_source") or ""
         ).strip().lower()
-        is_expert_locked = selection_source in {"expert", "confirm", "manual_load"}
+        is_expert_locked = selection_source in {"expert", "confirm", "manual_load", "expert_confirm", "select"}
         if is_expert_locked and selected_id is not None:
             head = [item for item in rescored if int(item.get("id") or 0) == selected_id]
             tail = [item for item in rescored if int(item.get("id") or 0) != selected_id]
@@ -625,9 +625,9 @@ class ProductAIApplyMixin:
             (product.get("ai_mapping") or {}).get("selection_source") or ""
         ).strip().lower()
         is_green = float(confidence or 0.0) >= float(PRODUCT_ID_CONFIRM_CONFIDENCE)
-        expert_locked = selection_source in {"expert", "confirm", "manual_load"}
+        expert_locked = selection_source in {"expert", "confirm", "manual_load", "expert_confirm", "select"}
 
-        if not rematch and not expert_locked and not is_green:
+        if not expert_locked and not is_green:
             provisional = self._provisional_schema_match(
                 enriched,
                 rate=rate,
@@ -802,7 +802,7 @@ class ProductAIApplyMixin:
         selection_source = str(
             (product.get("ai_mapping") or {}).get("selection_source") or ""
         ).strip().lower()
-        is_expert_locked = selection_source in {"expert", "confirm", "manual_load"}
+        is_expert_locked = selection_source in {"expert", "confirm", "manual_load", "expert_confirm", "select"}
         if is_expert_locked and selected_id is not None:
             try:
                 selected_pk = int(selected_id)
@@ -1183,10 +1183,12 @@ class ProductAIApplyMixin:
         selection_source = str(
             (enriched.get("ai_mapping") or {}).get("selection_source") or ""
         ).strip().lower()
+        is_green = match_conf >= float(PRODUCT_ID_CONFIRM_CONFIDENCE)
+        expert_locked = selection_source in {"expert", "confirm", "manual_load", "expert_confirm", "select"}
         confirmed = (
             status == DB_MATCH_MATCHED
             and enriched.get("db_product_id") not in (None, "")
-            and selection_source in {"expert", "confirm", "manual_load"}
+            and (expert_locked or is_green)
         )
 
         # Prefer Product_ID from the confirmed Rate_Master_Output row.

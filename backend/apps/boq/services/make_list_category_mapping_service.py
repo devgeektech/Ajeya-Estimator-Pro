@@ -23,7 +23,7 @@ logger = logging.getLogger("boq_ai")
 _BATCH_SIZE = 20
 
 # Bump when mapping rules change so ensure_mappings remaps stored make lists.
-_MAPPING_VERSION = 11
+_MAPPING_VERSION = 12
 
 # Tokens too generic to pick a sub-category by overlap alone (e.g. "Alarm Valve"
 # must not become BALL VALVE just because both share "valve").
@@ -317,17 +317,20 @@ def _heuristic_category(
             )
             return resolved, sub, 78.0, True
 
-    desc_tokens = _token_set(text)
+    stem = lambda t: t[:-1] if t.endswith("s") and not t.endswith("ss") and len(t) > 3 else t
+    desc_stems = {stem(tok) for tok in _token_set(text)}
+    _generic_cat_overlap = frozenset({"fire", "fighting", "system", "equipment", "accessories", "and", "the", "for", "with", "etc"})
     best_cat = None
     best_score = 0.0
     for category in categories:
         cat_tokens = _token_set(category)
-        if not cat_tokens:
+        cat_stems = {stem(tok) for tok in cat_tokens}
+        if not cat_stems:
             continue
-        overlap = desc_tokens & cat_tokens
-        if not overlap:
+        overlap = desc_stems & cat_stems
+        if not overlap or overlap <= _generic_cat_overlap:
             continue
-        score = 100.0 * len(overlap) / max(len(cat_tokens), 1)
+        score = 100.0 * len(overlap) / max(len(cat_stems), 1)
         if score > best_score:
             best_score = score
             best_cat = category

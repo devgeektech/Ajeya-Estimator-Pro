@@ -315,9 +315,19 @@
     data-detail-analysis-url="{% url 'boq:detail' boq.pk %}?tab=analysis"
     data-is-extracting="{% if is_extracting %}1{% else %}0{% endif %}"
     @product-id-assigned.window="
-        missingProductIdCount = Math.max(0, missingProductIdCount - 1);
-        if ($event.detail && $event.detail.isRateOnly) {
-            missingRateOnlyCount = Math.max(0, missingRateOnlyCount - 1);
+        if ($event.detail && typeof $event.detail.missing_product_id_count === 'number') {
+            missingProductIdCount = $event.detail.missing_product_id_count;
+            if (typeof $event.detail.missing_rate_only_count === 'number') {
+                missingRateOnlyCount = $event.detail.missing_rate_only_count;
+            }
+            if (typeof $event.detail.total_product_count === 'number') {
+                totalProductCount = $event.detail.total_product_count;
+            }
+        } else {
+            missingProductIdCount = Math.max(0, missingProductIdCount - 1);
+            if ($event.detail && $event.detail.isRateOnly) {
+                missingRateOnlyCount = Math.max(0, missingRateOnlyCount - 1);
+            }
         }
     "
     @make-vendor-status.window="
@@ -1312,7 +1322,7 @@
                 >{% if analysis_error %}{{ analysis_error }}{% endif %}</span>
                 {% if extraction_display.has_extraction %}
                 <span x-show="tab === 'analysis' && !analysing && !analysisError" x-cloak>
-                    <strong>{{ extraction_display.product_count }}</strong> product(s) extracted.
+                    <strong x-text="totalProductCount">{{ extraction_display.product_count }}</strong> product(s) extracted.
                     {% if extraction_display.multiproduct_review_count %}
                         <span class="extraction-missing-summary">{{ extraction_display.multiproduct_review_count }} multi-product review.</span>
                     {% endif %}

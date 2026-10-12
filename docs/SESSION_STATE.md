@@ -3,22 +3,81 @@
 Compact active memory. Full spec: `docs/PRODUCT.md`. Schema: `docs/DATABASE.md`.
 History: `docs/CHANGELOG.md` (do not duplicate session diaries here).
 
-### 2026-10-12 — Analysis & Make/Vendor Confirmation Modals Rephrase & New Row
+### 2026-10-12 — Confidence Score Re-weighting, MS vs GI Pipe Disambiguation, & Export Sheet Yellow/#1976E7 Styling
 
 Completed:
-- Shortened and rephrased the unmatched product warning modal message in `goToMakeVendor` on the Analysis tab to Option 1: concise, non-redundant wording (*"X of Y products have no Product ID and will skip Make/Vendor lookup."*).
-- Shortened and rephrased the `goToLabour` modal message on the Make & Vendor tab to Option 1: concise breakdown (*"X products will be marked Not Available on Labour (no rates): ..."*) with action sentence (*"Stay on Make & Vendor to resolve them, or proceed to Labour."*) on its own row.
-- Updated `goToLabour` modal button labels from generic *"Cancel"* / *"Continue"* to *"Stay on Make & Vendor"* (with warning/secondary styling) and *"Proceed anyway"*.
-- Handled singular vs plural dynamic phrasing (*"product"* vs *"products"*, *"has"* vs *"have"*, *"it"* vs *"them"*).
-- Enforced `white-space: pre-line !important;` on `.confirm-modal__message` in `templates/base.html` so newline characters render across all browser contexts and cache states.
-- All 144 tests in `tests.boq` passing.
+- **Confidence Score Weight Adjustment (70% Extracted Inputs, 30% AI Section Understanding)**:
+  - Reduced `category` weight from 30% to 15% (-15%).
+  - Reduced `sub_category` weight from 40% to 25% (-15%).
+  - Allocated remaining 30% to AI understanding and semantic section meaning in candidate scoring (`_CHROMA_WEIGHT = 0.30`, `_STRUCTURED_WEIGHT = 0.70`).
+  - Updated `_compute_match_confidence` in `product_ai_common.py` to blend 30% AI understanding (`ai_weight = 0.30`).
+  - Updated `_TEXT_WEIGHTS` in `product_helper_matching_service.py` to match (category 15%, sub_category 25%).
+- **MS vs GI Piping Disambiguation & Conflict Prevention**:
+  - In `product_matching_service.py`, added pipe material conflicts (`MS` vs `GI`, `CPVC`, `UPVC`, `SS`) to `_SUB_CATEGORY_CONFLICTS` and phrase pairs.
+  - In `product_type_conflicts`, added explicit check flagging candidates whose pipe material contradicts section text (caps confidence at 29%, preventing 90%+ scores for wrong metals).
+  - In `product_extraction_sanitize.py`, reinforced `_sanitize_sub_category` for PIPE to correct hallucinated GI sub_category to MS when evidence specifies M.S./Mild Steel/Black ERW.
+  - In `extract_products.txt`, added piping base material dominance rule ensuring section header material applies to all child diameter slots regardless of joint fitting notes.
+- **Export Sheets Styling & Formula Preservation**:
+  - In `boq_export_service.py`, styled entire highlighted calculation columns (I, O, Q, S, U, V, W) in solid yellow (`#FFFF00`) for headers and all data rows.
+  - Styled all other headers in `#1976E7` royal blue with bold white font.
+  - Removed literal `Not available` text across Review and BOQ sheets: leaves input cells blank while keeping active calculation formulas (`=IF(...)`, `=N(...)`, etc.) in place on all rows.
+  - Maintained bidirectional hyperlinks and formula linkage between BOQ and Review sheets so manual entries in Excel calculate seamlessly.
+- **Tests**: All 147 tests in `tests.boq` pass.
 
-Pending:
-- None.
-
+Pending: None.
 Issues: None.
+Next: Deploy and verify in production runtime.
 
-Next: None.
+### 2026-10-12 — Immediate Confirm Manually Responsiveness & Idempotent Match Locking
+
+Completed:
+- **Immediate UI Feedback & Unblocked Execution**:
+  - In `_extraction_table.html`, added immediate button feedback (`Confirming…`) and replaced the unconstrained `while (formData.saving)` loop with a bounded 100ms wait.
+  - Set `formData._confirming = true` so any pending background auto-save cannot overwrite the confirmed product's score or status.
+  - Switched DOM update in `confirmExtractionMatch` to `replaceExtractionLine` first (with `activeProduct` preserved) to atomically update line headers, tabs, borders, badges, and card state in a single synchronous DOM replacement.
+  - Stripped `x-cloak` from inserted DOM trees so dynamic content is never hidden by `[x-cloak] { display: none !important; }`.
+  - Added `extraction-line--confidence-orange` to `syncExtractionLineConfidence` to ensure orange borders transition properly to green.
+- **Idempotency & Grouped Slot Row Matching**:
+  - In `boq_extraction_edit_service.py`, made `confirm_match` idempotent: if a product is already confirmed at 100%, return the product cleanly instead of raising `ValidationError("This product is already confirmed.")`.
+  - In `boq_extraction_edit_service.py`, targeted `product_row_id` first when locating the target product to accurately match slot products in grouped rows, while preserving the anchor row ID for frontend DOM replacement.
+  - In `views.py`, updated `_render_extraction_line_html` with a fallback to find lines by child slot `source_row_id`, guaranteeing non-empty line HTML is returned.
+  - In `boq_extraction_display_service.py`, enabled `show_confirm_match` for products where a candidate was picked (`selection_source == "select"`) with `< 100%` match so experts can confirm candidates immediately.
+- **Test Coverage**:
+  - Added unit tests in `tests/boq/test_extraction_edit.py` and `tests/boq/test_product_id_visibility.py` verifying `confirm_match` idempotency, slot product targeting, and candidate button visibility.
+  - Verified all 145 tests pass cleanly.
+
+Pending: None.
+Issues: None.
+Next: Monitor live manual confirmations in the UI.
+
+### 2026-10-12 — Export Sheets Bidirectional Hyperlinking & Review Calculation Column Highlighting
+
+Completed:
+- **Export Sheets Bidirectional Hyperlinking (Rate & Amount)**:
+  - In `boq_export_service.py`, implemented ECMA-376 OpenXML internal worksheet hyperlinks (`openpyxl.worksheet.hyperlink.Hyperlink`) between the `Review` sheet and the `BOQ` sheet.
+  - On the `BOQ` sheet: Rate and Amount cells link directly to the corresponding product's Final Rate (col S) and Amount (col W) on the `Review` sheet (`location="'Review'!S{row}"` and `location="'Review'!W{row}"`) with descriptive tooltips.
+  - On the `Review` sheet: Final Rate (col S) and Amount (col W) link directly back to the item's Rate and Amount cells on the `BOQ` sheet (`location="'BOQ'!{col}{row}"`).
+  - Added support across both standard workbook filling and JSON-fallback BOQ tab generation.
+- **Review Sheet Formula Column Name Updates**:
+  - In `boq_review_display_service.py`, updated `REVIEW_OUTPUT_HEADER_SPECS` to incorporate exact algebraic formula notation into column headers:
+    - `Net_Material_Rate (G*(1-H))`
+    - `Sub_Total (K+L+M+N)`
+    - `Final_Material_Amount (O+P)`
+    - `Final Rate (Q+R)`
+    - `TOTAL MATERIAL (Q*T)`
+    - `TOTAL LABOUR (R*T)`
+    - `Amount (U+V)`
+- **Review Sheet Calculation Column Highlighting**:
+  - In `boq_export_service.py`, designated `_HIGHLIGHTED_REVIEW_COLS` (cols 9, 15, 17, 19, 21, 22, 23).
+  - Styled headers in row 1 with distinct accent fill `_FORMULA_HEADER_FILL` (`#BDD7EE`, soft pastel blue).
+  - Styled data cells in those columns with `_FORMULA_CELL_FILL` (`#EDF2F8`, subtle ice blue) while safely preserving error/warning fills (`_MISSING_PRODUCT_FILL`, `_ZERO_OR_RATE_ONLY_FILL`, `_ACTIVITY_ONLY_FILL`).
+- **Test Coverage**:
+  - Extended `tests/boq/test_boq_export.py` to assert header labels, header fill colors, and bidirectional hyperlinks.
+  - All 144 tests in `tests.boq` passing cleanly.
+
+Pending: None.
+Issues: None.
+Next: Test Excel exports in desktop Excel.
 
 ### 2026-10-09 — Make & Vendor Dropdown Scoping, Approved Makes Completeness & Price Preview
 
