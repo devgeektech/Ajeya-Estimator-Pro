@@ -251,7 +251,8 @@ def attribute_overlap_score(
             scores[score_key] = 0.6
             matched += 0.6
 
-    return matched / len(extracted), scores
+    denom = max(len(extracted), len(candidate))
+    return (matched / denom) if denom > 0 else 0.0, scores
 
 
 def _values_match(left: str, right: str) -> bool:

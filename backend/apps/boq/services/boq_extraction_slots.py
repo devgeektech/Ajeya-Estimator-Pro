@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 from ai.context import (
+    load_rate_master_taxonomy,
     resolve_category_label,
     resolve_sub_category_label,
     snap_product_taxonomy,
@@ -740,6 +741,7 @@ def _snap_identity_from_product_context(
 
     item = dict(product)
     blob = (product_context or "").strip()
+    taxonomy = taxonomy or load_rate_master_taxonomy()
     main_cat, main_sub = resolve_main_product_from_evidence(blob, taxonomy=taxonomy)
     if main_cat and main_sub:
         # Only override if AI failed to assign a category
@@ -754,11 +756,25 @@ def _snap_identity_from_product_context(
     target_cat = (category or "").strip().upper()
     target_sub = (sub_category or "").strip().upper()
 
-    # Only fill if AI category/sub are blank (Trust the AI)
+    # Fill if blank, or if current sub contradicts explicit context evidence (hallucination)
     if category and not current_cat:
         item["category"] = category
-    if sub_category and not current_sub:
-        item["sub_category"] = sub_category
+    if sub_category:
+        if not current_sub:
+            item["sub_category"] = sub_category
+        elif category == (item.get("category") or "") and sub_category.upper() != current_sub:
+            from utils.product_synonyms import get_dynamic_taxonomy_hints
+            by_cat = dict(taxonomy.get("sub_categories_by_category") or {})
+            _, sub_hints = get_dynamic_taxonomy_hints(by_cat)
+            blob_l = blob.lower()
+            current_mentioned = any(phrase in blob_l for phrase, target in sub_hints if target.upper() == current_sub)
+            target_mentioned = any(phrase in blob_l for phrase, target in sub_hints if target.upper() == sub_category.upper())
+            if target_mentioned and not current_mentioned:
+                logger.info(
+                    "_snap_identity_from_product_context: correcting hallucinated sub_category %r to %r from evidence for %s",
+                    current_sub, sub_category, blob[:60],
+                )
+                item["sub_category"] = sub_category
     item = _snap_class_from_text(item, blob)
     return snap_product_taxonomy(item, taxonomy, infer_defaults=False)
 
@@ -1190,6 +1206,8 @@ def _slot_fallback_product(
     slot: dict[str, Any],
     *,
     product_index: int,
+    taxonomy: dict[str, Any] | None = None,
+    sibling_products: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """
     Preserve a filled BOQ slot if AI still omits it after the correction pass.
@@ -1197,6 +1215,7 @@ def _slot_fallback_product(
     This does not invent catalog facts. It keeps the slot's BOQ evidence visible
     for expert review and downstream matching instead of silently losing a line.
     """
+    taxonomy = taxonomy or load_rate_master_taxonomy()
     evidence = str(
         slot.get("evidence_text")
         or slot.get("product_context")
@@ -1236,6 +1255,21 @@ def _slot_fallback_product(
         hint = size_phrase
     else:
         hint = str(slot.get("description") or "").strip() or evidence
+
+    # Inherit product family from sibling products under the same anchor group when available
+    inherited_cat = None
+    inherited_sub = None
+    inherited_class = None
+    inherited_attrs = {}
+    if sibling_products:
+        for sib in sibling_products:
+            if sib.get("category") and sib.get("sub_category"):
+                inherited_cat = sib.get("category")
+                inherited_sub = sib.get("sub_category")
+                inherited_class = sib.get("class")
+                inherited_attrs = dict(sib.get("attributes") or {})
+                break
+
     product = {
         "product_index": product_index,
         "source_row_id": row_id,
@@ -1244,14 +1278,14 @@ def _slot_fallback_product(
         "slot_id": slot.get("slot_id"),
         "boq_serial": str(slot.get("serial") or "").strip() or None,
         "description_hint": hint[:500],
-        "category": None,
-        "sub_category": None,
-        "class": None,
+        "category": inherited_cat,
+        "sub_category": inherited_sub,
+        "class": inherited_class,
         "size": size,
         "unit": size_unit,
         "capacity": capacity,
         "make_hint": None,
-        "attributes": {},
+        "attributes": inherited_attrs,
         "extraction_confidence": 0.0,
         "slot_fallback": True,
         "needs_extraction_review": True,
@@ -1259,7 +1293,12 @@ def _slot_fallback_product(
     product = _snap_identity_from_product_context(
         product,
         product_context=product_context,
+        taxonomy=taxonomy,
     )
+    if product.get("category") and product.get("sub_category"):
+        composed = compose_description_hint(product)
+        if composed:
+            product["description_hint"] = composed
     return _apply_one_qty(
         normalize_product_fields(product),
         qty=slot.get("qty"),
@@ -1272,8 +1311,11 @@ def _slot_fallback_product(
 def _ensure_minimum_slot_products(
     group: dict[str, Any],
     row: dict[str, Any],
+    *,
+    taxonomy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Stabilize to one product per filled Unit/Qty slot (pad missing, trim extras)."""
+    taxonomy = taxonomy or load_rate_master_taxonomy()
     slots = list(_group_slots(group))
     updated = dict(row)
     products = list(updated.get("products") or [])
@@ -1308,6 +1350,8 @@ def _ensure_minimum_slot_products(
                         group,
                         slot,
                         product_index=len(stabilized),
+                        taxonomy=taxonomy,
+                        sibling_products=products,
                     )
                 )
                 continue
@@ -1341,6 +1385,8 @@ def _ensure_minimum_slot_products(
                     group,
                     slot,
                     product_index=len(products),
+                    taxonomy=taxonomy,
+                    sibling_products=products,
                 )
             )
 
@@ -1351,6 +1397,7 @@ def _ensure_minimum_slot_products(
         products,
         group=group,
         slots=slots,
+        taxonomy=taxonomy,
     )
     updated["skip_matching"] = False
     if missing_slots:

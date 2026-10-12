@@ -106,7 +106,57 @@ def _request_wants_json(request) -> bool:
     )
 
 
-def _extraction_edit_json_ok(message: str, **payload):
+def _extraction_summary_counts(boq: BOQ) -> dict[str, int]:
+    from apps.boq.services.make_vendor_common import loaded_catalog_product_id
+    try:
+        boq.refresh_from_db(fields=["analysis_data"])
+    except Exception:
+        pass
+    analysis = boq.analysis_data or {}
+    rows = analysis.get("rows") or []
+    missing_ids = 0
+    missing_rate_only = 0
+    total = 0
+    red_count = 0
+    orange_count = 0
+    green_count = 0
+    for r in rows:
+        for p in r.get("products") or []:
+            total += 1
+            cat_id = loaded_catalog_product_id(p)
+            conf = float(p.get("db_match_confidence") or 0.0)
+            mapping = p.get("ai_mapping") or {}
+            source = str(mapping.get("selection_source") or "").strip().lower()
+            is_locked = source in {"expert", "confirm", "manual_load", "expert_confirm", "select"}
+            if not cat_id and not is_locked:
+                missing_ids += 1
+                qty_str = str(p.get("quantity") or "").strip().lower()
+                is_ro = bool(p.get("rate_only")) or qty_str in {"rate only", "rate_only"}
+                if is_ro:
+                    missing_rate_only += 1
+            if conf >= 95.0 or is_locked:
+                green_count += 1
+            elif conf >= 85.0:
+                orange_count += 1
+            else:
+                red_count += 1
+    return {
+        "missing_product_id_count": missing_ids,
+        "missing_rate_only_count": missing_rate_only,
+        "total_product_count": total,
+        "red_product_count": red_count,
+        "orange_product_count": orange_count,
+        "green_product_count": green_count,
+    }
+
+
+def _extraction_edit_json_ok(message: str, boq: BOQ | None = None, **payload):
+    if boq is not None:
+        try:
+            counts = _extraction_summary_counts(boq)
+            payload = {**counts, **payload}
+        except Exception:
+            pass
     return JsonResponse({"ok": True, "message": message, **payload})
 
 
@@ -153,6 +203,15 @@ def _render_extraction_line_html(request, boq: BOQ, row_id: str) -> str:
         (item for item in display.get("lines") or [] if str(item.get("row_id")) == row_id),
         None,
     )
+    if line is None:
+        # Fallback: check if row_id is a child slot row within one of the lines
+        line = next(
+            (
+                item for item in display.get("lines") or []
+                if any(str(p.get("source_row_id")) == row_id for p in item.get("products") or [])
+            ),
+            None,
+        )
     if line is None:
         return ""
     return render_to_string(
@@ -772,6 +831,7 @@ class BOQRowExtractView(LoginRequiredMixin, View):
                 line_html = _render_extraction_line_html(request, boq, row_id)
                 return _extraction_edit_json_ok(
                     message,
+                    boq=boq,
                     row_id=row_id,
                     line_html=line_html,
                     product_index=product_index,
@@ -819,6 +879,7 @@ class BOQExtractionEditView(LoginRequiredMixin, View):
                 if ajax:
                     return _extraction_edit_json_ok(
                         message,
+                        boq=boq,
                         product_index=int(product.get("product_index") or 0),
                     )
                 messages.success(request, message)
@@ -834,7 +895,7 @@ class BOQExtractionEditView(LoginRequiredMixin, View):
                 editor.remove_product(row_id=row_id, product_index=product_index)
                 message = "Product removed from this row."
                 if ajax:
-                    return _extraction_edit_json_ok(message)
+                    return _extraction_edit_json_ok(message, boq=boq)
                 messages.success(request, message)
             elif action == "select_candidate":
                 try:
@@ -862,6 +923,7 @@ class BOQExtractionEditView(LoginRequiredMixin, View):
                     line_html = _render_extraction_line_html(request, boq, row_id)
                     return _extraction_edit_json_ok(
                         message,
+                        boq=boq,
                         row_id=row_id,
                         product_index=product_index,
                         line_html=line_html,
@@ -899,6 +961,7 @@ class BOQExtractionEditView(LoginRequiredMixin, View):
                     line_html = _render_extraction_line_html(request, boq, row_id)
                     return _extraction_edit_json_ok(
                         message,
+                        boq=boq,
                         row_id=row_id,
                         product_index=product_index,
                         line_html=line_html,
@@ -913,13 +976,20 @@ class BOQExtractionEditView(LoginRequiredMixin, View):
                         return _extraction_edit_json_error(message)
                     messages.error(request, message)
                     return HttpResponseRedirect(redirect_url)
-                editor.confirm_match(row_id=row_id, product_index=product_index)
+                product_row_id = (request.POST.get("product_row_id") or "").strip() or None
+                editor.confirm_match(
+                    row_id=row_id,
+                    product_index=product_index,
+                    product_row_id=product_row_id,
+                )
+                actual_row_id = row_id or editor.last_matched_row_id
                 message = "Product match confirmed at 100%."
                 if ajax:
-                    line_html = _render_extraction_line_html(request, boq, row_id)
+                    line_html = _render_extraction_line_html(request, boq, actual_row_id)
                     return _extraction_edit_json_ok(
                         message,
-                        row_id=row_id,
+                        boq=boq,
+                        row_id=actual_row_id,
                         product_index=product_index,
                         line_html=line_html,
                     )
@@ -989,6 +1059,7 @@ class BOQExtractionEditView(LoginRequiredMixin, View):
                 if ajax:
                     return _extraction_edit_json_ok(
                         message,
+                        boq=boq,
                         product=build_product_save_feedback(updated),
                     )
                 messages.success(request, message)

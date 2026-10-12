@@ -118,6 +118,8 @@ def get_standard_abbreviations() -> dict[str, tuple[str, ...]]:
         "co2 extinguisher": ("co2",),
         "foam extinguisher": ("foam",),
         "dcp extinguisher": ("dcp",),
+        "short branch pipe": ("branch pipe", "nozzle"),
+        "fire hose reel": ("hose reel", "hose reel drum"),
     }
     
     bidirectional = {}
@@ -267,7 +269,8 @@ def expand_query_terms(value: Any) -> list[str]:
                 
     text = _normalize_label(raw)
     for phrase_key, phrase_items in abbrevs.items():
-        if phrase_key in text:
+        pattern = rf"(?<![a-zA-Z0-9]){re.escape(phrase_key)}(?![a-zA-Z0-9])"
+        if re.search(pattern, text, re.IGNORECASE):
             for item in phrase_items:
                 if item not in terms:
                     terms.append(item)

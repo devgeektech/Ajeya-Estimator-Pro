@@ -76,12 +76,21 @@ def makes_optimally_match(
     return False
 
 
+def _canonical_category(cat: str) -> str:
+    norm = _normalize_text(cat)
+    if norm.startswith("fire "):
+        norm = norm[5:].strip()
+    return norm
+
+
 def _categories_equivalent(left: str, right: str) -> bool:
     a = _normalize_text(left)
     b = _normalize_text(right)
     if not a or not b:
         return False
-    return a == b or a in b or b in a
+    if a == b:
+        return True
+    return _canonical_category(a) == _canonical_category(b)
 
 
 def _description_from_fields(
@@ -154,14 +163,15 @@ def _entry_covers_sub(
     Category-wide rows (null sub) match every sub only when ``allow_category_wide``.
     Cascade UI passes ``False`` so a selected sub-category shows that sub's makes.
     """
-    if sub_norm in _normalize_text(entry.get("description") or ""):
-        return True
     targets = list(entry.get("mapped_targets") or [])
     if not targets:
         mapped_sub = _normalize_text(str(entry.get("mapped_sub_category") or ""))
-        if not mapped_sub:
-            return bool(allow_category_wide)  # type: ignore
-        return mapped_sub == sub_norm
+        if mapped_sub:
+            return mapped_sub == sub_norm
+        desc_norm = _normalize_text(entry.get("description") or "")
+        if re.search(rf"(?<![a-zA-Z0-9]){re.escape(sub_norm)}(?![a-zA-Z0-9])", desc_norm):
+            return True
+        return allow_category_wide
     for target in targets:
         if not _categories_equivalent(str(target.get("category") or ""), category):
             continue

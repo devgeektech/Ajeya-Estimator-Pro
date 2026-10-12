@@ -5,14 +5,132 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
-## 2026-10-07 — Re-analyse Penalty & AI Re-extraction Fixes
+## 2026-10-12 — Confidence Score Re-weighting, MS vs GI Pipe Disambiguation, & Export Sheet Yellow/#1976E7 Styling
+- **Confidence Score Weight Adjustment**:
+  - Re-weighted extracted product fields: reduced `category` by 15% (30% -> 15%) and `sub_category` by 15% (40% -> 25%), while maintaining 6% each for class, size, unit, capacity, and attributes (total 70% extracted input weight).
+  - Allocated remaining 30% to AI understanding and section meaning: set `_CHROMA_WEIGHT = 0.30` and `_STRUCTURED_WEIGHT = 0.70` in [product_matching_service.py](file:///c:/Users/vikas.DESKTOP-61LEE8B/Projects/BOQ_AI/backend/apps/boq/services/product_matching_service.py).
+  - Updated `_compute_match_confidence` in [product_ai_common.py](file:///c:/Users/vikas.DESKTOP-61LEE8B/Projects/BOQ_AI/backend/apps/boq/services/product_ai_common.py) with `ai_weight = 0.30`.
+  - Updated `_TEXT_WEIGHTS` in [product_helper_matching_service.py](file:///c:/Users/vikas.DESKTOP-61LEE8B/Projects/BOQ_AI/backend/apps/boq/services/product_helper_matching_service.py) to match.
+- **MS vs GI Pipe Disambiguation & Hard Conflict Cap**:
+  - In [product_matching_service.py](file:///c:/Users/vikas.DESKTOP-61LEE8B/Projects/BOQ_AI/backend/apps/boq/services/product_matching_service.py), added pipe material conflicts (`MS`, `GI`, `CPVC`, `UPVC`, `SS`) to `_SUB_CATEGORY_CONFLICTS` and phrase pairs.
+  - In `product_type_conflicts`, added explicit check flagging candidates whose pipe material contradicts section text (e.g. GI candidate for MS pipe section), capping confidence at `_TYPE_MISMATCH_SCORE_CAP` (29%) and preventing false 90%+ scores.
+  - In [product_extraction_sanitize.py](file:///c:/Users/vikas.DESKTOP-61LEE8B/Projects/BOQ_AI/backend/utils/product_extraction_sanitize.py), reinforced `_sanitize_sub_category` for PIPE to correct hallucinated GI sub_category to MS when evidence specifies M.S./Mild Steel/Black ERW.
+  - In [extract_products.txt](file:///c:/Users/vikas.DESKTOP-61LEE8B/Projects/BOQ_AI/backend/ai/prompts/extract_products.txt), added piping base material dominance rule ensuring section header material applies to all child diameter slots regardless of joint fitting notes.
+- **Export Sheets Styling & Formula Preservation**:
+  - In [boq_export_service.py](file:///c:/Users/vikas.DESKTOP-61LEE8B/Projects/BOQ_AI/backend/apps/boq/services/boq_export_service.py), styled entire highlighted calculation columns (I, O, Q, S, U, V, W) in solid yellow (`#FFFF00`) for headers and all data rows.
+  - Styled all other headers in `#1976E7` royal blue with bold white font.
+  - Removed literal `Not available` text across Review and BOQ sheets: leaves input cells blank while keeping active calculation formulas (`=IF(...)`, `=N(...)`, etc.) in place on all rows.
+  - Maintained bidirectional hyperlinks and formula linkage between BOQ and Review sheets so manual entries in Excel calculate seamlessly.
 
-- Fixed PDF Make List extraction by switching from `pypdf` to `pdfplumber`, completely resolving table layout loss on malformed PDFs missing font metadata (`Tf`).
-- Upgraded text peeling boundaries (`utils/text_boundary.py`) to preserve lowercase brand names.
-- Resolved IDE linter warnings in `pdf_make_list_parser.py` and `test_conflict.py`.
-- Merged and deployed all fixes to live.
+## 2026-10-12 — Immediate Confirm Manually Responsiveness & Idempotent Match Locking
+- **Immediate Response & Button Feedback**:
+  - In [templates/boq/_extraction_table.html](file:///c:/Users/vikas.DESKTOP-61LEE8B/Projects/BOQ_AI/templates/boq/_extraction_table.html), updated `window.confirmExtractionMatch` to provide immediate feedback by disabling the clicked button and setting text to `Confirming…`.
+  - Replaced the unconstrained `while (formData.saving)` loop with a bounded wait (max 100ms) to eliminate execution hanging on pending or stalled auto-saves.
+  - Added `_confirming = true` flag on form state to prevent stale background auto-save responses from overwriting the 100% confirmed match score.
+  - Switched DOM replacement to update the entire line atomically via `window.replaceExtractionLine` (with `activeProduct` preserved), ensuring line headers, tabs, borders, and product cards refresh in unison without delay.
+  - Added stripping of `x-cloak` attributes on inserted DOM trees to prevent hidden elements.
+  - Added `extraction-line--confidence-orange` to `syncExtractionLineConfidence` so orange borders transition cleanly to green.
+- **Idempotency & Grouped Slot Product Lookup**:
+  - In [boq_extraction_edit_service.py](file:///c:/Users/vikas.DESKTOP-61LEE8B/Projects/BOQ_AI/backend/apps/boq/services/boq_extraction_edit_service.py), made `confirm_match` idempotent: if a product is already confirmed at 100%, return the product cleanly instead of raising `ValidationError("This product is already confirmed.")`.
+  - In [boq_extraction_edit_service.py](file:///c:/Users/vikas.DESKTOP-61LEE8B/Projects/BOQ_AI/backend/apps/boq/services/boq_extraction_edit_service.py), prioritized `product_row_id` when finding slot products in grouped rows, ensuring slot child rows are directly targeted while preserving the section anchor `row_id` for frontend DOM replacement.
+  - In [views.py](file:///c:/Users/vikas.DESKTOP-61LEE8B/Projects/BOQ_AI/backend/apps/boq/views.py), added a fallback in `_render_extraction_line_html` to locate lines by child slot `source_row_id`, guaranteeing valid rendered line HTML on every confirm request.
+  - In [boq_extraction_display_service.py](file:///c:/Users/vikas.DESKTOP-61LEE8B/Projects/BOQ_AI/backend/apps/boq/services/boq_extraction_display_service.py), allowed products with selected candidates (`selection_source == "select"`) and `< 100%` match to display the "Confirm Manually" button.
+- **Tests**:
+  - Added unit tests in [tests/boq/test_extraction_edit.py](file:///c:/Users/vikas.DESKTOP-61LEE8B/Projects/BOQ_AI/tests/boq/test_extraction_edit.py) and [tests/boq/test_product_id_visibility.py](file:///c:/Users/vikas.DESKTOP-61LEE8B/Projects/BOQ_AI/tests/boq/test_product_id_visibility.py) verifying idempotency, slot product targeting, and candidate confirm visibility.
+  - All test suites passing cleanly.
 
-## 2026-10-07 — Add Rate Only tag for zero quantity
+## 2026-10-12 — Export Sheets Bidirectional Hyperlinking & Review Calculation Column Highlighting
+- **Bidirectional Hyperlinks in Rate and Amount Columns**:
+  - In [boq_export_service.py](file:///c:/Users/vikas.DESKTOP-61LEE8B/Projects/BOQ_AI/backend/apps/boq/services/boq_export_service.py), implemented native ECMA-376 OpenXML internal worksheet hyperlinks (`openpyxl.worksheet.hyperlink.Hyperlink`) between the `Review` sheet and the `BOQ` sheet.
+  - On the `BOQ` sheet, each priced row's Rate and Amount cells link directly to the corresponding product's Final Rate (col S) and Amount (col W) on the `Review` sheet (`location="'Review'!S{row}"` and `location="'Review'!W{row}"`) with interactive hover tooltips.
+  - On the `Review` sheet, each product's Final Rate (col S) and Amount (col W) link directly back to the source item's Rate and Amount cells on the `BOQ` sheet (`location="'BOQ'!{col}{row}"`).
+  - Added full hyperlink generation to both standard original workbook sheet filling and JSON-fallback BOQ tab generation.
+- **Review Sheet Formula Column Name Updates**:
+  - In [boq_review_display_service.py](file:///c:/Users/vikas.DESKTOP-61LEE8B/Projects/BOQ_AI/backend/apps/boq/services/boq_review_display_service.py), updated `REVIEW_OUTPUT_HEADER_SPECS` with exact mathematical formula notations:
+    - `Net_Material_Rate (G*(1-H))`
+    - `Sub_Total (K+L+M+N)`
+    - `Final_Material_Amount (O+P)`
+    - `Final Rate (Q+R)`
+    - `TOTAL MATERIAL (Q*T)`
+    - `TOTAL LABOUR (R*T)`
+    - `Amount (U+V)`
+- **Review Sheet Calculation Column Highlighting**:
+  - In [boq_export_service.py](file:///c:/Users/vikas.DESKTOP-61LEE8B/Projects/BOQ_AI/backend/apps/boq/services/boq_export_service.py), designated `_HIGHLIGHTED_REVIEW_COLS` for all 7 formula calculation columns.
+  - Styled headers in row 1 with a distinct accent fill `_FORMULA_HEADER_FILL` (`#BDD7EE`, soft pastel blue).
+  - Styled data cells in those columns with `_FORMULA_CELL_FILL` (`#EDF2F8`, subtle ice blue) while safely preserving error/warning fills (`_MISSING_PRODUCT_FILL`, `_ZERO_OR_RATE_ONLY_FILL`, `_ACTIVITY_ONLY_FILL`).
+- **Tests**:
+  - Extended `tests/boq/test_boq_export.py` with assertions for updated column names, formula column fill styling, and bidirectional hyperlinks.
+  - All 144 tests in `tests.boq` pass cleanly.
+
+## 2026-10-12 — Live Extraction Count Synchronization & Evidence-Based Dynamic Pipe Matching
+- **Fixed Live Product Count Mismatch ("0 left in red")**:
+  - In [boq_detail.html](file:///c:/Users/vikas.DESKTOP-61LEE8B/Projects/BOQ_AI/templates/boq/boq_detail.html), updated `@product-id-assigned.window` to consume live server-computed counts (`$event.detail.missing_product_id_count`, `missing_rate_only_count`, `total_product_count`) instead of client-side decrementing `missingProductIdCount = Math.max(0, missingProductIdCount - 1)` on every user action.
+  - In [boq_detail.html](file:///c:/Users/vikas.DESKTOP-61LEE8B/Projects/BOQ_AI/templates/boq/boq_detail.html), made the total product count header reactive (`<strong x-text="totalProductCount">`).
+  - In [_extraction_table.html](file:///c:/Users/vikas.DESKTOP-61LEE8B/Projects/BOQ_AI/templates/boq/_extraction_table.html), updated all 3 `product-id-assigned` CustomEvent dispatches (`selectCandidate`, `confirmExtractionMatch`, `loadProductId`) to pass `{ detail: data }` with the full server response.
+  - In [views.py](file:///c:/Users/vikas.DESKTOP-61LEE8B/Projects/BOQ_AI/backend/apps/boq/views.py), added `_extraction_summary_counts(boq)` and wired it into `_extraction_edit_json_ok` so every extraction AJAX mutation returns accurate real-time counts.
+  - Extended `selection_source` checks across [views.py](file:///c:/Users/vikas.DESKTOP-61LEE8B/Projects/BOQ_AI/backend/apps/boq/views.py), [product_ai_apply.py](file:///c:/Users/vikas.DESKTOP-61LEE8B/Projects/BOQ_AI/backend/apps/boq/services/product_ai_apply.py), [boq_extraction_display_service.py](file:///c:/Users/vikas.DESKTOP-61LEE8B/Projects/BOQ_AI/backend/apps/boq/services/boq_extraction_display_service.py), and [make_vendor_common.py](file:///c:/Users/vikas.DESKTOP-61LEE8B/Projects/BOQ_AI/backend/apps/boq/services/make_vendor_common.py) to consistently recognize `"select"` and `"confirm"` as user-locked choices, preventing default top candidate overrides on re-render.
+- **Fixed Dynamic Slot Fallback & Resolved MS vs GI Pipe Mismatch (Row 20 / r55)**:
+  - In [boq_extraction_slots.py](file:///c:/Users/vikas.DESKTOP-61LEE8B/Projects/BOQ_AI/backend/apps/boq/services/boq_extraction_slots.py), updated `_slot_fallback_product` to receive `taxonomy` and `sibling_products`. Sibling slot fallback items generated for multi-size rows now dynamically inherit the product family (`category`, `sub_category`, `class`, `attributes`) from parent/sibling products in the same anchor group instead of falling back to empty taxonomy.
+  - In [boq_extraction_service.py](file:///c:/Users/vikas.DESKTOP-61LEE8B/Projects/BOQ_AI/backend/apps/boq/services/boq_extraction_service.py), passed active database `taxonomy` into `_ensure_minimum_slot_products`.
+  - In [product_extraction_sanitize.py](file:///c:/Users/vikas.DESKTOP-61LEE8B/Projects/BOQ_AI/backend/utils/product_extraction_sanitize.py), added `_sanitize_sub_category` to dynamically check the BOQ evidence text against active taxonomy sub-categories; if the extracted/inferred sub-category (e.g. `GI`) does not appear in the BOQ text while another valid sub-category (e.g. `MS`) in that category is explicitly named in the BOQ text, it rectifies the hallucination dynamically without hardcoding.
+  - Verified on BOQ 203 row 20 (`r55`): all 7 pipe sizes (100mm, 80mm, 65mm, 50mm, 40mm, 32mm, 25mm) cleanly resolved to `PIPE / MS / C / mm / IS:1239` (Product IDs 7–13) at 100% confidence.
+
+## 2026-10-12 — Confidence Score Weight Calibration & Confirm Manually Score Update Fix
+- **Fixed Confirm Manually Immediate Score Update**: In `templates/boq/_extraction_line.html`, changed `window.confirmExtractionMatch` to pass the section's `line.row_id` rather than `product.source_row_id`. Passing `source_row_id` (which differs from `line.row_id` in grouped lineage and slot rows) caused the backend to render against the child row and the frontend DOM replacement `document.getElementById('line-' + rowId)` to return null, preventing the score badge and card DOM from updating immediately.
+- **Auto-Save Debounce Cancellation**: In `window.confirmExtractionMatch` (`_extraction_table.html`), cancelled pending `autoSaveTimer` debouncers and waited for any active `saving` state before sending `confirm_match`, preventing background `update_product` calls from concurrently overwriting the confirmed 100% confidence score.
+- **Backend Defensive Row Lookup**: In `BOQExtractionEditService.confirm_match` and `views.py`, added fallback row lookup when `product_row_id` or child `source_row_id` is supplied, and returned `editor.last_matched_row_id` so the AJAX response targets the section container in the DOM.
+- **DOM Fallback Replacement**: In `window.confirmExtractionMatch`, if sub-panel replacement returns false, automatically falls back to full `window.replaceExtractionLine` so the line always re-renders.
+- **Eliminated Double Penalty on Size Mismatch**: In `structured_match_score` (`backend/apps/boq/services/product_matching_service.py`), fixed an issue where a size mismatch lost its assigned weight (6%) and was additionally docked an obsolete 20-point penalty (`total = max(0.0, total - penalty)`), which erroneously dragged 92% matches down to 72%. When taxonomy is confirmed (`taxonomy_confirmed=True`), size loss is now strictly governed by `_TEXT_WEIGHTS["size"]` (6%).
+- **Fixed Sentinel Size Handling for Decimal Formats**: Updated `_size_for_score` and `_capacity_for_score` to use `_is_sentinel_or_empty` instead of checking `in {"0", "0.0"}`. Rate Master entries with Decimal `0.00` now correctly evaluate as unconstrained sentinel values rather than mismatched nominal sizes.
+- **Fixed Missing Attribute Ratio**: In `attribute_overlap_score` (`backend/utils/attribute_parser.py`), updated the denominator to `denom = max(len(extracted), len(candidate))` so missing candidate attributes scale down the attribute score proportionally rather than dividing only by the extracted count.
+- **Protected Core Clean Promotion**: In `_is_core_clean` (`product_ai_common.py`), ensured `not breakdown.get("size_mismatch")` is checked so items with size mismatches are never prematurely promoted to 100%.
+- **Fixed Lint Warning**: In `make_list_constraint_service.py`, simplified `return bool(allow_category_wide)` to `return allow_category_wide`.
+
+## 2026-10-12 — Active Database Verification, Upload Diagnosis & Make/Vendor Cascade Scoping Fixes
+- **Active Database Verification**: Confirmed that `DatabaseVersion` pk=24 (`Controling_DB_26Sep.xlsx`) is active (`is_active=True`) with 253 `Rate_Master_Output` rows and 144 `Product_Helper` rows, and all queries are correctly scoped to it.
+- **Diagnosed DB 25 Activation Failure**: Revealed that DB 25 ("testa") was not activated because embedding generation failed due to OpenAI `RateLimitError: 429 credit_balance_exhausted`. Per import pipeline rules, version activation only occurs after embeddings complete successfully. Furthermore, confirmed that the uploaded file for DB 25 is bit-for-bit identical (MD5 `ff0040d125b1b77b143f53903a4d66ff`) to DB 24.
+- **Fixed Abbreviation Substring Matching**: In `expand_query_terms` (`backend/utils/product_synonyms.py`), wrapped abbreviations in word boundaries (`(?<![a-zA-Z0-9]){key}(?![a-zA-Z0-9])`), preventing words like "drums" from expanding to "MS" and "engine" from expanding to "GI".
+- **Added Hydrant Taxonomy Synonyms**: Added standard abbreviation synonyms for `"short branch pipe": ("branch pipe", "nozzle")` and `"fire hose reel": ("hose reel", "hose reel drum")`, ensuring hose reels and branch pipes properly map to `HYDRANT` instead of `PIPE`.
+- **Fixed Subcategory Coverage in Make List**: In `_entry_covers_sub` (`make_list_constraint_service.py`), removed the top-level description substring check that allowed unrelated materials with "ms" anywhere in the name to match `sub_category="MS"`. Prioritized explicit target mappings and whole-word matching.
+- **Fixed Category Equivalence**: In `_categories_equivalent` (`make_list_constraint_service.py`), replaced `a in b or b in a` with exact/canonical matching, stopping compound categories like `PUMP ACCESSORIES` from leaking into `PUMP` and vice versa.
+- **Fixed Category Heuristic Overlap**: In `_heuristic_category` (`make_list_category_mapping_service.py`), stemmed tokens and excluded purely generic category tokens like "fire" so equipment like "Fire Pumps" and "Fire Extinguishers" are not falsely classified as `FIRE ALARM`. Bumped `_MAPPING_VERSION` to 12.
+- **Fixed Overall Lowest Price Fallback**: In `_lowest_amount_maps` (`make_vendor_rates.py`), ensured overall lowest price does not fall back to unapproved database makes when approved makes exist for that scope.
+
+## 2026-10-12 — Top Summary Count Synchronization, Product ID Retention & Fallback Candidate Matching
+- **Synchronized Top Summary Count with Displayed Product Cards**: In `BOQExtractionDisplayService.build()` (`backend/apps/boq/services/boq_extraction_display_service.py`), computed `missing_product_id_count` and `missing_rate_only_count` directly from the shaped `lines` rather than raw unshaped `analysis` JSON on disk. This prevents discrepancies where dynamic candidate recall or green-band matches populate Product IDs on product cards while the top banner still counted them as missing.
+- **Optimized Batch Embedding Fallback**: Updated `match_products_batch` and `match_product` in `product_matching_service.py` to route to empty embedding vectors on batch embedding failure, avoiding 44 sequential retries against an exhausted OpenAI quota and enabling instant structured SQL fallback.
+- **Fixed Green-Band Product ID Retention**: In `product_ai_apply.py` (`_attach_catalog_product_id`), restored the `is_green` (≥95%) check on `confirmed`. Previously, when `selection_source` was `"ai"`, `catalog_product_id` was erroneously removed from AI-matched products even when match confidence reached the green band.
+- **Graceful Fallback on OpenAI Quota / Embedding Failure**: Updated `product_matching_service.py` to catch embedding errors and fall back to structured SQL candidate recall (`_merge_size_sql_hits` and `_guarantee_taxonomy_hits`) instead of crashing the matching phase when OpenAI API credits are exhausted or unavailable.
+- **Enhanced Attribute Extraction Prompt**: Updated `extract_products.txt` with explicit instructions and examples for `door_type` (e.g. "glass fronted double door" → "double"), diverse IS standard notations (e.g. `I.S: 5290-1977`, `IS:12585-1988`), `hose_standard`, `outlet`, `outlet_size`, `nozzle_size`, `connection_material`, and `thickness`/`gauge`.
+- **Shortened Analysis Next Modal Message**: Shortened and cleaned up the "Continue to Make & Vendor?" warning dialog text when unmatched products exist. Rephrased to *"X of Y products have no Product ID and will skip Make/Vendor lookup."* Moved *"Stay on Analysis to match them, or proceed to mark them Not Available."* to its own row.
+- **Shortened Make & Vendor Next Modal Message**: Shortened and restructured the "Continue to Labour?" dialog text (`goToLabour`) to a clean summary (*"X products will be marked Not Available on Labour (no rates): [breakdown]. Stay on Make & Vendor to resolve them, or proceed to Labour."*) on distinct rows.
+- **Updated Modal Button Labels**: Updated `goToLabour` modal action buttons to *"Stay on Make & Vendor"* and *"Proceed anyway"*.
+- **Enforced Modal Line Break Rendering**: Added `style="white-space: pre-line;"` and inline CSS override to `.confirm-modal__message` in `templates/base.html` so newlines in confirmation messages always break onto a new row.
+
+## 2026-10-09 — Make & Vendor Dropdown Scoping, Approved Makes Completeness & Price Preview
+- **Approved Make Completeness**: Ensured 100% of approved makes from the Make List are loaded into the "Approved make" dropdown for the scoped category / subcategory, removing premature Rate_Master intersections that dropped approved makes without existing rate entries.
+- **Available Make Dropdown**: Added a dedicated "Available make" dropdown directly after "Approved make" in the top Category / Sub-category panel of Make & Vendor.
+- **Strict Mutual Exclusivity**: Selecting any make from "Approved make" automatically clears "Available make", and selecting from "Available make" automatically clears "Approved make". Only one make is active at a time.
+- **Strict Separation of Approved and Database Makes**: Prevented database makes (`Rate_Master_Output`) from ever mixing into the "Approved make" dropdown. When no approved makes exist for a scope, "Approved make" is disabled and displays only `"No Approved Make Found"`, never falling back to database makes.
+- **Strict Sub-Category Vendor Scoping**: Removed parent category fallback in `_vendors_for_subcategory_make` that leaked random vendors from unrelated subcategories into the dropdown. Now strictly returns vendors from the active subcategory and make.
+- **Stale Make Clear on Sub-Category Change**: Fixed `onSubCategoryChange` in Alpine.js so changing subcategory resets make and available make rather than pre-filling makes from other subcategories.
+- **Dynamic Price Preview Across Scopes**: Removed sub-category restriction in `previewRate` so price previews load dynamically for both category-wide and sub-category scopes, dual-indexing prices under canonical Rate_Master makes and approved make aliases.
+- **Cascade Apply Support**: Updated `apply_subcategory_make` to accept available database makes alongside approved makes when bulk-applying to categories and sub-categories.
+- **Responsive 6-Column Grid**: Updated `.make-vendor-subcategory-panel__grid` in `templates/base.html` to 6 responsive columns.
+- **Removed Review and Vendor Review Tags**: Removed the "Review" and "Vendor review" badges and notes from Make & Vendor pages because Product IDs are already assigned on the Analysis page. Selecting make and vendor now directly retrieves the Product ID + Rate ID combination from `Rate_Master_Output` and marks the card "Matched" without intermediate review states. Disabled `_flag_same_material_rate_vendor_review` and removed `vendor_review_count` from summary counters.
+- **Fixed Suggestion Confidence Badge Falsely Showing 100%**: In `templates/boq/_extraction_line.html`, removed `|default:product.attribute_confidence` from the suggestion database match badge. Django template filter `|default:` treated `0` as falsy, which erroneously substituted the attribute extraction completeness confidence (100%) in place of the 0% database match score. Now strictly renders `{{ product.match_percentage|floatformat:0 }}% match`.
+
+## 2026-10-09 — Attribute Extraction, Manual Confirmation & Mismatch Highlights
+
+- **AI Attribute Extraction Optimization**: Enhanced extraction instructions in `extract_products.txt` with explicit key mappings and examples for `mounting` (mount type), `is` (IS standards), `type`, `length`, `nozzle_size`, `pressure_rating`, etc.
+- **Sentinel & Mismatch Scoring**: Added `_is_sentinel_or_empty` support across size/class/capacity in `product_matching_service.py` to prevent sentinel values (`0`, `00`, `0.0`, `0.00`, null) in DB or extraction from degrading confidence scores.
+- **Green-Band Prefill & Clean Matched Display**: Products with green-band confidence (≥95%) come prefilled with Product IDs, display the clean "Matched database product" header without "Suggested:" prefixes, and suppress missing attribute warnings/notes. Products below green (<95%) stay provisional until manually confirmed or selected from candidates. "Confirm Manually" is shown only on products below 100% match, and hidden completely for products with 100% confidence score.
+- **Separate Rate Only Count in Summary**: Displayed missing "Rate Only" products separately in the top summary banner and Next step confirmation modal.
+- **Mismatched Field Highlighting**: Implemented `.extraction-input--mismatched` with light red background styling for any extracted field differing from the top suggested candidate row (e.g. AI extracted size `20` vs suggested candidate size `10`), active for all products with confidence score ≥ 50% evaluated against the candidate with the highest confidence score.
+- **Suggested Product Always Reflects Highest Confidence Candidate**: Ensured that the Suggested Database Product banner summary, `suggested_id`, and `confirm_match` always reflect the candidate with the highest confidence score rather than any lower-scoring candidate.
+- **Updated Input Matching Weightages**: Adjusted `_TEXT_WEIGHTS` in `product_matching_service.py` and `product_helper_matching_service.py` to: Sub-category 40%, Category 30%, Size 6%, Class 6%, Capacity 6%, Unit 6%, Attributes 6% (summing to 100%).
+- **Clean Match Card UI**: Removed missing attribute warning banners and AI notes paragraphs from extraction cards across all sections.
+>>>>>>> users/vikas/new-changes
 
 - Added `Rate Only` badge for extraction lines and review tables when the line quantity is zero (`line.qty == 0`), displayed next to the product count tag.
 

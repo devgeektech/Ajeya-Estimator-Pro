@@ -78,9 +78,26 @@ class BOQExportTestCase(TestCase):
                     "qty": 1,
                     "unit": "Set",
                     "is_activity_only": False,
-                    "products": [],
-                    "rate": 5000,
-                    "amount": 5000,
+                    "products": [
+                        {
+                            "row_id": "r1",
+                            "source_row_id": "r1",
+                            "qty_row_id": "r1",
+                            "status": "matched",
+                            "review_output": {
+                                "serial": "1",
+                                "boq_description": "Fire Pump Set",
+                                "base_purchase_rate": 5000,
+                                "discount": 0,
+                                "final_material_amount": 5000,
+                                "labour": 500,
+                                "qty": 1,
+                                "amount": 5500,
+                            },
+                        }
+                    ],
+                    "rate": 5500,
+                    "amount": 5500,
                 }
             ]
         }
@@ -105,6 +122,35 @@ class BOQExportTestCase(TestCase):
         review_ws = wb["Review"]
         self.assertEqual(review_ws["A1"].value, "Ser no of BOQ")
         self.assertEqual(review_ws["B1"].value, "BOQ Description")
+        self.assertEqual(review_ws["I1"].value, "Net_Material_Rate (G*(1-H))")
+        self.assertEqual(review_ws["O1"].value, "Sub_Total (K+L+M+N)")
+        self.assertEqual(review_ws["Q1"].value, "Final_Material_Amount (O+P)")
+        self.assertEqual(review_ws["S1"].value, "Final Rate (Q+R)")
+        self.assertEqual(review_ws["U1"].value, "TOTAL MATERIAL (Q*T)")
+        self.assertEqual(review_ws["V1"].value, "TOTAL LABOUR (R*T)")
+        self.assertEqual(review_ws["W1"].value, "Amount (U+V)")
+        
+        # Verify formula column header fill highlight (yellow FFFF00)
+        self.assertEqual(review_ws["I1"].fill.start_color.rgb, "00FFFF00")
+        self.assertEqual(review_ws["O1"].fill.start_color.rgb, "00FFFF00")
+        self.assertEqual(review_ws["W1"].fill.start_color.rgb, "00FFFF00")
+        # Verify other header columns use royal blue #1976E7
+        self.assertEqual(review_ws["A1"].fill.start_color.rgb, "001976E7")
+
+        # Verify bidirectional hyperlinks between BOQ and Review
+        boq_ws = wb["BOQ"]
+        # In BOQ sheet: Rate and Amount link to Review sheet
+        self.assertIsNotNone(boq_ws["E2"].hyperlink)
+        self.assertIn("Review", boq_ws["E2"].hyperlink.location)
+        self.assertIsNotNone(boq_ws["F2"].hyperlink)
+        self.assertIn("Review", boq_ws["F2"].hyperlink.location)
+
+        # In Review sheet: Final Rate (col S) and Amount (col W) link to BOQ sheet
+        # Find product row in Review sheet (row 2)
+        self.assertIsNotNone(review_ws["S2"].hyperlink)
+        self.assertIn("BOQ", review_ws["S2"].hyperlink.location)
+        self.assertIsNotNone(review_ws["W2"].hyperlink)
+        self.assertIn("BOQ", review_ws["W2"].hyperlink.location)
         
         # Verify status transitioned
         self.boq.refresh_from_db()

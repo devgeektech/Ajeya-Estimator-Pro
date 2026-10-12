@@ -28,8 +28,24 @@ def is_filled(value: Any) -> bool:
     if value is None:
         return False
     if isinstance(value, str):
-        return bool(value.strip())
+        text = value.strip().lower()
+        if not text:
+            return False
+        if text in {"not found", "null", "none", "n/a", "na"}:
+            return False
+        return True
     return True
+
+
+def is_sentinel_or_empty(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, (int, float)):
+        return value == 0
+    text = str(value).strip().lower()
+    if not text:
+        return True
+    return text in {"0", "0.0", "00", "0.00", "not found", "null", "none", "n/a", "na", "-", "—"}
 
 
 def is_blank(value: Any) -> bool:

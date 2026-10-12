@@ -1,8 +1,11 @@
 """Clear uncertain AI-extracted product fields; never substitute guesses."""
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
+
+logger = logging.getLogger("boq_ai")
 
 from ai.context import is_catalog_class, load_rate_master_taxonomy, resolve_class_label, snap_product_taxonomy
 from apps.boq.services.boq_row_fields import is_blank as _is_blank_value
@@ -333,6 +336,59 @@ def _fill_unit_from_size_evidence(
     return item
 
 
+def _sanitize_sub_category(
+    product: dict[str, Any],
+    *,
+    product_context: str,
+    slot_desc: str,
+    evidence_text: str,
+    taxonomy: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Correct hallucinated sub_category when contradicted by explicit BOQ evidence."""
+    item = dict(product)
+    sub = str(item.get("sub_category") or "").strip()
+    cat = str(item.get("category") or "").strip()
+    if not sub or not cat:
+        return item
+    blob = _evidence_blob(product_context, slot_desc, evidence_text)
+    if not blob:
+        return item
+    taxonomy = taxonomy or load_rate_master_taxonomy()
+    blob_l = blob.lower()
+    if cat.upper() == "PIPE":
+        has_ms = bool(re.search(r"\b(m\.?s\.?|mild\s+steel|black\s+erw)\b", blob_l))
+        has_gi = bool(re.search(r"\b(g\.?i\.?|galvaniz|galvanis)\b", blob_l))
+        if has_ms and not has_gi and sub.upper() == "GI":
+            logger.info(
+                "_sanitize_sub_category: replacing GI with MS from pipe evidence for %s",
+                blob[:60],
+            )
+            item["sub_category"] = "MS"
+            return item
+        if has_gi and not has_ms and sub.upper() == "MS":
+            logger.info(
+                "_sanitize_sub_category: replacing MS with GI from pipe evidence for %s",
+                blob[:60],
+            )
+            item["sub_category"] = "GI"
+            return item
+
+    from utils.product_synonyms import get_dynamic_taxonomy_hints
+    by_cat = dict(taxonomy.get("sub_categories_by_category") or {})
+    _, sub_hints = get_dynamic_taxonomy_hints(by_cat)
+    current_mentioned = any(phrase in blob_l for phrase, target in sub_hints if target.upper() == sub.upper())
+    if not current_mentioned:
+        from apps.boq.services.boq_extraction_slots import _hint_category_sub_from_text
+        ev_cat, ev_sub = _hint_category_sub_from_text(blob, taxonomy=taxonomy)
+        if ev_cat == cat and ev_sub and ev_sub.upper() != sub.upper():
+            logger.info(
+                "_sanitize_sub_category: replacing hallucinated sub_category %r with %r from evidence for %s",
+                sub, ev_sub, blob[:60],
+            )
+            item["sub_category"] = ev_sub
+    return item
+
+
 def sanitize_product_against_evidence(
     product: dict[str, Any],
     *,
@@ -353,6 +409,13 @@ def sanitize_product_against_evidence(
     item = snap_product_taxonomy(item, taxonomy, infer_defaults=False)
     blob = _evidence_blob(product_context, slot_desc, evidence_text)
     item = normalize_main_product_identity(item, evidence_text=blob, taxonomy=taxonomy)
+    item = _sanitize_sub_category(
+        item,
+        product_context=product_context,
+        slot_desc=slot_desc,
+        evidence_text=evidence_text,
+        taxonomy=taxonomy,
+    )
     item = _sanitize_capacity(
         item,
         product_context=product_context,

@@ -98,6 +98,7 @@ class BOQExtractionEditService:
 
     def __init__(self, boq_id: int):
         self.boq_id = boq_id
+        self.last_matched_row_id: str | None = None
 
     def update_product(
         self,
@@ -375,6 +376,7 @@ class BOQExtractionEditService:
         *,
         row_id: str,
         product_index: int,
+        product_row_id: str | None = None,
     ) -> dict[str, Any]:
         """Expert confirms the current product match → lock confidence at 100%."""
         from apps.boq.services.product_ai_common import DB_MATCH_MATCHED
@@ -384,16 +386,58 @@ class BOQExtractionEditService:
 
         analysis = dict(boq.analysis_data or {})
         rows = list(analysis.get("rows") or [])
-        row = self._find_row(rows, row_id)
+        row = None
+        if product_row_id:
+            row = self._find_row(rows, product_row_id)
+        if row is None:
+            row = self._find_row(rows, row_id)
+        if row is None:
+            # Fallback: check if row_id or product_row_id was an extracted product's source_row_id
+            for candidate_row in rows:
+                for p in candidate_row.get("products") or []:
+                    p_src = str(p.get("source_row_id") or "")
+                    if p_src and (p_src == row_id or (product_row_id and p_src == product_row_id)):
+                        row = candidate_row
+                        break
+                if row is not None:
+                    break
         if row is None:
             raise ValidationError(f"Unknown BOQ row: {row_id}")
 
+        self.last_matched_row_id = str(row_id or row.get("row_id") or "")
+
         products = list(row.get("products") or [])
         product = self._find_product(products, product_index)
+        if product is None and products:
+            product = products[0]
+            product_index = int(product.get("product_index") or 0)
         if product is None:
             raise ValidationError(f"Unknown product index: {product_index}")
 
-        rate_id = product.get("db_product_id") or product.get("suggested_db_product_id")
+        from apps.boq.services.make_vendor_common import loaded_catalog_product_id
+
+        rate_id = product.get("db_product_id")
+        if rate_id in (None, ""):
+            best_cand = None
+            best_score = -1.0
+            for cand in product.get("db_candidates") or []:
+                if isinstance(cand, dict) and cand.get("id"):
+                    try:
+                        sc = float(cand.get("confidence") or 0.0)
+                        if sc > best_score:
+                            best_score = sc
+                            best_cand = cand
+                    except (TypeError, ValueError):
+                        pass
+            if best_cand:
+                rate_id = best_cand.get("id")
+            else:
+                rate_id = product.get("suggested_db_product_id")
+        if rate_id in (None, ""):
+            for cand in product.get("db_candidates") or []:
+                if cand.get("id"):
+                    rate_id = cand.get("id")
+                    break
         if rate_id in (None, ""):
             raise ValidationError(
                 "No database product to confirm. Select a candidate first."
@@ -403,16 +447,10 @@ class BOQExtractionEditService:
         except (TypeError, ValueError) as exc:
             raise ValidationError("Invalid database product id.") from exc
 
-        try:
-            current = float(
-                product.get("db_match_confidence")
-                or product.get("attribute_confidence")
-                or 0.0
-            )
-        except (TypeError, ValueError):
-            current = 0.0
-        if current >= 99.5:
-            raise ValidationError("This product is already a 100% match.")
+        source = str((product.get("ai_mapping") or {}).get("selection_source") or "").strip().lower()
+        if source in {"confirm", "manual_load", "expert_confirm"} and float(product.get("db_match_confidence") or 0.0) >= 100.0:
+            # Already confirmed at 100% - return existing product idempotently
+            return product
 
         updated = dict(product)
         updated["db_product_id"] = rate_pk

@@ -151,14 +151,23 @@ class MakeVendorCascadeMixin:
                 make_text, approved_makes or None
             )
         ):
-            scope = (
-                f"{category_text} / {sub_category_text}"
-                if sub_category_text
-                else category_text
+            database_version_id = self._database_version_id(boq)
+            available_makes = self._rate_master_makes_for_subcategory(
+                database_version_id=database_version_id,
+                category=category_text,
+                sub_category=sub_category_text,
             )
-            raise ValidationError(
-                f"Make '{make_text}' is not in the approved make list for {scope}."
-            )
+            if not MakeListConstraintService.make_is_allowed(
+                make_text, available_makes or None
+            ):
+                scope = (
+                    f"{category_text} / {sub_category_text}"
+                    if sub_category_text
+                    else category_text
+                )
+                raise ValidationError(
+                    f"Make '{make_text}' is not in the approved make list or database for {scope}."
+                )
 
         if (
             self.has_make_list
@@ -211,6 +220,16 @@ class MakeVendorCascadeMixin:
                 updated = dict(product)
                 match_payload: dict[str, Any] | None = None
                 if find_rates:
+                    effective_approved = (
+                        approved_makes
+                        if (
+                            not make_text
+                            or MakeListConstraintService.make_is_allowed(
+                                make_text, approved_makes
+                            )
+                        )
+                        else None
+                    )
                     match_payload = self._exact_match_and_rates(
                         updated,
                         make=make_text,
@@ -219,7 +238,7 @@ class MakeVendorCascadeMixin:
                         database_version_id=database_version_id,
                         prefer_lowest_price=use_lowest
                         or (bool(make_text) and not vendor_text),
-                        approved_makes=approved_makes or None,
+                        approved_makes=effective_approved or None,
                     )
                     updated["vendor_selection"] = match_payload
                     applied_make = match_payload.get("make") or applied_make
@@ -1107,8 +1126,16 @@ class MakeVendorCascadeMixin:
                     sub_category="",
                 )
             )
+            category_available_makes = self._rate_master_makes_for_subcategory(
+                database_version_id=database_version_id,
+                category=category,
+                sub_category="",
+            )
             category_vendors_by_make: dict[str, list[str]] = {}
-            for make_option in category_concrete:
+            for make_option in sorted(
+                set(category_concrete) | set(category_available_makes),
+                key=lambda s: s.lower(),
+            ):
                 category_vendors_by_make[make_option] = self._vendors_for_subcategory_make(
                     database_version_id=database_version_id,
                     category=category,
@@ -1132,14 +1159,27 @@ class MakeVendorCascadeMixin:
                     category=category,
                     sub_category=sub_category,
                 )
+                available_makes = self._rate_master_makes_for_subcategory(
+                    database_version_id=database_version_id,
+                    category=category,
+                    sub_category=sub_category,
+                )
                 selected_make = str(selection.get("make") or "").strip()
                 if selectable and selection.get("prefer_lowest_price") and not selected_make:
                     selected_make = LOWEST_MAKE_LABEL
-                elif selected_make and selected_make not in make_options and selectable:
+                elif (
+                    selected_make
+                    and selected_make not in make_options
+                    and selectable
+                    and MakeListConstraintService.make_is_allowed(selected_make, concrete_makes)
+                ):
                     make_options = [selected_make] + make_options
 
                 vendors_by_make: dict[str, list[str]] = {}
-                for make_option in concrete_makes:
+                for make_option in sorted(
+                    set(concrete_makes) | set(available_makes),
+                    key=lambda s: s.lower(),
+                ):
                     vendors_by_make[make_option] = self._vendors_for_subcategory_make(
                         database_version_id=database_version_id,
                         category=category,
@@ -1163,6 +1203,7 @@ class MakeVendorCascadeMixin:
                         "has_approved_makes": selectable,
                         "no_approved_make_label": NO_APPROVED_MAKE_LABEL,
                         "make_options": make_options,
+                        "available_makes": available_makes,
                         "vendors_by_make": vendors_by_make,
                         "vendor_options": vendor_options,
                         "selected_make": selected_make if selectable else "",
@@ -1186,6 +1227,7 @@ class MakeVendorCascadeMixin:
                     "has_approved_makes": category_selectable,
                     "no_approved_make_label": NO_APPROVED_MAKE_LABEL,
                     "make_options": category_make_options,
+                    "available_makes": category_available_makes,
                     "vendors_by_make": category_vendors_by_make,
                     "sub_categories": sub_rows,
                     **category_preview,

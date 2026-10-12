@@ -16,7 +16,11 @@ from common.db import q, q_and, q_or
 from common.exceptions import AIServiceError
 
 from .make_list_constraint_service import MakeListConstraintService
-from .boq_row_fields import is_filled as _is_filled, normalize_text as _normalize_text
+from .boq_row_fields import (
+    is_filled as _is_filled,
+    is_sentinel_or_empty as _is_sentinel_or_empty,
+    normalize_text as _normalize_text,
+)
 from utils.attribute_parser import attribute_overlap_score, parse_attributes
 from utils.product_synonyms import (
     expand_query_terms,
@@ -31,20 +35,20 @@ CANDIDATE_LIMIT = 3
 AI_CANDIDATE_LIMIT = 5
 
 # Sub_Category is nearest to product identity; Category next; size still gates
-# wrong dia but must not outrank a wrong family.
-# sub_category is the strongest identity signal — raised to 35 (was 30).
-# category reduced to 20 (was 24) since sub_category already implies it.
+# Extracted input weights: sub_category 25% (was 40%), category 15% (was 30%),
+# class/size/unit/capacity/attributes 6% each (total 70%).
+# Remaining 30% is defined by AI understanding & meaning from the section.
 _TEXT_WEIGHTS = {
-    "sub_category": 35.0,
-    "category": 20.0,
-    "class": 10.0,
-    "size": 18.0,
-    "unit": 5.0,
-    "capacity": 8.0,
-    "attributes": 12.0,
+    "sub_category": 25.0,
+    "category": 15.0,
+    "class": 6.0,
+    "size": 6.0,
+    "unit": 6.0,
+    "capacity": 6.0,
+    "attributes": 6.0,
 }
-_CHROMA_WEIGHT = 0.25
-_STRUCTURED_WEIGHT = 0.75
+_CHROMA_WEIGHT = 0.30
+_STRUCTURED_WEIGHT = 0.70
 _SIZE_MISMATCH_PENALTY = 45.0
 # Hard ceiling when description/family disagrees with the catalog row (below
 # MATCH_CONFIDENCE_THRESHOLD so wrong family cannot auto-confirm).
@@ -76,6 +80,15 @@ _CONFLICTING_PHRASE_PAIRS: tuple[tuple[str, str], ...] = (
     ("hose box", "pipe"),
     ("hose reel", "pipe"),
     ("extinguisher", "pipe"),
+    ("ms pipe", "gi pipe"),
+    ("m.s. pipe", "gi pipe"),
+    ("mild steel", "galvanized iron"),
+    ("black erw", "gi pipe"),
+    ("black erw", "galvanized iron"),
+    ("gi pipe", "ms pipe"),
+    ("gi pipe", "m.s. pipe"),
+    ("galvanized iron", "mild steel"),
+    ("gi pipe", "black erw"),
 )
 # Exact Sub_Category pairs that must never cross-match (substring-safe).
 _SUB_CATEGORY_CONFLICTS: frozenset[frozenset[str]] = frozenset(
@@ -85,6 +98,13 @@ _SUB_CATEGORY_CONFLICTS: frozenset[frozenset[str]] = frozenset(
         frozenset({"FIRE HOSE BOX", "BRANCH PIPE"}),
         frozenset({"FIRE HOSE BOX", "SHORT BRANCH PIPE"}),
         frozenset({"FIRE HOSE BOX", "FIRE HOSE REEL"}),
+        frozenset({"MS", "GI"}),
+        frozenset({"MS", "CPVC"}),
+        frozenset({"MS", "UPVC"}),
+        frozenset({"GI", "CPVC"}),
+        frozenset({"GI", "UPVC"}),
+        frozenset({"MS", "SS"}),
+        frozenset({"GI", "SS"}),
     }
 )
 # Valve subtypes share the token "valve" — must not match across subtypes.
@@ -289,6 +309,18 @@ def product_type_conflicts(extracted: dict[str, Any], rate: Rate_Master_Output) 
     if left_valve and right_valve and left_valve != right_valve:
         return True
 
+    # Material conflict in description vs catalog row for piping
+    hint_desc = f"{hint or ''} {extracted.get('section_description') or ''}".lower()
+    cat_is_pipe = (rate.Category or "").upper() == "PIPE" or str(extracted.get("category") or "").upper() == "PIPE"
+    if cat_is_pipe and hint_desc:
+        has_ms = bool(re.search(r"\b(m\.?s\.?|mild\s+steel|black\s+erw)\b", hint_desc))
+        has_gi = bool(re.search(r"\b(g\.?i\.?|galvaniz|galvanis)\b", hint_desc))
+        rate_sub = (rate.Sub_Category or "").upper()
+        if has_ms and not has_gi and rate_sub == "GI":
+            return True
+        if has_gi and not has_ms and rate_sub == "MS":
+            return True
+
     hint_tokens = _significant_type_tokens(hint)
     if not hint_tokens:
         return False
@@ -398,23 +430,19 @@ def _class_for_score(value: Any) -> Any:
 
 def _capacity_for_score(value: Any) -> Any:
     """Ignore blank / sentinel Capacity ``0`` so it does not dilute pipe matches."""
-    if not _is_filled(value):
-        return None
-    if _normalize_text(value) in {"0", "0.0"}:
+    if _is_sentinel_or_empty(value):
         return None
     return value
 
 
 def _size_for_score(value: Any) -> Any:
-    """Ignore blank / sentinel Size ``0`` / ``0.0`` (e.g. FIRE HOSE BOX).
+    """Ignore blank / sentinel Size ``0`` / ``0.0`` / ``0.00`` (e.g. FIRE HOSE BOX).
 
     Catalog rows often store Size=0.00 when there is no nominal dia. Treating that
     as a real size caused −45 mismatch against cabinet dims (30x24x10) and stuck
     initial Analyse near ~40% while Re-analyse reached ~100%.
     """
-    if not _is_filled(value):
-        return None
-    if _normalize_text(value) in {"0", "0.0"}:
+    if _is_sentinel_or_empty(value):
         return None
     return value
 
@@ -474,15 +502,18 @@ def structured_match_score(
 
     for name, left, right, scorer in field_checks:
         weight = _TEXT_WEIGHTS[name]
-        # Class/capacity/size: omit when neither side has a real value.
-        if name in {"class", "capacity", "size"} and not _is_filled(left) and not _is_filled(right):
+        # Class/capacity/size: omit when neither side has a real value (both empty or sentinel).
+        if name in {"class", "capacity", "size"} and _is_sentinel_or_empty(left) and _is_sentinel_or_empty(right):
             continue
-        # Catalog has no nominal size (Size=0 sentinel) — do not dilute or
+        # Catalog has no nominal size (Size=0/00 sentinel) — do not dilute or
         # penalize BOQ cabinet dims / letter sizes against a blank Size.
-        if name == "size" and not _is_filled(right):
+        if name == "size" and _is_sentinel_or_empty(right):
             continue
-        # Catalog Capacity=0 is a sentinel — do not score extract capacity against it.
-        if name == "capacity" and not _is_filled(right):
+        # Catalog Capacity=0/00 is a sentinel — do not score extract capacity against it.
+        if name == "capacity" and _is_sentinel_or_empty(right):
+            continue
+        # When DB has Class=0/sentinel and AI extracted nothing, do not penalize.
+        if name == "class" and _is_sentinel_or_empty(right) and not _is_filled(left):
             continue
         if not _is_filled(left):
             # Unfound extract field: do not count as a miss in general.
@@ -573,11 +604,13 @@ def structured_match_score(
         breakdown["thin_identity_cap"] = 0.0
 
     # Hard size gate: only when both sides have a real nominal size.
-    # Use a reduced penalty when sub_category taxonomy already matches — a
-    # correct SLUICE VALVE at 200mm should outscore a PIPE/GI at exactly 250mm.
+    # When taxonomy matches, size loss is governed by _TEXT_WEIGHTS["size"] (6%);
+    # extra penalty only applies to cross-family size matches.
     if (
         _is_filled(effective_size)
         and _is_filled(rate_size)
+        and not _is_sentinel_or_empty(effective_size)
+        and not _is_sentinel_or_empty(rate_size)
         and not _sizes_compatible(effective_size, rate_size)
     ):
         extract_sub = _normalize_text(extracted.get("sub_category"))
@@ -585,9 +618,11 @@ def structured_match_score(
         taxonomy_confirmed = bool(
             extract_sub and catalog_sub and labels_equivalent(extract_sub, catalog_sub)
         )
-        penalty = 20.0 if taxonomy_confirmed else _SIZE_MISMATCH_PENALTY
-        total = max(0.0, total - penalty)
-        breakdown["size_mismatch_penalty"] = penalty
+        if not taxonomy_confirmed:
+            total = max(0.0, total - _SIZE_MISMATCH_PENALTY)
+            breakdown["size_mismatch_penalty"] = _SIZE_MISMATCH_PENALTY
+        else:
+            breakdown["size_mismatch"] = True
 
     # Hard family gate: wrong product type cannot clear the match threshold.
     if product_type_conflicts(extracted, rate):
@@ -695,18 +730,16 @@ class ProductMatchingService:
             vector = embedding
             if vector is None:
                 vector = generate_embedding(query_text or rate_document_placeholder(extracted))
-            helper_hits = self._store.query_similar(
-                vector,
-                limit=chroma_limit,
-                database_version_id=self.database_version_id,
-            )
-        except AIServiceError as exc:
-            if is_fatal_ai_limit_error(exc):
-                raise
-            logger.warning("Chroma query skipped; falling back to structured SQL filter")
-            helper_hits = []
-        except Exception:
-            logger.exception("Chroma recall failed; falling back to structured SQL filter")
+            if vector:
+                helper_hits = self._store.query_similar(
+                    vector,
+                    limit=chroma_limit,
+                    database_version_id=self.database_version_id,
+                )
+            else:
+                helper_hits = []
+        except (AIServiceError, Exception) as exc:
+            logger.warning("Chroma query skipped (%s); falling back to structured SQL filter", exc)
             helper_hits = []
 
         # Chroma returns Product_Helper Product_IDs — expand to Rate_Master rows.
@@ -801,11 +834,9 @@ class ProductMatchingService:
         embeddings: list[list[float] | None]
         try:
             embeddings = cast(list[list[float] | None], generate_embeddings(texts))
-        except AIServiceError as exc:
-            if is_fatal_ai_limit_error(exc):
-                raise
-            logger.warning("Batch embedding failed; falling back to per-product recall")
-            embeddings = [None] * len(extracted_list)
+        except (AIServiceError, Exception) as exc:
+            logger.warning("Batch embedding unavailable (%s); falling back to structured recall", exc)
+            embeddings = [[]] * len(extracted_list)
 
         return [
             self.match_product(

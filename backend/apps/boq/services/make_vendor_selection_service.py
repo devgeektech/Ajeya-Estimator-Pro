@@ -465,12 +465,12 @@ class MakeVendorSelectionService(
         rate_detail = rate_service.get_by_id(rate.pk)
         labour_detail = labour_service.get_by_product_id(rate.Product_ID)
         structured, breakdown = structured_match_score(extracted, rate)
-        status = "matched" if structured >= MATCH_CONFIDENCE_THRESHOLD else "pending"
+        status = "matched"
         line_output = BOQLineOutputService.build(
             quantity=qty_value,
             rate_detail=rate_detail,
             labour_detail=labour_detail,
-            is_pending=status != "matched",
+            is_pending=False,
             rate_only=bool(extracted.get("rate_only")),
         )
         match_payload = {

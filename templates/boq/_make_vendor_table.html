@@ -43,48 +43,42 @@
                 <span class="extraction-field__label">Approved make</span>
                 <select
                     class="extraction-input"
-                    x-show="!category || hasApprovedMakes"
                     x-model="make"
                     :disabled="!category || !hasApprovedMakes"
                     @change="onMakeChange()"
                 >
-                    <option value="" x-show="!hasApprovedMakes" x-cloak>No Approved Make Found in Make List</option>
+                    <option value="" x-text="hasApprovedMakes ? 'Select approved make…' : 'No Approved Make Found'"></option>
                     <template x-for="option in makeOptions" :key="option">
                         <option :value="option" x-text="option"></option>
                     </template>
                 </select>
-                <input
-                    type="text"
+            </label>
+            <label class="extraction-field">
+                <span class="extraction-field__label">Available make</span>
+                <select
                     class="extraction-input"
-                    x-show="category && !hasApprovedMakes"
-                    x-cloak
-                    x-model="make"
-                    placeholder="Enter make…"
-                    autocomplete="off"
+                    x-model="availableMake"
+                    :disabled="!category || !availableMakeOptions.length"
+                    @change="onAvailableMakeChange()"
                 >
+                    <option value="">Select available make…</option>
+                    <template x-for="option in availableMakeOptions" :key="option">
+                        <option :value="option" x-text="option"></option>
+                    </template>
+                </select>
             </label>
             <label class="extraction-field">
                 <span class="extraction-field__label">Vendor</span>
                 <select
                     class="extraction-input"
-                    x-show="!category || hasApprovedMakes"
                     x-model="vendor"
-                    :disabled="!category || !hasApprovedMakes || !make || isLowestMake(make)"
+                    :disabled="!category || !activeMake || isLowestMake(activeMake)"
                 >
                     <option value="">Auto (lowest price)</option>
                     <template x-for="option in vendorOptions" :key="option">
                         <option :value="option" x-text="option"></option>
                     </template>
                 </select>
-                <input
-                    type="text"
-                    class="extraction-input"
-                    x-show="category && !hasApprovedMakes"
-                    x-cloak
-                    x-model="vendor"
-                    placeholder="Enter vendor (optional)"
-                    autocomplete="off"
-                >
             </label>
             <label class="extraction-field">
                 <span class="extraction-field__label">Price</span>
@@ -102,7 +96,7 @@
             <button
                 type="button"
                 class="btn btn--small btn--primary"
-                :disabled="saving || !category || (!hasApprovedMakes && !String(make || '').trim())"
+                :disabled="saving || !category || !activeMake"
                 @click="applySubcategory()"
             >
                 <span x-show="!saving" x-text="subCategory ? 'Apply to sub-category' : 'Apply to category'"></span>
@@ -111,9 +105,9 @@
             <span class="extraction-save-hint extraction-save-hint--error" x-show="error" x-text="error" x-cloak></span>
             <span
                 class="extraction-save-hint extraction-save-hint--error"
-                x-show="category && !hasApprovedMakes && !error"
+                x-show="category && !hasApprovedMakes && !hasAvailableMakes && !error"
                 x-cloak
-            >No Approved Make Found in Make List — enter make and vendor above, then Apply.</span>
+            >No Approved Make or Database Make found for this category.</span>
         </div>
     </div>
 </section>
@@ -277,7 +271,6 @@
                     'make-vendor-card--not-available': notAvailable,
                     'make-vendor-card--no-make': notFound && !notAvailable,
                     'make-vendor-card--no-match': status === 'unmatched' && !notFound && !notAvailable,
-                    'make-vendor-card--vendor-review': vendorRateReview,
                     'make-vendor-card--same-price': samePriceTie
                 }"
                 role="tabpanel"
@@ -300,7 +293,7 @@
                     notAvailable: {{ product.is_not_available|yesno:'true,false' }},
                     showManualApply: {{ product.show_manual_apply|yesno:'true,false' }},
                     allowTypedEntry: {{ product.allow_typed_make_vendor|yesno:'true,false' }},
-                    vendorRateReview: {{ product.vendor_rate_review|yesno:'true,false' }},
+                    vendorRateReview: false,
                     samePriceTie: {{ product.same_price_tie|yesno:'true,false' }},
                     samePriceChoices: {{ product.same_price_choices_json|default:'[]' }},
                     makeOptions: {{ product.make_options_json|default:'[]' }},
@@ -314,11 +307,6 @@
                     <div class="make-vendor-card__heading">
                         <p class="make-vendor-card__ai-label">AI Description</p>
                         <h4 class="make-vendor-card__title">{{ product.description_hint|default:product.summary }}</h4>
-                        {% if product.vendor_rate_review %}
-                        <p class="make-vendor-card__vendor-review-note">
-                            Same material rate appears with a different make/vendor elsewhere — confirm this vendor before continuing.
-                        </p>
-                        {% endif %}
                         {% if product.same_price_tie %}
                         <p class="make-vendor-card__same-price-note">
                             Multiple product detected in same price — choose one vendor below.
@@ -339,12 +327,6 @@
                         title="Multiple Rate_Master_Output rows share the lowest price"
                     >Same price</span>
                     <span
-                        class="badge badge--yellow"
-                        x-show="vendorRateReview && !samePriceTie"
-                        x-cloak
-                        title="Confirm vendor — same material rate with different make/vendor"
-                    >Vendor review</span>
-                    <span
                         class="badge badge--red"
                         x-show="notAvailable"
                         x-cloak
@@ -358,8 +340,7 @@
                         class="badge"
                         x-show="!notAvailable && !notFound && !samePriceTie"
                         :class="{
-                            'badge--yellow': vendorRateReview || status === 'pending',
-                            'badge--green': !vendorRateReview && status === 'matched',
+                            'badge--green': status === 'matched' || status === 'pending',
                             'badge--orange': status === 'unmatched',
                             'badge--gray': status === 'not_searched'
                         }"
@@ -674,6 +655,7 @@ document.addEventListener('alpine:init', () => {
         category: '',
         subCategory: '',
         make: LOWEST_LABEL,
+        availableMake: '',
         vendor: '',
         saving: false,
         error: '',
@@ -711,11 +693,42 @@ document.addEventListener('alpine:init', () => {
             const row = this.activeScope;
             return row ? row.make_options || [] : [];
         },
+        get availableMakeOptions() {
+            const row = this.activeScope;
+            return row ? row.available_makes || [] : [];
+        },
+        get hasAvailableMakes() {
+            return this.availableMakeOptions.length > 0;
+        },
+        get activeMake() {
+            return this.availableMake || this.make;
+        },
         get vendorOptions() {
             const row = this.activeScope;
-            if (!row || isLowestMake(this.make)) return [];
+            const currentMake = this.activeMake;
+            if (!row || !currentMake || isLowestMake(currentMake)) return [];
             const byMake = row.vendors_by_make || {};
-            return byMake[this.make] || [];
+            if (byMake[currentMake] && Array.isArray(byMake[currentMake])) {
+                return byMake[currentMake];
+            }
+            const wanted = String(currentMake).trim().toLowerCase().replace(/\s+/g, '');
+            for (const [entry, vendors] of Object.entries(byMake)) {
+                const entryKey = String(entry).trim().toLowerCase().replace(/\s+/g, '');
+                if (entryKey === wanted && Array.isArray(vendors)) {
+                    return vendors;
+                }
+            }
+            return [];
+        },
+        syncVendorAndPrice() {
+            if (!this.activeMake || isLowestMake(this.activeMake)) {
+                this.vendor = '';
+                return;
+            }
+            const options = this.vendorOptions;
+            if (this.vendor && !options.some((item) => String(item) === String(this.vendor))) {
+                this.vendor = '';
+            }
         },
         _amountLookup(map, key) {
             if (!map || !key) return '';
@@ -732,66 +745,51 @@ document.addEventListener('alpine:init', () => {
             return '';
         },
         get previewRate() {
-            if (!this.subCategory) return '';
             const row = this.activeScope;
             if (!row) return '';
-            const make = String(this.make || '').trim();
+            const currentMake = String(this.activeMake || '').trim();
             const vendor = String(this.vendor || '').trim();
-            if (make && !this.isLowestMake(make)) {
+            if (currentMake && !this.isLowestMake(currentMake)) {
                 if (vendor) {
-                    const byVendor = this._amountLookup(row.lowest_by_make_vendor || {}, make) || {};
+                    const byVendor = this._amountLookup(row.lowest_by_make_vendor || {}, currentMake) || {};
                     const pair = this._amountLookup(byVendor, vendor);
                     if (pair) return pair;
                 }
-                const byMake = this._amountLookup(row.lowest_by_make || {}, make);
+                const byMake = this._amountLookup(row.lowest_by_make || {}, currentMake);
                 if (byMake) return byMake;
             }
             return row.lowest_amount || '';
         },
         onCategoryChange() {
             this.subCategory = '';
-            const row = this.currentCategory;
-            this.make = (row && row.make_options && row.make_options.length) ? LOWEST_LABEL : '';
+            this.make = '';
+            this.availableMake = '';
             this.vendor = '';
+            this.error = '';
         },
         onSubCategoryChange() {
-            const row = this.activeScope;
-            if (row && row.has_approved_makes === false) {
-                this.make = '';
-                this.vendor = '';
-                return;
-            }
-            const options = (row && row.make_options) ? row.make_options : [];
-            const preferred = (row && row.selected_make) ? row.selected_make : '';
-            if (preferred && options.some((item) => String(item) === String(preferred))) {
-                this.make = preferred;
-            } else if (options.length) {
-                this.make = LOWEST_LABEL;
-            } else {
-                this.make = '';
-            }
-            const vendors = this.vendorOptions;
-            const preferredVendor = (row && row.selected_vendor) ? row.selected_vendor : '';
-            if (preferredVendor && vendors.some((item) => String(item) === String(preferredVendor))) {
-                this.vendor = preferredVendor;
-            } else {
-                this.vendor = '';
-            }
+            this.availableMake = '';
+            this.make = '';
+            this.vendor = '';
+            this.error = '';
         },
         onMakeChange() {
-            if (isLowestMake(this.make)) {
-                this.vendor = '';
-                return;
+            if (this.make) {
+                this.availableMake = '';
             }
-            const options = this.vendorOptions;
-            if (this.vendor && !options.some((item) => String(item) === String(this.vendor))) {
-                this.vendor = '';
+            this.syncVendorAndPrice();
+        },
+        onAvailableMakeChange() {
+            if (this.availableMake) {
+                this.make = '';
             }
+            this.syncVendorAndPrice();
         },
         async applySubcategory() {
             if (this.saving || !this.category) return;
-            if (!this.hasApprovedMakes && !String(this.make || '').trim()) {
-                this.error = 'Enter a make to apply.';
+            const targetMake = this.activeMake;
+            if (!targetMake) {
+                this.error = 'Select a make to apply.';
                 return;
             }
             this.saving = true;
@@ -802,7 +800,7 @@ document.addEventListener('alpine:init', () => {
                 body.append('action', 'apply_subcategory');
                 body.append('category', this.category);
                 body.append('sub_category', this.subCategory || '');
-                body.append('make', this.hasApprovedMakes ? (this.make || LOWEST_LABEL) : String(this.make || '').trim());
+                body.append('make', targetMake);
                 body.append('vendor', this.vendor || '');
                 body.append('find_rates', '1');
                 const response = await fetch(this.url, {
@@ -983,9 +981,7 @@ document.addEventListener('alpine:init', () => {
         },
         get statusLabel() {
             if (this.notAvailable || this.status === 'not_available') return 'Not available';
-            // Same-price uses its own badge; do not duplicate the label here.
-            if (this.status === 'matched') return 'Matched';
-            if (this.status === 'pending') return 'Review';
+            if (this.status === 'matched' || this.status === 'pending') return 'Matched';
             if (this.status === 'unmatched') return 'Not in Db';
             if (this.notFound) return 'Not listed';
             return this.statusLabelServer || 'Select make';
