@@ -9,6 +9,7 @@ from ai.errors import is_fatal_ai_limit_error
 from ai.service import AIService
 from apps.boq.services.boq_extraction_slots import (
     build_product_boq_context,
+    compose_description_hint,
     refresh_product_from_boq_context,
 )
 from apps.boq.services.product_ai_apply import ProductAIApplyMixin
@@ -205,6 +206,11 @@ class ProductAIMappingService(
         aligned.pop("catalog_product_id", None)
         if rate.Product_ID:
             aligned["suggested_catalog_product_id"] = rate.Product_ID.strip()
+        composed = compose_description_hint(aligned)
+        if composed:
+            aligned["description_hint"] = composed
+        elif rate.Product_ID:
+            aligned["description_hint"] = rate.display_key() or _product_summary(snapshot)
         return aligned
 
 

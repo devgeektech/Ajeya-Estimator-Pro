@@ -359,6 +359,7 @@
                                     class="extraction-input"
                                     value="{{ field.value|default_if_none:'' }}"
                                     placeholder="Enter Product ID"
+                                    @keydown.enter.prevent="loadProductId($el.value)"
                                 >
                                 <button
                                     type="button"

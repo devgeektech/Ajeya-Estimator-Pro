@@ -282,3 +282,127 @@ class AnalysisNextProductIdGateTests(TestCase):
         self.assertEqual(product.get("vendor_selection_source"), NOT_AVAILABLE_SOURCE)
         self.assertFalse(selection.get("rate_detail"))
         self.assertFalse(selection.get("labour_detail"))
+
+
+class DescriptionHintUpdateOnProductMatchTests(TestCase):
+    def setUp(self):
+        from apps.database_manager.models import DatabaseVersion, Rate_Master_Output
+
+        self.user = User.objects.create_user(
+            email="desc_test@example.com", password="password"
+        )
+        self.version = DatabaseVersion.objects.create(
+            version_number=1,
+            name="Test DB",
+            is_active=True,
+            source_filename="test.xlsx",
+        )
+        self.rate1 = Rate_Master_Output.objects.create(
+            database_version=self.version,
+            Product_ID="P101",
+            Category="VALVE",
+            Sub_Category="BUTTERFLY VALVE",
+            Class="PN 16",
+            Size=150,
+            Unit="mm",
+            Capacity="",
+            Attribute="Body: CI",
+        )
+        self.rate2 = Rate_Master_Output.objects.create(
+            database_version=self.version,
+            Product_ID="P102",
+            Category="VALVE",
+            Sub_Category="CHECK VALVE",
+            Class="PN 16",
+            Size=150,
+            Unit="mm",
+            Capacity="",
+            Attribute="Body: CI",
+        )
+        self.boq = BOQ.objects.create(
+            boq_name="Desc Hint Test BOQ",
+            status=BOQStatus.EXTRACTED,
+            user=self.user,
+            boq_data={"rows": [{"row_id": "r1", "serial": "1"}]},
+            analysis_data={
+                "database_version_id": self.version.pk,
+                "rows": [
+                    {
+                        "row_id": "r1",
+                        "products": [
+                            {
+                                "product_index": 0,
+                                "description_hint": "wrong initial extracted description",
+                                "category": "VALVE",
+                                "sub_category": "BUTTERFLY VALVE",
+                                "class": "PN 16",
+                                "size": "150",
+                                "unit": "mm",
+                                "db_candidates": [
+                                    {
+                                        "id": self.rate1.pk,
+                                        "product_id": "P101",
+                                        "summary": "VALVE / BUTTERFLY VALVE / PN 16 / 150 / mm",
+                                        "confidence": 90.0,
+                                    },
+                                    {
+                                        "id": self.rate2.pk,
+                                        "product_id": "P102",
+                                        "summary": "VALVE / CHECK VALVE / PN 16 / 150 / mm",
+                                        "confidence": 85.0,
+                                    },
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
+
+    def test_select_candidate_updates_description_hint(self):
+        editor = BOQExtractionEditService(self.boq.pk)
+        updated = editor.select_candidate(
+            row_id="r1",
+            product_index=0,
+            rate_master_id=self.rate2.pk,
+        )
+        self.assertIn("check valve", updated.get("description_hint", "").lower())
+        self.assertNotIn("wrong initial", updated.get("description_hint", "").lower())
+
+    def test_load_by_product_id_updates_description_hint(self):
+        editor = BOQExtractionEditService(self.boq.pk)
+        updated = editor.load_by_product_id(
+            row_id="r1",
+            product_index=0,
+            product_id="P102",
+        )
+        self.assertIn("check valve", updated.get("description_hint", "").lower())
+        self.assertNotIn("wrong initial", updated.get("description_hint", "").lower())
+        self.assertEqual(updated.get("catalog_product_id"), "P102")
+
+    def test_update_product_with_product_id_updates_description_hint(self):
+        editor = BOQExtractionEditService(self.boq.pk)
+        updated = editor.update_product(
+            row_id="r1",
+            product_index=0,
+            fields={
+                "product_id": "P102",
+                "description_hint": "wrong initial extracted description",
+            },
+        )
+        self.assertIn("check valve", updated.get("description_hint", "").lower())
+        self.assertNotIn("wrong initial", updated.get("description_hint", "").lower())
+        self.assertEqual(updated.get("catalog_product_id"), "P102")
+
+    def test_confirm_match_updates_description_hint(self):
+        editor = BOQExtractionEditService(self.boq.pk)
+        # Point product to rate2 candidate
+        self.boq.analysis_data["rows"][0]["products"][0]["db_product_id"] = self.rate2.pk
+        self.boq.save(update_fields=["analysis_data"])
+        updated = editor.confirm_match(
+            row_id="r1",
+            product_index=0,
+        )
+        self.assertIn("check valve", updated.get("description_hint", "").lower())
+        self.assertNotIn("wrong initial", updated.get("description_hint", "").lower())
+        self.assertEqual(updated.get("catalog_product_id"), "P102")

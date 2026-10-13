@@ -1035,6 +1035,7 @@ class BOQExtractionEditView(LoginRequiredMixin, View):
                 fields = {
                     key: request.POST.get(key, "")
                     for key in (
+                        "product_id",
                         "description_hint",
                         "category",
                         "sub_category",

@@ -5,6 +5,17 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
+## 2026-10-13 — AI Description Synchronization on Product Selection & Manual Product ID Load
+- **AI Description (`description_hint`) Automatic Refresh on Catalog Match**:
+  - In `product_ai_mapping_service.py`, updated `apply_selected_candidate` to re-compose `description_hint` from the selected Rate_Master catalog product attributes.
+  - In `boq_extraction_edit_service.py`, removed previous bypasses in `select_candidate`, `load_by_product_id`, and `confirm_match` so `description_hint` is immediately updated whenever a catalog product is chosen, manually loaded, or confirmed.
+  - In `boq_extraction_edit_service.py` (`update_product`) and `views.py`, enabled `product_id` field handling: when a user manually enters or changes a Product ID matching `Rate_Master_Output`, the catalog product is loaded at 100% and `description_hint` is refreshed to reflect the new catalog item.
+  - In `boq_extraction_display_service.py` (`build_product_save_feedback`) and `_extraction_table.html`, returned `description_hint` on product save to keep the Analysis textarea in sync.
+  - In `_extraction_line.html`, added `@keydown.enter.prevent="loadProductId($el.value)"` on the Product ID input.
+  - Ensures accurate product descriptions across Analysis, Make & Vendor cards, Labour cards, and Review / Output Sheet `ai_interpretation`.
+- **Test Coverage**:
+  - Added unit test suite in `tests/boq/test_extraction_edit.py` (`DescriptionHintUpdateOnProductMatchTests`).
+
 ## 2026-10-13 — Review & Output Sheet Price Sync with Active Database & 4-Column Highlights
 - **Review & Output Sheet Price Synchronization**:
   - In `rate_detail_retrieval_service.py`, extended `RateDetailRetrievalService` with `get_by_rate_id`, `get_by_product_make_vendor`, and `resolve_rate_detail` methods to resolve accurate `Rate_Master_Output` snapshots across primary key, `Rate_ID`, or `Product_ID` + Make + Vendor.

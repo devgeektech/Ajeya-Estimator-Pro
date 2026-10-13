@@ -726,6 +726,12 @@ document.addEventListener('alpine:init', () => {
                     if (data.product.attribute_confidence != null) {
                         this.attributeConfidence = Number(data.product.attribute_confidence || 0);
                     }
+                    if (data.product.description_hint != null) {
+                        const hintEl = this.getForm()?.querySelector('[name="description_hint"]');
+                        if (hintEl && document.activeElement !== hintEl && data.product.description_hint) {
+                            hintEl.value = data.product.description_hint;
+                        }
+                    }
                 }
                 if (!this._confirming) {
                     this.recalcAttributeConfidence();

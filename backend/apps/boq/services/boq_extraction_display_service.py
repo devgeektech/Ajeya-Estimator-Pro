@@ -901,6 +901,7 @@ def build_product_save_feedback(product: dict[str, Any]) -> dict[str, Any]:
     return {
         "missing_count": shaped["missing_count"],
         "summary": shaped["summary"],
+        "description_hint": product.get("description_hint") or "",
         "is_complete": shaped["missing_count"] == 0,
         "attribute_confidence": shaped["attribute_confidence"],
         "attribute_confidence_band": shaped["attribute_confidence_band"],

@@ -32,6 +32,7 @@ PHASE_EXTRACTED = "extracted"
 
 _PRODUCT_SCALAR_FIELDS = (
     "description_hint",
+    "product_id",
     "category",
     "sub_category",
     "class",
@@ -138,6 +139,51 @@ class BOQExtractionEditService:
         if not _is_blank(submitted_class):
             updated["class"] = submitted_class
 
+        previous_pid = str(
+            product.get("catalog_product_id")
+            or product.get("suggested_catalog_product_id")
+            or ""
+        ).strip()
+        entered_pid = str(fields.get("product_id") or "").strip()
+        pid_changed_to_match = False
+        if entered_pid and entered_pid.lower() != previous_pid.lower():
+            from apps.database_manager.models import Rate_Master_Output
+            from apps.boq.services.product_ai_mapping_service import ProductAIMappingService
+            from apps.database_manager.services.activation import get_active_database_version
+
+            stored_db_id = int(analysis.get("database_version_id") or 0) or None
+            if stored_db_id:
+                version_id = stored_db_id
+            else:
+                active = get_active_database_version()
+                version_id = active.pk if active else None
+            if version_id:
+                rate_match = Rate_Master_Output.objects.filter(
+                    database_version_id=version_id,
+                    Product_ID__iexact=entered_pid,
+                ).first()
+                if rate_match:
+                    try:
+                        aligned = ProductAIMappingService(version_id).apply_selected_candidate(
+                            updated,
+                            rate_match.pk,
+                        )
+                        updated.update(aligned)
+                        updated["catalog_product_id"] = rate_match.Product_ID
+                        updated["db_match_confidence"] = 100.0
+                        updated["attribute_confidence"] = 100.0
+                        if "ai_mapping" in updated:
+                            updated["ai_mapping"]["notes"] = f"Manually entered Product ID: {entered_pid}."
+                            updated["ai_mapping"]["selection_source"] = "manual_load"
+                        pid_changed_to_match = True
+                    except Exception:
+                        pass
+        elif not entered_pid and previous_pid and "product_id" in fields:
+            updated.pop("catalog_product_id", None)
+            updated.pop("suggested_catalog_product_id", None)
+            updated["db_match_confidence"] = 0.0
+            updated["db_match_status"] = "unmatched"
+
         if attributes is not None:
             updated["attributes"] = _normalize_attributes(attributes)
             schema_keys = [
@@ -155,7 +201,11 @@ class BOQExtractionEditService:
                 updated["attribute_source"] = updated.get("attribute_source") or "extracted"
 
         # Keep an expert-edited AI Description; otherwise rebuild from taxonomy + attrs.
-        if submitted_hint is not None and submitted_hint and submitted_hint != previous_hint:
+        if pid_changed_to_match:
+            composed = compose_description_hint(updated)
+            if composed:
+                updated["description_hint"] = composed
+        elif submitted_hint is not None and submitted_hint and submitted_hint != previous_hint:
             updated["description_hint"] = submitted_hint[:500]
         else:
             composed = compose_description_hint(updated)
@@ -271,7 +321,9 @@ class BOQExtractionEditService:
         except ValueError as exc:
             raise ValidationError(str(exc)) from exc
 
-        # description_hint is left unchanged as per user request.
+        composed = compose_description_hint(updated)
+        if composed:
+            updated["description_hint"] = composed
 
         position = self._product_position(products, product_index)
         if position is None:
@@ -354,11 +406,17 @@ class BOQExtractionEditService:
         # Override confidence since it's a manual load by ID without AI
         updated["db_match_confidence"] = 100.0
         updated["attribute_confidence"] = 100.0
+        if rate_match.Product_ID:
+            updated["catalog_product_id"] = rate_match.Product_ID.strip()
         if "ai_mapping" in updated:
             updated["ai_mapping"]["notes"] = f"Manually loaded Product ID: {product_id}."
             updated["ai_mapping"]["selection_source"] = "manual_load"
 
-        # description_hint is left unchanged as per user request.
+        composed = compose_description_hint(updated)
+        if composed:
+            updated["description_hint"] = composed
+        else:
+            updated["description_hint"] = rate_match.display_key() or product_id
 
         position = self._product_position(products, product_index)
         if position is None:
@@ -471,14 +529,21 @@ class BOQExtractionEditService:
             updated["category"] = getattr(rate, "Category", "") or ""
             updated["sub_category"] = getattr(rate, "Sub_Category", "") or ""
             updated["class_name"] = getattr(rate, "Class", "") or ""
+            updated["class"] = getattr(rate, "Class", "") or ""
             updated["size"] = str(getattr(rate, "Size", "")) if getattr(rate, "Size", None) is not None else ""
             updated["capacity"] = str(getattr(rate, "Capacity", "")) if getattr(rate, "Capacity", None) is not None else ""
             updated["unit"] = getattr(rate, "Unit", "") or ""
             updated["attribute"] = getattr(rate, "Attribute", "") or ""
+            composed = compose_description_hint(updated)
+            if composed:
+                updated["description_hint"] = composed
         elif str(updated.get("suggested_catalog_product_id") or "").strip():
             updated["catalog_product_id"] = str(
                 updated.get("suggested_catalog_product_id")
             ).strip()
+            composed = compose_description_hint(updated)
+            if composed:
+                updated["description_hint"] = composed
         mapping = dict(updated.get("ai_mapping") or {})
         mapping["selected_id"] = rate_pk
         mapping["selected_rate_master_id"] = rate_pk

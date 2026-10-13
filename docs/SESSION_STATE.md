@@ -3,6 +3,24 @@
 Compact active memory. Full spec: `docs/PRODUCT.md`. Schema: `docs/DATABASE.md`.
 History: `docs/CHANGELOG.md` (do not duplicate session diaries here).
 
+### 2026-10-13 — AI Description Synchronization on Product Selection & Manual Product ID Load
+
+Completed:
+- **AI Description (`description_hint`) Automatic Refresh on Catalog Match**:
+  - Identified issue where manually loading a Product ID (`load_by_product_id`), selecting a database candidate (`select_candidate`), confirming a match (`confirm_match`), or filling in a Product ID on the form (`update_product`) retained stale initial BOQ extract descriptions in `description_hint`.
+  - In `ProductAIMappingService.apply_selected_candidate`, rebuild `aligned["description_hint"] = compose_description_hint(aligned)` so candidate selections and manual loads derive the AI Description from the chosen database product attributes.
+  - In `BOQExtractionEditService.select_candidate`, `load_by_product_id`, and `confirm_match`, removed previous bypasses and ensured `updated["description_hint"]` is automatically regenerated from the chosen database product.
+  - In `BOQExtractionEditService.update_product`, added `"product_id"` handling to `_PRODUCT_SCALAR_FIELDS` and form fields parsing in `BOQExtractionEditView`: when a user manually enters or changes a Product ID matching `Rate_Master_Output`, the catalog product is loaded, locked at 100%, and `description_hint` is re-composed to match the newly loaded catalog item.
+  - In `_shape_product` and `build_product_save_feedback`, passed `description_hint` in AJAX responses so auto-save immediately updates the form textarea without page reload.
+  - In `_extraction_line.html`, added `@keydown.enter.prevent="loadProductId($el.value)"` on the Product ID input field for quick loading on Enter.
+  - In subsequent phases (Analysis tab, Make & Vendor card header `description_hint`, Labour card header `description_hint`, and Review / Export `_ai_interpretation`), the updated description is now consistently used.
+- **Test Coverage**:
+  - Added `DescriptionHintUpdateOnProductMatchTests` in `tests/boq/test_extraction_edit.py` covering candidate selection, manual load by ID, manual product ID entry, and confirmation. All 211 tests passing cleanly.
+
+Pending: None.
+Issues: None.
+Next: Deploy changes to EC2 and verify.
+
 ### 2026-10-13 — Review & Output Sheet Price Sync with Active Database & 4-Column Highlights
 
 Completed:
