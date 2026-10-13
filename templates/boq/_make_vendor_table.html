@@ -40,6 +40,20 @@
                 </select>
             </label>
             <label class="extraction-field">
+                <span class="extraction-field__label">Product</span>
+                <select
+                    class="extraction-input"
+                    x-model="productId"
+                    :disabled="!subCategory || !products.length"
+                    @change="onProductChange()"
+                >
+                    <option value="">All products in sub-category</option>
+                    <template x-for="item in products" :key="item.product_id">
+                        <option :value="item.product_id" x-text="item.label"></option>
+                    </template>
+                </select>
+            </label>
+            <label class="extraction-field">
                 <span class="extraction-field__label">Approved make</span>
                 <select
                     class="extraction-input"
@@ -99,7 +113,7 @@
                 :disabled="saving || !category || !activeMake"
                 @click="applySubcategory()"
             >
-                <span x-show="!saving" x-text="subCategory ? 'Apply to sub-category' : 'Apply to category'"></span>
+                <span x-show="!saving" x-text="productId ? ('Apply to product ' + productId) : (subCategory ? 'Apply to sub-category' : 'Apply to category')"></span>
                 <span x-show="saving" x-cloak>Applying…</span>
             </button>
             <span class="extraction-save-hint extraction-save-hint--error" x-show="error" x-text="error" x-cloak></span>
@@ -128,7 +142,7 @@
         {% for item in make_vendor_display.selection_catalog.applied_filters %}
         <li class="make-vendor-applied-filters__item">
             <div class="make-vendor-applied-filters__body">
-                <strong>{{ item.category }} / {{ item.sub_category }}</strong>
+                <strong>{{ item.category }} / {{ item.sub_category }}{% if item.product_id %} (Product #{{ item.product_id }}){% endif %}</strong>
                 <span>{{ item.make }} · {{ item.vendor }}{% if item.amount %} · {{ item.amount }}{% endif %}</span>
                 {% if item.product_count %}
                 <span class="badge badge--gray">{{ item.product_count }} product{{ item.product_count|pluralize }}</span>
@@ -138,8 +152,8 @@
                 type="button"
                 class="make-vendor-applied-filters__remove"
                 title="Remove filter"
-                aria-label="Remove filter {{ item.category }} / {{ item.sub_category }}"
-                @click="window.removeMakeVendorAppliedFilter('{% url 'boq:make_vendor_select' boq.pk %}', '{{ item.category|escapejs }}', '{{ item.sub_category_value|default:''|escapejs }}')"
+                aria-label="Remove filter {{ item.category }} / {{ item.sub_category }}{% if item.product_id %} (Product #{{ item.product_id }}){% endif %}"
+                @click="window.removeMakeVendorAppliedFilter('{% url 'boq:make_vendor_select' boq.pk %}', '{{ item.category|escapejs }}', '{{ item.sub_category_value|default:''|escapejs }}', '{{ item.product_id|default:''|escapejs }}')"
             >&times;</button>
         </li>
         {% endfor %}
@@ -573,7 +587,7 @@ document.addEventListener('alpine:init', () => {
         window.location.assign(MAKE_VENDOR_URL + Date.now());
     };
 
-    window.removeMakeVendorAppliedFilter = async function removeMakeVendorAppliedFilter(url, category, subCategory) {
+    window.removeMakeVendorAppliedFilter = async function removeMakeVendorAppliedFilter(url, category, subCategory, productId) {
         if (!url || !category) {
             return;
         }
@@ -592,6 +606,7 @@ document.addEventListener('alpine:init', () => {
             body.append('action', 'remove_subcategory_filter');
             body.append('category', category);
             body.append('sub_category', subCategory || '');
+            body.append('product_id', productId || '');
             const response = await fetch(url, {
                 method: 'POST',
                 headers: {
@@ -654,6 +669,7 @@ document.addEventListener('alpine:init', () => {
         catalog: { categories: [] },
         category: '',
         subCategory: '',
+        productId: '',
         make: LOWEST_LABEL,
         availableMake: '',
         vendor: '',
@@ -680,7 +696,17 @@ document.addEventListener('alpine:init', () => {
         get currentSubCategory() {
             return this.subCategories.find((item) => item.sub_category === this.subCategory) || null;
         },
+        get products() {
+            return this.currentSubCategory ? (this.currentSubCategory.products || []) : [];
+        },
+        get currentProduct() {
+            if (!this.productId) return null;
+            return this.products.find((item) => String(item.product_id) === String(this.productId)) || null;
+        },
         get activeScope() {
+            if (this.productId && this.currentProduct) {
+                return this.currentProduct;
+            }
             return this.subCategory ? this.currentSubCategory : this.currentCategory;
         },
         get hasApprovedMakes() {
@@ -762,12 +788,20 @@ document.addEventListener('alpine:init', () => {
         },
         onCategoryChange() {
             this.subCategory = '';
+            this.productId = '';
             this.make = '';
             this.availableMake = '';
             this.vendor = '';
             this.error = '';
         },
         onSubCategoryChange() {
+            this.productId = '';
+            this.availableMake = '';
+            this.make = '';
+            this.vendor = '';
+            this.error = '';
+        },
+        onProductChange() {
             this.availableMake = '';
             this.make = '';
             this.vendor = '';
@@ -800,6 +834,7 @@ document.addEventListener('alpine:init', () => {
                 body.append('action', 'apply_subcategory');
                 body.append('category', this.category);
                 body.append('sub_category', this.subCategory || '');
+                body.append('product_id', this.productId || '');
                 body.append('make', targetMake);
                 body.append('vendor', this.vendor || '');
                 body.append('find_rates', '1');

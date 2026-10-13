@@ -80,6 +80,24 @@ def _catalog_product_id(product: dict[str, Any] | None) -> str:
         text = str(item.get(key) or selection.get(key) or mapping.get(key) or "").strip()
         if text:
             return text
+    db_prod_id = (
+        item.get("db_product_id")
+        or selection.get("rate_master_id")
+        or mapping.get("selected_id")
+    )
+    if db_prod_id:
+        try:
+            from apps.database_manager.models import Rate_Master_Output
+
+            rate_pid = (
+                Rate_Master_Output.objects.filter(pk=int(db_prod_id))
+                .values_list("Product_ID", flat=True)
+                .first()
+            )
+            if rate_pid:
+                return str(rate_pid).strip()
+        except Exception:
+            pass
     return ""
 
 
@@ -303,8 +321,15 @@ def _taxonomy_label(product: dict[str, Any]) -> str:
     return category or sub_category or "—"
 
 
-def _subcategory_storage_key(category: str, sub_category: str) -> str:
-    return f"{(category or '').strip()}{_SUBCATEGORY_SEP}{(sub_category or '').strip()}"
+def _subcategory_storage_key(
+    category: str, sub_category: str, product_id: str = ""
+) -> str:
+    cat = (category or "").strip()
+    sub = (sub_category or "").strip()
+    pid = (product_id or "").strip()
+    if pid:
+        return f"{cat}{_SUBCATEGORY_SEP}{sub}{_SUBCATEGORY_SEP}{pid}"
+    return f"{cat}{_SUBCATEGORY_SEP}{sub}"
 
 
 def _product_matches_subcategory(
@@ -312,6 +337,7 @@ def _product_matches_subcategory(
     *,
     category: str,
     sub_category: str,
+    product_id: str = "",
 ) -> bool:
     product_category = str(product.get("category") or "").strip()
     if not product_category:
@@ -320,10 +346,21 @@ def _product_matches_subcategory(
         return False
     # Empty sub-category = apply to the entire category.
     target_sub = (sub_category or "").strip()
-    if not target_sub or target_sub == "—":
-        return True
-    product_sub = str(product.get("sub_category") or "").strip()
-    return _normalize_text(product_sub) == _normalize_text(target_sub)
+    if target_sub and target_sub != "—":
+        product_sub = str(product.get("sub_category") or "").strip()
+        if _normalize_text(product_sub) != _normalize_text(target_sub):
+            return False
+    target_pid = (product_id or "").strip()
+    if target_pid:
+        actual_pid = str(
+            product.get("catalog_product_id")
+            or _catalog_product_id(product)
+            or loaded_catalog_product_id(product)
+            or ""
+        ).strip()
+        if actual_pid != target_pid:
+            return False
+    return True
 
 
 def _is_lowest_make(value: str) -> bool:

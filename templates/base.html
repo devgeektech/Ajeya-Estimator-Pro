@@ -1548,7 +1548,7 @@
 
         .make-vendor-subcategory-panel__grid {
             display: grid;
-            grid-template-columns: repeat(6, minmax(110px, 1fr));
+            grid-template-columns: repeat(7, minmax(110px, 1fr));
             gap: 10px;
             align-items: end;
             margin-top: 0;
@@ -1732,6 +1732,12 @@
             background: #fee2e2;
             border-color: #fca5a5;
             color: #991b1b;
+        }
+
+        @media (max-width: 1200px) {
+            .make-vendor-subcategory-panel__grid {
+                grid-template-columns: repeat(4, 1fr);
+            }
         }
 
         @media (max-width: 960px) {

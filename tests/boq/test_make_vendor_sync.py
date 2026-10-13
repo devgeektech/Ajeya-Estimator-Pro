@@ -235,3 +235,125 @@ class AvailableMakeCascadeTests(TestCase):
         self.assertEqual(row_prod["selected_make"], "JINDAL")
         self.assertEqual(row_prod["selected_vendor"], "SUPPLIER A")
 
+
+class MakeVendorProductWiseCascadeTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="cascade_prod@example.com", password="password"
+        )
+        self.boq = BOQ.objects.create(
+            boq_name="Cascade Product BOQ",
+            status=BOQStatus.MAKE_VENDOR,
+            user=self.user,
+            uploaded_file="boq/cascade_prod.xlsx",
+            analysis_data={
+                "make_vendor_defaults_applied": True,
+                "rows": [
+                    {
+                        "row_id": "r1",
+                        "products": [
+                            {
+                                "product_index": 0,
+                                "category": "TANK",
+                                "sub_category": "AIR CUSHION TANK",
+                                "catalog_product_id": "161",
+                                "size": "200.00",
+                                "unit": "mm",
+                                "selected_make": "OLD_MAKE",
+                                "selected_vendor": "OLD_VENDOR",
+                                "vendor_selection": {
+                                    "status": "matched",
+                                    "make": "OLD_MAKE",
+                                    "vendor": "OLD_VENDOR",
+                                    "catalog_product_id": "161",
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "row_id": "r2",
+                        "products": [
+                            {
+                                "product_index": 0,
+                                "category": "TANK",
+                                "sub_category": "AIR CUSHION TANK",
+                                "catalog_product_id": "238",
+                                "size": "300.00",
+                                "unit": "mm",
+                                "selected_make": "OLD_MAKE",
+                                "selected_vendor": "OLD_VENDOR",
+                                "vendor_selection": {
+                                    "status": "matched",
+                                    "make": "OLD_MAKE",
+                                    "vendor": "OLD_VENDOR",
+                                    "catalog_product_id": "238",
+                                },
+                            }
+                        ],
+                    },
+                ],
+            },
+            boq_data={"rows": [{"row_id": "r1", "qty": 1}, {"row_id": "r2", "qty": 1}]},
+        )
+
+    def test_apply_subcategory_with_product_id_updates_only_target_product(self):
+        service = MakeVendorSelectionService(self.boq.pk)
+        fake_payload = {
+            "status": "matched",
+            "make": "SELF",
+            "vendor": "SELF",
+            "line_output": {"material_rate": "7471.30"},
+        }
+        with (
+            patch.object(MakeVendorSelectionService, "has_make_list", new_callable=PropertyMock, return_value=False),
+            patch.object(service, "_database_version_id", return_value=1),
+            patch.object(service, "_rate_master_makes_for_subcategory", return_value=["SELF"]),
+            patch.object(service, "_exact_match_and_rates", return_value=dict(fake_payload)),
+        ):
+            result = service.apply_subcategory_make(
+                category="TANK",
+                sub_category="AIR CUSHION TANK",
+                product_id="238",
+                make="SELF",
+                vendor="SELF",
+            )
+
+        self.assertEqual(result["updated_count"], 1)
+        self.assertEqual(result["product_id"], "238")
+        self.boq.refresh_from_db()
+        rows = self.boq.analysis_data["rows"]
+        # r1 (Product 161) must remain untouched
+        prod_161 = rows[0]["products"][0]
+        self.assertEqual(prod_161["selected_make"], "OLD_MAKE")
+        self.assertEqual(prod_161["selected_vendor"], "OLD_VENDOR")
+
+        # r2 (Product 238) must be updated to SELF / SELF
+        prod_238 = rows[1]["products"][0]
+        self.assertEqual(prod_238["selected_make"], "SELF")
+        self.assertEqual(prod_238["selected_vendor"], "SELF")
+
+        # Applied filter stored with product_id
+        selections = self.boq.analysis_data["subcategory_make_selections"]
+        storage_key = "TANK::AIR CUSHION TANK::238"
+        self.assertIn(storage_key, selections)
+        self.assertEqual(selections[storage_key]["product_id"], "238")
+
+    def test_catalog_builds_product_rows(self):
+        service = MakeVendorSelectionService(self.boq.pk)
+        with (
+            patch.object(service, "_make_options_for_scope", return_value=(["Lowest price", "SELF"], ["SELF"], True)),
+            patch.object(service, "_rate_master_makes_for_subcategory", return_value=["SELF"]),
+            patch.object(service, "_vendors_for_subcategory_make", return_value=["SELF"]),
+            patch.object(service, "_lowest_amount_maps", return_value={"lowest_amount": "5959.90"}),
+            patch.object(service, "_approved_makes_for_subcategory", return_value=["SELF"]),
+        ):
+            catalog = service._build_selection_catalog(self.boq.analysis_data, database_version_id=1)
+
+        sub = catalog["categories"][0]["sub_categories"][0]
+        self.assertIn("products", sub)
+        self.assertEqual(len(sub["products"]), 2)
+        prod_ids = [p["product_id"] for p in sub["products"]]
+        self.assertIn("161", prod_ids)
+        self.assertIn("238", prod_ids)
+
+

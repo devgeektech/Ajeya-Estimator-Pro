@@ -3,6 +3,25 @@
 Compact active memory. Full spec: `docs/PRODUCT.md`. Schema: `docs/DATABASE.md`.
 History: `docs/CHANGELOG.md` (do not duplicate session diaries here).
 
+### 2026-10-13 — Make & Vendor Product-Wise Cascade Filtering & Exact Product_ID Scope Preservation
+
+Completed:
+- **Product-Wise Cascade Filter Selection in Make & Vendor**:
+  - Resolved issue where applying a cascade filter for Category `TANK` and Sub-category `AIR CUSHION TANK` caused both section 15 (Product ID 238, 300 mm) and another section (Product ID 161, 200 mm) to both change to Product ID 161 (picking the lowest-price variant across the sub-category bucket).
+  - Extended cascade selection catalog (`_collect_extraction_catalog` and `_build_selection_catalog`) to collect `products_by_sub` and construct `products` list for each sub-category, containing product IDs, sizes, units, make options, vendors, and prices specific to each product.
+  - Added `Product` dropdown to the Make & Vendor cascade selection panel (`templates/boq/_make_vendor_table.html`), allowing users to select an exact product or all products in the sub-category.
+  - Updated Alpine.js `makeVendorSubcategoryPanel` component: added `productId` state, `products`, `currentProduct`, dynamic `activeScope`, and button label dynamic text (`Apply to product <id>`).
+  - Updated `apply_subcategory_make`, `remove_subcategory_filter`, `_restore_scope_to_lowest`, and storage keys (`category::sub_category::product_id`) in `make_vendor_cascade.py` and `views.py` to support `product_id`.
+  - In `apply_subcategory_make`, `_capture_analysis_product_id` is now run prior to rate evaluation, ensuring the analysis-selected Product_ID is strictly preserved and rates for that specific product ID variant are retrieved.
+  - Updated `templates/base.html` `.make-vendor-subcategory-panel__grid` to 7 responsive columns with breakpoints.
+  - Displayed `product_id` in the Applied Filters list and ensured filter removal targets the specific product ID.
+- **Test Coverage**:
+  - Added `MakeVendorProductWiseCascadeTests` in `tests/boq/test_make_vendor_sync.py` verifying targeted product updates and catalog construction. All 213 tests passing cleanly.
+
+Pending: None.
+Issues: None.
+Next: Deploy changes to EC2 and verify on live instance.
+
 ### 2026-10-13 — AI Description Synchronization on Product Selection & Manual Product ID Load
 
 Completed:

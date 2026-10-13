@@ -56,7 +56,7 @@ class MakeVendorRatesMixin:
             Rate_Master_Output.objects.filter(database_version_id=database_version_id)
             .exclude(Make__isnull=True)
             .exclude(Make="")
-            .values("Category", "Sub_Category", "Make", "Vendor", "Final_Material_Amount")
+            .values("Category", "Sub_Category", "Make", "Vendor", "Final_Material_Amount", "Product_ID")
         )
         by_category: dict[str, list[dict[str, str]]] = {}
         for row in rows:
@@ -69,6 +69,7 @@ class MakeVendorRatesMixin:
                 {
                     "category": category,
                     "sub_category": str(row.get("Sub_Category") or "").strip(),
+                    "product_id": str(row.get("Product_ID") or "").strip(),
                     "make": str(row.get("Make") or "").strip(),
                     "vendor": str(row.get("Vendor") or "").strip(),
                     "amount": "" if amount is None else str(amount),
@@ -84,8 +85,9 @@ class MakeVendorRatesMixin:
         database_version_id: int,
         category: str,
         sub_category: str = "",
+        product_id: str = "",
     ) -> list[dict[str, str]]:
-        """Return cached Rate_Master rows for category, optionally narrowed by sub-category."""
+        """Return cached Rate_Master rows for category, optionally narrowed by sub-category / product_id."""
         self._ensure_rate_index(database_version_id)
         category_key = _normalize_text(category)
         if not category_key:
@@ -93,13 +95,21 @@ class MakeVendorRatesMixin:
         rows = list(self._rates_by_category.get(category_key) or [])
         sub_text = str(sub_category or "").strip()  # type: ignore
         if not sub_text or sub_text == "—":
-            return rows
-        sub_key = _normalize_text(sub_text)
-        narrowed = [
-            row
-            for row in rows
-            if _normalize_text(row.get("sub_category") or "") == sub_key
-        ]
+            narrowed = rows
+        else:
+            sub_key = _normalize_text(sub_text)
+            narrowed = [
+                row
+                for row in rows
+                if _normalize_text(row.get("sub_category") or "") == sub_key
+            ]
+        pid_text = str(product_id or "").strip()
+        if pid_text:
+            narrowed = [
+                row
+                for row in narrowed
+                if str(row.get("product_id") or "").strip() == pid_text
+            ]
         # Keep sub-category scope strict — do not fall back to every make in the
         # parent category (that flooded the Approved make cascade dropdown).
         return narrowed
@@ -137,8 +147,9 @@ class MakeVendorRatesMixin:
         database_version_id: int,
         category: str,
         sub_category: str,
+        product_id: str = "",
     ) -> list[str]:
-        """Distinct Rate_Master_Output makes for category / optional sub-category."""
+        """Distinct Rate_Master_Output makes for category / optional sub-category / product."""
         if not database_version_id or not (category or "").strip():
             return []
         makes: list[str] = []
@@ -147,6 +158,7 @@ class MakeVendorRatesMixin:
             database_version_id=database_version_id,
             category=category,
             sub_category=sub_category,
+            product_id=product_id,
         ):
             text = (rate.get("make") or "").strip()
             key = _normalize_text(text)
@@ -218,8 +230,9 @@ class MakeVendorRatesMixin:
         category: str,
         sub_category: str,
         approved_makes: list[str] | None,
+        product_id: str = "",
     ) -> dict[str, Any]:
-        """Lowest Final_Material_Amount for cascade preview (scope / make / vendor)."""
+        """Lowest Final_Material_Amount for cascade preview (scope / make / vendor / product)."""
         overall: float | None = None
         by_make: dict[str, float] = {}
         by_make_vendor: dict[str, dict[str, float]] = {}
@@ -227,6 +240,7 @@ class MakeVendorRatesMixin:
             database_version_id=database_version_id,
             category=category,
             sub_category=sub_category,
+            product_id=product_id,
         ):
             make = (rate.get("make") or "").strip()
             vendor = (rate.get("vendor") or "").strip()
@@ -308,6 +322,7 @@ class MakeVendorRatesMixin:
         category: str,
         sub_category: str,
         make: str,
+        product_id: str = "",
     ) -> list[str]:
         if not database_version_id or not make or _is_lowest_make(make):
             return []
@@ -331,6 +346,7 @@ class MakeVendorRatesMixin:
             database_version_id=database_version_id,
             category=category,
             sub_category=sub_category,
+            product_id=product_id,
         )
         return _collect(scoped)
 

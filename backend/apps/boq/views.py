@@ -1124,25 +1124,29 @@ class BOQMakeVendorSelectView(LoginRequiredMixin, View):
             if action == "apply_subcategory":
                 category = (request.POST.get("category") or "").strip()
                 sub_category = (request.POST.get("sub_category") or "").strip()
+                product_id = (request.POST.get("product_id") or "").strip()
                 make = (request.POST.get("make") or "").strip()
                 vendor = (request.POST.get("vendor") or "").strip()
                 find_rates = (request.POST.get("find_rates") or "1").strip() != "0"
                 result = service.apply_subcategory_make(
                     category=category,
                     sub_category=sub_category,
+                    product_id=product_id,
                     make=make,
                     vendor=vendor,
                     find_rates=find_rates,
                 )
+                scope_label = result['category']
+                if result.get("sub_category"):
+                    scope_label += f" / {result['sub_category']}"
+                if result.get("product_id"):
+                    scope_label += f" (Product #{result['product_id']})"
+                elif not result.get("sub_category"):
+                    scope_label += " (entire category)"
                 message = (
                     f"Applied {result.get('make') or 'lowest price'} to "
                     f"{result['updated_count']} product(s) in "
-                    f"{result['category']}"
-                    + (
-                        f" / {result['sub_category']}"
-                        if result.get("sub_category")
-                        else " (entire category)"
-                    )
+                    f"{scope_label}"
                     + f" ({result['matched_count']} matched with rates)."
                 )
                 if ajax:
@@ -1153,14 +1157,18 @@ class BOQMakeVendorSelectView(LoginRequiredMixin, View):
             if action == "remove_subcategory_filter":
                 category = (request.POST.get("category") or "").strip()
                 sub_category = (request.POST.get("sub_category") or "").strip()
+                product_id = (request.POST.get("product_id") or "").strip()
                 result = service.remove_subcategory_filter(
                     category=category,
                     sub_category=sub_category,
+                    product_id=product_id,
                 )
                 label = result["category"]
                 if result.get("sub_category"):
                     label = f"{label} / {result['sub_category']}"
-                else:
+                if result.get("product_id"):
+                    label = f"{label} (Product #{result['product_id']})"
+                elif not result.get("sub_category"):
                     label = f"{label} (entire category)"
                 message = f"Removed applied filter for {label}."
                 if ajax:

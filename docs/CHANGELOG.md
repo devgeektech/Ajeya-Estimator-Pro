@@ -5,6 +5,17 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
+## 2026-10-13 — Make & Vendor Product-Wise Cascade Filtering & Exact Product_ID Scope Preservation
+- **Product-Wise Cascade Filter Selection in Make & Vendor**:
+  - In `make_vendor_common.py`, extended `_catalog_product_id` to fall back to `Rate_Master_Output` lookups via `db_product_id`/`rate_master_id` if missing, and enhanced `_subcategory_storage_key` and `_product_matches_subcategory` to support product-specific scoping (`category::sub_category::product_id`).
+  - In `make_vendor_rates.py`, indexed `Product_ID` and updated `_rate_rows_for_scope`, `_rate_master_makes_for_subcategory`, `_lowest_amount_maps`, and `_vendors_for_subcategory_make` to accept optional `product_id`.
+  - In `make_vendor_cascade.py`, updated `_collect_extraction_catalog` and `_build_selection_catalog` to build a `products` list under each sub-category with individual sizes, units, make options, vendors, and price maps for each product.
+  - In `make_vendor_cascade.py`, updated `apply_subcategory_make` to accept `product_id` and run `_capture_analysis_product_id` before rating, strictly locking the analysis-selected Product_ID and preventing unintentional product overrides. Updated `remove_subcategory_filter` and `_restore_scope_to_lowest` to support product-scoped filter clearing.
+  - In `views.py`, extracted `product_id` from `request.POST` in `BOQMakeVendorSelectView` for both `apply_subcategory` and `remove_subcategory_filter`.
+  - In `_make_vendor_table.html`, added a `Product` dropdown to the cascade panel, updated Alpine.js `makeVendorSubcategoryPanel` with `productId`, dynamic `activeScope`, preview pricing, and contextual button labels (`Apply to product <id>`).
+  - In `templates/base.html`, updated `.make-vendor-subcategory-panel__grid` to 7 responsive columns with tablet/mobile media queries.
+  - In `tests/boq/test_make_vendor_sync.py`, added `MakeVendorProductWiseCascadeTests`.
+
 ## 2026-10-13 — AI Description Synchronization on Product Selection & Manual Product ID Load
 - **AI Description (`description_hint`) Automatic Refresh on Catalog Match**:
   - In `product_ai_mapping_service.py`, updated `apply_selected_candidate` to re-compose `description_hint` from the selected Rate_Master catalog product attributes.
