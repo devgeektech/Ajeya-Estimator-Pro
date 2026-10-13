@@ -5,6 +5,17 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
+## 2026-10-13 — Review & Output Sheet Price Sync with Active Database & 4-Column Highlights
+- **Review & Output Sheet Price Synchronization**:
+  - In `rate_detail_retrieval_service.py`, extended `RateDetailRetrievalService` with `get_by_rate_id`, `get_by_product_make_vendor`, and `resolve_rate_detail` methods to resolve accurate `Rate_Master_Output` snapshots across primary key, `Rate_ID`, or `Product_ID` + Make + Vendor.
+  - In `boq_review_display_service.py`, updated `BOQReviewDisplayService._product_line` to resolve rates against the active database version on display and re-compute `line_output` via `BOQLineOutputService.build(...)`. This eliminates price discrepancies caused by stale cached `rate_detail` snapshots in `analysis_data`.
+  - In `make_vendor_cascade.py`, updated `sync_analysis_product_ids` so that when preserving existing Make & Vendor picks during sync, rates are refreshed with the active database values.
+- **Excel Export 4-Column Highlighting**:
+  - In `boq_export_service.py`, narrowed `_HIGHLIGHTED_REVIEW_COLS` to strictly the 4 requested columns: `Sub Total` (col 15), `Final Material Amount` (col 17), `Final Rate` (col 19), and `Amount` (col 23).
+  - Net Material Rate, Total Material, and Total Labour now use standard `#1976E7` blue header styling without yellow column fill.
+- **Test Coverage**:
+  - Updated `test_boq_export.py` and added test cases in `test_labour_retrieval.py` for live rate resolution.
+
 ## 2026-10-13 — Labour Rate Retrieval & Stale Database Version Fallback Fix
 - **Active Database Version Resolution & Purged Version Fallback**:
   - In `activation.py`, implemented `resolve_active_database_version_id` to guarantee that queries resolve to an active DatabaseVersion containing master rows. Because PostgreSQL only retains master data rows (`Product_Helper`, `Rate_Master_Output`, `Labour_master_Output`) for the active database version and purges inactive versions, BOQs analysed under an older version could fail to fetch labour rates or rates if a newer database version was uploaded.

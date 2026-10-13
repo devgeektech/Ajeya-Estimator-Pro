@@ -3,6 +3,29 @@
 Compact active memory. Full spec: `docs/PRODUCT.md`. Schema: `docs/DATABASE.md`.
 History: `docs/CHANGELOG.md` (do not duplicate session diaries here).
 
+### 2026-10-13 — Review & Output Sheet Price Sync with Active Database & 4-Column Highlights
+
+Completed:
+- **Active Database Rate Resolution & Synchronization in Review and Export Sheets**:
+  - Investigated price discrepancies reported in Review tab and export sheets: products processed under earlier database versions retained stale `rate_detail` snapshots in `analysis_data` (`vendor_selection.rate_detail`).
+  - Extended `RateDetailRetrievalService` with `get_by_rate_id`, `get_by_product_make_vendor`, and `resolve_rate_detail` to resolve accurate `Rate_Master_Output` snapshots across primary key, `Rate_ID`, or `Product_ID` + Make + Vendor.
+  - Updated `BOQReviewDisplayService._product_line` to dynamically re-resolve `rate_detail` against the active database version and recalculate `line_output` via `BOQLineOutputService.build(...)`. This ensures material rates, sub totals, profit values, final rates, and amounts in both the Review UI and exported Excel sheets strictly match the active master database.
+  - Updated `MakeVendorCascadeService.sync_analysis_product_ids` so that when preserving existing Make & Vendor picks during sync, rates are re-resolved against the active database instead of preserving stale snapshots.
+- **Export Sheet Highlighting (Sub Total, Final Material Amount, Final Rate, Amount)**:
+  - Updated `_HIGHLIGHTED_REVIEW_COLS` in `boq_export_service.py` to highlight strictly the 4 requested columns in yellow (`FFFF00`):
+    1. `Sub Total` (Column 15, `_REVIEW_SUBTOTAL_COL`)
+    2. `Final Material Amount` (Column 17, `_REVIEW_FINAL_MATERIAL_COL`)
+    3. `Final Rate` (Column 19, `_REVIEW_FINAL_RATE_COL`)
+    4. `Amount` (Column 23, `_REVIEW_AMOUNT_COL`)
+  - Other columns (e.g. Net Material Rate, Total Material, Total Labour) now use the standard royal blue `#1976E7` styling.
+- **Test Coverage**:
+  - Updated `test_boq_export.py` to assert the 4 yellow highlighted columns and blue styling on others.
+  - Added test cases in `test_labour_retrieval.py` verifying rate resolution across `Rate_ID`, `Product_ID`, and live synchronization in `BOQReviewDisplayService`. All tests pass.
+
+Pending: None.
+Issues: None.
+Next: Deploy to EC2 server and verify BOQ 27 / 29.
+
 ### 2026-10-13 — Labour Rate Retrieval & Stale Database Version Resolution Fix
 
 Completed:

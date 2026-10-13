@@ -733,6 +733,52 @@ class MakeVendorCascadeMixin:
                 elif product_id:
                     selection["product_id"] = product_id
                     selection["catalog_product_id"] = product_id
+                    if refresh_rates_if_changed:
+                        from apps.boq.services.labour_detail_retrieval_service import (
+                            LabourDetailRetrievalService,
+                        )
+                        from apps.boq.services.rate_detail_retrieval_service import (
+                            RateDetailRetrievalService,
+                        )
+
+                        rate_service = RateDetailRetrievalService(database_version_id)
+                        labour_service = LabourDetailRetrievalService(database_version_id)
+                        pick_make = str(
+                            selection.get("make") or updated.get("selected_make") or ""
+                        ).strip()
+                        pick_vendor = str(
+                            selection.get("vendor") or updated.get("selected_vendor") or ""
+                        ).strip()
+                        resolved_rd = rate_service.resolve_rate_detail(
+                            rate_master_id=selection.get("rate_master_id"),
+                            rate_id=selection.get("rate_id"),
+                            product_id=product_id,
+                            make=pick_make,
+                            vendor=pick_vendor,
+                        )
+                        if resolved_rd:
+                            selection["rate_detail"] = resolved_rd
+                            selection["rate_master_id"] = resolved_rd.get("rate_master_id")
+                            selection["rate_id"] = resolved_rd.get("rate_id")
+                            if resolved_rd.get("make"):
+                                selection["make"] = resolved_rd["make"]
+                                updated["selected_make"] = resolved_rd["make"]
+                            if resolved_rd.get("vendor"):
+                                selection["vendor"] = resolved_rd["vendor"]
+                                updated["selected_vendor"] = resolved_rd["vendor"]
+                            resolved_ld = labour_service.get_by_product_id(product_id)
+                            selection["labour_detail"] = resolved_ld
+                            selection["line_output"] = BOQLineOutputService.build(
+                                quantity=(
+                                    updated.get("quantity")
+                                    if updated.get("quantity") not in (None, "")
+                                    else qty
+                                ),
+                                rate_detail=resolved_rd,
+                                labour_detail=resolved_ld,
+                                is_pending=selection.get("status") != "matched",
+                                rate_only=bool(updated.get("rate_only")),
+                            )
                     updated["vendor_selection"] = selection
                 else:
                     updated = mark_product_not_available(

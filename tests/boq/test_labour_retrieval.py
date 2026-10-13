@@ -95,3 +95,62 @@ class LabourRetrievalTests(TestCase):
         resolved_id = service._database_version_id(boq)
         self.assertEqual(resolved_id, self.v2.pk)
         self.assertEqual(boq.analysis_data["database_version_id"], self.v2.pk)
+
+    def test_rate_detail_retrieval_service_resolve_methods(self):
+        service = RateDetailRetrievalService(self.v1.pk)
+        # Resolve by rate_id
+        res_by_rate_id = service.resolve_rate_detail(rate_id="217")
+        self.assertIsNotNone(res_by_rate_id)
+        self.assertEqual(res_by_rate_id["product_id"], "154")
+        self.assertEqual(res_by_rate_id["final_material_amount"], "4645.08")
+
+        # Resolve by product_id and make/vendor
+        res_by_prod = service.resolve_rate_detail(product_id="154", make="SAFEGUARD", vendor="OEM")
+        self.assertIsNotNone(res_by_prod)
+        self.assertEqual(res_by_prod["rate_id"], "217")
+
+    def test_boq_review_display_service_syncs_live_prices(self):
+        from apps.boq.services.boq_review_display_service import BOQReviewDisplayService
+
+        # BOQ has stale rate_detail with old price 9999.00
+        boq = BOQ.objects.create(
+            user=self.user,
+            boq_name="Live Price BOQ",
+            boq_data={
+                "headers": [{"key": "description", "label": "Desc", "index": 0}],
+                "rows": [{"row_id": "r1", "description": "Hose Box", "excel_row_number": 2}],
+            },
+            analysis_data={
+                "database_version_id": self.v1.pk,
+                "rows": [
+                    {
+                        "row_id": "r1",
+                        "products": [
+                            {
+                                "product_id": "154",
+                                "selected_make": "SAFEGUARD",
+                                "selected_vendor": "OEM",
+                                "vendor_selection": {
+                                    "status": "matched",
+                                    "rate_id": "217",
+                                    "product_id": "154",
+                                    "rate_detail": {
+                                        "product_id": "154",
+                                        "rate_id": "217",
+                                        "final_material_amount": "9999.00",
+                                        "sub_total": "8000.00",
+                                    },
+                                },
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
+        display = BOQReviewDisplayService(boq).build()
+        lines = display.get("lines") or []
+        self.assertEqual(len(lines), 1)
+        prod = lines[0]["products"][0]
+        # Should be resolved to 4645.08 from active database
+        self.assertEqual(prod["rate_detail"]["final_material_amount"], "4645.08")
+        self.assertEqual(prod["review_output"]["final_material_amount"], "4645.08")

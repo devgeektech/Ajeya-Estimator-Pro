@@ -78,3 +78,93 @@ class RateDetailRetrievalService:
             database_version_id=self.database_version_id,
         )
         return {row.pk: rate_to_snapshot(row) for row in rows}
+
+    def get_by_rate_id(self, rate_id: str | int | None) -> dict[str, Any] | None:
+        """Fetch Rate_Master_Output snapshot by workbook Rate_ID in the active DB."""
+        if rate_id in (None, ""):
+            return None
+        from apps.database_manager.services.importer import _to_optional_id
+
+        norm_id = _to_optional_id(rate_id)
+        if not norm_id:
+            return None
+        rate = Rate_Master_Output.objects.filter(
+            Rate_ID=norm_id,
+            database_version_id=self.database_version_id,
+        ).first()
+        if rate is None and str(rate_id).strip() != norm_id:
+            rate = Rate_Master_Output.objects.filter(
+                Rate_ID=str(rate_id).strip(),
+                database_version_id=self.database_version_id,
+            ).first()
+        if rate is None:
+            return None
+        return rate_to_snapshot(rate)
+
+    def get_by_product_make_vendor(
+        self,
+        product_id: str | int | None,
+        make: str = "",
+        vendor: str = "",
+    ) -> dict[str, Any] | None:
+        """Fetch Rate_Master_Output snapshot by Product_ID + Make + Vendor."""
+        if product_id in (None, ""):
+            return None
+        from apps.database_manager.services.importer import _to_optional_id
+
+        norm_pid = _to_optional_id(product_id)
+        if not norm_pid:
+            return None
+        qs = Rate_Master_Output.objects.filter(
+            Product_ID=norm_pid,
+            database_version_id=self.database_version_id,
+        )
+        make_str = str(make or "").strip()
+        vendor_str = str(vendor or "").strip()
+        if make_str and vendor_str:
+            rate = qs.filter(Make__iexact=make_str, Vendor__iexact=vendor_str).first()
+            if rate is not None:
+                return rate_to_snapshot(rate)
+        if make_str:
+            rate = qs.filter(Make__iexact=make_str).first()
+            if rate is not None:
+                return rate_to_snapshot(rate)
+        rate = qs.order_by("Final_Material_Amount").first()
+        if rate is not None:
+            return rate_to_snapshot(rate)
+        return None
+
+    def resolve_rate_detail(
+        self,
+        *,
+        rate_master_id: int | str | None = None,
+        rate_id: str | int | None = None,
+        product_id: str | int | None = None,
+        make: str | None = None,
+        vendor: str | None = None,
+    ) -> dict[str, Any] | None:
+        """
+        Resolve the active Rate_Master_Output snapshot using available identifiers.
+
+        Tries primary key first, falls back to Rate_ID, then Product_ID + Make + Vendor.
+        """
+        if rate_master_id:
+            try:
+                res = self.get_by_id(int(rate_master_id))
+                if res:
+                    return res
+            except (TypeError, ValueError):
+                pass
+        if rate_id:
+            res = self.get_by_rate_id(rate_id)
+            if res:
+                return res
+        if product_id:
+            res = self.get_by_product_make_vendor(
+                product_id,
+                make=make or "",
+                vendor=vendor or "",
+            )
+            if res:
+                return res
+        return None

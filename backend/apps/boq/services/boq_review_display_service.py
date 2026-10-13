@@ -295,6 +295,12 @@ class BOQReviewDisplayService:
 
     def __init__(self, boq: BOQ):
         self.boq = boq
+        from apps.boq.services.rate_detail_retrieval_service import (
+            RateDetailRetrievalService,
+        )
+
+        db_version_id = (boq.analysis_data or {}).get("database_version_id")
+        self.rate_service = RateDetailRetrievalService(db_version_id)
 
     def build(self) -> dict[str, Any]:
         analysis = self.boq.analysis_data or {}
@@ -568,6 +574,39 @@ class BOQReviewDisplayService:
 
         is_not_available = is_product_not_available(product)
         source = str(product.get("vendor_selection_source") or selection.get("source") or "")
+
+        # Re-resolve rate_detail against the active database to ensure live, accurate pricing
+        pid = (
+            selection.get("product_id")
+            or product.get("catalog_product_id")
+            or product.get("product_id")
+            or (rate_detail or {}).get("product_id")
+        )
+        rid = selection.get("rate_id") or (rate_detail or {}).get("rate_id")
+        rmid = selection.get("rate_master_id") or (rate_detail or {}).get("rate_master_id")
+        make = selection.get("make") or product.get("selected_make") or (rate_detail or {}).get("make") or ""
+        vendor = selection.get("vendor") or product.get("selected_vendor") or (rate_detail or {}).get("vendor") or ""
+
+        db_rate = self.rate_service.resolve_rate_detail(
+            rate_master_id=rmid,
+            rate_id=rid,
+            product_id=pid,
+            make=make,
+            vendor=vendor,
+        )
+        if db_rate is not None:
+            rate_detail = db_rate
+            if not is_not_available:
+                from apps.boq.services.boq_line_output_service import BOQLineOutputService
+
+                line_output = BOQLineOutputService.build(
+                    quantity=qty,
+                    rate_detail=rate_detail,
+                    labour_detail=labour_detail,
+                    is_pending=status != "matched",
+                    rate_only=bool(product.get("rate_only")),
+                )
+
         if is_not_available:
             status_label = NOT_AVAILABLE_LABEL
         elif source == "not_found" or status == "not_found":
@@ -582,29 +621,30 @@ class BOQReviewDisplayService:
             status_label = status or "—"
 
         selected = {
-            "rate_master_id": selection.get("rate_master_id")
-            or (rate_detail or {}).get("rate_master_id"),
-            "product_id": selection.get("product_id")
-            or (rate_detail or {}).get("product_id"),
-            "rate_id": selection.get("rate_id")
-            or (rate_detail or {}).get("rate_id"),
-            "tech_key": selection.get("tech_key")
-            or (rate_detail or {}).get("product_display_key")
+            "rate_master_id": (rate_detail or {}).get("rate_master_id")
+            or selection.get("rate_master_id"),
+            "product_id": (rate_detail or {}).get("product_id")
+            or selection.get("product_id")
+            or pid,
+            "rate_id": (rate_detail or {}).get("rate_id")
+            or selection.get("rate_id"),
+            "tech_key": (rate_detail or {}).get("product_display_key")
             or (rate_detail or {}).get("tech_key")
+            or selection.get("tech_key")
             or "",
-            "make": selection.get("make")
+            "make": (rate_detail or {}).get("make")
+            or selection.get("make")
             or product.get("selected_make")
-            or (rate_detail or {}).get("make")
             or "",
-            "vendor": selection.get("vendor")
+            "vendor": (rate_detail or {}).get("vendor")
+            or selection.get("vendor")
             or product.get("selected_vendor")
-            or (rate_detail or {}).get("vendor")
             or "",
-            "category": product.get("category")
-            or (rate_detail or {}).get("category")
+            "category": (rate_detail or {}).get("category")
+            or product.get("category")
             or "",
-            "sub_category": product.get("sub_category")
-            or (rate_detail or {}).get("sub_category")
+            "sub_category": (rate_detail or {}).get("sub_category")
+            or product.get("sub_category")
             or "",
         }
 

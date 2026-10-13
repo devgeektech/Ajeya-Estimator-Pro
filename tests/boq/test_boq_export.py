@@ -130,11 +130,13 @@ class BOQExportTestCase(TestCase):
         self.assertEqual(review_ws["V1"].value, "TOTAL LABOUR (R*T)")
         self.assertEqual(review_ws["W1"].value, "Amount (U+V)")
         
-        # Verify formula column header fill highlight (yellow FFFF00)
-        self.assertEqual(review_ws["I1"].fill.start_color.rgb, "00FFFF00")
-        self.assertEqual(review_ws["O1"].fill.start_color.rgb, "00FFFF00")
-        self.assertEqual(review_ws["W1"].fill.start_color.rgb, "00FFFF00")
-        # Verify other header columns use royal blue #1976E7
+        # Verify formula column header fill highlight (yellow FFFF00 for the 4 highlighted columns)
+        self.assertEqual(review_ws["O1"].fill.start_color.rgb, "00FFFF00")  # Sub Total
+        self.assertEqual(review_ws["Q1"].fill.start_color.rgb, "00FFFF00")  # Final Material Amount
+        self.assertEqual(review_ws["S1"].fill.start_color.rgb, "00FFFF00")  # Final Rate
+        self.assertEqual(review_ws["W1"].fill.start_color.rgb, "00FFFF00")  # Amount
+        # Columns not in the 4 highlighted columns use royal blue #1976E7
+        self.assertEqual(review_ws["I1"].fill.start_color.rgb, "001976E7")
         self.assertEqual(review_ws["A1"].fill.start_color.rgb, "001976E7")
 
         # Verify bidirectional hyperlinks between BOQ and Review
