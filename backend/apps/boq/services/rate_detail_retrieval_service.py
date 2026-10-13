@@ -51,8 +51,12 @@ def rate_to_snapshot(rate: Rate_Master_Output) -> dict[str, Any]:
 class RateDetailRetrievalService:
     """Fetch Rate_Master_Output snapshots by primary key."""
 
-    def __init__(self, database_version_id: int):
-        self.database_version_id = database_version_id
+    def __init__(self, database_version_id: int | None = None):
+        from apps.database_manager.services.activation import (
+            resolve_active_database_version_id,
+        )
+
+        self.database_version_id = resolve_active_database_version_id(database_version_id)
 
     def get_by_id(self, rate_master_id: int) -> dict[str, Any] | None:
         rate = (

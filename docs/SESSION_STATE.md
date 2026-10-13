@@ -3,6 +3,24 @@
 Compact active memory. Full spec: `docs/PRODUCT.md`. Schema: `docs/DATABASE.md`.
 History: `docs/CHANGELOG.md` (do not duplicate session diaries here).
 
+### 2026-10-13 — Labour Rate Retrieval & Stale Database Version Resolution Fix
+
+Completed:
+- **Active Database Version Resolution & Purged Version Fallback**:
+  - Identified root cause for un-fetched labour rates on live BOQ `MANESAR FACTORY`: BOQ had stored `database_version_id = 4`. When database version 5 was uploaded and activated, PostgreSQL purged master data rows for inactive versions (`DatabaseVersion` 4, 3, etc.). When `BOQLabourService` queried `Labour_master_Output` with `database_version_id = 4`, 0 rows were found.
+  - Implemented `resolve_active_database_version_id` in `apps/database_manager/services/activation.py` to ensure queries always resolve to an active DatabaseVersion holding master data.
+  - Updated `_database_version_id` in `BOQLabourService` and `MakeVendorSelectionService` to use `resolve_active_database_version_id` and sync the active database version onto `analysis_data`.
+  - Updated `LabourDetailRetrievalService` and `RateDetailRetrievalService` `__init__` to fall back to the active database version when passed an inactive or missing database version ID.
+  - Added integral float string ID normalization (e.g. `"154.0"` -> `"154"`) in `LabourDetailRetrievalService.get_by_product_id`.
+- **Export Hyperlink MergedCell Guard**:
+  - In `boq_export_service.py`, guarded hyperlink assignment with `not isinstance(cell, MergedCell)` to prevent OpenXML `AttributeError`.
+- **Test Coverage**:
+  - Added `tests/boq/test_labour_retrieval.py` verifying active DB version fallback and numeric ID formatting. All 205 tests passing cleanly.
+
+Pending: None.
+Issues: None.
+Next: Deploy changes to EC2 and re-apply auto labour on BOQ 27 (MANESAR FACTORY).
+
 ### 2026-10-12 — Confidence Score Re-weighting, MS vs GI Pipe Disambiguation, & Export Sheet Yellow/#1976E7 Styling
 
 Completed:

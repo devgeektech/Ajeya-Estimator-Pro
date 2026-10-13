@@ -80,8 +80,12 @@ def labour_to_snapshot(row: Labour_master_Output) -> dict[str, Any]:
 class LabourDetailRetrievalService:
     """Fetch Labour_master_Output rows by Product_ID from the active database."""
 
-    def __init__(self, database_version_id: int):
-        self.database_version_id = database_version_id
+    def __init__(self, database_version_id: int | None = None):
+        from apps.database_manager.services.activation import (
+            resolve_active_database_version_id,
+        )
+
+        self.database_version_id = resolve_active_database_version_id(database_version_id)
 
     def get_by_product_id(self, product_id: int | str | None) -> dict[str, Any] | None:
         if product_id in (None, ""):
@@ -93,6 +97,19 @@ class LabourDetailRetrievalService:
             Product_ID=pid,
             database_version_id=self.database_version_id,
         ).first()
+        if row is None and "." in pid:
+            try:
+                dec = Decimal(pid)
+                if dec == dec.to_integral_value():
+                    integral_pid = str(dec.to_integral_value())
+                    if integral_pid != pid:
+                        row = Labour_master_Output.objects.filter(
+                            Product_ID=integral_pid,
+                            database_version_id=self.database_version_id,
+                        ).first()
+            except Exception:
+                pass
         if row is None:
             return None
         return labour_to_snapshot(row)
+

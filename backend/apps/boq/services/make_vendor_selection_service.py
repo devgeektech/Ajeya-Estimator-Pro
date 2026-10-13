@@ -547,11 +547,15 @@ class MakeVendorSelectionService(
 
 
     def _database_version_id(self, boq: BOQ) -> int:
-        stored = int((boq.analysis_data or {}).get("database_version_id") or 0)
-        if stored:
-            return stored
-        active = get_active_database_version()
-        return int(active.pk) if active else 0  # type: ignore
+        from apps.database_manager.services.activation import (
+            resolve_active_database_version_id,
+        )
+
+        stored = (boq.analysis_data or {}).get("database_version_id")
+        resolved = resolve_active_database_version_id(stored)
+        if resolved and boq.analysis_data and stored != resolved:
+            boq.analysis_data["database_version_id"] = resolved
+        return resolved
 
 
     def _get_boq(self) -> BOQ:

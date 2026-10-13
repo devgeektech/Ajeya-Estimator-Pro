@@ -159,3 +159,34 @@ def get_active_database_version() -> DatabaseVersion | None:
     return DatabaseVersion.objects.filter(is_active=True).order_by(
         "-version_number", "-uploaded_at", "-pk"
     ).first()
+
+
+def resolve_active_database_version_id(preferred_id: int | str | None = None) -> int:
+    """Return a database version ID that currently holds active master data.
+
+    PostgreSQL retains master rows (Product_Helper, Rate_Master_Output,
+    Labour_master_Output) only for the active database version; inactive versions
+    are purged upon new activation.
+
+    If ``preferred_id`` is provided and currently points to the active database,
+    it is returned. If ``preferred_id`` is inactive, missing, or purged, it falls
+    back to the currently active DatabaseVersion.
+    """
+    if preferred_id not in (None, "", 0, "0"):
+        try:
+            pid = int(preferred_id)
+            if pid > 0 and DatabaseVersion.objects.filter(pk=pid, is_active=True).exists():
+                return pid
+        except (TypeError, ValueError):
+            pass
+
+    active = get_active_database_version()
+    if active:
+        return active.pk
+    if preferred_id not in (None, "", 0, "0"):
+        try:
+            return int(preferred_id)
+        except (TypeError, ValueError):
+            pass
+    return 0
+

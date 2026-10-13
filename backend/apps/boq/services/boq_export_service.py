@@ -14,6 +14,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter, quote_sheetname
 from openpyxl.worksheet.hyperlink import Hyperlink
+from openpyxl.cell.cell import MergedCell
 from openpyxl.worksheet.worksheet import Worksheet
 
 from apps.boq.models import BOQ
@@ -1035,18 +1036,20 @@ class BOQExportService:
                 amount_col = _header_excel_column(headers, amount_key)
                 if rate_col is not None:
                     r_cell = sheet.cell(row=sheet.max_row, column=rate_col)
-                    r_cell.hyperlink = Hyperlink(
-                        ref=r_cell.coordinate,
-                        location=f"{quoted_review}!{get_column_letter(_REVIEW_FINAL_RATE_COL)}{first_rev_row}",
-                        tooltip="Go to Review sheet Final Rate",
-                    )
+                    if not isinstance(r_cell, MergedCell):
+                        r_cell.hyperlink = Hyperlink(
+                            ref=r_cell.coordinate,
+                            location=f"{quoted_review}!{get_column_letter(_REVIEW_FINAL_RATE_COL)}{first_rev_row}",
+                            tooltip="Go to Review sheet Final Rate",
+                        )
                 if amount_col is not None:
                     a_cell = sheet.cell(row=sheet.max_row, column=amount_col)
-                    a_cell.hyperlink = Hyperlink(
-                        ref=a_cell.coordinate,
-                        location=f"{quoted_review}!{get_column_letter(_REVIEW_AMOUNT_COL)}{first_rev_row}",
-                        tooltip="Go to Review sheet Amount",
-                    )
+                    if not isinstance(a_cell, MergedCell):
+                        a_cell.hyperlink = Hyperlink(
+                            ref=a_cell.coordinate,
+                            location=f"{quoted_review}!{get_column_letter(_REVIEW_AMOUNT_COL)}{first_rev_row}",
+                            tooltip="Go to Review sheet Amount",
+                        )
                 if workbook and review_title in workbook.sheetnames:
                     review_sheet = workbook[review_title]
                     quoted_boq = quote_sheetname(sheet.title)

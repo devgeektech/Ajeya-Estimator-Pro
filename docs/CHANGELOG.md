@@ -5,6 +5,17 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
+## 2026-10-13 — Labour Rate Retrieval & Stale Database Version Fallback Fix
+- **Active Database Version Resolution & Purged Version Fallback**:
+  - In `activation.py`, implemented `resolve_active_database_version_id` to guarantee that queries resolve to an active DatabaseVersion containing master rows. Because PostgreSQL only retains master data rows (`Product_Helper`, `Rate_Master_Output`, `Labour_master_Output`) for the active database version and purges inactive versions, BOQs analysed under an older version could fail to fetch labour rates or rates if a newer database version was uploaded.
+  - In `BOQLabourService` and `MakeVendorSelectionService`, updated `_database_version_id` to use `resolve_active_database_version_id`, automatically syncing the active database version onto `boq.analysis_data["database_version_id"]`.
+  - In `LabourDetailRetrievalService` and `RateDetailRetrievalService`, updated `__init__` to resolve to the active database version when passed an inactive or missing database version ID.
+  - In `LabourDetailRetrievalService.get_by_product_id`, added support for integral float-string Product_IDs (e.g. `"154.0"` -> `"154"`).
+- **Export Hyperlink MergedCell Guard**:
+  - In `boq_export_service.py`, added `MergedCell` guard checking `not isinstance(cell, MergedCell)` before assigning hyperlinks to prevent OpenXML `AttributeError`.
+- **Test Coverage**:
+  - Added unit test suite in `tests/boq/test_labour_retrieval.py` testing database version resolution, fallback on inactive database versions, and numeric ID formatting.
+
 ## 2026-10-12 — Confidence Score Re-weighting, MS vs GI Pipe Disambiguation, & Export Sheet Yellow/#1976E7 Styling
 - **Confidence Score Weight Adjustment**:
   - Re-weighted extracted product fields: reduced `category` by 15% (30% -> 15%) and `sub_category` by 15% (40% -> 25%), while maintaining 6% each for class, size, unit, capacity, and attributes (total 70% extracted input weight).
