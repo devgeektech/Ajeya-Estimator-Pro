@@ -3,7 +3,16 @@
 Meaningful product and technical changes. Day-by-day micro-entries older than
 the summaries below live in **git history** (`git log -- docs/`).
 
----
+## 2026-10-15 — Final Code Cleanups and IDE Warning Resolution
+- **Make Vendor Display & Typing Resolution**:
+  - Moved `BOQ` type hint import to module-level `if TYPE_CHECKING:` in `make_vendor_display.py` to resolve class-body lexical scoping errors in static type checkers.
+  - Maintained `MakeListConstraintService` import with `# noqa: F401` in `make_vendor_display.py` for unit test mock patching compatibility.
+  - Removed redundant `str()` conversions on typed string fields in `make_vendor_display.py` and `make_vendor_selection_service.py`.
+- **Logging Handlers Cleanups**:
+  - Cleaned redundant `int()` calls on already typed integer parameters in `SafeRotatingFileHandler`.
+- **Repository Optimization & Branch Sync**:
+  - Cleaned legacy scratch files and one-off test scripts (`scratch_test.py`, `backend/test_candidates.py`, `backend/test_conflict.py`, `tests/test_full_ui_pipeline.py`, `tests/test_pipeline.py`).
+  - Synchronized and validated all local branches (`users/vikas/new-changes`, `main`, and `users/vikas/main-backup`).
 
 ## 2026-10-15 — Available Make Selection Retained and Prefilled When Approved Make Not Available
 - **Available Make Prefilling & Retention**:

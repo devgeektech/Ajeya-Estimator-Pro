@@ -3,6 +3,26 @@
 Compact active memory. Full spec: `docs/PRODUCT.md`. Schema: `docs/DATABASE.md`.
 History: `docs/CHANGELOG.md` (do not duplicate session diaries here).
 
+### 2026-10-15 — Final Code Cleanup, IDE Warnings Resolution, and Branch Synchronization
+
+Completed:
+- **IDE Warning Resolution**:
+  - `make_vendor_display.py`: Moved `from apps.boq.models import BOQ` to module-level `if TYPE_CHECKING:` block, eliminating Pyright/Pylance inner class scoping error. Retained `MakeListConstraintService, # noqa: F401` required by mock patchers in tests. Cleaned redundant `str()` call on `rm_row.Make`.
+  - `make_vendor_selection_service.py`: Cleaned redundant `str()` calls on `make_source`.
+  - `logging_handlers.py`: Cleaned redundant `int()` calls on `max_lines` and `check_interval`.
+- **Repository Optimization**:
+  - Removed legacy scratch test files and ad-hoc scripts: `scratch_test.py`, `backend/test_candidates.py`, `backend/test_conflict.py`, `tests/test_full_ui_pipeline.py`, `tests/test_pipeline.py`.
+- **Branch Synchronization & Verification**:
+  - Committed cleanups on `users/vikas/new-changes`, merged into `main`, and fast-forwarded `users/vikas/main-backup`.
+  - Verified test suite: all 16 Make & Vendor and logging queue tests pass with 0 errors.
+  - Remote push held pending user sign-off (no push to live yet).
+
+Pending:
+- Client SMTP credentials (to be configured when provided).
+
+Issues: None.
+Next: Final review or deployment to production when instructed.
+
 ### 2026-10-15 — Documentation Alignment and Final Completion Prep
 
 Completed:
