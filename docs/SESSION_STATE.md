@@ -3,6 +3,18 @@
 Compact active memory. Full spec: `docs/PRODUCT.md`. Schema: `docs/DATABASE.md`.
 History: `docs/CHANGELOG.md` (do not duplicate session diaries here).
 
+### 2026-10-15 — Active Real-Time Password Validation and 15-Minute Reset Link Expiration
+
+Completed:
+- **15-Minute Expiration for Reset Links**:
+  - Configured `PASSWORD_RESET_TIMEOUT = env.int("PASSWORD_RESET_TIMEOUT", default=15 * 60)` in `backend/config/settings.py`.
+  - Added expiration notice `(valid for 15 minutes)` to HTML and text email templates.
+  - Added unit test suite `PasswordResetTimeoutTests` verifying immediate token validity and rejection after 16m. All 27 tests passing.
+- **Active Real-Time Password Validation Checklist**:
+  - Added dynamic typing checklist to `password_reset_confirm.html`, `user_form.html`, and `profile.html`.
+- **Live Deployment & Branch Synchronization**:
+  - Ready for synchronization across `main`, `users/vikas/new-changes`, and `users/vikas/main-backup`, git push, and live deployment on EC2.
+
 ### 2026-10-15 — Email Sender Display Name Updated to Ajeya Estimator Pro
 
 Completed:

@@ -3,6 +3,15 @@
 Meaningful product and technical changes. Day-by-day micro-entries older than
 the summaries below live in **git history** (`git log -- docs/`).
 
+## 2026-10-15 — Active Real-Time Password Validation and 15-Minute Reset Link Expiration
+- **15-Minute Password Reset Link Expiration**:
+  - Configured `PASSWORD_RESET_TIMEOUT = env.int("PASSWORD_RESET_TIMEOUT", default=15 * 60)` in `backend/config/settings.py`.
+  - Updated password reset email templates (`password_reset_email.html`, `password_reset_email.txt`) to notify users of the 15-minute expiration period.
+  - Added unit test suite `PasswordResetTimeoutTests` verifying that tokens are valid immediately and strictly expire after 15 minutes.
+- **Active Real-Time Password Validation Checklist**:
+  - Implemented interactive live rule checklist (minimum 6 characters, at least one letter, at least one number, at least one special symbol) with SVG checkmarks that update in real-time as users type.
+  - Added to password reset confirmation screen (`password_reset_confirm.html`), user management creation/edit modal (`user_form.html`), and user profile modal (`profile.html`).
+
 ## 2026-10-15 — Email Sender Display Name Updated to Ajeya Estimator Pro
 - **Sender Display Name**:
   - Updated `DEFAULT_FROM_EMAIL` to `Ajeya Estimator Pro <ajeyaindiapvtltd@gmail.com>` in `.env`, `.env.example`, and `settings.py`.
