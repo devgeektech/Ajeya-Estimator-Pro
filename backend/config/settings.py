@@ -269,7 +269,7 @@ if env.str("EMAIL_HOST", default=""):
 else:
     EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
-DEFAULT_FROM_EMAIL = env.str("DEFAULT_FROM_EMAIL", default="no-reply@boq-ai.local")
+DEFAULT_FROM_EMAIL = env.str("DEFAULT_FROM_EMAIL", default="Ajeya Estimator Pro <no-reply@ajeya.in>")
 
 # --- Uploads ----------------------------------------------------------------
 
