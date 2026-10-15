@@ -474,11 +474,22 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
   applied (`MAKE_VENDOR` / later pipeline statuses).
 - Analysis attaches **`catalog_product_id`** (Product_Helper `Product_ID`) when
   the matched Rate_Master_Output row (or structured Product_Helper match) resolves.
-- Make and Vendor ``<select>`` dropdowns list Rate_Master_Output combinations for
-  that Product_ID. The Make list always shows every available make. Selecting a
-  Make scopes Vendor to that make's vendors; clearing Make shows all vendors.
-  Product rate = **`Final_Material_Amount`**. Cards show an **AI Description**
-  heading plus view-only **Rate id** and **Product id**.
+- Make & Vendor dropdowns on each product card provide separate **Approved make**
+  and **Available make** selectors, matching the cascade panel pattern:
+  - **Approved make:** strictly scoped to the product's specific `sub_category`
+    (`allow_category_wide=False`), ensuring parent category-wide makes do not
+    spill into sub-category products.
+  - **Available make:** lists every available `Rate_Master_Output` make for that
+    `Product_ID` from the database.
+  - Selecting an Approved make clears Available make and records `make_source = "approved"`.
+  - Selecting an Available make clears Approved make and records `make_source = "available"`.
+  - When no approved makes exist for that sub-category, the card automatically
+    pre-selects and prefills the lowest-price make into **Available make**
+    (`selected_available_make`) with `selected_make_source = "available"`.
+  - Selecting either make immediately filters the Vendor dropdown to vendors for that
+    make and auto-loads the material rate.
+  - Product rate = **`Final_Material_Amount`**. Cards show an **AI Description**
+    heading plus view-only **Rate id** and **Product id**.
 - Line headers show a soft badge **Auto** (lowest-price default) or **filtered**
   (any product has an expert make-list pick), after “N lines grouped” when present.
 - Status labels: **Not available** (red) = no Product Id — no searches/computes;
@@ -498,7 +509,7 @@ Make & Vendor; Labour → Labour; Ready to Export / Exported → Review. An expl
 - **Sub-category makes:** top panel lists **category → sub-category → make → vendor**
   (only categories/sub-categories present in Analysis extraction). **Apply to sub-category**
   sets make/vendor on every product in that sub-category and loads rates. When a
-  **sub-category is selected**, Approved make lists only makes for that sub
+  **sub-category is selected**, Approved make lists only makes strictly for that sub
   (make-list mapping for the sub, else approved ∩ Rate_Master makes for the sub) —
   not the full category / whole make-list dump. Default make is
   **Lowest price** (approved-make constrained when a make list exists). The cascade
@@ -811,10 +822,25 @@ BOQ_AI/
 | `apps/boq/services/boq_review_display_service.py` | Review/export from vendor_selection |
 | `apps/boq/services/boq_price_calculation_service.py` | Labour → Next row pricing / ready to export |
 | `apps/boq/services/boq_export_service.py` | Combined Excel export (Review + BOQ tabs) |
+| `apps/audit/services.py` | Audit logging + 50-entry per user FIFO queue retention |
+| `apps/notifications/services.py` | In-app notifications + 50-entry per user FIFO queue retention |
+| `apps/audit/management/commands/prune_server_data.py` | Management command to enforce data & log queues |
+| `common/logging_handlers.py` | Bounded line queue (5,000 lines) `SafeRotatingFileHandler` |
 | `ai/openai_client.py` | OpenAI client + API key check |
 | `ai/embeddings/` | Chroma product index |
 | `config/settings.py` | Single settings module |
 | `common/admin_site.py` | Django `/admin/` Superadmin-only lock |
+
+---
+
+## Queue Retention Policies
+
+To ensure long-term server stability and eliminate unconstrained growth on single-server EC2 deployment:
+
+- **Audit Logs (`AuditLog`):** Bounded to the most recent **50 entries per user**. Automatically pruned on write (`prune_audit_logs_for_user`) in FIFO order.
+- **Notifications (`Notification`):** Bounded to the most recent **50 entries per user**. Automatically pruned on write (`prune_notifications_for_user`) in FIFO order.
+- **Server Log Files (`logs/*.log`):** Bounded to a FIFO queue of **5,000 lines per file** (`application.log`, `errors.log`, `instructions.log`). Handled in-place via `SafeRotatingFileHandler` using read/truncate (`r+`) to eliminate Windows and Linux multi-process file sharing locks between Django web processes and Celery workers.
+- **Maintenance Command:** `python manage.py prune_server_data` allows operators or scheduled cron jobs to enforce all three limits on demand.
 
 ---
 
@@ -844,6 +870,9 @@ BOQ_AI/
   requires a strong `SECRET_KEY`, `DATABASE_URL`, explicit `ALLOWED_HOSTS`, and
   Celery (not eager). CSRF origins follow `CSRF_TRUSTED_ORIGINS` or `ALLOWED_HOSTS`.
   Gunicorn config: `backend/config/gunicorn.conf.py`.
+- **Domain & SSL:** Production domain is **`portal.ajeya.in`** served via Nginx reverse
+  proxy with Let's Encrypt TLS/SSL (`https://portal.ajeya.in/`), automatic HTTP &rarr; HTTPS
+  301 redirect, and direct IP access blocked (`403 Forbidden`).
 - **Timezone:** `TIME_ZONE = Asia/Kolkata` (IST). UI, logs, JSON ISO
   timestamps, and Celery use IST. PostgreSQL still stores UTC (`USE_TZ=True`);
   display/serialization converts via `utils.timestamps` / Django localtime.

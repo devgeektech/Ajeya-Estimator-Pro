@@ -118,13 +118,13 @@ Required production values (no blanks):
 | --- | --- |
 | `SECRET_KEY` | Generate (command below) |
 | `DEBUG` | `False` |
-| `ALLOWED_HOSTS` | `13.205.90.58` |
-| `CSRF_TRUSTED_ORIGINS` | `http://13.205.90.58` |
+| `ALLOWED_HOSTS` | `portal.ajeya.in` |
+| `CSRF_TRUSTED_ORIGINS` | `http://portal.ajeya.in,https://portal.ajeya.in` |
 | `DATABASE_URL` | `postgres://boq_user:<password>@localhost:5432/boq_db` |
 | `CELERY_TASK_ALWAYS_EAGER` | `False` |
 | `OPENAI_API_KEY` | Real key (Analyse will fail without it) |
 | `AI_INSTRUCTION_LOGGING` | `False` |
-| `SECURE_SSL_REDIRECT` | `False` |
+| `SECURE_SSL_REDIRECT` | `True` |
 | `GUNICORN_TIMEOUT` | `600` |
 
 ```bash
@@ -137,8 +137,8 @@ Full example:
 SECRET_KEY=<generated>
 DEBUG=False
 DJANGO_SETTINGS_MODULE=config.settings
-ALLOWED_HOSTS=13.205.90.58
-CSRF_TRUSTED_ORIGINS=http://13.205.90.58
+ALLOWED_HOSTS=portal.ajeya.in
+CSRF_TRUSTED_ORIGINS=http://portal.ajeya.in,https://portal.ajeya.in
 DATABASE_URL=postgres://boq_user:<password>@localhost:5432/boq_db
 CONN_MAX_AGE=60
 REDIS_URL=redis://localhost:6379/0
@@ -158,7 +158,7 @@ AI_SKIP_MAPPING_CONFIDENCE_THRESHOLD=95
 OPENAI_MAX_RETRIES=4
 CHROMA_PATH=media/chroma
 CHROMA_COLLECTION=rate_master_products
-SECURE_SSL_REDIRECT=False
+SECURE_SSL_REDIRECT=True
 GUNICORN_BIND=unix:/run/boq_ai/gunicorn.sock
 GUNICORN_WORKERS=3
 GUNICORN_TIMEOUT=600
@@ -227,9 +227,16 @@ WantedBy=multi-user.target
 ### 11. Nginx (`/etc/nginx/sites-available/boq_ai`)
 
 ```nginx
+# Reject direct IP or non-matching host access
 server {
-    listen 80;
-    server_name 13.205.90.58;
+    listen 80 default_server;
+    server_name _;
+    return 403 "Forbidden: Direct IP access is disabled.";
+}
+
+# Subdomain HTTPS server
+server {
+    server_name portal.ajeya.in;
     client_max_body_size 50M;
     proxy_connect_timeout 10s;
     proxy_send_timeout 600s;
@@ -250,6 +257,19 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_pass http://unix:/run/boq_ai/gunicorn.sock;
     }
+
+    listen 443 ssl;
+    ssl_certificate /etc/letsencrypt/live/portal.ajeya.in/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/portal.ajeya.in/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+}
+
+# HTTP to HTTPS redirect
+server {
+    listen 80;
+    server_name portal.ajeya.in;
+    return 301 https://$host$request_uri;
 }
 ```
 
@@ -545,14 +565,42 @@ reloads when analysis completes or fails.
 
 ---
 
-## TLS & SMTP (later)
+## TLS & Subdomain (`portal.ajeya.in`)
+
+Configured with Let's Encrypt Certbot:
 
 ```bash
 sudo apt install -y certbot python3-certbot-nginx
-sudo certbot --nginx -d your-domain.com
+sudo certbot --nginx -d portal.ajeya.in
 ```
 
-Update `.env` with the domain, `ALLOWED_HOSTS`,
-`CSRF_TRUSTED_ORIGINS=https://your-domain.com`, `SECURE_SSL_REDIRECT=True`, and
-SMTP settings when ready. Session/CSRF cookies then become Secure automatically.
-Restart gunicorn after the `.env` change.
+`/srv/boq_ai/.env` production settings:
+
+```env
+ALLOWED_HOSTS=portal.ajeya.in
+CSRF_TRUSTED_ORIGINS=http://portal.ajeya.in,https://portal.ajeya.in
+SECURE_SSL_REDIRECT=True
+```
+
+Cookies become Secure automatically with HSTS enabled (`max-age=31536000`). Direct IP access on port 80 returns `403 Forbidden`.
+
+---
+
+## Data & Log Queue Maintenance
+
+The application enforces bounded FIFO queues on data growth automatically:
+- **Audit Logs:** max 50 recent entries per user.
+- **Notifications:** max 50 recent entries per user.
+- **Log Files (`logs/*.log`):** max 5,000 recent lines per file.
+
+To manually audit and prune all three queues at any time (or via an optional weekly cron job):
+
+```bash
+cd /srv/boq_ai/backend
+../.venv/bin/python manage.py prune_server_data
+```
+
+Options:
+- `--audit-limit 50`: Recent audit logs to keep per user.
+- `--notif-limit 50`: Recent notifications to keep per user.
+- `--log-lines 5000`: Recent lines to keep per log file.

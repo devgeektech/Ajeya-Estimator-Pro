@@ -3,6 +3,165 @@
 Compact active memory. Full spec: `docs/PRODUCT.md`. Schema: `docs/DATABASE.md`.
 History: `docs/CHANGELOG.md` (do not duplicate session diaries here).
 
+### 2026-10-15 — Documentation Alignment and Final Completion Prep
+
+Completed:
+- **Documentation Synchronization**:
+  - `docs/PRODUCT.md`: Updated Make & Vendor section with separate Approved/Available make selectors, strict sub-category scoping (`allow_category_wide=False`), and available make prefilling/retention. Added Queue Retention Policies section (50 audits/user, 50 notifs/user, 5,000 log lines/file). Updated Key Files with `prune_server_data.py` and `logging_handlers.py`. Updated Runtime with production domain `portal.ajeya.in`, Let's Encrypt TLS/SSL, and direct IP blocking.
+  - `docs/DATABASE.md`: Documented 50-entry per user FIFO queue limits on `AuditLog` and `Notification` models in System Tables.
+  - `docs/OPS.md`: Documented `python manage.py prune_server_data` queue maintenance command and TLS configuration for `portal.ajeya.in`.
+  - `docs/CHANGELOG.md`: Logged all recent features and architectural updates.
+  - `README.md`: Verified all commands, file links, and scripts; added production URL (`portal.ajeya.in`) and `docs/CHANGELOG.md` entry.
+- **Code Quality & Linter**:
+  - Resolved all IDE / Ruff linter warnings (`RUF010` redundant `str()` calls on typed arguments and `F401` unused imports) in `boq_extraction_edit_service.py`, `make_vendor_cascade.py`, `rate_detail_retrieval_service.py`, `boq_extraction_display_service.py`, and test files.
+  - Reverted incidental changes to maintain clean UI consistency on `version_detail.html` and `user_list.html`.
+- **Test Suite Verification**:
+  - Full test suite verified: 228 tests pass with 0 errors.
+
+Pending: None.
+Issues: None.
+Next: Code review run or quick optimization run.
+
+### 2026-10-15 — Available Make Selection Retained and Prefilled When Approved Make Not Available
+
+Completed:
+- **Available Make Prefilling & Selection Retention**:
+  - In `backend/apps/boq/services/make_vendor_display.py`:
+    - Added `_make_in_options(make, options)` helper using `makes_optimally_match` to accurately check if a make exists in an options list (replacing `MakeListConstraintService.make_is_allowed(make, approved_make_options)` which previously returned `True` for empty lists, incorrectly shifting available makes into empty approved makes).
+    - In `_shape_product`: When approved make is not available (`not approved_make_options`), automatically assigned the selected make to `selected_available_make` and set `make_source = "available"`. If `selected_make` was unpopulated, resolved it from `rate_detail`, `selection["make"]`, `product["make_hint"]`, or `Rate_Master_Output` via `rate_master_id`.
+  - In `backend/apps/boq/services/make_vendor_cascade.py`:
+    - In `apply_lowest_defaults_all`: When prefilling the lowest price make, set `selected_make_source = "approved" if approved_found else "available"` so products without approved makes are tagged as `"available"`.
+  - In `templates/boq/_make_vendor_table.html`:
+    - In `makeVendorForm`:
+      - In `init()`: When `!this.hasApprovedMakes || !this.approvedMakeOptions.length`, immediately initialized `this.availableMake` from `selAvail` or `rawMake`.
+      - In `_syncMakeSelection(makeVal)`: When `!this.approvedMakeOptions.length`, routed the make selection directly to `this.availableMake`.
+  - In `backend/apps/boq/views.py`:
+    - Extracted `make_source` from POST in `apply_manual` and default `select_and_match`, passing it to the service.
+  - In `backend/apps/boq/services/make_vendor_selection_service.py`:
+    - Accepted `make_source` in `select_and_match` and `apply_manual_selection`, persisting it to `updated["selected_make_source"]` and `match_payload["make_source"]`.
+- **Test Suite**:
+  - Added unit test `test_shape_product_fills_available_make_when_approved_make_not_available` in `tests/boq/test_make_vendor_sync.py`.
+  - All 13 tests in `test_make_vendor_sync` and all 75 BOQ tests pass.
+
+Pending: None.
+Issues: None.
+Next: None.
+
+### 2026-10-15 — Make & Vendor Product Cards Approved Makes Strictly Per Sub-Category
+
+Completed:
+- **Sub-Category Scoped Approved Makes in Product Cards**:
+  - In `backend/apps/boq/services/make_list_constraint_service.py`: Updated `_entry_covers_sub` to use `_categories_equivalent` for comparing make list mapped sub-categories against target sub-categories, handling singular/plural and alias variations.
+  - In `backend/apps/boq/services/make_vendor_rates.py`:
+    - Updated `_approved_makes_for_subcategory` to set `allow_category_wide: bool = False` by default. When a sub-category is specified, it strictly retrieves makes mapped to that sub-category and never falls back to parent category-wide makes.
+    - Updated `_options_for_product` and `_options_for_catalog_product_id` to pass `allow_category_wide=False`. If category/sub_category are missing on a catalog product, resolved them directly from `Rate_Master_Output`.
+  - In `backend/apps/boq/services/make_vendor_display.py`:
+    - Updated protocol stubs and `_shape_product` so `approved` uses the strictly sub-category scoped `approved_make_options`.
+  - In `backend/apps/boq/services/make_vendor_cascade.py`:
+    - Updated protocol stubs for `_approved_makes_for_subcategory`.
+- **Test Suite**:
+  - Added `test_shape_product_approved_makes_strictly_sub_category` in `tests/boq/test_make_vendor_sync.py` asserting that product cards receive only makes approved for their specific sub-category and never inherit category-wide or cross-subcategory makes.
+  - All 24 targeted tests and 215 full suite tests pass.
+
+Pending: None.
+Issues: None.
+Next: None.
+
+### 2026-10-15 — Queue Retention Policies for Audit Logs, Notifications, and Server Logs
+
+Completed:
+- **Audit Logs Queue Retention (50 entries per user)**:
+  - In `backend/apps/audit/services.py`: Added `MAX_AUDIT_LOGS_PER_USER = 50`, `prune_audit_logs_for_user()`, and `prune_all_audit_logs()`.
+  - Updated `record()` to automatically prune entries exceeding 50 per user on every write, deleting oldest entries in FIFO order.
+- **Notifications Queue Retention (50 entries per user)**:
+  - In `backend/apps/notifications/services.py`: Added `MAX_NOTIFICATIONS_PER_USER = 50`, `prune_notifications_for_user()`, and `prune_all_notifications()`.
+  - Updated `notify()` to automatically prune notifications exceeding 50 per user on every write, deleting oldest notifications in FIFO order.
+- **Server Log Files Bounded Queue (5,000 lines per file)**:
+  - In `backend/common/logging_handlers.py`: Implemented in-place line-bounded queue file handling in `SafeRotatingFileHandler` with `trim_log_file()` using `r+` seeking and `truncate()` to avoid multi-process file locking issues across Celery and web processes.
+  - In `backend/config/settings.py`: Set `max_lines: 5000` for `app_file`, `error_file`, and `instruction_file`.
+- **Management Command**:
+  - Created `backend/apps/audit/management/commands/prune_server_data.py` allowing manual or scheduled enforcement of all three queues.
+- **Test Coverage**:
+  - Added unit tests in `tests/audit/test_audit_queue.py`, `tests/notifications/test_notification_queue.py`, and `tests/test_logging_queue.py`. All tests pass.
+
+Pending: None.
+Issues: None.
+Next: None.
+
+### 2026-10-15 — Domain Subdomain Migration to portal.ajeya.in & SSL (HTTPS) Enabled
+
+Completed:
+- **Subdomain Routing & Direct IP Blocking**:
+  - Reconfigured Nginx (`/etc/nginx/sites-available/boq_ai`) on EC2:
+    - Added default server block on port 80 returning `403 Forbidden` for direct IP or unrecognized host access.
+    - Added primary server block for `server_name portal.ajeya.in;`.
+  - Updated `/srv/boq_ai/.env` on EC2:
+    - `ALLOWED_HOSTS=portal.ajeya.in`
+    - `CSRF_TRUSTED_ORIGINS=http://portal.ajeya.in,https://portal.ajeya.in`
+- **Free Let's Encrypt SSL / HTTPS Configuration**:
+  - Installed `python3-certbot-nginx` on Ubuntu EC2.
+  - Issued and installed Let's Encrypt TLS certificate for `portal.ajeya.in` via Certbot.
+  - Enabled HTTP -> HTTPS 301 automatic redirection in Nginx.
+  - Enabled `SECURE_SSL_REDIRECT=True` in `/srv/boq_ai/.env`, activating HSTS (`max-age=31536000`), secure session cookies, and secure CSRF cookies.
+  - Ran `python manage.py check --deploy` with 0 issues.
+  - Verified `https://portal.ajeya.in/` serves 200 OK with valid SSL, HSTS, and Secure cookies.
+  - Verified `http://portal.ajeya.in/` redirects (301) to `https://portal.ajeya.in/`.
+  - Verified `http://13.205.90.58/` returns 403 Forbidden.
+  - Updated `docs/OPS.md` and `docs/DEPLOY.md` to reflect HTTPS.
+
+Pending: None.
+Issues: None.
+Next: None.
+
+### 2026-10-14 — Make & Vendor Separate Approved & Available Make Dropdowns & Category Cascade Isolation
+
+Completed:
+- **Separated Approved Make and Available Make Dropdowns in Product Cards**:
+  - In `backend/apps/boq/services/make_vendor_rates.py`:
+    - Updated `_options_for_catalog_product_id` and `_options_for_product` to return 5 distinct items: `(approved_makes, available_makes, vendor_options, vendors_by_make, makes_by_vendor)`.
+    - Stopped prepending arbitrary unapproved/unavailable `selected_make` into make lists or `selected_vendor` into vendor lists, eliminating dropdown pollution.
+  - In `backend/apps/boq/services/make_vendor_display.py`:
+    - Updated `_shape_product` to unpack the 5 items and distinguish `selected_approved_make` vs `selected_available_make`.
+    - Removed arbitrary `selected_make` and `selected_vendor` injection into `make_options` and `all_vendor_options`.
+    - Added `approved_make_options`, `available_make_options`, `has_approved_makes`, `selected_approved_make`, `selected_available_make` to the product dictionary payload.
+  - In `templates/boq/_make_vendor_table.html`:
+    - Rendered distinct `Approved make` and `Available make` dropdowns in each product card matching the top cascade filter pattern.
+    - Updated `makeVendorForm` Alpine component with separate `approvedMake` and `availableMake` states, mutual clearing on selection, dynamic `activeMake` getter, and rate auto-load/find/apply orchestration.
+  - In `templates/base.html`:
+    - Updated `.make-vendor-fields` to `flex-wrap: wrap;` with responsive minimum dimensions so all 6 inputs and action buttons fit cleanly without horizontal clipping.
+- **Category Cascade Isolation**:
+  - In `backend/apps/boq/services/make_vendor_cascade.py`:
+    - Updated `apply_subcategory_make` to accept `make_source: str = ""` ('approved' or 'available').
+    - Guarded cascade loop across categories:
+      - If `make_source == "approved"`, verified make is approved for the product's sub-category. If not approved, skipped the product (`continue`), leaving its existing valid selection untouched.
+      - Checked `match_payload.get("status") == "matched"`. If the product has no matching rate in the database for that make, skipped the product (`continue`), preventing category cascade from corrupting unapproved/unavailable products or turning them into `unmatched`.
+  - In `backend/apps/boq/views.py`:
+    - Extracted `make_source` in `BOQMakeVendorSelectView.post` and passed to `service.apply_subcategory_make`.
+  - In `templates/boq/_make_vendor_table.html`:
+    - In `applySubcategory()`, sent `make_source: this.availableMake ? 'available' : 'approved'`.
+- **Test Suite & Static Analysis**:
+  - Added unit tests `test_category_cascade_skips_unmatched_or_unapproved_products` and `test_shape_product_separates_approved_and_available_makes` in `tests/boq/test_make_vendor_sync.py`.
+  - Pyright passed with 0 errors across `backend/apps/boq/`. All 162 unit and integration tests passed cleanly.
+
+Pending: None.
+Issues: None.
+Next: Deploy changes to EC2 or proceed with active feature work.
+
+### 2026-10-14 — Typing and Static Analysis Fixes Across BOQ Services & Views
+
+Completed:
+- Resolved Pyright and IDE linter errors and warnings across views and services:
+  - In `backend/apps/boq/views.py`: Fixed `_render_extraction_line_html` call argument type mismatch by prioritizing `editor.last_matched_row_id` over `row_id`, guaranteeing non-None `str` type.
+  - In `backend/apps/boq/services/boq_extraction_edit_service.py`: Removed redundant `str()` cast on typed string field `product_id`.
+  - In `backend/apps/boq/services/make_vendor_cascade.py`: Removed redundant `str()` cast on typed parameter `product_id`.
+  - In `backend/apps/boq/services/make_vendor_rates.py`: Removed redundant `str()` casts on `product_id` and cached row field `row.get("product_id")`.
+  - In `backend/apps/boq/services/rate_detail_retrieval_service.py`: Removed redundant `str()` casts on typed string parameters `make` and `vendor`.
+- Ran static analysis checks (`pyright`) and test suite (`test_extraction_edit`, `test_make_vendor_sync`); all 23 tests pass cleanly.
+
+Pending: None.
+Issues: None.
+Next: Deploy changes to EC2 or proceed with active feature work.
+
 ### 2026-10-13 — Make & Vendor Product-Wise Cascade Filtering & Exact Product_ID Scope Preservation
 
 Completed:

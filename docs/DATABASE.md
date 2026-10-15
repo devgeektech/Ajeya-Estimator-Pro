@@ -164,8 +164,8 @@ labour % remains a Labour-page UI feature (not this sheet).
 ## System Tables
 
 - **`accounts.User`** — email auth, `role` (`SUPERADMIN` / `ADMIN` / `EXPERT`)
-- **`audit.*`** — action log
-- **`notifications.*`** — in-app notifications
+- **`audit.AuditLog`** — action log; bounded to the most recent **50 entries per user** (FIFO pruned on write via `apps.audit.services.prune_audit_logs_for_user`)
+- **`notifications.Notification`** — in-app notifications; bounded to the most recent **50 entries per user** (FIFO pruned on write via `apps.notifications.services.prune_notifications_for_user`)
 
 ---
 

@@ -75,6 +75,7 @@ class MakeVendorSelectionService(
         make: str,
         vendor: str = "",
         preview_only: bool = False,
+        make_source: str = "",
     ) -> dict[str, Any]:
         """Persist make/vendor, find a rate row, and load labour by Product_ID.
 
@@ -160,6 +161,10 @@ class MakeVendorSelectionService(
             approved_makes=None if (allow_manual_override or expert_make) else approved_makes,
         )
 
+        make_source_text = str(make_source or "").strip().lower()
+        if make_source_text:
+            match_payload["make_source"] = make_source_text
+
         if preview_only:
             # Rate preview for Not found / No match — Apply commits the match.
             logger.debug(
@@ -180,6 +185,10 @@ class MakeVendorSelectionService(
             or vendor_text
             or None
         )
+        if make_source_text:
+            updated["selected_make_source"] = make_source_text
+        elif "selected_make_source" in updated and not updated["selected_make"]:
+            updated["selected_make_source"] = ""
         updated["make_hint"] = make_text or updated.get("make_hint")
         updated["vendor_selection"] = match_payload
         if match_payload.get("product_id"):
@@ -229,6 +238,7 @@ class MakeVendorSelectionService(
         product_index: int,
         make: str,
         vendor: str = "",
+        make_source: str = "",
     ) -> dict[str, Any]:
         """Accept expert make/vendor on Not found / No match cards → green matched.
 
@@ -333,6 +343,10 @@ class MakeVendorSelectionService(
             match_payload["make"] = applied_make or match_payload.get("make")
             match_payload["vendor"] = applied_vendor or match_payload.get("vendor")
 
+        make_source_text = str(make_source or "").strip().lower()
+        if make_source_text:
+            match_payload["make_source"] = make_source_text
+
         catalog_id = str(
             match_payload.get("catalog_product_id")
             or match_payload.get("product_id")
@@ -346,6 +360,8 @@ class MakeVendorSelectionService(
         updated = dict(product)
         updated["selected_make"] = applied_make or None
         updated["selected_vendor"] = applied_vendor or None
+        if make_source_text:
+            updated["selected_make_source"] = make_source_text
         if applied_make:
             updated["make_hint"] = applied_make
         updated["vendor_selection"] = match_payload

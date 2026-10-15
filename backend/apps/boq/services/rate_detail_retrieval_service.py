@@ -119,8 +119,8 @@ class RateDetailRetrievalService:
             Product_ID=norm_pid,
             database_version_id=self.database_version_id,
         )
-        make_str = str(make or "").strip()
-        vendor_str = str(vendor or "").strip()
+        make_str = (make or "").strip()
+        vendor_str = (vendor or "").strip()
         if make_str and vendor_str:
             rate = qs.filter(Make__iexact=make_str, Vendor__iexact=vendor_str).first()
             if rate is not None:

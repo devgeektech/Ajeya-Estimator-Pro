@@ -20,9 +20,7 @@ from apps.boq.services.make_list_constraint_service import (
     MakeListConstraintService,
 )
 from apps.boq.services.make_vendor_common import (
-    NOT_AVAILABLE_NOTES,
     NOT_AVAILABLE_SOURCE,
-    NOT_AVAILABLE_STATUS,
     _SUBCATEGORY_SEP,
     _catalog_product_id,
     _is_lowest_make,
@@ -61,7 +59,7 @@ class MakeVendorCascadeMixin:
         def _database_version_id(self, boq: BOQ) -> int: ...
         def build_display(self) -> dict[str, Any]: ...
         def _approved_makes_for_subcategory(
-            self, category: str, sub_category: str
+            self, category: str, sub_category: str, *, allow_category_wide: bool = False
         ) -> list[str]: ...
         def _exact_match_and_rates(
             self,
@@ -127,6 +125,7 @@ class MakeVendorCascadeMixin:
         sub_category: str,
         make: str = "",
         vendor: str = "",
+        make_source: str = "",
         find_rates: bool = True,
         prefer_lowest_price: bool | None = None,
         product_id: str = "",
@@ -249,6 +248,18 @@ class MakeVendorCascadeMixin:
                     ).strip()
                     if check_id != product_id_text:
                         continue
+
+                is_approved_cascade = (
+                    make_source == "approved"
+                    or (not make_source and bool(make_text) and MakeListConstraintService.make_is_allowed(make_text, approved_makes))
+                )
+                if make_text and find_rates:
+                    prod_sub = str(updated.get("sub_category") or "").strip()
+                    prod_approved = self._approved_makes_for_subcategory(category_text, prod_sub)
+                    if self.has_make_list and prod_approved and is_approved_cascade:
+                        if not MakeListConstraintService.make_is_allowed(make_text, prod_approved):
+                            continue
+
                 match_payload: dict[str, Any] | None = None
                 if find_rates:
                     effective_approved = (
@@ -271,6 +282,8 @@ class MakeVendorCascadeMixin:
                         or (bool(make_text) and not vendor_text),
                         approved_makes=effective_approved or None,
                     )
+                    if make_text and match_payload.get("status") != "matched":
+                        continue
                     updated["vendor_selection"] = match_payload
                     applied_make = match_payload.get("make") or applied_make
                     applied_vendor = match_payload.get("vendor") or applied_vendor
@@ -298,6 +311,11 @@ class MakeVendorCascadeMixin:
                 updated["selected_vendor"] = applied_vendor or None
                 if applied_make:
                     updated["make_hint"] = applied_make
+                    updated["selected_make_source"] = make_source or (
+                        "approved" if is_approved_cascade else "available"
+                    )
+                    if isinstance(updated.get("vendor_selection"), dict):
+                        updated["vendor_selection"]["make_source"] = updated["selected_make_source"]
                 updated["approved_make_found"] = True
                 updated["vendor_selection_source"] = "manual"
                 products[index] = updated
@@ -470,7 +488,7 @@ class MakeVendorCascadeMixin:
     ) -> int:
         """Restore cascade-applied products in one category/sub/product to lowest price."""
         cleared = 0
-        product_id_text = str(product_id or "").strip()
+        product_id_text = (product_id or "").strip()
         for row in rows:
             products = list(row.get("products") or [])
             if not products:
@@ -1076,6 +1094,8 @@ class MakeVendorCascadeMixin:
                 updated["selected_vendor"] = applied_vendor or None
                 if applied_make:
                     updated["make_hint"] = applied_make
+                    updated["selected_make_source"] = "approved" if approved_found else "available"
+                    match_payload["make_source"] = updated["selected_make_source"]
                 updated["approved_make_found"] = approved_found
                 updated["vendor_selection_source"] = source
                 if catalog_id:

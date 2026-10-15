@@ -5,6 +5,60 @@ the summaries below live in **git history** (`git log -- docs/`).
 
 ---
 
+## 2026-10-15 — Available Make Selection Retained and Prefilled When Approved Make Not Available
+- **Available Make Prefilling & Retention**:
+  - In `make_vendor_display.py`, added `_make_in_options(make, options)` helper using `makes_optimally_match` to accurately check if a make exists in an options list. Previously, `MakeListConstraintService.make_is_allowed(make, approved_make_options)` returned `True` for empty lists, erroneously treating available makes as approved makes and returning empty `selected_approved_make` without populating `selected_available_make`.
+  - In `_shape_product`, when approved makes are not available (`not approved_make_options`), assigned the make directly to `selected_available_make` and tagged `selected_make_source = "available"`. If `selected_make` was unpopulated, resolved it from `rate_detail`, `selection["make"]`, `product["make_hint"]`, or `Rate_Master_Output` via `rate_master_id`.
+  - In `make_vendor_cascade.py`, in `apply_lowest_defaults_all`, tagged `selected_make_source = "approved" if approved_found else "available"` so products without approved makes are tagged as `"available"`.
+  - In `_make_vendor_table.html`, updated `init()` and `_syncMakeSelection` so when no approved makes exist for the product (`!this.hasApprovedMakes || !this.approvedMakeOptions.length`), the make selection immediately fills `this.availableMake` from `selAvail` or `rawMake`.
+  - Added unit test `test_shape_product_fills_available_make_when_approved_make_not_available` in `test_make_vendor_sync.py`. All 13 tests in `test_make_vendor_sync` and all 75 BOQ tests pass.
+
+## 2026-10-15 — Make & Vendor Product Cards Approved Makes Strictly Per Sub-Category
+- **Product Card Approved Makes Scoped to Sub-Category**:
+  - In `make_list_constraint_service.py`, updated `_entry_covers_sub` to compare make list mapped sub-categories against target sub-categories using `_categories_equivalent`, properly supporting singular/plural and alias forms.
+  - In `make_vendor_rates.py`, updated `_approved_makes_for_subcategory` to set `allow_category_wide: bool = False` as default so that when a sub-category is specified, it strictly retrieves makes approved for that specific sub-category rather than falling back to parent category-wide makes. Updated `_options_for_product` and `_options_for_catalog_product_id` to enforce `allow_category_wide=False`, falling back to `Rate_Master_Output` to resolve sub-category when not present on the product dict.
+  - In `make_vendor_display.py`, shaped `approved` directly from the strictly sub-category scoped `approved_make_options`.
+  - Added unit test `test_shape_product_approved_makes_strictly_sub_category` in `test_make_vendor_sync.py` asserting that product cards receive only makes approved for their specific sub-category and never inherit category-wide or cross-subcategory makes.
+
+## 2026-10-15 — Queue Retention Policies for Audit Logs, Notifications, and Server Logs
+- **Audit Logs Retention**: Enforced a 50-entry FIFO queue per user in `apps.audit.services.record()`, ensuring older entries are deleted when new actions are logged. Added `prune_audit_logs_for_user()` and `prune_all_audit_logs()`.
+- **Notifications Retention**: Enforced a 50-entry FIFO queue per user in `apps.notifications.services.notify()`, ensuring older entries are deleted when new notifications are created. Added `prune_notifications_for_user()` and `prune_all_notifications()`.
+- **Server Log File Line Bounding**: Implemented an in-place 5,000-line queue in `SafeRotatingFileHandler` via `trim_log_file()` using `r+` seeking and `truncate()` in `common.logging_handlers`, keeping log files bounded to the most recent 5,000 lines without Windows multi-process file locking errors or redundant backup files. Updated `settings.py` logging handlers (`app_file`, `error_file`, `instruction_file`) with `max_lines: 5000`.
+- **Management Command**: Added `prune_server_data` management command to manually or periodically enforce queue retention across audit logs, notifications, and server log files.
+- **Test Suite**: Added unit tests in `tests/audit/test_audit_queue.py`, `tests/notifications/test_notification_queue.py`, and `tests/test_logging_queue.py`. All tests pass.
+
+## 2026-10-15 — Documentation Alignment and Final Completion Prep
+- Synchronized `docs/PRODUCT.md`, `docs/DATABASE.md`, `docs/OPS.md`, and `docs/SESSION_STATE.md` with all completed features (sub-category approved makes, available make prefilling/retention, 50-entry audit/notification queue limits, 5,000-line server log FIFO bounds, `prune_server_data` command, and `portal.ajeya.in` HTTPS configuration).
+- Cleared all IDE / Ruff linter warnings (`RUF010` and `F401` unused imports) across all modified files and tests.
+- Reverted incidental button style and text changes to preserve consistent navigation styling and helpful workbook ingestion guidance.
+
+## 2026-10-15 — Domain Subdomain Migration to portal.ajeya.in & SSL (HTTPS) Enabled
+- Reconfigured Nginx on EC2 to enforce subdomain access (`portal.ajeya.in`) and explicitly disable direct IP access with HTTP 403 Forbidden.
+- Installed `python3-certbot-nginx` and provisioned a free Let's Encrypt SSL/TLS certificate for `portal.ajeya.in`.
+- Configured automatic HTTP to HTTPS 301 redirection in Nginx.
+- Updated production environment configuration (`.env`) on EC2: set `ALLOWED_HOSTS=portal.ajeya.in`, `CSRF_TRUSTED_ORIGINS=http://portal.ajeya.in,https://portal.ajeya.in`, and `SECURE_SSL_REDIRECT=True` (enabling HSTS and Secure cookies).
+- Updated deployment documentation in `docs/OPS.md` and `docs/DEPLOY.md` to reflect HTTPS.
+
+## 2026-10-14 — Make & Vendor Separate Approved & Available Make Dropdowns & Category Cascade Isolation
+- **Separated Approved Make and Available Make Dropdowns**:
+  - In `make_vendor_rates.py`, updated `_options_for_catalog_product_id` and `_options_for_product` to return 5 distinct items: `(approved_makes, available_makes, vendor_options, vendors_by_make, makes_by_vendor)`. Stopped prepending unapproved or unavailable `selected_make` into make options or `selected_vendor` into vendor options.
+  - In `make_vendor_display.py`, shaped product payloads to include both `approved_make_options` and `available_make_options`, along with `selected_approved_make` and `selected_available_make`. Removed forced injection of unapproved selections.
+  - In `_make_vendor_table.html`, split the single `Make` select into separate `Approved make` and `Available make` dropdowns within each product card. Updated Alpine `makeVendorForm` component to manage both dropdowns, clearing one when the other is selected and routing make selection cleanly to rate lookups.
+  - In `base.html`, updated `.make-vendor-fields` flexbox to wrap cleanly across smaller viewports.
+- **Category Cascade Isolation**:
+  - In `make_vendor_cascade.py`, updated `apply_subcategory_make` to accept `make_source`. In the cascade loop, products for which the chosen make is not approved (when applying from Approved Make) or for which no matching rates exist in the database are skipped rather than overwritten with an unapproved/unmatched state.
+  - In `views.py` and `_make_vendor_table.html`, forwarded `make_source` from the cascade filter request.
+- **Test Suite**:
+  - Added unit tests `test_category_cascade_skips_unmatched_or_unapproved_products` and `test_shape_product_separates_approved_and_available_makes` in `test_make_vendor_sync.py`. All 162 tests passed.
+
+## 2026-10-14 — Typing and Static Analysis Fixes Across BOQ Services & Views
+- **Static Analysis & Type Consistency**:
+  - In `backend/apps/boq/views.py`: In `BOQExtractionEditView.post` for `confirm_match`, prioritized `editor.last_matched_row_id or row_id` so `actual_row_id` is strictly narrowed to `str` when passed to `_render_extraction_line_html`.
+  - In `backend/apps/boq/services/boq_extraction_edit_service.py`: Removed redundant `str()` wrapper around `fields.get("product_id")` where the dictionary values are already typed as `str`.
+  - In `backend/apps/boq/services/make_vendor_cascade.py`: Removed redundant `str()` wrapper around typed `product_id: str` argument.
+  - In `backend/apps/boq/services/make_vendor_rates.py`: Removed redundant `str()` wrappers around typed `product_id: str` argument and dictionary lookup in `_rate_rows_for_scope`.
+  - In `backend/apps/boq/services/rate_detail_retrieval_service.py`: Removed redundant `str()` wrappers around typed `make: str` and `vendor: str` parameters in `get_by_product_make_vendor`.
+
 ## 2026-10-13 — Make & Vendor Product-Wise Cascade Filtering & Exact Product_ID Scope Preservation
 - **Product-Wise Cascade Filter Selection in Make & Vendor**:
   - In `make_vendor_common.py`, extended `_catalog_product_id` to fall back to `Rate_Master_Output` lookups via `db_product_id`/`rate_master_id` if missing, and enhanced `_subcategory_storage_key` and `_product_matches_subcategory` to support product-specific scoping (`category::sub_category::product_id`).

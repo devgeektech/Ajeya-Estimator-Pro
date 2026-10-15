@@ -161,13 +161,13 @@ def _entry_covers_sub(
     """True when make-list entry covers category+sub.
 
     Category-wide rows (null sub) match every sub only when ``allow_category_wide``.
-    Cascade UI passes ``False`` so a selected sub-category shows that sub's makes.
+    Cascade UI and product cards pass ``False`` so a selected sub-category shows that sub's makes.
     """
     targets = list(entry.get("mapped_targets") or [])
     if not targets:
         mapped_sub = _normalize_text(str(entry.get("mapped_sub_category") or ""))
         if mapped_sub:
-            return mapped_sub == sub_norm
+            return _categories_equivalent(mapped_sub, sub_norm)
         desc_norm = _normalize_text(entry.get("description") or "")
         if re.search(rf"(?<![a-zA-Z0-9]){re.escape(sub_norm)}(?![a-zA-Z0-9])", desc_norm):
             return True
@@ -180,7 +180,7 @@ def _entry_covers_sub(
             if allow_category_wide:
                 return True
             continue
-        if mapped_sub == sub_norm:
+        if _categories_equivalent(mapped_sub, sub_norm):
             return True
     return False
 

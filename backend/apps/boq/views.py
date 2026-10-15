@@ -982,7 +982,7 @@ class BOQExtractionEditView(LoginRequiredMixin, View):
                     product_index=product_index,
                     product_row_id=product_row_id,
                 )
-                actual_row_id = row_id or editor.last_matched_row_id
+                actual_row_id = editor.last_matched_row_id or row_id
                 message = "Product match confirmed at 100%."
                 if ajax:
                     line_html = _render_extraction_line_html(request, boq, actual_row_id)
@@ -1127,6 +1127,7 @@ class BOQMakeVendorSelectView(LoginRequiredMixin, View):
                 product_id = (request.POST.get("product_id") or "").strip()
                 make = (request.POST.get("make") or "").strip()
                 vendor = (request.POST.get("vendor") or "").strip()
+                make_source = (request.POST.get("make_source") or "").strip()
                 find_rates = (request.POST.get("find_rates") or "1").strip() != "0"
                 result = service.apply_subcategory_make(
                     category=category,
@@ -1134,6 +1135,7 @@ class BOQMakeVendorSelectView(LoginRequiredMixin, View):
                     product_id=product_id,
                     make=make,
                     vendor=vendor,
+                    make_source=make_source,
                     find_rates=find_rates,
                 )
                 scope_label = result['category']
@@ -1228,6 +1230,7 @@ class BOQMakeVendorSelectView(LoginRequiredMixin, View):
                 row_id = (request.POST.get("row_id") or "").strip()
                 make = (request.POST.get("make") or "").strip()
                 vendor = (request.POST.get("vendor") or "").strip()
+                make_source = (request.POST.get("make_source") or "").strip()
                 try:
                     product_index = int(request.POST.get("product_index") or "0")
                 except ValueError:
@@ -1247,6 +1250,7 @@ class BOQMakeVendorSelectView(LoginRequiredMixin, View):
                     product_index=product_index,
                     make=make,
                     vendor=vendor,
+                    make_source=make_source,
                 )
                 message = (
                     f"Applied make/vendor ({result.get('make') or '—'} / "
@@ -1287,6 +1291,7 @@ class BOQMakeVendorSelectView(LoginRequiredMixin, View):
             row_id = (request.POST.get("row_id") or "").strip()
             make = (request.POST.get("make") or "").strip()
             vendor = (request.POST.get("vendor") or "").strip()
+            make_source = (request.POST.get("make_source") or "").strip()
             try:
                 product_index = int(request.POST.get("product_index") or "0")
             except ValueError:
@@ -1314,6 +1319,7 @@ class BOQMakeVendorSelectView(LoginRequiredMixin, View):
                 make=make,
                 vendor=vendor,
                 preview_only=preview_only,
+                make_source=make_source,
             )
             if preview_only:
                 message = "Rate preview loaded."

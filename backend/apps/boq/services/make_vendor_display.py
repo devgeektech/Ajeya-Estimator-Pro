@@ -17,7 +17,11 @@ from apps.boq.services.boq_row_fields import (
     ordered_boq_rows as _ordered_boq_rows,
     resolve_activity_only,
 )
-from apps.boq.services.make_list_constraint_service import NO_APPROVED_MAKE_LABEL
+from apps.boq.services.make_list_constraint_service import (
+    NO_APPROVED_MAKE_LABEL,
+    MakeListConstraintService,
+    makes_optimally_match,
+)
 from apps.boq.services.make_vendor_common import (
     NOT_AVAILABLE_LABEL,
     NOT_AVAILABLE_SOURCE,
@@ -36,8 +40,13 @@ from apps.boq.services.make_vendor_common import (
 )
 from apps.boq.services.serial_normalizer import analysis_fields
 
-if TYPE_CHECKING:
-    from apps.boq.models import BOQ
+def _make_in_options(make: str, options: list[str] | None) -> bool:
+    if not make or not options:
+        return False
+    for opt in options:
+        if makes_optimally_match(make, opt):
+            return True
+    return False
 
 
 class MakeVendorDisplayMixin:
@@ -58,7 +67,7 @@ class MakeVendorDisplayMixin:
             *,
             database_version_id: int,
             boq_description: str,
-        ) -> tuple[list[str], list[str], dict[str, list[str]], dict[str, list[str]]]: ...
+        ) -> tuple[list[str], list[str], list[str], dict[str, list[str]], dict[str, list[str]]]: ...
         def _vendors_for_subcategory_make(
             self,
             *,
@@ -68,7 +77,7 @@ class MakeVendorDisplayMixin:
             make: str,
         ) -> list[str]: ...
         def _approved_makes_for_subcategory(
-            self, category: str, sub_category: str
+            self, category: str, sub_category: str, *, allow_category_wide: bool = False
         ) -> list[str]: ...
 
     def build_display(self) -> dict[str, Any]:
@@ -289,28 +298,99 @@ class MakeVendorDisplayMixin:
         product = normalize_product_fields(product)
         selection = dict(product.get("vendor_selection") or {})
         catalog_id = _catalog_product_id(product)
-        make_options, vendor_options, vendors_by_make, makes_by_vendor = (
-            self._options_for_product(
-                product,
-                database_version_id=database_version_id,
-                boq_description=boq_description,
-            )
+        (
+            approved_make_options,
+            available_make_options,
+            vendor_options,
+            vendors_by_make,
+            makes_by_vendor,
+        ) = self._options_for_product(
+            product,
+            database_version_id=database_version_id,
+            boq_description=boq_description,
         )
-        selected_make = product.get("selected_make") or selection.get("make") or ""
-        selected_vendor = (
+        rate_detail = selection.get("rate_detail")
+        labour_detail = selection.get("labour_detail")
+        line_output = selection.get("line_output")
+
+        selected_make = str(product.get("selected_make") or selection.get("make") or "").strip()
+        if not selected_make or _is_lowest_make(selected_make):
+            candidate = str(
+                (rate_detail or {}).get("make")
+                or (rate_detail or {}).get("Make")
+                or selection.get("make")
+                or product.get("make_hint")
+                or ""
+            ).strip()
+            if candidate and not _is_lowest_make(candidate):
+                selected_make = candidate
+        if (not selected_make or _is_lowest_make(selected_make)) and selection.get("rate_master_id"):
+            try:
+                from apps.database_manager.models import Rate_Master_Output
+
+                rm_row = Rate_Master_Output.objects.filter(pk=int(selection["rate_master_id"])).first()
+                if rm_row and rm_row.Make:
+                    selected_make = str(rm_row.Make).strip()
+            except Exception:
+                pass
+
+        selected_vendor = str(
             product.get("selected_vendor")
             or selection.get("vendor")
             or ""
-        )
-        # NEWAGE (make list) vs NEW AGE (Rate_Master) — pick the dropdown label.
-        selected_make = _align_option_label(str(selected_make), make_options)
-        selected_vendor = _align_option_label(str(selected_vendor), vendor_options)
-        if selected_make and selected_make not in make_options:
-            make_options = [selected_make] + make_options
-        # Keep the full Product_ID vendor list for the dropdown; cascade maps still
-        # scope vendors when a concrete make is selected in the UI.
+        ).strip()
+        if not selected_vendor:
+            candidate_vendor = str(
+                (rate_detail or {}).get("vendor")
+                or (rate_detail or {}).get("Vendor")
+                or selection.get("vendor")
+                or ""
+            ).strip()
+            if candidate_vendor:
+                selected_vendor = candidate_vendor
+
+        make_source = str(
+            product.get("selected_make_source")
+            or selection.get("make_source")
+            or ""
+        ).strip().lower()
+
+        selected_approved_make = ""
+        selected_available_make = ""
+        if selected_make and not _is_lowest_make(selected_make):
+            in_available = _make_in_options(selected_make, available_make_options)
+            in_approved = _make_in_options(selected_make, approved_make_options)
+
+            if not approved_make_options:
+                selected_available_make = _align_option_label(selected_make, available_make_options) or (
+                    selected_make if in_available else ""
+                )
+                make_source = "available"
+            elif make_source == "available":
+                if in_available:
+                    selected_available_make = _align_option_label(selected_make, available_make_options)
+                elif in_approved:
+                    selected_approved_make = _align_option_label(selected_make, approved_make_options)
+            elif make_source == "approved":
+                if in_approved:
+                    selected_approved_make = _align_option_label(selected_make, approved_make_options)
+                elif in_available:
+                    selected_available_make = _align_option_label(selected_make, available_make_options)
+            else:
+                if in_approved:
+                    selected_approved_make = _align_option_label(selected_make, approved_make_options)
+                elif in_available:
+                    selected_available_make = _align_option_label(selected_make, available_make_options)
+                elif available_make_options and not approved_make_options:
+                    selected_available_make = _align_option_label(selected_make, available_make_options)
+
         all_vendor_options: list[str] = []
         seen_vendors: set[str] = set()
+        for v in vendor_options:
+            text = (v or "").strip()
+            if text and text not in seen_vendors:
+                seen_vendors.add(text)
+                all_vendor_options.append(text)
         for vendors in vendors_by_make.values():
             for vendor in vendors or []:
                 text = (vendor or "").strip()
@@ -318,72 +398,16 @@ class MakeVendorDisplayMixin:
                     continue
                 seen_vendors.add(text)
                 all_vendor_options.append(text)
-        for vendor in vendor_options:
-            text = (vendor or "").strip()
-            if text and text not in seen_vendors:
-                seen_vendors.add(text)
-                all_vendor_options.append(text)
-        # Product_ID options already carry complete make↔vendor pairs. Only refresh
-        # from category/sub-category when no Product_ID map is available.
-        if (
-            not catalog_id
-            and selected_make
-            and not _is_lowest_make(selected_make)
-        ):
-            vendors_by_make[selected_make] = self._vendors_for_subcategory_make(
-                database_version_id=database_version_id,
-                category=str(product.get("category") or ""),
-                sub_category=str(product.get("sub_category") or ""),
-                make=selected_make,
-            )
-            for vendor in vendors_by_make.get(selected_make) or []:
-                text = (vendor or "").strip()
-                if text and text not in seen_vendors:
-                    seen_vendors.add(text)
-                    all_vendor_options.append(text)
-        if selected_vendor and selected_vendor not in all_vendor_options:
-            all_vendor_options = [selected_vendor, *all_vendor_options]
-            if selected_make and not _is_lowest_make(selected_make):
-                vendors_by_make.setdefault(selected_make, [])
-                if selected_vendor not in vendors_by_make[selected_make]:
-                    vendors_by_make[selected_make] = [
-                        selected_vendor,
-                        *vendors_by_make[selected_make],
-                    ]
-            makes_by_vendor.setdefault(selected_vendor, [])
-            if selected_make and selected_make not in makes_by_vendor[selected_vendor]:
-                makes_by_vendor[selected_vendor] = [
-                    selected_make,
-                    *makes_by_vendor[selected_vendor],
-                ]
-        # Keep cascade maps consistent after alignment (avoid NEWAGE → []).
-        if (
-            selected_make
-            and selected_vendor
-            and not _is_lowest_make(selected_make)
-        ):
-            vendors_by_make.setdefault(selected_make, [])
-            if selected_vendor not in vendors_by_make[selected_make]:
-                vendors_by_make[selected_make].append(selected_vendor)
-            makes_by_vendor.setdefault(selected_vendor, [])
-            if selected_make not in makes_by_vendor[selected_vendor]:
-                makes_by_vendor[selected_vendor].append(selected_make)
-            if selected_vendor not in all_vendor_options:
-                all_vendor_options = [selected_vendor, *all_vendor_options]
-        # Current selection's vendors (for reference); JSON dropdowns use full lists.
-        if selected_make and not _is_lowest_make(selected_make):
-            vendor_options = list(vendors_by_make.get(selected_make) or all_vendor_options)
+
+        active_make = selected_available_make or selected_approved_make or selected_make
+        if active_make and not _is_lowest_make(active_make):
+            vendor_options = list(vendors_by_make.get(active_make) or all_vendor_options)
         else:
             vendor_options = list(all_vendor_options)
-        if selected_vendor and selected_vendor not in vendor_options:
-            vendor_options = [selected_vendor, *vendor_options]
-        rate_detail = selection.get("rate_detail")
-        labour_detail = selection.get("labour_detail")
-        line_output = selection.get("line_output")
 
         category = str(product.get("category") or "").strip()
         sub_category = str(product.get("sub_category") or "").strip()
-        approved = self._approved_makes_for_subcategory(category, sub_category)
+        approved = approved_make_options
         source = str(product.get("vendor_selection_source") or "").strip()
         match_status = str(selection.get("status") or "not_searched").strip() or "not_searched"
         notes = str(selection.get("notes") or "")
@@ -431,10 +455,8 @@ class MakeVendorDisplayMixin:
             and make_status != "not_found"
             and match_status == "unmatched"
         )
-        # Use the same Make/Vendor <select> format as matched (green) cards whenever
-        # options exist. Free-text only when there is nothing to select from.
-        # Not available: no dropdowns / Apply — no searches or computes.
-        allow_typed_make_vendor = False if is_not_available else (not bool(make_options))
+        # Use dropdowns whenever approved or available options exist.
+        allow_typed_make_vendor = False if is_not_available else (not bool(approved_make_options or available_make_options))
 
         same_price_choices = list(selection.get("same_price_choices") or [])
         same_price_tie = bool(selection.get("same_price_tie")) and bool(same_price_choices)
@@ -478,16 +500,23 @@ class MakeVendorDisplayMixin:
             "capacity": product.get("capacity") or "",
             "qty": qty_fields["quantity"],
             **qty_fields,
-            "make_options": [] if is_not_available else make_options,
-            "make_options_json": json.dumps([] if is_not_available else make_options),
+            "approved_make_options": [] if is_not_available else approved_make_options,
+            "approved_make_options_json": json.dumps([] if is_not_available else approved_make_options),
+            "available_make_options": [] if is_not_available else available_make_options,
+            "available_make_options_json": json.dumps([] if is_not_available else available_make_options),
+            "has_approved_makes": bool(approved_make_options) and not is_not_available,
+            "selected_approved_make": selected_approved_make if not is_not_available else "",
+            "selected_available_make": selected_available_make if not is_not_available else "",
+            "make_options": [] if is_not_available else (approved_make_options or available_make_options),
+            "make_options_json": json.dumps([] if is_not_available else (approved_make_options or available_make_options)),
             "vendor_options": [] if is_not_available else vendor_options,
-            # Full Product_ID vendor list — Alpine uses this plus vendors_by_make.
             "vendor_options_json": json.dumps([] if is_not_available else all_vendor_options),
             "vendors_by_make": {} if is_not_available else vendors_by_make,
             "vendors_by_make_json": json.dumps({} if is_not_available else vendors_by_make),
             "makes_by_vendor": {} if is_not_available else makes_by_vendor,
             "makes_by_vendor_json": json.dumps({} if is_not_available else makes_by_vendor),
             "selected_make": selected_make if not is_not_available else "",
+            "selected_make_source": make_source,
             "selected_vendor": selected_vendor if not is_not_available else "",
             "match_status": match_status,
             "status_label": status_label,
