@@ -3,9 +3,11 @@
 Compact active memory. Full spec: `docs/PRODUCT.md`. Schema: `docs/DATABASE.md`.
 History: `docs/CHANGELOG.md` (do not duplicate session diaries here).
 
-### 2026-10-15 — Password Reset Branding Alignment and Professional HTML Email Template
+### 2026-10-15 — Password Reset Branding Alignment, Professional HTML Email, and Dynamic Button State
 
 Completed:
+- **Dynamic Button Submission State**:
+  - Added dynamic loading states with SVG spinners on `password_reset.html` ("Sending...") and `password_reset_confirm.html` ("Changing password..."), preventing accidental duplicate clicks during SMTP dispatch.
 - **Professional HTML Email Template**:
   - Implemented responsive, branded HTML email in `password_reset_email.html` with card container, styled header (`Ajeya Estimator Pro`), CTA button, URL fallback, and security notice.
   - Added clean plain text counterpart in `password_reset_email.txt` and configured `html_email_template_name` on `BOQPasswordResetView`.

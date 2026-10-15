@@ -3,7 +3,9 @@
 Meaningful product and technical changes. Day-by-day micro-entries older than
 the summaries below live in **git history** (`git log -- docs/`).
 
-## 2026-10-15 — Password Reset Branding Alignment and Professional HTML Email Template
+## 2026-10-15 — Password Reset Branding Alignment, Professional HTML Email, and Dynamic Button State
+- **Dynamic Button Submission State**:
+  - Added dynamic loading states with SVG spinners on `password_reset.html` ("Sending...") and `password_reset_confirm.html` ("Changing password..."), preventing accidental duplicate clicks during SMTP dispatch.
 - **Professional HTML Email Template**:
   - Implemented a responsive, modern HTML email template in `password_reset_email.html` with card layout, dark navy header (`Ajeya Estimator Pro`), blue "Reset Password" CTA button, direct URL fallback, and security notice.
   - Added clean plain text counterpart in `password_reset_email.txt` and configured `html_email_template_name` on `BOQPasswordResetView` for automatic multipart MIME dispatch.
