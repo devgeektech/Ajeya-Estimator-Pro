@@ -3,6 +3,13 @@
 Compact active memory. Full spec: `docs/PRODUCT.md`. Schema: `docs/DATABASE.md`.
 History: `docs/CHANGELOG.md` (do not duplicate session diaries here).
 
+### 2026-10-15 — Email Sender Display Name Updated to Ajeya Estimator Pro
+
+Completed:
+- **Sender Display Name**:
+  - Updated `DEFAULT_FROM_EMAIL` to `Ajeya Estimator Pro <ajeyaindiapvtltd@gmail.com>` in `.env`, `.env.example`, and `settings.py`.
+  - Recipient email clients (Gmail, Outlook, Apple Mail) now display the sender prominently as **Ajeya Estimator Pro**.
+
 ### 2026-10-15 — Password Complexity Validation Across User Registration and Password Reset
 
 Completed:

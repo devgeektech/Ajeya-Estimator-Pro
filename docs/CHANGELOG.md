@@ -3,6 +3,11 @@
 Meaningful product and technical changes. Day-by-day micro-entries older than
 the summaries below live in **git history** (`git log -- docs/`).
 
+## 2026-10-15 — Email Sender Display Name Updated to Ajeya Estimator Pro
+- **Sender Display Name**:
+  - Updated `DEFAULT_FROM_EMAIL` to `Ajeya Estimator Pro <ajeyaindiapvtltd@gmail.com>` in `.env`, `.env.example`, and `settings.py`.
+  - Recipient email clients (Gmail, Outlook, Apple Mail) now display the sender prominently as **Ajeya Estimator Pro**.
+
 ## 2026-10-15 — Password Complexity Validation Across User Registration and Password Reset
 - **Password Complexity Validator**:
   - Created `ComplexityPasswordValidator` in `apps.accounts.validators` enforcing minimum 6 character length, at least one letter (`[a-zA-Z]`), at least one number (`[0-9]`), and at least one special symbol (e.g. `@`, `#`, `$`, `%`, `!`).
