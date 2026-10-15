@@ -121,3 +121,31 @@ class StyledSetPasswordFormTests(TestCase):
         self.assertTrue(form.is_valid())
         user = form.save()
         self.assertTrue(user.check_password("Pass1@"))
+
+
+class PasswordResetTimeoutTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="timeout_user@example.com", password="ComplexPass123!"
+        )
+
+    def test_password_reset_timeout_configured_to_15_minutes(self):
+        from django.conf import settings
+        self.assertEqual(settings.PASSWORD_RESET_TIMEOUT, 15 * 60)
+
+    def test_token_valid_immediately(self):
+        from django.contrib.auth.tokens import default_token_generator
+        token = default_token_generator.make_token(self.user)
+        self.assertTrue(default_token_generator.check_token(self.user, token))
+
+    def test_token_expires_after_timeout(self):
+        import datetime
+        from django.contrib.auth.tokens import default_token_generator
+        token = default_token_generator.make_token(self.user)
+        original_now = default_token_generator._now
+        try:
+            # Simulate 16 minutes (960 seconds) passing
+            default_token_generator._now = lambda: original_now() + datetime.timedelta(seconds=960)
+            self.assertFalse(default_token_generator.check_token(self.user, token))
+        finally:
+            default_token_generator._now = original_now
