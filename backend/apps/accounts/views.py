@@ -21,6 +21,7 @@ from .forms import (
     ProfileForm,
     RegisteredEmailPasswordResetForm,
     StyledPasswordChangeForm,
+    StyledSetPasswordForm,
 )
 from .models import User
 from .services import record_login, record_logout
@@ -111,6 +112,7 @@ class BOQPasswordResetDoneView(PasswordResetDoneView):
 
 
 class BOQPasswordResetConfirmView(PasswordResetConfirmView):
+    form_class = StyledSetPasswordForm
     template_name = "accounts/password_reset_confirm.html"
     success_url = reverse_lazy("accounts:password_reset_complete")
 

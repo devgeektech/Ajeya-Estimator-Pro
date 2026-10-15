@@ -1,5 +1,6 @@
 """User management forms."""
 from django import forms
+from django.contrib.auth.password_validation import validate_password
 from django.forms import ChoiceField
 
 from apps.accounts.models import User
@@ -24,6 +25,7 @@ class UserCreateForm(forms.ModelForm):
     password1 = forms.CharField(
         label="Password",
         widget=forms.PasswordInput(attrs=_INPUT),
+        help_text="At least 6 characters with letters, numbers, and symbols (e.g. @, #, $).",
     )
     password2 = forms.CharField(
         label="Confirm password",
@@ -62,6 +64,11 @@ class UserCreateForm(forms.ModelForm):
         if cleaned is None:
             return cleaned
         p1, p2 = cleaned.get("password1"), cleaned.get("password2")
+        if p1:
+            try:
+                validate_password(p1, self.instance)
+            except forms.ValidationError as err:
+                self.add_error("password1", err)
         if p1 and p2 and p1 != p2:
             self.add_error("password2", "Passwords do not match.")
         if cleaned.get("role") == UserRole.ADMIN:
