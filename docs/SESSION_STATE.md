@@ -3,6 +3,19 @@
 Compact active memory. Full spec: `docs/PRODUCT.md`. Schema: `docs/DATABASE.md`.
 History: `docs/CHANGELOG.md` (do not duplicate session diaries here).
 
+### 2026-10-15 — Password Complexity Validation Across User Registration and Password Reset
+
+Completed:
+- **Password Complexity Validator**:
+  - Implemented `ComplexityPasswordValidator` in `apps.accounts.validators` enforcing minimum 6 character length, at least one letter (`[a-zA-Z]`), at least one number (`[0-9]`), and at least one special symbol (e.g. `@`, `#`, `$`, `%`, `!`).
+  - Integrated validator into `settings.AUTH_PASSWORD_VALIDATORS`.
+- **User Registration Form Validation**:
+  - Updated `UserCreateForm` in `apps.users.forms` to validate `password1` through `validate_password()`, enforcing complexity on Admin/Superadmin user creation with helpful guidance text.
+- **Forgot Password & Confirm Screen**:
+  - Added `StyledSetPasswordForm` with `.form-control` inputs, eye password toggle, and complexity rules hint in `templates/accounts/password_reset_confirm.html`.
+- **Verification**:
+  - Created test suite in `tests/accounts/test_password_validation.py`. All 24 accounts and users tests pass.
+
 ### 2026-10-15 — Password Reset Branding Alignment, Professional HTML Email, and Dynamic Button State
 
 Completed:

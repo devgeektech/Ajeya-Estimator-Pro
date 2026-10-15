@@ -3,6 +3,18 @@
 Meaningful product and technical changes. Day-by-day micro-entries older than
 the summaries below live in **git history** (`git log -- docs/`).
 
+## 2026-10-15 — Password Complexity Validation Across User Registration and Password Reset
+- **Password Complexity Validator**:
+  - Created `ComplexityPasswordValidator` in `apps.accounts.validators` enforcing minimum 6 character length, at least one letter (`[a-zA-Z]`), at least one number (`[0-9]`), and at least one special symbol (e.g. `@`, `#`, `$`, `%`, `!`).
+  - Configured `ComplexityPasswordValidator` in `settings.AUTH_PASSWORD_VALIDATORS`.
+- **User Registration Form Validation**:
+  - Updated `UserCreateForm` in `apps.users.forms` to validate `password1` against Django's password validator pipeline, ensuring admin and superadmin user creation strictly adheres to the complexity rules.
+  - Added user guidance `help_text` under the password field.
+- **Forgot Password & Profile Reset**:
+  - Implemented `StyledSetPasswordForm` in `apps.accounts.forms` and wired into `BOQPasswordResetConfirmView`, providing sleek `.form-control` inputs, password visibility eye toggle, and complexity rules hint.
+- **Test Suite**:
+  - Added unit test suite in `tests/accounts/test_password_validation.py` covering validator unit tests, form rejections/acceptances, and pipeline checks. All 24 accounts and user tests pass.
+
 ## 2026-10-15 — Password Reset Branding Alignment, Professional HTML Email, and Dynamic Button State
 - **Dynamic Button Submission State**:
   - Added dynamic loading states with SVG spinners on `password_reset.html` ("Sending...") and `password_reset_confirm.html` ("Changing password..."), preventing accidental duplicate clicks during SMTP dispatch.
