@@ -66,8 +66,8 @@ class SafeRotatingFileHandler(logging.FileHandler):
         backupCount: int = 0,
     ):
         super().__init__(filename, mode=mode, encoding=encoding, delay=delay, errors=errors)
-        self.max_lines = int(max_lines) if max_lines else MAX_LOG_LINES
-        self.check_interval = int(check_interval) if check_interval else 50
+        self.max_lines = max_lines if max_lines else MAX_LOG_LINES
+        self.check_interval = check_interval if check_interval else 50
         self._emit_count = 0
         self._last_trim_time = 0.0
         try:

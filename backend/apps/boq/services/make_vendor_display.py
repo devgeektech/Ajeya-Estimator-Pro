@@ -19,7 +19,7 @@ from apps.boq.services.boq_row_fields import (
 )
 from apps.boq.services.make_list_constraint_service import (
     NO_APPROVED_MAKE_LABEL,
-    MakeListConstraintService,
+    MakeListConstraintService,  # noqa: F401
     makes_optimally_match,
 )
 from apps.boq.services.make_vendor_common import (
@@ -31,7 +31,6 @@ from apps.boq.services.make_vendor_common import (
     SAME_PRICE_TIE_LABEL,
     _align_option_label,
     _catalog_product_id,
-    _flag_same_material_rate_vendor_review,
     _is_lowest_make,
     _product_summary,
     _taxonomy_label,
@@ -39,6 +38,10 @@ from apps.boq.services.make_vendor_common import (
     loaded_catalog_product_id,
 )
 from apps.boq.services.serial_normalizer import analysis_fields
+
+if TYPE_CHECKING:
+    from apps.boq.models import BOQ
+
 
 def _make_in_options(make: str, options: list[str] | None) -> bool:
     if not make or not options:
@@ -297,7 +300,6 @@ class MakeVendorDisplayMixin:
     ) -> dict[str, Any]:
         product = normalize_product_fields(product)
         selection = dict(product.get("vendor_selection") or {})
-        catalog_id = _catalog_product_id(product)
         (
             approved_make_options,
             available_make_options,
@@ -330,7 +332,7 @@ class MakeVendorDisplayMixin:
 
                 rm_row = Rate_Master_Output.objects.filter(pk=int(selection["rate_master_id"])).first()
                 if rm_row and rm_row.Make:
-                    selected_make = str(rm_row.Make).strip()
+                    selected_make = rm_row.Make.strip()
             except Exception:
                 pass
 
@@ -405,8 +407,6 @@ class MakeVendorDisplayMixin:
         else:
             vendor_options = list(all_vendor_options)
 
-        category = str(product.get("category") or "").strip()
-        sub_category = str(product.get("sub_category") or "").strip()
         approved = approved_make_options
         source = str(product.get("vendor_selection_source") or "").strip()
         match_status = str(selection.get("status") or "not_searched").strip() or "not_searched"

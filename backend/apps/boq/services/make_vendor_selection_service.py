@@ -29,9 +29,7 @@ from apps.boq.services.product_matching_service import structured_match_score
 from apps.boq.services.rate_detail_retrieval_service import RateDetailRetrievalService
 from apps.boq.services.serial_normalizer import analysis_fields
 from apps.database_manager.models import Rate_Master_Output
-from apps.database_manager.services.activation import get_active_database_version
 from common.choices import BOQStatus
-from common.constants import MATCH_CONFIDENCE_THRESHOLD
 from common.exceptions import BOQAIError, ValidationError
 from utils.json_safe import json_safe
 from utils.timestamps import now_local_iso
@@ -161,7 +159,7 @@ class MakeVendorSelectionService(
             approved_makes=None if (allow_manual_override or expert_make) else approved_makes,
         )
 
-        make_source_text = str(make_source or "").strip().lower()
+        make_source_text = (make_source or "").strip().lower()
         if make_source_text:
             match_payload["make_source"] = make_source_text
 
@@ -343,7 +341,7 @@ class MakeVendorSelectionService(
             match_payload["make"] = applied_make or match_payload.get("make")
             match_payload["vendor"] = applied_vendor or match_payload.get("vendor")
 
-        make_source_text = str(make_source or "").strip().lower()
+        make_source_text = (make_source or "").strip().lower()
         if make_source_text:
             match_payload["make_source"] = make_source_text
 
