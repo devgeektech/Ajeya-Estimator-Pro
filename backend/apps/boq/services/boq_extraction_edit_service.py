@@ -144,7 +144,7 @@ class BOQExtractionEditService:
             or product.get("suggested_catalog_product_id")
             or ""
         ).strip()
-        entered_pid = str(fields.get("product_id") or "").strip()
+        entered_pid = (fields.get("product_id") or "").strip()
         pid_changed_to_match = False
         if entered_pid and entered_pid.lower() != previous_pid.lower():
             from apps.database_manager.models import Rate_Master_Output
@@ -346,7 +346,7 @@ class BOQExtractionEditService:
         """Manually load a product by its text Product_ID (e.g. 'P1001')."""
         from apps.boq.services.product_ai_mapping_service import ProductAIMappingService
         from apps.database_manager.services.activation import get_active_database_version
-        from apps.database_manager.models import Rate_Master_Output, Product_Helper
+        from apps.database_manager.models import Rate_Master_Output
 
         boq = self._get_boq()
         self._ensure_editable(boq)
@@ -472,7 +472,6 @@ class BOQExtractionEditService:
         if product is None:
             raise ValidationError(f"Unknown product index: {product_index}")
 
-        from apps.boq.services.make_vendor_common import loaded_catalog_product_id
 
         rate_id = product.get("db_product_id")
         if rate_id in (None, ""):

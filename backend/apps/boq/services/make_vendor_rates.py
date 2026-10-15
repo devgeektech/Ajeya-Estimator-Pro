@@ -103,24 +103,30 @@ class MakeVendorRatesMixin:
                 for row in rows
                 if _normalize_text(row.get("sub_category") or "") == sub_key
             ]
-        pid_text = str(product_id or "").strip()
+        pid_text = (product_id or "").strip()
         if pid_text:
             narrowed = [
                 row
                 for row in narrowed
-                if str(row.get("product_id") or "").strip() == pid_text
+                if (row.get("product_id") or "").strip() == pid_text
             ]
         # Keep sub-category scope strict — do not fall back to every make in the
         # parent category (that flooded the Approved make cascade dropdown).
         return narrowed
 
 
-    def _approved_makes_for_subcategory(self, category: str, sub_category: str) -> list[str]:
-        """Approved makes for cascade scope — sub-specific when a sub is selected."""
+    def _approved_makes_for_subcategory(
+        self,
+        category: str,
+        sub_category: str,
+        *,
+        allow_category_wide: bool = False,
+    ) -> list[str]:
+        """Approved makes for cascade / product scope — strictly sub-specific when a sub is selected."""
         sub_text = str(sub_category or "").strip()  # type: ignore
         if sub_text == "—":
             sub_text = ""
-        # Cascade with an explicit sub: prefer makes mapped to that sub only.
+        # Explicit sub: strictly return makes mapped to that sub only.
         if sub_text:
             specific = self.make_list_service.approved_makes_for_category(
                 category,
@@ -129,14 +135,14 @@ class MakeVendorRatesMixin:
             )
             if specific:
                 return list(specific)
-            # No sub-specific make-list row: keep category-wide approved makes, but
-            # the dropdown will intersect them with Rate_Master makes for this sub.
-            approved = self.make_list_service.approved_makes_for_category(
-                category,
-                sub_text,
-                allow_category_wide=True,
-            )
-            return list(approved or [])
+            if allow_category_wide:
+                approved = self.make_list_service.approved_makes_for_category(
+                    category,
+                    sub_text,
+                    allow_category_wide=True,
+                )
+                return list(approved or [])
+            return []
         approved = self.make_list_service.approved_makes_for_category(category, "")
         return list(approved or [])
 
@@ -440,7 +446,7 @@ class MakeVendorRatesMixin:
         *,
         database_version_id: int,
         boq_description: str,
-    ) -> tuple[list[str], list[str], dict[str, list[str]], dict[str, list[str]]]:
+    ) -> tuple[list[str], list[str], list[str], dict[str, list[str]], dict[str, list[str]]]:
         catalog_product_id = _catalog_product_id(product)
         if catalog_product_id:
             return self._options_for_catalog_product_id(
@@ -451,28 +457,29 @@ class MakeVendorRatesMixin:
 
         category = str(product.get("category") or "")
         sub_category = str(product.get("sub_category") or "")
-        preferred_makes, concrete_makes, _selectable = self._make_options_for_scope(
+        approved_makes: list[str] = []
+        if self.has_make_list:
+            approved_makes = list(
+                self._approved_makes_for_subcategory(
+                    category, sub_category, allow_category_wide=False
+                )
+                or []
+            )
+        available_makes = self._rate_master_makes_for_subcategory(
             database_version_id=database_version_id,
             category=category,
             sub_category=sub_category,
         )
 
-        selected_make = str(
-            (product.get("vendor_selection") or {}).get("make")
-            or product.get("selected_make")
-            or ""
-        ).strip()
-        selected_vendor = str(
-            (product.get("vendor_selection") or {}).get("vendor")
-            or product.get("selected_vendor")
-            or ""
-        ).strip()
-        selected_make = _align_option_label(selected_make, preferred_makes + concrete_makes)
-
-        makes = list(preferred_makes)
+        all_makes = sorted(
+            set(approved_makes) | set(available_makes),
+            key=lambda s: s.lower(),
+        )
         vendors_by_make: dict[str, list[str]] = {}
         makes_by_vendor: dict[str, list[str]] = {}
-        for make_option in concrete_makes:
+        vendor_options: list[str] = []
+        seen_vendors: set[str] = set()
+        for make_option in all_makes:
             vendors = self._vendors_for_subcategory_make(
                 database_version_id=database_version_id,
                 category=category,
@@ -481,57 +488,21 @@ class MakeVendorRatesMixin:
             )
             vendors_by_make[make_option] = vendors
             for vendor in vendors:
+                v_key = _normalize_text(vendor)
+                if vendor and v_key not in seen_vendors:
+                    seen_vendors.add(v_key)
+                    vendor_options.append(vendor)
                 makes_by_vendor.setdefault(vendor, [])
                 if make_option not in makes_by_vendor[vendor]:
                     makes_by_vendor[vendor].append(make_option)
-        if selected_make and selected_make not in makes and selected_make not in {
-            LOWEST_MAKE_VALUE,
-            LOWEST_MAKE_STORED,
-            "",
-        }:
-            makes = [selected_make, *makes]
-            vendors_by_make[selected_make] = self._vendors_for_subcategory_make(
-                database_version_id=database_version_id,
-                category=category,
-                sub_category=sub_category,
-                make=selected_make,
-            )
-            for vendor in vendors_by_make[selected_make]:
-                makes_by_vendor.setdefault(vendor, [])
-                if selected_make not in makes_by_vendor[vendor]:
-                    makes_by_vendor[vendor].append(selected_make)
 
-        vendor_options: list[str] = []
-        if selected_make and selected_make not in {LOWEST_MAKE_VALUE, LOWEST_MAKE_STORED, ""}:
-            vendor_options = [
-                item
-                for item in (vendors_by_make.get(selected_make) or [])
-                if item
-            ]
-        else:
-            # All vendors for this Product scope — used when Make is empty / Lowest.
-            seen: set[str] = set()
-            for values in vendors_by_make.values():
-                for vendor in values:
-                    key = _normalize_text(vendor)
-                    if vendor and key not in seen:
-                        seen.add(key)
-                        vendor_options.append(vendor)
-        if not self.has_make_list:
-            all_db_vendors = self._all_database_vendors(database_version_id)
-            seen_v = {_normalize_text(v) for v in vendor_options}
-            for v in all_db_vendors:
-                key = _normalize_text(v)
-                if key not in seen_v:
-                    seen_v.add(key)
-                    vendor_options.append(v)
-
-        selected_vendor = _align_option_label(selected_vendor, vendor_options)
-        if selected_vendor and selected_vendor not in vendor_options:
-            vendor_options = [selected_vendor, *vendor_options]
-
-        return makes, vendor_options, vendors_by_make, makes_by_vendor
-
+        return (
+            approved_makes,
+            available_makes,
+            sorted(vendor_options, key=lambda s: s.lower()),
+            vendors_by_make,
+            makes_by_vendor,
+        )
 
     def _options_for_catalog_product_id(
         self,
@@ -539,39 +510,30 @@ class MakeVendorRatesMixin:
         *,
         database_version_id: int,
         product: dict[str, Any],
-    ) -> tuple[list[str], list[str], dict[str, list[str]], dict[str, list[str]]]:
-        """Make/Vendor pair maps from Rate_Master_Output rows for one Product_ID."""
+    ) -> tuple[list[str], list[str], list[str], dict[str, list[str]], dict[str, list[str]]]:
+        """Approved makes, available database makes, and Make/Vendor pair maps for one Product_ID."""
         rates = list(
             Rate_Master_Output.objects.filter(
                 database_version_id=database_version_id,
                 Product_ID=product_id,
             ).order_by("Make", "Vendor", "pk")
         )
-        if self.has_make_list:
-            category = str(product.get("category") or "")
-            sub_category = str(product.get("sub_category") or "")
-            approved = self._approved_makes_for_subcategory(category, sub_category)
-            if approved:
-                filtered = MakeListConstraintService.filter_rate_ids_by_make(rates, approved)
-                if filtered:
-                    rates = filtered
-                # else keep all Product_ID rates so Make dropdown still fills
 
-        makes: list[str] = []
+        available_makes: list[str] = []
         vendor_options: list[str] = []
         vendors_by_make: dict[str, list[str]] = {}
         makes_by_vendor: dict[str, list[str]] = {}
         seen_makes: set[str] = set()
         seen_vendors: set[str] = set()
         for rate in rates:
-            make = str(rate.Make or "").strip()
-            vendor = str(rate.Vendor or "").strip()
+            make = (rate.Make or "").strip()
+            vendor = (rate.Vendor or "").strip()
             if not make:
                 continue
             make_key = _normalize_text(make)
             if make_key not in seen_makes:
                 seen_makes.add(make_key)
-                makes.append(make)
+                available_makes.append(make)
             vendors_by_make.setdefault(make, [])
             if vendor and vendor not in vendors_by_make[make]:
                 vendors_by_make[make].append(vendor)
@@ -584,55 +546,35 @@ class MakeVendorRatesMixin:
                 if make not in makes_by_vendor[vendor]:
                     makes_by_vendor[vendor].append(make)
 
-        if not self.has_make_list:
-            all_db_makes = self._all_database_makes(database_version_id)
-            for m in all_db_makes:
-                m_key = _normalize_text(m)
-                if m_key not in seen_makes:
-                    seen_makes.add(m_key)
-                    makes.append(m)
-            all_db_vendors = self._all_database_vendors(database_version_id)
-            for v in all_db_vendors:
-                v_key = _normalize_text(v)
-                if v_key not in seen_vendors:
-                    seen_vendors.add(v_key)
-                    vendor_options.append(v)
+        available_makes.sort(key=lambda s: s.lower())
 
-        selected_make = str(
-            (product.get("vendor_selection") or {}).get("make")
-            or product.get("selected_make")
-            or ""
-        ).strip()
-        selected_vendor = str(
-            (product.get("vendor_selection") or {}).get("vendor")
-            or product.get("selected_vendor")
-            or ""
-        ).strip()
-        # Align make-list spellings onto Rate_Master option labels before maps.
-        selected_make = _align_option_label(selected_make, makes)
-        selected_vendor = _align_option_label(selected_vendor, vendor_options)
-        if selected_make and selected_make not in makes and selected_make not in {
-            LOWEST_MAKE_VALUE,
-            LOWEST_MAKE_STORED,
-            "",
-        }:
-            makes = [selected_make, *makes]
-            vendors_by_make.setdefault(selected_make, [])
-        if selected_vendor and selected_vendor not in vendor_options:
-            vendor_options = [selected_vendor, *vendor_options]
-            makes_by_vendor.setdefault(selected_vendor, [])
-        if (
-            selected_make
-            and selected_vendor
-            and selected_make not in {LOWEST_MAKE_VALUE, LOWEST_MAKE_STORED, ""}
-        ):
-            vendors_by_make.setdefault(selected_make, [])
-            if selected_vendor not in vendors_by_make[selected_make]:
-                vendors_by_make[selected_make].append(selected_vendor)
-            makes_by_vendor.setdefault(selected_vendor, [])
-            if selected_make not in makes_by_vendor[selected_vendor]:
-                makes_by_vendor[selected_vendor].append(selected_make)
-        return makes, vendor_options, vendors_by_make, makes_by_vendor
+        approved_makes: list[str] = []
+        if self.has_make_list:
+            category = str(product.get("category") or "")
+            sub_category = str(product.get("sub_category") or "")
+            if (not category or not sub_category) and rates:
+                first_rate = rates[0]
+                category = category or (first_rate.Category or "").strip()
+                sub_category = sub_category or (first_rate.Sub_Category or "").strip()
+            approved = self._approved_makes_for_subcategory(
+                category, sub_category, allow_category_wide=False
+            )
+            if approved:
+                approved_makes = list(approved)
+                for app_make in approved_makes:
+                    if app_make not in vendors_by_make:
+                        for db_make, v_list in list(vendors_by_make.items()):
+                            if MakeListConstraintService.make_is_allowed(db_make, [app_make]):
+                                vendors_by_make[app_make] = list(v_list)
+                                break
+
+        return (
+            approved_makes,
+            available_makes,
+            sorted(vendor_options, key=lambda s: s.lower()),
+            vendors_by_make,
+            makes_by_vendor,
+        )
 
 
     def _exact_match_and_rates(

@@ -24,8 +24,6 @@ from apps.boq.services.boq_row_grouping_service import grouped_anchor_rows
 from apps.boq.services.extraction_attribute_fields import COMMON_ATTRIBUTE_LABELS
 from apps.boq.services.make_list_constraint_service import MakeListConstraintService
 from apps.boq.services.make_vendor_common import (
-    count_missing_loaded_product_ids,
-    count_missing_product_ids_summary,
     loaded_catalog_product_id,
 )
 from apps.boq.services.product_attribute_enrichment_service import (
@@ -495,7 +493,8 @@ def _shape_product(
         for item in db_candidates:
             if isinstance(item, dict):
                 try:
-                    if item.get("id") and int(item.get("id")) == int(selected_id):
+                    cand_item_id = item.get("id")
+                    if cand_item_id is not None and int(str(cand_item_id)) == int(str(selected_id)):
                         comparison_item = item
                         break
                 except (TypeError, ValueError):
@@ -508,7 +507,8 @@ def _shape_product(
             for item in db_candidates:
                 if isinstance(item, dict):
                     try:
-                        if item.get("id") and int(item.get("id")) == int(top_cand_id):
+                        cand_item_id = item.get("id")
+                        if cand_item_id is not None and top_cand_id is not None and int(str(cand_item_id)) == int(str(top_cand_id)):
                             comparison_item = item
                             break
                     except (TypeError, ValueError):
@@ -522,7 +522,8 @@ def _shape_product(
             for item in db_candidates:
                 if isinstance(item, dict):
                     try:
-                        if item.get("id") and int(item.get("id")) == int(target_id):
+                        cand_item_id = item.get("id")
+                        if cand_item_id is not None and int(str(cand_item_id)) == int(str(target_id)):
                             comparison_item = item
                             break
                     except (TypeError, ValueError):

@@ -13,12 +13,13 @@ This file is the day-to-day operator guide.
 | Item | Value |
 | --- | --- |
 | EC2 host | `13.205.90.58` |
+| Domain / Subdomain | `portal.ajeya.in` |
 | App path | `/srv/boq_ai` |
 | App user | `boq_ai` (group `www-data`) |
 | SSH user | `ubuntu` + key `boq_keypair.pem` |
 | Database | PostgreSQL `boq_db` / user `boq_user` on `localhost` |
 | Secrets | `/srv/boq_ai/.env` on server — **never commit** |
-| Site | http://13.205.90.58/login/ |
+| Site | https://portal.ajeya.in/login/ |
 
 ### Mental model
 
@@ -289,7 +290,7 @@ Quick verify:
 
 ```bash
 systemctl is-active boq_ai-gunicorn boq_ai-celery
-curl -I http://13.205.90.58/login/
+curl -I https://portal.ajeya.in/login/
 ```
 
 Hard-refresh the browser (Ctrl+F5) after CSS changes.

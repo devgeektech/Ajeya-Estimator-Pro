@@ -10,6 +10,8 @@ Vendor → Labour → Review → Excel export.
 Django · PostgreSQL · Celery/Redis · OpenAI + Chroma · Gunicorn/Nginx (EC2) ·
 Django templates + Alpine.js
 
+**Production Site:** [https://portal.ajeya.in](https://portal.ajeya.in) (Ubuntu EC2 with Let's Encrypt TLS/SSL and Nginx reverse proxy)
+
 ## Docs
 
 | File | Purpose |
@@ -19,6 +21,7 @@ Django templates + Alpine.js
 | [`docs/DEPLOY.md`](docs/DEPLOY.md) | **Manual go-live + later `git pull` deploys** (no CI/CD) |
 | [`docs/OPS.md`](docs/OPS.md) | Local setup, systemd/Nginx templates, tests |
 | [`docs/SESSION_STATE.md`](docs/SESSION_STATE.md) | Current session status |
+| [`docs/CHANGELOG.md`](docs/CHANGELOG.md) | Change history (compact) |
 | [`AGENTS.md`](AGENTS.md) | Instructions for AI agents |
 
 **Make it live / update live:** follow [`docs/DEPLOY.md`](docs/DEPLOY.md).

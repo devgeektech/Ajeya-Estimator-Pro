@@ -356,4 +356,348 @@ class MakeVendorProductWiseCascadeTests(TestCase):
         self.assertIn("161", prod_ids)
         self.assertIn("238", prod_ids)
 
+    def test_category_cascade_skips_unmatched_or_unapproved_products(self):
+        service = MakeVendorSelectionService(self.boq.pk)
+
+        def fake_exact(product, make, vendor, database_version_id, *args, **kwargs):
+            pid = str(product.get("catalog_product_id") or "")
+            if pid == "161":
+                return {
+                    "status": "matched",
+                    "make": "TARGET_MAKE",
+                    "vendor": "TARGET_VENDOR",
+                    "line_output": {"material_rate": "100.00"},
+                }
+            return {
+                "status": "unmatched",
+                "make": "TARGET_MAKE",
+                "vendor": "",
+                "line_output": {},
+            }
+
+        with (
+            patch.object(MakeVendorSelectionService, "has_make_list", new_callable=PropertyMock, return_value=True),
+            patch.object(service, "_database_version_id", return_value=1),
+            patch.object(service.make_list_service, "approved_makes_for_category", return_value=["TARGET_MAKE"]),
+            patch.object(service, "_approved_makes_for_subcategory", return_value=["TARGET_MAKE"]),
+            patch.object(service, "_capture_analysis_product_id", side_effect=lambda p, **kw: (dict(p), str(p.get("catalog_product_id") or ""))),
+            patch.object(service, "_exact_match_and_rates", side_effect=fake_exact),
+        ):
+            result = service.apply_subcategory_make(
+                category="TANK",
+                sub_category="AIR CUSHION TANK",
+                make="TARGET_MAKE",
+                vendor="TARGET_VENDOR",
+                make_source="approved",
+            )
+
+        self.assertEqual(result["updated_count"], 1)
+        self.boq.refresh_from_db()
+        rows = self.boq.analysis_data["rows"]
+
+        # Product 161 was matched and updated
+        prod_161 = rows[0]["products"][0]
+        self.assertEqual(prod_161["selected_make"], "TARGET_MAKE")
+        self.assertEqual(prod_161["selected_vendor"], "TARGET_VENDOR")
+
+        # Product 238 was unmatched for TARGET_MAKE, so it was SKIPPED without injecting TARGET_MAKE
+        prod_238 = rows[1]["products"][0]
+        self.assertEqual(prod_238["selected_make"], "OLD_MAKE")
+        self.assertEqual(prod_238["selected_vendor"], "OLD_VENDOR")
+
+    def test_shape_product_separates_approved_and_available_makes(self):
+        service = MakeVendorSelectionService(self.boq.pk)
+        fake_product = {
+            "product_index": 0,
+            "category": "TANK",
+            "sub_category": "AIR CUSHION TANK",
+            "catalog_product_id": "161",
+            "db_match_status": "matched",
+            "db_match_confidence": 100.0,
+            "selected_make": "UNAPPROVED_MAKE",
+            "vendor_selection": {
+                "status": "matched",
+                "make": "UNAPPROVED_MAKE",
+                "vendor": "V1",
+            },
+        }
+
+        def fake_options(p, database_version_id, boq_description):
+            return (
+                ["APPROVED_A", "APPROVED_B"],
+                ["AVAILABLE_X", "AVAILABLE_Y"],
+                ["V1", "V2"],
+                {"AVAILABLE_X": ["V1"]},
+                {"V1": ["AVAILABLE_X"]},
+            )
+
+        with (
+            patch.object(service, "_options_for_product", side_effect=fake_options),
+            patch("apps.boq.services.make_vendor_display.MakeListConstraintService.make_is_allowed", return_value=False),
+        ):
+            shaped = service._shape_product(
+                fake_product,
+                row_id="r1",
+                qty=1,
+                unit="nos",
+                database_version_id=1,
+                boq_description="",
+            )
+
+        self.assertEqual(shaped["approved_make_options"], ["APPROVED_A", "APPROVED_B"])
+        self.assertEqual(shaped["available_make_options"], ["AVAILABLE_X", "AVAILABLE_Y"])
+        self.assertNotIn("UNAPPROVED_MAKE", shaped["approved_make_options"])
+        self.assertNotIn("UNAPPROVED_MAKE", shaped["available_make_options"])
+
+    def test_shape_product_approved_makes_strictly_sub_category(self):
+        """Approved makes for product cards must be strictly per sub-category, never falling back to category."""
+        make_list_data = {
+            "category_mappings": [
+                {
+                    "material": "Ball Valves",
+                    "mapped_category": "VALVE",
+                    "mapped_sub_category": "BALL VALVE",
+                    "mapped_targets": [{"category": "VALVE", "sub_category": "BALL VALVE"}],
+                    "approved_makes_list": ["BALL_MAKE_1", "BALL_MAKE_2"],
+                },
+                {
+                    "material": "Butterfly Valves",
+                    "mapped_category": "VALVE",
+                    "mapped_sub_category": "BUTTERFLY",
+                    "mapped_targets": [{"category": "VALVE", "sub_category": "BUTTERFLY"}],
+                    "approved_makes_list": ["BF_MAKE_1"],
+                },
+                {
+                    "material": "General Valves",
+                    "mapped_category": "VALVE",
+                    "mapped_sub_category": None,
+                    "mapped_targets": [{"category": "VALVE", "sub_category": None}],
+                    "approved_makes_list": ["CAT_WIDE_MAKE"],
+                },
+            ]
+        }
+        service = MakeVendorSelectionService(self.boq.pk, make_list_data=make_list_data)
+
+        # 1. Product with sub_category="BALL VALVE"
+        ball_product = {
+            "category": "VALVE",
+            "sub_category": "BALL VALVE",
+            "size": "25",
+            "unit": "MM",
+        }
+        with patch.object(service, "_rate_master_makes_for_subcategory", return_value=["BALL_MAKE_1", "DB_MAKE"]):
+            app_makes, avail_makes, _, _, _ = service._options_for_product(
+                ball_product, database_version_id=1, boq_description=""
+            )
+
+        self.assertEqual(app_makes, ["BALL_MAKE_1", "BALL_MAKE_2"])
+        self.assertNotIn("CAT_WIDE_MAKE", app_makes)
+        self.assertNotIn("BF_MAKE_1", app_makes)
+
+        # 2. Product with sub_category="SLUICE VALVE" (not in make list)
+        sluice_product = {
+            "category": "VALVE",
+            "sub_category": "SLUICE VALVE",
+            "size": "50",
+            "unit": "MM",
+        }
+        with patch.object(service, "_rate_master_makes_for_subcategory", return_value=["DB_SLUICE"]):
+            app_makes, avail_makes, _, _, _ = service._options_for_product(
+                sluice_product, database_version_id=1, boq_description=""
+            )
+
+        self.assertEqual(app_makes, [])
+        self.assertNotIn("CAT_WIDE_MAKE", app_makes)
+
+    def test_shape_product_retains_available_make_when_also_approved(self):
+        """When user selects an Available make that is also in Approved makes, it stays in Available make."""
+        service = MakeVendorSelectionService(self.boq.pk)
+        common_make = "ZURN"
+
+        # Case 1: make_source == 'available'
+        fake_product_available = {
+            "product_index": 0,
+            "category": "VALVE",
+            "sub_category": "BALL VALVE",
+            "catalog_product_id": "100",
+            "db_match_status": "matched",
+            "db_match_confidence": 100.0,
+            "selected_make": common_make,
+            "selected_make_source": "available",
+            "vendor_selection": {
+                "status": "matched",
+                "make": common_make,
+                "vendor": "V1",
+                "make_source": "available",
+            },
+        }
+
+        def fake_options(p, database_version_id, boq_description):
+            return (
+                [common_make, "OTHER_APP"],
+                [common_make, "OTHER_AVAIL"],
+                ["V1"],
+                {common_make: ["V1"]},
+                {"V1": [common_make]},
+            )
+
+        with patch.object(service, "_options_for_product", side_effect=fake_options):
+            shaped_avail = service._shape_product(
+                fake_product_available,
+                row_id="r1",
+                qty=1,
+                unit="nos",
+                database_version_id=1,
+                boq_description="",
+            )
+
+        self.assertEqual(shaped_avail["selected_available_make"], common_make)
+        self.assertEqual(shaped_avail["selected_approved_make"], "")
+        self.assertEqual(shaped_avail["selected_make_source"], "available")
+
+        # Case 2: make_source == 'approved'
+        fake_product_approved = {
+            "product_index": 0,
+            "category": "VALVE",
+            "sub_category": "BALL VALVE",
+            "catalog_product_id": "100",
+            "db_match_status": "matched",
+            "db_match_confidence": 100.0,
+            "selected_make": common_make,
+            "selected_make_source": "approved",
+            "vendor_selection": {
+                "status": "matched",
+                "make": common_make,
+                "vendor": "V1",
+                "make_source": "approved",
+            },
+        }
+
+        with patch.object(service, "_options_for_product", side_effect=fake_options):
+            shaped_app = service._shape_product(
+                fake_product_approved,
+                row_id="r1",
+                qty=1,
+                unit="nos",
+                database_version_id=1,
+                boq_description="",
+            )
+
+        self.assertEqual(shaped_app["selected_approved_make"], common_make)
+        self.assertEqual(shaped_app["selected_available_make"], "")
+        self.assertEqual(shaped_app["selected_make_source"], "approved")
+
+    def test_select_and_match_persists_make_source(self):
+        """select_and_match persists selected_make_source on product dictionary."""
+        service = MakeVendorSelectionService(self.boq.pk)
+
+        fake_exact = {
+            "status": "matched",
+            "confidence": 100.0,
+            "make": "DANFOSS",
+            "vendor": "BILLU",
+            "product_id": "40",
+            "rate_detail": {"final_material_amount": 856.48},
+        }
+
+        with (
+            patch.object(service, "_database_version_id", return_value=1),
+            patch.object(service, "_exact_match_and_rates", return_value=fake_exact),
+            patch("apps.boq.services.make_vendor_selection_service.save_boq_analysis_json"),
+        ):
+            res = service.select_and_match(
+                row_id="r1",
+                product_index=0,
+                make="DANFOSS",
+                vendor="BILLU",
+                make_source="available",
+            )
+
+        self.assertEqual(res.get("make_source"), "available")
+        self.boq.refresh_from_db()
+        prod = self.boq.analysis_data["rows"][0]["products"][0]
+        self.assertEqual(prod.get("selected_make_source"), "available")
+
+    def test_shape_product_fills_available_make_when_approved_make_not_available(self):
+        """When approved make is not available, Available make is filled with the available make name."""
+        service = MakeVendorSelectionService(self.boq.pk)
+
+        # 1. Product with selected_make set to an available make
+        fake_product_1 = {
+            "product_index": 0,
+            "category": "VALVE",
+            "sub_category": "SPECIAL VALVE",
+            "catalog_product_id": "100",
+            "db_match_status": "matched",
+            "db_match_confidence": 100.0,
+            "selected_make": "ZURN",
+            "vendor_selection": {
+                "status": "matched",
+                "make": "ZURN",
+                "vendor": "V1",
+            },
+        }
+
+        # No approved makes, only available makes
+        def fake_options(p, database_version_id, boq_description):
+            return (
+                [],  # No approved makes
+                ["ZURN", "LEADER"],
+                ["V1"],
+                {"ZURN": ["V1"]},
+                {"V1": ["ZURN"]},
+            )
+
+        with patch.object(service, "_options_for_product", side_effect=fake_options):
+            shaped_1 = service._shape_product(
+                fake_product_1,
+                row_id="r1",
+                qty=1,
+                unit="nos",
+                database_version_id=1,
+                boq_description="",
+            )
+
+        self.assertEqual(shaped_1["selected_available_make"], "ZURN")
+        self.assertEqual(shaped_1["selected_approved_make"], "")
+        self.assertEqual(shaped_1["selected_make"], "ZURN")
+        self.assertFalse(shaped_1["has_approved_makes"])
+
+        # 2. Product where selected_make is not set directly, but present in rate_detail
+        fake_product_2 = {
+            "product_index": 1,
+            "category": "VALVE",
+            "sub_category": "SPECIAL VALVE",
+            "catalog_product_id": "100",
+            "db_match_status": "matched",
+            "db_match_confidence": 100.0,
+            "selected_make": "",
+            "vendor_selection": {
+                "status": "matched",
+                "make": "",
+                "rate_detail": {
+                    "make": "LEADER",
+                    "vendor": "V1",
+                    "final_material_amount": 500.0,
+                },
+            },
+        }
+
+        with patch.object(service, "_options_for_product", side_effect=fake_options):
+            shaped_2 = service._shape_product(
+                fake_product_2,
+                row_id="r1",
+                qty=1,
+                unit="nos",
+                database_version_id=1,
+                boq_description="",
+            )
+
+        self.assertEqual(shaped_2["selected_available_make"], "LEADER")
+        self.assertEqual(shaped_2["selected_approved_make"], "")
+        self.assertEqual(shaped_2["selected_make"], "LEADER")
+
+
+
+
 
