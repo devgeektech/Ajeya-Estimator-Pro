@@ -3,16 +3,19 @@
 Compact active memory. Full spec: `docs/PRODUCT.md`. Schema: `docs/DATABASE.md`.
 History: `docs/CHANGELOG.md` (do not duplicate session diaries here).
 
-### 2026-10-15 — Password Reset Branding Alignment and Confirmation Copy
+### 2026-10-15 — Password Reset Branding Alignment and Professional HTML Email Template
 
 Completed:
+- **Professional HTML Email Template**:
+  - Implemented responsive, branded HTML email in `password_reset_email.html` with card container, styled header (`Ajeya Estimator Pro`), CTA button, URL fallback, and security notice.
+  - Added clean plain text counterpart in `password_reset_email.txt` and configured `html_email_template_name` on `BOQPasswordResetView`.
 - **Branding Update**:
-  - Updated all password reset templates (`password_reset.html`, `password_reset_done.html`, `password_reset_confirm.html`, `password_reset_complete.html`, `password_reset_email.html`, `password_reset_subject.txt`) to application brand `Ajeya Estimator Pro`.
+  - Updated all password reset templates (`password_reset.html`, `password_reset_done.html`, `password_reset_confirm.html`, `password_reset_complete.html`, `password_reset_subject.txt`) to application brand `Ajeya Estimator Pro`.
 - **Confirmation Copy & Tab Title**:
   - Set tab title and page heading to "Please check your email" on `password_reset_done.html`.
   - Replaced speculative wording with definitive notice ("We've sent password reset instructions to your registered email address. They should arrive shortly.") reflecting that email registration is checked upfront.
 - **Verification**:
-  - All 7 accounts tests pass.
+  - All 7 accounts tests pass. Live test email dispatched and verified.
 
 ### 2026-10-15 — Final Code Cleanup, IDE Warnings Resolution, and Branch Synchronization
 

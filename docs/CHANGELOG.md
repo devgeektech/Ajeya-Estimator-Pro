@@ -3,10 +3,13 @@
 Meaningful product and technical changes. Day-by-day micro-entries older than
 the summaries below live in **git history** (`git log -- docs/`).
 
-## 2026-10-15 — Password Reset Branding Alignment and Confirmation Copy
+## 2026-10-15 — Password Reset Branding Alignment and Professional HTML Email Template
+- **Professional HTML Email Template**:
+  - Implemented a responsive, modern HTML email template in `password_reset_email.html` with card layout, dark navy header (`Ajeya Estimator Pro`), blue "Reset Password" CTA button, direct URL fallback, and security notice.
+  - Added clean plain text counterpart in `password_reset_email.txt` and configured `html_email_template_name` on `BOQPasswordResetView` for automatic multipart MIME dispatch.
 - **Branding Update**:
   - Updated `password_reset.html`, `password_reset_done.html`, `password_reset_confirm.html`, and `password_reset_complete.html` to display the unified application brand `Ajeya Estimator Pro` with tagline `AI-Powered BOQ Estimation Platform`.
-  - Updated email notification template (`password_reset_email.html`) and subject (`password_reset_subject.txt`) to refer to `Ajeya Estimator Pro`.
+  - Updated email notification subject (`password_reset_subject.txt`) to refer to `Ajeya Estimator Pro`.
 - **Confirmation Copy & Tab Title**:
   - Updated the "Check your email" tab title and heading to "Please check your email" on `password_reset_done.html`.
   - Replaced the speculative copy ("If an account exists...") with clear confirmation ("We've sent password reset instructions to your registered email address. They should arrive shortly.") since email registration is already validated prior to dispatch.
